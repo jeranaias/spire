@@ -72,18 +72,30 @@ function SpireMark() {
 }
 
 function RoleSelector({ role, onChange }: { role: Role; onChange: (r: Role) => void }) {
+  // Native <select> on Windows is hideous over dark backgrounds -- the native
+  // chrome ignores CSS color on option elements. This wrapper keeps the
+  // input accessible but frames it so the dropdown blends into the bar.
   return (
     <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-      <span>View as</span>
-      <select
-        value={role}
-        onChange={(e) => onChange(e.target.value as Role)}
-        className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-[var(--color-text)] focus:border-[var(--color-border-active)] focus:outline-none"
-      >
-        {(Object.keys(ROLE_LABELS) as Role[]).map((k) => (
-          <option key={k} value={k}>{ROLE_LABELS[k]}</option>
-        ))}
-      </select>
+      <span className="select-none">View as</span>
+      <div className="relative">
+        <select
+          value={role}
+          onChange={(e) => onChange(e.target.value as Role)}
+          className="appearance-none rounded border border-[var(--color-border)] bg-[var(--color-bg)] py-1 pl-2 pr-7 text-[var(--color-text)] transition-colors hover:border-[var(--color-border-active)] focus:border-[var(--color-primary)] focus:outline-none"
+        >
+          {(Object.keys(ROLE_LABELS) as Role[]).map((k) => (
+            <option key={k} value={k}>{ROLE_LABELS[k]}</option>
+          ))}
+        </select>
+        <svg
+          className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--color-text-muted)]"
+          viewBox="0 0 12 12"
+          fill="currentColor"
+        >
+          <path d="M2 4l4 4 4-4H2z" />
+        </svg>
+      </div>
     </label>
   );
 }

@@ -13,9 +13,7 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
-# Realistic Marine rank distribution skewed toward junior enlisted (E-3 through
-# E-5 make up the bulk of a maintenance shop; officers appear as POCs less
-# often and are not included in the roster).
+# Base Marine rank distribution (junior-heavy) -- adjusted per unit below.
 RANK_DISTRIBUTION = [
     ("LCpl", 0.25),
     ("Cpl",  0.22),
@@ -27,6 +25,21 @@ RANK_DISTRIBUTION = [
     ("CWO2", 0.005),
     ("CWO3", 0.005),
 ]
+
+# Per-unit multiplier on the base distribution (values >1 skew toward that rank).
+# Tank + LAR + aviation units carry more senior ranks; CLBs skew junior.
+UNIT_RANK_MULTIPLIERS = {
+    "CLB-6":        {"LCpl": 1.20, "Cpl": 1.10, "GySgt": 0.80, "MSgt": 0.70},
+    "CLB-1":        {"LCpl": 1.20, "Cpl": 1.10, "GySgt": 0.80, "MSgt": 0.70},
+    "3d Maint Bn":  {"SSgt": 1.20, "GySgt": 1.15, "Sgt": 1.05},
+    "2d Tank Bn":   {"Sgt": 1.15, "SSgt": 1.25, "GySgt": 1.15, "MSgt": 1.20, "CWO2": 2.0, "CWO3": 2.0},
+    "2d LAR Bn":    {"Sgt": 1.10, "SSgt": 1.15, "GySgt": 1.10},
+    "MALS-31":      {"SSgt": 1.25, "GySgt": 1.30, "MSgt": 1.40, "CWO2": 2.5, "CWO3": 2.5},
+    "MWSS-372":     {"Sgt": 1.05, "SSgt": 1.05},
+    "2d LAAD Bn":   {"SSgt": 1.15, "GySgt": 1.15, "CWO2": 2.0},
+    "5/11 Marines": {"Sgt": 1.10, "SSgt": 1.10, "GySgt": 1.10},
+    "7th ESB":      {"LCpl": 1.15, "Cpl": 1.10},
+}
 
 # MOS assignment rules tied to unit equipment mix (simplified; real T/O&E is
 # richer but this is enough to make POC lines realistic).
@@ -103,11 +116,22 @@ SURNAMES = [
 FIRST_INITIALS = list("ABCDEFGHJKLMNPRSTVW")
 
 
+FIRST_NAMES = [
+    "Alex", "Brian", "Carlos", "Daniel", "Eric", "Frank", "George", "Henry",
+    "Ivan", "Jacob", "Kyle", "Luis", "Marcus", "Nathan", "Owen", "Peter",
+    "Quinn", "Ryan", "Samuel", "Thomas", "Victor", "Wesley",
+    "Amanda", "Brianna", "Christina", "Diana", "Elena", "Fatima",
+    "Gabrielle", "Hannah", "Isabella", "Jasmine", "Keri", "Lauren", "Maria",
+    "Natalie", "Olivia", "Priya", "Rachel", "Sofia", "Tiffany", "Vanessa",
+]
+
+
 @dataclass
 class Marine:
     edipi: str
     rank: str
     last_name: str
+    first_name: str
     first_initial: str
     mos: str
     unit_name: str
@@ -121,17 +145,21 @@ class Marine:
 
     @property
     def email(self) -> str:
-        return f"{self.first_initial.lower()}.{self.last_name.lower()}.mil@usmc.mil"
+        """USMC email convention: firstname.lastname@usmc.mil."""
+        return f"{self.first_name.lower()}.{self.last_name.lower()}@usmc.mil"
 
 
-def _weighted_rank(rng: random.Random) -> str:
-    r = rng.random()
+def _weighted_rank(rng: random.Random, unit_name: str = "") -> str:
+    multipliers = UNIT_RANK_MULTIPLIERS.get(unit_name, {})
+    adjusted = [(rank, weight * multipliers.get(rank, 1.0)) for rank, weight in RANK_DISTRIBUTION]
+    total = sum(w for _, w in adjusted)
+    r = rng.random() * total
     acc = 0.0
-    for rank, weight in RANK_DISTRIBUTION:
+    for rank, weight in adjusted:
         acc += weight
         if r <= acc:
             return rank
-    return RANK_DISTRIBUTION[-1][0]
+    return adjusted[-1][0]
 
 
 def _synthetic_edipi(seq: int, rng: random.Random) -> str:
@@ -160,11 +188,13 @@ def generate_personnel(units: list, count: int, seed: int) -> list[Marine]:
         share = max(5, round(count * len(u.assets) / total_assets))
         mos_mix = UNIT_MOS_MIX.get(u.name, ["0431"])
         for _ in range(share):
+            first_name = rng.choice(FIRST_NAMES)
             marine = Marine(
                 edipi=_synthetic_edipi(seq, rng),
-                rank=_weighted_rank(rng),
+                rank=_weighted_rank(rng, u.name),
                 last_name=rng.choice(SURNAMES),
-                first_initial=rng.choice(FIRST_INITIALS),
+                first_name=first_name,
+                first_initial=first_name[0],
                 mos=rng.choice(mos_mix),
                 unit_name=u.name,
                 phone_ext=f"{rng.randint(4000, 4999)}",
@@ -199,4 +229,4 @@ if __name__ == "__main__":
     print(f"Rank distribution: {dict(ranks)}")
     print("Sample entries:")
     for m in roster[:5]:
-        print(f"  {m.display} MOS {m.mos} ({m.unit_name}) ext {m.phone_ext} EDIPI {m.edipi}")
+        print(f"  {m.display} MOS {m.mos} ({m.unit_name}) ext {m.phone_ext} EDIPI {m.edipi} email {m.email}")

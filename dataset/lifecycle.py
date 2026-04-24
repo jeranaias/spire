@@ -187,7 +187,7 @@ def _new_sr_number(asset, d: date) -> str:
     return f"{asset.unit_uic}-{d.year % 10}{yday:03d}-{seq:04d}"
 
 
-def _open_pmcs_sr(asset, d: date) -> ServiceRequest:
+def _open_pmcs_sr(asset, d: date, rng: random.Random) -> ServiceRequest:
     sr = ServiceRequest(
         sr_number=_new_sr_number(asset, d),
         asset_id=asset.asset_id,
@@ -198,27 +198,31 @@ def _open_pmcs_sr(asset, d: date) -> ServiceRequest:
         nsn=asset.nsn,
         serial_number=asset.serial_number,
         open_date=d,
-        job_status="WORK IN PROGRESS",
+        job_status="COMPLETED",
         condition="Minor",
         priority="10",
         defect_code_primary="SCHD",
         defect_code_secondary="PMCS",
         tm_reference="Operator TM / PMCS Checklist",
-        remark_text="Scheduled B-check PMCS. Lubed, cleaned, fluid levels inspected, lamps and safety items verified. No deficiencies noted.",
+        remark_text=rng.choice(_PMCS_REMARKS),
         source_classification="UNCLASSIFIED",
         detected_classification="UNCLASSIFIED",
         labor_hours_est=2,
-        labor_hours_actual=round(random_pmcs_hours(), 1),
+        labor_hours_actual=round(rng.uniform(1.5, 3.5), 1),
         is_pmcs=True,
     )
-    # PMCS closes same day (non-NMC) — represent that by setting close_date.
     sr.close_date = d
-    sr.job_status = "COMPLETED"
     return sr
 
 
-def random_pmcs_hours() -> float:
-    return random.Random().uniform(1.5, 3.5)
+# Five remark variants so a year of PMCS doesn't look copy-pasted.
+_PMCS_REMARKS = [
+    "Scheduled B-check PMCS. Lubed, cleaned, fluid levels inspected, lamps and safety items verified. No deficiencies noted.",
+    "B-check PMCS complete per op TM. All fluid levels nominal, no leaks, lamps functional. Tires checked, pressures adjusted. Veh RTS.",
+    "Monthly B-check. Engine bay clean, belts + hoses good, no fluid loss since last PMCS. Safety items ok. PMCS signed off.",
+    "Op PMCS per schedule. Found no deficiencies beyond normal wear. Topped off all fluids to mark, recorded hours.",
+    "B-check PMCS done. Replaced wiper fluid, topped coolant, tightened battery terminal. No new defects identified.",
+]
 
 
 def _open_corrective_sr(
@@ -244,8 +248,9 @@ def _open_corrective_sr(
     else:
         source_cls = "UNCLASSIFIED"  # operator under-marked
 
-    parts_cost = fault_event.avg_parts_cost * rng.uniform(0.85, 1.15)
-    labor_hours = fault_event.avg_repair_hours * rng.uniform(0.8, 1.3)
+    # Wider actual variance -- bimodal scrap/reuse effects in real shops.
+    parts_cost = fault_event.avg_parts_cost * rng.uniform(0.70, 1.45)
+    labor_hours = fault_event.avg_repair_hours * rng.uniform(0.7, 1.5)
 
     priority = {
         "Deadlined": rng.choice(["02", "03"]),
@@ -386,10 +391,36 @@ def _readiness_for_asset(asset) -> Tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 def run_simulation(units, assets, roster, seed: int):
-    """Execute the 365-day simulation. Returns (srs, snapshots, requisitions)."""
+    """Execute the 365-day simulation. Returns (srs, snapshots, requisitions).
+
+    Fully idempotent: all module-level counters are reset up front, and the
+    assets passed in are restored to simulation-start state (hours / miles
+    roll back to initial, SR history cleared, PMCS jitter re-drawn).
+    """
     rng = random.Random(seed + 2)
     reset_sequence_counters()
     _SR_COUNTER["n"] = 0
+
+    # Restore each asset to start-of-simulation state so callers can re-run
+    # in the same process without surprising cross-run contamination.
+    jitter_rng = random.Random(seed + 7)
+    for a in assets:
+        a.current_hours = a.initial_hours
+        a.current_miles = a.initial_miles
+        a.current_status = "MC"
+        a.current_deployment_status = a.deployment_status
+        a.days_in_current_status = 0
+        a.days_nmc_last_12mo = 0
+        a.nmc_events_last_12mo = 0
+        a.open_srs = []
+        a.maintenance_history = []
+        a.pmcs_due_date = SIMULATION_START_DATE + timedelta(
+            days=jitter_rng.randint(0, PMCS_INTERVALS["B_CHECK"] - 1),
+        )
+        a.last_maintenance_date = SIMULATION_START_DATE
+        a.days_since_last_maintenance = 0
+        a.hours_today = 0.0
+        a.miles_today = 0
 
     calendars = _build_unit_calendars(units, rng)
     all_srs: List[ServiceRequest] = []
@@ -402,20 +433,27 @@ def run_simulation(units, assets, roster, seed: int):
         today = start + timedelta(days=day_idx)
 
         for asset in assets:
-            # Calendar-driven deployment status (overrides the static default).
-            asset.deployment_status = _effective_deployment_status(asset, today, calendars)
+            # Today's effective deployment posture (canonical is preserved on
+            # asset.deployment_status; the daily override lives on current_*).
+            asset.current_deployment_status = _effective_deployment_status(asset, today, calendars)
 
             # Reset today's operating deltas.
             asset.hours_today = 0.0
             asset.miles_today = 0
 
-            # ---- PMCS due? Generate a PMCS SR (closes same day) ----
-            if asset.pmcs_due_date <= today:
-                pmcs = _open_pmcs_sr(asset, today)
-                all_srs.append(pmcs)
-                asset.maintenance_history.append(pmcs)
-                asset.last_maintenance_date = today
-                asset.pmcs_due_date = today + timedelta(days=PMCS_INTERVALS["B_CHECK"])
+            # ---- PMCS due? Generate a PMCS SR (closes same day). PMCS only
+            # runs on weekdays outside block leave; if overdue on a weekend,
+            # it slips to the next business day automatically via this check.
+            if asset.pmcs_due_date <= today and not _is_weekend(today):
+                in_block_leave = (
+                    CALENDAR_EVENTS["block_leave_start"] <= today <= CALENDAR_EVENTS["block_leave_end"]
+                )
+                if not in_block_leave:
+                    pmcs = _open_pmcs_sr(asset, today, rng)
+                    all_srs.append(pmcs)
+                    asset.maintenance_history.append(pmcs)
+                    asset.last_maintenance_date = today
+                    asset.pmcs_due_date = today + timedelta(days=PMCS_INTERVALS["B_CHECK"])
 
             # ---- Operate? ----
             readiness_code, _ = _readiness_for_asset(asset)
@@ -451,8 +489,10 @@ def run_simulation(units, assets, roster, seed: int):
             # ---- Daily book-keeping ----
             asset.days_since_last_maintenance = (today - asset.last_maintenance_date).days
             readiness_code, condition = _readiness_for_asset(asset)
-            if readiness_code.startswith("NMC"):
-                asset.days_in_current_status += 1 if asset.current_status == readiness_code else 1
+            if readiness_code == asset.current_status:
+                asset.days_in_current_status += 1
+            else:
+                asset.days_in_current_status = 1
             asset.current_status = readiness_code
 
             parts_on_order = sum(
@@ -479,7 +519,7 @@ def run_simulation(units, assets, roster, seed: int):
                 current_miles=asset.current_miles,
                 parts_on_order=parts_on_order,
                 location=asset.location,
-                deployment_status=asset.deployment_status,
+                deployment_status=asset.current_deployment_status,
             ))
 
     return all_srs, snapshots, all_reqs

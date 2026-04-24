@@ -105,8 +105,10 @@ def check_for_fault(asset, current_date: date, rng: random.Random) -> Optional[F
     age_mod = _age_modifier(asset, current_date)
     maint_mod = _post_maintenance_modifier(asset)
 
-    faults = profile["faults"]
-    rng.shuffle(faults)  # avoid the same fault always winning when multiple roll below threshold
+    # Local copy — shuffling the shared list would reorder the catalog for
+    # every future asset's check in this same simulation day.
+    faults = list(profile["faults"])
+    rng.shuffle(faults)
 
     for fault in faults:
         if not _threshold_met(fault, asset):

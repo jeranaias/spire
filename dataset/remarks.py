@@ -5,6 +5,14 @@ primary SENTRY input surface so this module is what makes the dataset
 linguistically believable.
 
 The generator drives sensitive.py for classification-label ground truth.
+
+A lightweight post-processor then introduces shop-voice variance:
+  - typo drift (~5% of remarks get 1 character-swap / drop)
+  - abbreviation swap (~15% swap a long word for its shop shorthand)
+  - trailing informal phrase (~5% append a mechanic's note)
+  - dropped punctuation (~5% lose the final period)
+These perturbations make the corpus pattern-matcher resistant without
+changing the semantic content that SENTRY is trained to classify.
 """
 from __future__ import annotations
 
@@ -12,6 +20,51 @@ import random
 from typing import Tuple
 
 from sensitive import inject_sensitive_data
+
+
+# Long-form -> Marine shop abbreviation dictionary applied probabilistically.
+SHOP_ABBREVS = {
+    "vehicle": "veh",
+    "Vehicle": "Veh",
+    "approximately": "approx",
+    "Approximately": "Approx",
+    "quantity": "qty",
+    "maintenance": "maint",
+    "Maintenance": "Maint",
+    "replaced": "replcd",
+    "inspection": "insp",
+    "inspected": "inspected",
+    "operation": "ops",
+    "operations": "ops",
+    "reference": "ref",
+    "per the": "per",
+}
+
+TRAILING_NOTES = [
+    " RTS.",
+    " Veh cleared for service.",
+    " No further action required.",
+    " Close out per {tm_ref}.",
+    " PLL stock reordered.",
+    " Copy to Cpl {rng_name}.",
+    " Same squawk as last month.",
+    " Checked twice before closing.",
+    "",
+    "",
+    "",
+]
+
+TYPO_TARGETS = [
+    ("replaced", "replced"),
+    ("inspected", "insepcted"),
+    ("checked", "chcked"),
+    ("failed", "faield"),
+    ("found", "foudn"),
+    ("system", "sysetm"),
+    ("leaking", "leakng"),
+    ("replaced", "replased"),
+    ("serviced", "servied"),
+]
 
 
 # Static template-fill pools -- tunable without changing fault-profile JSON.
@@ -101,11 +154,43 @@ def generate_remark(
     for key, value in params.items():
         remark = remark.replace(f"{{{key}}}", str(value))
 
+    # Shop-voice perturbations BEFORE sensitive injection so grids / comms
+    # references remain canonical (the classifier needs stable tokens for
+    # those categories). Typos only touch ordinary maintenance vocabulary.
+    remark = _apply_shop_voice(remark, rng)
+
     # Sensitive data injection (classification labels derived here too).
     remark, flags, classification = inject_sensitive_data(
         remark, asset, fault_event, mechanic, current_date, rng, seq,
     )
     return remark, flags, classification
+
+
+def _apply_shop_voice(remark: str, rng: random.Random) -> str:
+    """Inject realistic shop-floor messiness into a remark. Each perturbation
+    is independently sampled; on average a given remark gets 0-2 edits."""
+    # Typo (5%)
+    if rng.random() < 0.05:
+        word, typo = rng.choice(TYPO_TARGETS)
+        if word in remark and rng.random() < 0.8:
+            remark = remark.replace(word, typo, 1)
+
+    # Abbreviation swap (15%)
+    if rng.random() < 0.15:
+        long_forms = [k for k in SHOP_ABBREVS if k in remark]
+        if long_forms:
+            pick = rng.choice(long_forms)
+            remark = remark.replace(pick, SHOP_ABBREVS[pick], 1)
+
+    # Trailing informal phrase (5%)
+    if rng.random() < 0.05:
+        remark = remark.rstrip() + rng.choice(TRAILING_NOTES)
+
+    # Dropped final period (5%)
+    if rng.random() < 0.05 and remark.endswith("."):
+        remark = remark[:-1]
+
+    return remark
 
 
 if __name__ == "__main__":

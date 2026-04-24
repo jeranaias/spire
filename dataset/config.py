@@ -123,15 +123,23 @@ DEFECT_CODES = {
 CLASSIFICATION_LEVELS = ["UNCLASSIFIED", "CUI", "CONFIDENTIAL", "SECRET"]
 
 # ---------------------------------------------------------------------------
-# MGRS templates per installation area. Easting/northing ranges are realistic
-# for the named operating area. All values are synthetic.
+# MGRS templates per installation area. Grid-zone / square are realistic for
+# the named operating area but the easting/northing ranges are intentionally
+# offset into adjacent wilderness / open water / training-range polygons so a
+# reviewer who geocodes any synthetic grid lands in a non-sensitive place,
+# not on top of a real barracks or motor pool. All values remain synthetic.
 # ---------------------------------------------------------------------------
 MGRS_BY_AREA = {
-    "Camp Lejeune, NC":     {"grid_zone": "18S", "square": "UJ", "easting_range": (20000, 40000), "northing_range": (60000, 85000)},
-    "Camp Pendleton, CA":   {"grid_zone": "11S", "square": "MT", "easting_range": (30000, 50000), "northing_range": (60000, 80000)},
-    "Camp Kinser, Okinawa": {"grid_zone": "52S", "square": "FE", "easting_range": (30000, 50000), "northing_range": (50000, 70000)},
-    "MCAS Beaufort, SC":    {"grid_zone": "17S", "square": "PQ", "easting_range": (40000, 60000), "northing_range": (55000, 75000)},
-    "MCAS Yuma, AZ":        {"grid_zone": "11S", "square": "QA", "easting_range": (60000, 80000), "northing_range": (55000, 75000)},
+    # CARO NC area -- shifted SW into Onslow Bight training ranges
+    "Camp Lejeune, NC":     {"grid_zone": "18S", "square": "UH", "easting_range": (10000, 28000), "northing_range": (55000, 72000)},
+    # Southern CA area -- shifted into marine training areas south of the base
+    "Camp Pendleton, CA":   {"grid_zone": "11S", "square": "MS", "easting_range": (15000, 35000), "northing_range": (55000, 72000)},
+    # Okinawa -- shifted into East China Sea training sectors
+    "Camp Kinser, Okinawa": {"grid_zone": "52S", "square": "EE", "easting_range": (10000, 30000), "northing_range": (45000, 65000)},
+    # SC low country -- shifted into coastal wetlands training
+    "MCAS Beaufort, SC":    {"grid_zone": "17R", "square": "PP", "easting_range": (20000, 40000), "northing_range": (45000, 65000)},
+    # Sonoran Desert training complex -- well clear of MCAS Yuma proper
+    "MCAS Yuma, AZ":        {"grid_zone": "11S", "square": "QB", "easting_range": (40000, 60000), "northing_range": (40000, 60000)},
 }
 
 # ---------------------------------------------------------------------------
