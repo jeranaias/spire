@@ -13,11 +13,9 @@ export interface SpireState {
   role: Role;
   operatingMode: OperatingMode;
   alertCount: number;
-  sentryReady: boolean;
-  pulseReady: boolean;
-  bastionReady: boolean;
   setRole: (r: Role) => void;
   setOperatingMode: (m: OperatingMode) => void;
+  setAlertCount: (n: number) => void;
 }
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -40,9 +38,7 @@ export const useSpireStore = create<SpireState>((set) => ({
   role: "data_custodian",
   operatingMode: "full",
   alertCount: 0,
-  sentryReady: false,
-  pulseReady: false,
-  bastionReady: false,
   setRole: (role) => set({ role }),
   setOperatingMode: (operatingMode) => set({ operatingMode }),
+  setAlertCount: (alertCount) => set({ alertCount }),
 }));

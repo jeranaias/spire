@@ -109,12 +109,14 @@ class Asset:
     unit_parent: str
     location: str
     optempo: str
+    # Canonical deployment posture from the unit T/O&E. Never mutated.
     deployment_status: str
     fielding_date: date
     initial_hours: float
     initial_miles: int
     classification_risk: str
-    # mutable state updated by lifecycle.py
+    # Mutable state updated by lifecycle.py each simulated day.
+    current_deployment_status: str = ""  # today's effective status (field exercise overrides)
     current_hours: float = 0.0
     current_miles: int = 0
     current_status: str = "MC"  # MC / PMC / NMCM / NMCS
@@ -132,6 +134,7 @@ class Asset:
     def __post_init__(self) -> None:
         self.current_hours = self.initial_hours
         self.current_miles = self.initial_miles
+        self.current_deployment_status = self.deployment_status
 
 
 @dataclass

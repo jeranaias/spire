@@ -7,13 +7,17 @@ export function StatusFooter() {
     return () => clearInterval(id);
   }, []);
 
+  // Local wall-clock time -- judge at a TOC wants the same time as their watch,
+  // not Zulu.
+  const localTime = now.toLocaleTimeString([], { hour12: false });
+
   const segments = [
     "Local Infrastructure",
     "No Cloud",
     "No Third-Party APIs",
     "AES-256 Encrypted",
     "v0.1.0",
-    now.toISOString().slice(11, 19) + "Z",
+    localTime,
   ];
 
   return (
