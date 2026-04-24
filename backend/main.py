@@ -19,6 +19,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .state import load_dataset
+from .network_monitor import install as install_netmon
+from .model_hooks import STATE as MODEL_STATE
 
 from .routes.system import router as system_router
 from .routes.pulse import router as pulse_router
@@ -29,6 +31,10 @@ from .routes.llm import router as llm_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Install outbound-network monitor before anything else opens a socket
+    install_netmon()
+    print("[SPIRE] Network egress monitor armed.")
+
     # Generate the canonical dataset once at boot. ~30-60 seconds.
     print("[SPIRE] Generating canonical dataset under seed 42 ...")
     ds = load_dataset()
@@ -38,6 +44,13 @@ async def lifespan(app: FastAPI):
     err = sum(1 for v in ds.violations if v.severity == "error")
     warn = len(ds.violations) - err
     print(f"[SPIRE]   consistency: {err} errors, {warn} warnings")
+
+    ms = MODEL_STATE.status()
+    print(f"[SPIRE] Models: sentry_loaded={ms['sentry_loaded']} pulse_loaded={ms['pulse_loaded']}")
+    if ms["errors"]:
+        for e in ms["errors"]:
+            print(f"[SPIRE]   model load: {e}")
+
     print("[SPIRE] Ready.")
     yield
 

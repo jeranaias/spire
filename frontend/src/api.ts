@@ -6,8 +6,27 @@
 
 const BASE = "/api";
 
-async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(`${BASE}${path}`, {
+// Role read synchronously from the Zustand store on every call. The store
+// owns the active role; we splice it onto GET requests as `?role=...` so the
+// backend's scoping layer can filter per-role. POST routes also take a role
+// via payload where needed.
+let _getRole: () => string = () => "mef_commander";
+export function registerRoleSource(fn: () => string) { _getRole = fn; }
+
+function withRole(path: string): string {
+  try {
+    const role = _getRole();
+    if (!role) return path;
+    const sep = path.includes("?") ? "&" : "?";
+    return `${path}${sep}role=${encodeURIComponent(role)}`;
+  } catch {
+    return path;
+  }
+}
+
+async function jsonFetch<T>(path: string, init?: RequestInit, injectRole = true): Promise<T> {
+  const url = injectRole ? withRole(path) : path;
+  const resp = await fetch(`${BASE}${url}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
