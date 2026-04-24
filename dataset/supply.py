@@ -30,7 +30,12 @@ class PartRequisition:
     status_history: list = field(default_factory=list)  # list of (status_code, date)
     current_status: str = "BA"
     ordered_date: Optional[date] = None
+    # Set when the D6 milestone actually advances under advance_requisition,
+    # NOT at creation. Stays None until the part is physically received.
     received_date: Optional[date] = None
+    # The projected delivery date derived from the supply path -- always
+    # known at creation, used by PULSE for "expected arrival" displays.
+    projected_delivery_date: Optional[date] = None
     estimated_ship_date: Optional[date] = None
 
     @property
@@ -107,26 +112,51 @@ def create_requisitions_for_sr(
             ordered_date=sr_date,
         )
 
-        # Pre-compute the full status timeline (deterministic per path).
-        for code, offset in SUPPLY_PATHS[path]:
+        # Compute the planned status timeline with gamma-distributed per-step
+        # jitter so a cohort of same-path orders doesn't arrive on identical
+        # calendar days. The mean stays at the spec's integer value; variance
+        # comes from multiplicative noise.
+        jittered_offsets = _jitter_path_offsets(SUPPLY_PATHS[path], rng)
+        for (code, _base_offset), offset in zip(SUPPLY_PATHS[path], jittered_offsets):
             req.status_history.append((code, sr_date + timedelta(days=offset)))
 
-        # Last D6 step is the received date.
-        if req.status_history and req.status_history[-1][0] == "D6":
-            req.received_date = req.status_history[-1][1]
-        # Estimated ship date = AE step if present.
+        # Projected delivery is the planned D6 step (always known at creation);
+        # received_date stays None until advance_requisition confirms delivery.
         for code, step_date in req.status_history:
+            if code == "D6":
+                req.projected_delivery_date = step_date
             if code == "AE":
                 req.estimated_ship_date = step_date
-                break
 
         requisitions.append(req)
 
     return requisitions
 
 
+def _jitter_path_offsets(path_steps: list, rng: random.Random) -> list:
+    """
+    Gamma-like per-step noise: each planned step gets multiplied by a random
+    factor with mean 1.0. The returned offsets are monotonic -- a step never
+    lands before the previous one. This replaces the old integer determinism
+    where every 'fast' path hit D6 on exactly day 6.
+    """
+    out = []
+    prev = -1
+    for _code, base_offset in path_steps:
+        if base_offset == 0:
+            offset = 0
+        else:
+            # Lognormal-ish noise via uniform on log scale, clamped reasonable.
+            factor = rng.uniform(0.75, 1.30) if base_offset <= 10 else rng.uniform(0.85, 1.25)
+            offset = max(prev + 1, int(round(base_offset * factor)))
+        out.append(offset)
+        prev = offset
+    return out
+
+
 def advance_requisition(req: PartRequisition, today: date) -> bool:
     """Update the current_status to reflect the most recent past milestone.
+    Sets received_date on the calendar day the D6 milestone first lands.
     Returns True if the status changed this call."""
     new_status = req.current_status
     for code, step_date in req.status_history:
@@ -134,6 +164,12 @@ def advance_requisition(req: PartRequisition, today: date) -> bool:
             new_status = code
     changed = new_status != req.current_status
     req.current_status = new_status
+    if new_status == "D6" and req.received_date is None:
+        # Find the actual D6 date from history so ordering is deterministic.
+        for code, step_date in req.status_history:
+            if code == "D6":
+                req.received_date = step_date
+                break
     return changed
 
 

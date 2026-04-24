@@ -175,9 +175,10 @@ def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent
             key=_rank,
         )
         for donor in ranked:
+            event_date = recip.open_date + timedelta(days=rng.randint(3, 10))
             events.append(CannibalizationEvent(
                 event_id=f"CAN-{len(events)+1:04d}",
-                event_date=recip.open_date + timedelta(days=rng.randint(3, 10)),
+                event_date=event_date,
                 recipient_asset_id=recip.asset_id,
                 recipient_sr_number=recip.sr_number,
                 donor_asset_id=donor.asset_id,
@@ -192,6 +193,35 @@ def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent
                     else "Donor deadlined on slow-path order; readiness impact negligible."
                 ),
             ))
+
+            # Actually mutate the records -- recipient closes out the part
+            # requisition as satisfied via cannibalization on event_date;
+            # donor gains a second remark entry documenting the removal.
+            for r in recip.requisitions:
+                if r.nsn == needed_part.nsn and r.received_date is None:
+                    r.received_date = event_date
+                    r.current_status = "CANN"  # cannibalized, not RFI
+                    break
+
+            # If the recipient's remaining parts are all delivered after this
+            # cannibalization, the SR progresses to QC/COMPLETED. Otherwise
+            # remain SHT PART on any still-open requisitions.
+            if all(r.received_date is not None for r in recip.requisitions):
+                recip.job_status = "COMPLETED"
+                recip.close_date = event_date + timedelta(days=rng.randint(1, 3))
+
+            recip.remark_text = (
+                f"{recip.remark_text} [{event_date.isoformat()}] "
+                f"{needed_part.nomenclature} obtained via cannibalization from "
+                f"{donor.asset_id} (donor SR {donor.sr_number})."
+            )
+            # Donor SR keeps its deadline but the donated part is now gone.
+            donor.remark_text = (
+                f"{donor.remark_text} [{event_date.isoformat()}] "
+                f"{needed_part.nomenclature} removed for cannibalization to "
+                f"{recip.asset_id} (recipient SR {recip.sr_number})."
+            )
+
             used_donors.add(donor.sr_number)
             used_recipients.add(recip.sr_number)
             break
@@ -334,7 +364,9 @@ def check_single_active_cm_sr(assets, srs) -> List[Violation]:
 
 
 def check_parts_cost_realistic(srs) -> List[Violation]:
-    """Actual parts cost should stay within 30% of the estimated cost."""
+    """Actual parts cost should fall inside the spec's bimodal band. Catches
+    data corruption (e.g. a zero-cost actual under a $4k estimate) as well as
+    wildly inflated outliers."""
     out: List[Violation] = []
     for sr in srs:
         if sr.is_pmcs or sr.data_quality_flag:
@@ -342,7 +374,9 @@ def check_parts_cost_realistic(srs) -> List[Violation]:
         if sr.parts_cost_est == 0:
             continue
         ratio = sr.parts_cost_actual / sr.parts_cost_est
-        if ratio < 0.5 or ratio > 1.7:
+        # The generator produces uniform(0.70, 1.45). Any ratio outside
+        # 0.65-1.50 is a bug. Warning, not error -- cannibalized SRs skew lower.
+        if ratio < 0.65 or ratio > 1.50:
             out.append(Violation(
                 "parts_cost_realistic", "warning",
                 f"SR {sr.sr_number} parts cost ratio {ratio:.2f} (actual {sr.parts_cost_actual} vs est {sr.parts_cost_est})",

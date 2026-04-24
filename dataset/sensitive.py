@@ -115,8 +115,11 @@ def inject_sensitive_data(
         flags.append("pii")
 
     # ---- Grid coordinates (only when deployed / field exercise) ----
+    # Use current_deployment_status (today's posture) not the canonical field,
+    # so calendar-driven field exercises correctly inject grids.
     geo_rule = SENSITIVITY_RULES["grid_coords"]
-    if asset.deployment_status in geo_rule["trigger_deployment_status"]:
+    current_status = getattr(asset, "current_deployment_status", asset.deployment_status)
+    if current_status in geo_rule["trigger_deployment_status"]:
         if rng.random() < geo_rule["probability"]:
             grid = make_mgrs(asset.location, rng)
             if rng.random() < 0.5:

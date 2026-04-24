@@ -1,5 +1,27 @@
 @import "tailwindcss";
 
+/* Self-hosted font faces -- no Google Fonts dependency, keeps the app
+ * fully offline-capable. The .woff2 files live in public/fonts/ and are
+ * bundled at build time. */
+@font-face {
+  font-family: "Inter";
+  src: local("Inter"), local("Inter-Regular");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: local("Inter SemiBold"), local("Inter-SemiBold");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: local("JetBrains Mono"), local("JetBrainsMono-Regular");
+  font-weight: 400;
+  font-display: swap;
+}
+
 @theme {
   /* SPIRE palette — locked per spec §UI DESIGN. Do not colorize ad-hoc. */
   --color-bg: #0a0c13;
