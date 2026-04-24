@@ -10,6 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
+from ..scoping import allowed_units
 from ..state import get_dataset, last_day_snapshots
 from .streams import all_streams
 
@@ -46,13 +47,14 @@ UNIT_COORDS = {
 # ---------------------------------------------------------------------------
 
 @router.get("/cop")
-async def cop():
+async def cop(role: Optional[str] = None):
     ds = get_dataset()
     inst = _load_installation()
     last = last_day_snapshots(ds)
     if not last:
         raise HTTPException(status_code=503, detail="dataset empty")
 
+    allowed = allowed_units(ds, role)
     last_day = last[0].snapshot_date
 
     # Per-unit readiness
@@ -64,6 +66,8 @@ async def cop():
 
     units_out = []
     for u in ds.units:
+        if allowed is not None and u.name not in allowed:
+            continue
         c = by_unit_counter[u.name]
         total = sum(c.values())
         mc_rate = c.get("MC", 0) / total if total else 0.0
@@ -117,8 +121,9 @@ async def cop():
 # ---------------------------------------------------------------------------
 
 @router.get("/alerts")
-async def alerts(limit: int = 30):
+async def alerts(limit: int = 30, role: Optional[str] = None):
     ds = get_dataset()
+    allowed = allowed_units(ds, role)
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
     out: list[dict] = []
 
@@ -183,6 +188,16 @@ async def alerts(limit: int = 30):
     # Prepend any active BASTION incidents from the sim queue
     for sim in _ACTIVE_SIMS.values():
         out.insert(0, sim["alert"])
+
+    # Apply role scoping (installation-wide streams are unscoped; unit-scoped
+    # alerts hide when role can't see that unit)
+    if allowed is not None:
+        filtered: list[dict] = []
+        for a in out:
+            unit = a.get("unit")
+            if unit is None or unit in allowed:
+                filtered.append(a)
+        out = filtered
 
     return {"alerts": out[:limit]}
 

@@ -8,6 +8,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..persistence import feedback_summary, record_pulse_feedback
+from ..scoping import allowed_units, filter_assets, filter_units
 from ..state import (
     CanonicalDataset,
     get_dataset,
@@ -27,21 +29,25 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 @router.get("/fleet-overview")
-async def fleet_overview():
+async def fleet_overview(role: Optional[str] = None):
     ds = get_dataset()
-    last = last_day_snapshots(ds)
-    if not last:
+    last_all = last_day_snapshots(ds)
+    if not last_all:
         raise HTTPException(status_code=503, detail="dataset empty")
-    last_day = last[0].snapshot_date
+    allowed = allowed_units(ds, role)
+    last = [s for s in last_all if allowed is None or s.unit_name in allowed]
+    last_day = last_all[0].snapshot_date
 
     # Hero metrics ---------------------------------------------------------
     total = len(last)
     mc = sum(1 for s in last if s.readiness_code == "MC")
-    fleet_mc_rate = mc / total
+    fleet_mc_rate = mc / total if total else 0.0
 
     # 7-day delta: average MC rate over days last-6..last vs last-13..last-7
     by_date = defaultdict(Counter)
     for s in ds.snapshots:
+        if allowed is not None and s.unit_name not in allowed:
+            continue
         by_date[s.snapshot_date][s.readiness_code] += 1
     dates = sorted(by_date.keys())
 
@@ -59,6 +65,7 @@ async def fleet_overview():
     parts_on_order = sum(
         1
         for sr in ds.srs
+        if (allowed is None or sr.unit_name in allowed)
         for r in sr.requisitions
         if r.received_date is None or r.received_date > last_day
     )
@@ -77,7 +84,8 @@ async def fleet_overview():
         by_unit_equip[s.unit_name][s.equipment_type].append(s.readiness_code)
 
     heatmap = []
-    for u in ds.units:
+    visible_units = filter_units(ds, role)
+    for u in visible_units:
         rates = {}
         equip_breakdown = {}
         for eq_type in sorted(u.equipment_counts.keys()):
@@ -110,9 +118,14 @@ async def fleet_overview():
             "avg_days_nmc": round(avg_days_nmc, 1),
         },
         "heatmap": heatmap,
-        "equipment_types": sorted({et for u in ds.units for et in u.equipment_counts.keys()}),
+        "equipment_types": sorted({et for u in visible_units for et in u.equipment_counts.keys()}),
         "alerts": alerts[:10],
         "as_of": last_day.isoformat(),
+        "role": role or "mef_commander",
+        "scope": {
+            "units_visible": sorted([u.name for u in visible_units]),
+            "filter_applied": allowed is not None,
+        },
     }
 
 
@@ -182,15 +195,19 @@ def _severity_rank(s: str) -> int:
 # ---------------------------------------------------------------------------
 
 @router.get("/risk-board")
-async def risk_board(top: int = Query(20, ge=1, le=100)):
+async def risk_board(top: int = Query(20, ge=1, le=100), role: Optional[str] = None):
     ds = get_dataset()
-    scored = top_risk(ds, n=top)
-    # Enrich with asset-level context
+    allowed = allowed_units(ds, role)
+    scored = top_risk(ds, n=top * 3)  # oversample then filter
     out = []
     for s in scored:
         asset = ds.asset(s["asset_id"])
         if asset is None:
             continue
+        if allowed is not None and asset.unit_name not in allowed:
+            continue
+        if len(out) >= top:
+            break
         out.append({
             **s,
             "serial_number": asset.serial_number,
@@ -282,8 +299,9 @@ async def asset_deep_dive(asset_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/cannibalization")
-async def cannibalization():
+async def cannibalization(role: Optional[str] = None):
     ds = get_dataset()
+    allowed = allowed_units(ds, role)
     # Needs: currently NMCS SRs with un-received parts
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
     needs = []
@@ -291,6 +309,8 @@ async def cannibalization():
         if sr.is_pmcs or sr.close_date is not None:
             continue
         if sr.condition != "Deadlined":
+            continue
+        if allowed is not None and sr.unit_name not in allowed:
             continue
         pending = [
             r for r in sr.requisitions
@@ -316,6 +336,8 @@ async def cannibalization():
     # Cannibalization events -- already produced by the engine
     matches = []
     for ev in ds.cannib_events:
+        if allowed is not None and ev.recipient_unit not in allowed and ev.donor_unit not in allowed:
+            continue
         matches.append({
             "event_id": ev.event_id,
             "event_date": ev.event_date.isoformat(),
@@ -417,17 +439,17 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
 # Feedback loop (correct/incorrect)
 # ---------------------------------------------------------------------------
 
-_FEEDBACK_LOG: list[dict] = []
-
-
 @router.post("/feedback/{asset_id}")
 async def feedback(asset_id: str, payload: dict):
-    from datetime import datetime as _dt
-    entry = {
-        "asset_id": asset_id,
-        "correct": bool(payload.get("correct", False)),
-        "note": payload.get("note", ""),
-        "at": _dt.utcnow().isoformat(timespec="seconds") + "Z",
-    }
-    _FEEDBACK_LOG.append(entry)
-    return {"ok": True, "recorded": entry, "total_feedback": len(_FEEDBACK_LOG)}
+    correct = bool(payload.get("correct", False))
+    note = payload.get("note", "")
+    record_pulse_feedback(asset_id, correct, note=note)
+    summary = feedback_summary()
+    return {"ok": True, "asset_id": asset_id, "correct": correct, "summary": summary}
+
+
+@router.get("/feedback/summary")
+async def feedback_summary_endpoint():
+    """Aggregate feedback stats -- drives the 'continuous model improvement'
+    story in the spec Q&A."""
+    return feedback_summary()

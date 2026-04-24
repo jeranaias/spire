@@ -10,7 +10,13 @@ import { SentryView } from "./views/SentryView";
 import { PulseView } from "./views/PulseView";
 import { BastionView } from "./views/BastionView";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { registerRoleSource } from "./api";
+import { useSpireStore } from "./state/store";
 import "./index.css";
+
+// Expose the active role to the API layer. Every GET/POST now splices it as
+// `?role=...` so the backend's scoping filter applies per-call.
+registerRoleSource(() => useSpireStore.getState().role);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Tailwind 4 automatic source discovery misses our .tsx files under src/
+ * when @tailwindcss/vite runs inside Vite 8 + Rolldown -- the resulting
+ * bundle ships with @layer utilities empty and none of the flex / p-4 /
+ * rounded-md classes get emitted. @source below is the explicit hint. */
+@source "../src/**/*.{ts,tsx,html}";
+@source "../index.html";
+
 /* Self-hosted font faces -- no Google Fonts dependency, keeps the app
  * fully offline-capable. The .woff2 files live in public/fonts/ and are
  * bundled at build time. */
@@ -22,8 +29,14 @@
   font-display: swap;
 }
 
-@theme {
-  /* SPIRE palette — locked per spec §UI DESIGN. Do not colorize ad-hoc. */
+/* SPIRE palette — locked per spec §UI DESIGN. Do not colorize ad-hoc.
+ *
+ * Tailwind 4's @theme{} directive is not processed by Lightning CSS (Vite's
+ * minifier) -- it passes through as an unknown at-rule and the variables
+ * never land on :root. We define them on :root explicitly so they are always
+ * available to var() lookups, and @theme mirrors them so Tailwind utility
+ * generation can still reference the same tokens. */
+:root {
   --color-bg: #0a0c13;
   --color-surface: #12151e;
   --color-surface-hover: #1a1e2e;
@@ -45,6 +58,28 @@
   --color-text-secondary: #9ca3af;
   --color-text-muted: #6b7280;
 
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@theme {
+  --color-bg: #0a0c13;
+  --color-surface: #12151e;
+  --color-surface-hover: #1a1e2e;
+  --color-border: #1e2235;
+  --color-border-active: #2a3050;
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-danger: #ef4444;
+  --color-danger-muted: #7f1d1d;
+  --color-warning: #f59e0b;
+  --color-warning-muted: #78350f;
+  --color-success: #22c55e;
+  --color-success-muted: #14532d;
+  --color-info: #8b5cf6;
+  --color-text: #e5e7eb;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #6b7280;
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
