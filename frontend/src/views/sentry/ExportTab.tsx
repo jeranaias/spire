@@ -114,12 +114,24 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
           </div>
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Records</div>
-              <div className="font-mono text-[var(--color-text)]">{result.record_count.toLocaleString()}</div>
+              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Records exported</div>
+              <div className="font-mono text-[var(--color-text)]">
+                {(result.records_exported ?? 0).toLocaleString()}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Rejected</div>
+              <div className="font-mono text-[var(--color-text)]">
+                {(result.records_rejected ?? 0).toLocaleString()}
+              </div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Decisions applied</div>
-              <div className="font-mono text-[var(--color-text)]">{result.decisions_applied}</div>
+              <div className="font-mono text-[var(--color-text)]">{result.decisions_applied ?? 0}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Redactions applied</div>
+              <div className="font-mono text-[var(--color-text)]">{result.redactions_applied ?? 0}</div>
             </div>
             <div className="col-span-2">
               <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Distribution statement</div>
@@ -127,7 +139,15 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             </div>
             <div className="col-span-2">
               <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Download</div>
-              <div className="font-mono text-[var(--color-primary)]">{result.download_url}</div>
+              <a
+                href={result.download_url}
+                className="font-mono text-[var(--color-primary)] hover:underline"
+              >
+                {result.download_url}
+              </a>
+              {result.bytes != null && (
+                <span className="ml-2 text-[var(--color-text-muted)]">({(result.bytes / 1024).toFixed(1)} KB)</span>
+              )}
             </div>
           </div>
         </div>
