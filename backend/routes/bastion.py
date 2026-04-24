@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 
 from ..state import get_dataset, last_day_snapshots
+from .streams import all_streams
 
 router = APIRouter()
 
@@ -172,6 +173,9 @@ async def alerts(limit: int = 30):
             "body": f"Source marking UNCLASSIFIED, SENTRY detected {sr.detected_classification} ({sr.unit_name} / {sr.equipment_type})",
             "unit": sr.unit_name,
         })
+
+    # Multi-stream feeds (gate access, utilities, weather)
+    out.extend(all_streams(ds))
 
     # Sort newest-first, cap
     out.sort(key=lambda a: a["timestamp"], reverse=True)
