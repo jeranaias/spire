@@ -3,17 +3,20 @@ import { api, type FleetOverview } from "../../api";
 import { MetricCard } from "../../components/MetricCard";
 import { Heatmap } from "../../components/Heatmap";
 import { AlertCard } from "../../components/AlertCard";
+import { useSpireStore } from "../../state/store";
 
 export function FleetOverviewTab() {
+  const role = useSpireStore((s) => s.role);
   const [data, setData] = useState<FleetOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setData(null);
     api.pulse
       .fleetOverview()
       .then(setData)
       .catch((e) => setError(String(e)));
-  }, []);
+  }, [role]);
 
   if (error) {
     return (

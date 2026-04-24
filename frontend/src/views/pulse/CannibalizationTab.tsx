@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { api, type Cannibalization } from "../../api";
 import { LoadingOverlay } from "./FleetOverviewTab";
+import { useSpireStore } from "../../state/store";
 
 export function CannibalizationTab() {
+  const role = useSpireStore((s) => s.role);
   const [data, setData] = useState<Cannibalization | null>(null);
 
   useEffect(() => {
+    setData(null);
     api.pulse.cannibalization().then(setData);
-  }, []);
+  }, [role]);
 
   if (!data) return <LoadingOverlay message="Matching needs with donors ..." />;
 

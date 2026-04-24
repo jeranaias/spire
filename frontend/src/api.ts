@@ -262,11 +262,17 @@ export interface MarkResult {
 
 export interface ExportResult {
   ok: boolean;
+  export_id: string;
+  filename?: string;
+  bytes?: number;
   release_authority: string;
   format: string;
-  record_count: number;
+  records_exported: number;
+  records_rejected: number;
   decisions_applied: number;
+  redactions_applied: number;
   distribution_statement: string;
+  generalized_unit_markings?: boolean;
   download_url: string;
   created_at: string;
 }
