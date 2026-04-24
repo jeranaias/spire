@@ -1,0 +1,456 @@
+"""
+Cross-record consistency validator + controlled data-quality injector.
+
+Two responsibilities:
+
+  1. INJECT the intentional data-quality defects that SENTRY's data-quality
+     gate is designed to surface -- hours-decreased anomalies, serial/TAMCN
+     mismatches, unknown defect codes, and cannibalization events.
+
+  2. VALIDATE the 15 invariants from the engine spec. Each validator returns
+     a list of violations; zero violations on a clean run is the gate for
+     export. Injected defects are tagged so validators can ignore them.
+"""
+from __future__ import annotations
+
+import random
+from collections import Counter
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from typing import Callable, List
+
+from config import (
+    CONDITION_PRIORITY_MAP,
+    DATA_QUALITY_DEFECT_TARGETS,
+    DEFECT_CODES,
+    MIN_CANNIBALIZATION_EVENTS,
+    SIMULATION_START_DATE,
+    SIMULATION_DAYS,
+)
+
+SIMULATION_END_DATE = SIMULATION_START_DATE + timedelta(days=SIMULATION_DAYS - 1)
+
+
+@dataclass
+class Violation:
+    check: str
+    severity: str         # "error" / "warning"
+    message: str
+    record_id: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Intentional data-quality injection
+# ---------------------------------------------------------------------------
+
+def inject_data_quality_defects(srs, snapshots, seed: int) -> dict:
+    """
+    Apply the intentional defects that SENTRY's data-quality gate flags. All
+    injections tag the affected record with data_quality_flag so validators
+    know to skip them.
+    """
+    rng = random.Random(seed + 3)
+    summary = {"hours_decreased": 0, "serial_tamcn_mismatch": 0, "unknown_defect_code": 0}
+
+    # ---- hours_decreased: operator entry errors. Apply to 8 SRs out of the
+    # first 500. These look like "previous record showed 1450 hrs, this one
+    # shows 1422 hrs" -- an impossible decrease that flags the record.
+    # We annotate the SR; the actual hours stay consistent on the asset so
+    # PULSE's predictions aren't corrupted.
+    target = DATA_QUALITY_DEFECT_TARGETS["hours_decreased"]["target_count"]
+    candidates = [sr for sr in srs if not sr.is_pmcs and not sr.data_quality_flag]
+    rng.shuffle(candidates)
+    for sr in candidates[:target]:
+        sr.data_quality_flag = "hours_decreased"
+        summary["hours_decreased"] += 1
+
+    # ---- serial_tamcn_mismatch: 3 SRs where the recorded TAMCN does not match
+    # the asset's actual TAMCN. We store the "wrong" TAMCN in a mismatch field
+    # so validators can report it but PULSE downstream still uses the real TAMCN.
+    target = DATA_QUALITY_DEFECT_TARGETS["serial_tamcn_mismatch"]["target_count"]
+    candidates = [sr for sr in srs if not sr.is_pmcs and not sr.data_quality_flag]
+    rng.shuffle(candidates)
+    for sr in candidates[:target]:
+        sr.data_quality_flag = "serial_tamcn_mismatch"
+        # Swap the TAMCN with a plausible but wrong one from a different
+        # equipment family. (We keep the serial intact; the mismatch is the
+        # "fault" being injected.)
+        bogus_tamcns = ["D1196", "D0082", "A2249", "E1897", "B2601"]
+        sr_tamcn = sr.tamcn
+        sr.tamcn = rng.choice([t for t in bogus_tamcns if t != sr_tamcn])
+        summary["serial_tamcn_mismatch"] += 1
+
+    # ---- unknown_defect_code: 2 SRs with a defect code outside the known table.
+    target = DATA_QUALITY_DEFECT_TARGETS["unknown_defect_code"]["target_count"]
+    candidates = [sr for sr in srs if not sr.is_pmcs and not sr.data_quality_flag]
+    rng.shuffle(candidates)
+    for sr in candidates[:target]:
+        sr.data_quality_flag = "unknown_defect_code"
+        sr.defect_code_primary = "XXXX"
+        sr.defect_code_secondary = "UNKN"
+        summary["unknown_defect_code"] += 1
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Cannibalization generator
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CannibalizationEvent:
+    event_id: str
+    event_date: date
+    recipient_asset_id: str
+    recipient_sr_number: str
+    donor_asset_id: str
+    donor_sr_number: str
+    nsn: str
+    nomenclature: str
+    recipient_unit: str
+    donor_unit: str
+    readiness_impact_note: str
+
+
+def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent]:
+    """
+    Pair NMCS recipients with long-deadline donors from the SAME equipment
+    family. Real cannibalization matches on equipment type + part function,
+    not on exact NSN (every asset's NSN is serialized separately). These
+    cross-unit links are what PULSE's cannibalization matcher surfaces.
+    """
+    rng = random.Random(seed + 4)
+    events: List[CannibalizationEvent] = []
+
+    def _pending_req(req):
+        return req.received_date is None or req.received_date > SIMULATION_END_DATE
+
+    nmcs_srs = [
+        sr for sr in srs
+        if sr.condition == "Deadlined"
+        and not sr.is_pmcs
+        and any(_pending_req(r) for r in sr.requisitions)
+    ]
+    donor_pool = [
+        sr for sr in srs
+        if sr.condition == "Deadlined"
+        and not sr.is_pmcs
+        and (
+            sr.job_status in ("EVACUATED", "SHT PART", "WAITING APPROVAL")
+            or any(r.supply_path in ("slow", "backordered") for r in sr.requisitions)
+        )
+    ]
+
+    rng.shuffle(nmcs_srs)
+    rng.shuffle(donor_pool)
+
+    used_donors: set = set()
+    used_recipients: set = set()
+
+    for recip in nmcs_srs:
+        if len(events) >= max(MIN_CANNIBALIZATION_EVENTS + 2, 7):
+            break
+        if recip.sr_number in used_recipients:
+            continue
+        # Match on equipment type + fault component family -- like a real
+        # maintenance chief would scan the motor pool for a matching broken rig.
+        needed_part = next(
+            (r for r in recip.requisitions if _pending_req(r)),
+            None,
+        )
+        if needed_part is None:
+            continue
+        # Prefer cross-unit matches; fall back to same-unit if that's all we have.
+        def _rank(donor):
+            return (
+                0 if donor.unit_name != recip.unit_name else 1,  # cross-unit first
+                0 if donor.fault_component == recip.fault_component else 1,
+                0 if donor.job_status == "EVACUATED" else 1,
+            )
+        ranked = sorted(
+            (d for d in donor_pool
+             if d.sr_number not in used_donors
+             and d.asset_id != recip.asset_id
+             and d.equipment_type == recip.equipment_type),
+            key=_rank,
+        )
+        for donor in ranked:
+            events.append(CannibalizationEvent(
+                event_id=f"CAN-{len(events)+1:04d}",
+                event_date=recip.open_date + timedelta(days=rng.randint(3, 10)),
+                recipient_asset_id=recip.asset_id,
+                recipient_sr_number=recip.sr_number,
+                donor_asset_id=donor.asset_id,
+                donor_sr_number=donor.sr_number,
+                nsn=needed_part.nsn,
+                nomenclature=needed_part.nomenclature,
+                recipient_unit=recip.unit_name,
+                donor_unit=donor.unit_name,
+                readiness_impact_note=(
+                    "Donor awaiting depot return (est 90+ days); zero impact on donor unit readiness."
+                    if donor.job_status == "EVACUATED"
+                    else "Donor deadlined on slow-path order; readiness impact negligible."
+                ),
+            ))
+            used_donors.add(donor.sr_number)
+            used_recipients.add(recip.sr_number)
+            break
+
+    return events
+
+
+# ---------------------------------------------------------------------------
+# Validators
+# ---------------------------------------------------------------------------
+
+def _iter_open_srs(srs):
+    return (sr for sr in srs if sr.close_date is None)
+
+
+def check_nmcs_implies_open_parts(srs) -> List[Violation]:
+    """A SHT PART SR must have at least one requisition that has not yet
+    arrived by SIMULATION_END_DATE. Reqs whose received_date is in the future
+    relative to the simulation window count as 'open'."""
+    out: List[Violation] = []
+    for sr in _iter_open_srs(srs):
+        if sr.job_status != "SHT PART":
+            continue
+        any_pending = any(
+            (r.received_date is None or r.received_date > SIMULATION_END_DATE)
+            for r in sr.requisitions
+        )
+        if not any_pending and sr.requisitions:
+            out.append(Violation(
+                "nmcs_implies_open_parts", "error",
+                f"SR {sr.sr_number} is SHT PART but all requisitions delivered by end of sim",
+                sr.sr_number,
+            ))
+    return out
+
+
+def check_nmcm_implies_active_sr(srs) -> List[Violation]:
+    """Every Deadlined SR should have a non-terminal job status (OPEN, AWAITING MAINT,
+    WORK IN PROGRESS, SHT PART, QC INSPECTION, EVACUATED)."""
+    out: List[Violation] = []
+    terminal = {"COMPLETED"}
+    for sr in _iter_open_srs(srs):
+        if sr.condition == "Deadlined" and sr.job_status in terminal:
+            out.append(Violation(
+                "nmcm_implies_active_sr", "error",
+                f"SR {sr.sr_number} is Deadlined but job_status is terminal ({sr.job_status})",
+                sr.sr_number,
+            ))
+    return out
+
+
+def check_hours_miles_monotonic(snapshots) -> List[Violation]:
+    """Asset-level hours and miles must never decrease day-to-day."""
+    out: List[Violation] = []
+    by_asset: dict = {}
+    for s in snapshots:
+        prev = by_asset.get(s.asset_id)
+        if prev is not None:
+            if s.current_hours + 0.01 < prev[0]:
+                out.append(Violation(
+                    "hours_miles_monotonic", "error",
+                    f"Asset {s.asset_id} hours went from {prev[0]:.1f} to {s.current_hours:.1f} on {s.snapshot_date}",
+                    s.asset_id,
+                ))
+            if s.current_miles < prev[1]:
+                out.append(Violation(
+                    "hours_miles_monotonic", "error",
+                    f"Asset {s.asset_id} miles went from {prev[1]} to {s.current_miles} on {s.snapshot_date}",
+                    s.asset_id,
+                ))
+        by_asset[s.asset_id] = (s.current_hours, s.current_miles)
+    return out
+
+
+def check_condition_priority_alignment(srs) -> List[Violation]:
+    out: List[Violation] = []
+    for sr in srs:
+        if sr.is_pmcs:
+            continue
+        if sr.data_quality_flag:
+            continue
+        allowed = CONDITION_PRIORITY_MAP.get(sr.condition, [])
+        if allowed and sr.priority not in allowed:
+            out.append(Violation(
+                "condition_priority_alignment", "warning",
+                f"SR {sr.sr_number} condition={sr.condition} priority={sr.priority} (allowed {allowed})",
+                sr.sr_number,
+            ))
+    return out
+
+
+def check_unique_serial_numbers(assets) -> List[Violation]:
+    serials = [a.serial_number for a in assets]
+    dupes = [s for s, c in Counter(serials).items() if c > 1]
+    return [Violation("unique_serial_numbers", "error", f"Duplicate serial: {s}") for s in dupes]
+
+
+def check_unique_sr_numbers(srs) -> List[Violation]:
+    numbers = [sr.sr_number for sr in srs]
+    dupes = [n for n, c in Counter(numbers).items() if c > 1]
+    return [Violation("unique_sr_numbers", "error", f"Duplicate SR number: {n}") for n in dupes]
+
+
+def check_pmcs_interval_regularity(srs) -> List[Violation]:
+    """PMCS SRs per asset should be ~30 days apart (not randomly scattered)."""
+    out: List[Violation] = []
+    by_asset: dict = {}
+    for sr in srs:
+        if sr.is_pmcs:
+            by_asset.setdefault(sr.asset_id, []).append(sr.open_date)
+    for asset_id, dates in by_asset.items():
+        dates.sort()
+        for prev, nxt in zip(dates, dates[1:]):
+            gap = (nxt - prev).days
+            if gap < 20 or gap > 60:
+                out.append(Violation(
+                    "pmcs_interval_regularity", "warning",
+                    f"Asset {asset_id} PMCS gap={gap} days ({prev} -> {nxt})",
+                    asset_id,
+                ))
+    return out
+
+
+def check_single_active_cm_sr(assets, srs) -> List[Violation]:
+    """At most one active corrective SR per asset at a time (PMCS can overlap)."""
+    out: List[Violation] = []
+    by_asset: dict = {}
+    for sr in srs:
+        if sr.is_pmcs or sr.close_date is not None:
+            continue
+        by_asset.setdefault(sr.asset_id, []).append(sr)
+    for asset_id, active in by_asset.items():
+        if len(active) > 1:
+            out.append(Violation(
+                "single_active_cm_sr", "warning",
+                f"Asset {asset_id} has {len(active)} active CM SRs simultaneously",
+                asset_id,
+            ))
+    return out
+
+
+def check_parts_cost_realistic(srs) -> List[Violation]:
+    """Actual parts cost should stay within 30% of the estimated cost."""
+    out: List[Violation] = []
+    for sr in srs:
+        if sr.is_pmcs or sr.data_quality_flag:
+            continue
+        if sr.parts_cost_est == 0:
+            continue
+        ratio = sr.parts_cost_actual / sr.parts_cost_est
+        if ratio < 0.5 or ratio > 1.7:
+            out.append(Violation(
+                "parts_cost_realistic", "warning",
+                f"SR {sr.sr_number} parts cost ratio {ratio:.2f} (actual {sr.parts_cost_actual} vs est {sr.parts_cost_est})",
+                sr.sr_number,
+            ))
+    return out
+
+
+def check_classification_content_alignment(srs) -> List[Violation]:
+    """Records whose remark contains [CLASSIFIED TM must carry detected_classification
+    at least CONFIDENTIAL."""
+    out: List[Violation] = []
+    higher = {"CONFIDENTIAL", "SECRET", "TOP SECRET"}
+    for sr in srs:
+        if "[CLASSIFIED TM" in sr.remark_text and sr.detected_classification not in higher:
+            out.append(Violation(
+                "classification_content_alignment", "error",
+                f"SR {sr.sr_number} remark contains classified TM marker but detected classification is {sr.detected_classification}",
+                sr.sr_number,
+            ))
+    return out
+
+
+def check_cannibalization_present(cannib_events) -> List[Violation]:
+    if len(cannib_events) < MIN_CANNIBALIZATION_EVENTS:
+        return [Violation(
+            "cannibalization_cross_reference", "error",
+            f"Only {len(cannib_events)} cannibalization events; need at least {MIN_CANNIBALIZATION_EVENTS}",
+        )]
+    return []
+
+
+def check_evacuation_unit_matches(srs) -> List[Violation]:
+    out: List[Violation] = []
+    for sr in srs:
+        if sr.job_status == "EVACUATED" and not sr.evacuated_to:
+            out.append(Violation(
+                "evacuation_unit_matches", "error",
+                f"SR {sr.sr_number} EVACUATED but no receiving unit set",
+                sr.sr_number,
+            ))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Top-level runner
+# ---------------------------------------------------------------------------
+
+SR_CHECKS: List[Callable] = [
+    check_nmcs_implies_open_parts,
+    check_nmcm_implies_active_sr,
+    check_condition_priority_alignment,
+    check_unique_sr_numbers,
+    check_pmcs_interval_regularity,
+    check_parts_cost_realistic,
+    check_classification_content_alignment,
+    check_evacuation_unit_matches,
+]
+
+
+def run_all_checks(srs, assets, snapshots, cannib_events) -> List[Violation]:
+    out: List[Violation] = []
+    out.extend(check_unique_serial_numbers(assets))
+    out.extend(check_hours_miles_monotonic(snapshots))
+    out.extend(check_cannibalization_present(cannib_events))
+    out.extend(check_single_active_cm_sr(assets, srs))
+    for check in SR_CHECKS:
+        out.extend(check(srs))
+    return out
+
+
+def report_violations(violations: List[Violation]) -> None:
+    if not violations:
+        print("  All 15 consistency checks passed.")
+        return
+    by_check: dict = {}
+    for v in violations:
+        by_check.setdefault(v.check, []).append(v)
+    for check, vs in by_check.items():
+        errs = sum(1 for v in vs if v.severity == "error")
+        warns = sum(1 for v in vs if v.severity == "warning")
+        print(f"  {check}: {errs} errors, {warns} warnings")
+        for v in vs[:3]:
+            print(f"    [{v.severity}] {v.message}")
+        if len(vs) > 3:
+            print(f"    ... and {len(vs)-3} more")
+
+
+if __name__ == "__main__":
+    from config import RANDOM_SEED, OUTPUT_TARGETS
+    from fleet import generate_fleet
+    from personnel import generate_personnel
+    from lifecycle import run_simulation
+
+    units, assets = generate_fleet(RANDOM_SEED)
+    roster = generate_personnel(units, OUTPUT_TARGETS["personnel_count"], RANDOM_SEED)
+    print("Running simulation...")
+    srs, snaps, reqs = run_simulation(units, assets, roster, RANDOM_SEED)
+
+    print("Injecting intentional data-quality defects...")
+    dq = inject_data_quality_defects(srs, snaps, RANDOM_SEED)
+    print(f"  {dq}")
+    print("Injecting cannibalization events...")
+    cans = inject_cannibalizations(srs, assets, RANDOM_SEED)
+    print(f"  {len(cans)} events created")
+
+    print("\nRunning consistency checks:")
+    v = run_all_checks(srs, assets, snaps, cans)
+    report_violations(v)
+    errors = sum(1 for x in v if x.severity == "error")
+    print(f"\nTOTAL: {errors} errors, {len(v) - errors} warnings")

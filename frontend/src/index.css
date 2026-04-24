@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  /* SPIRE palette — locked per spec §UI DESIGN. Do not colorize ad-hoc. */
+  --color-bg: #0a0c13;
+  --color-surface: #12151e;
+  --color-surface-hover: #1a1e2e;
+  --color-border: #1e2235;
+  --color-border-active: #2a3050;
+
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+
+  --color-danger: #ef4444;
+  --color-danger-muted: #7f1d1d;
+  --color-warning: #f59e0b;
+  --color-warning-muted: #78350f;
+  --color-success: #22c55e;
+  --color-success-muted: #14532d;
+  --color-info: #8b5cf6;
+
+  --color-text: #e5e7eb;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #6b7280;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes scan-line {
+  0%   { transform: translateX(-8%); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translateX(108%); opacity: 0; }
+}
+
+.scan-line {
+  animation: scan-line 150ms ease-out forwards;
+}
