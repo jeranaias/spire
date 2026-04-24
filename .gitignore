@@ -1,0 +1,53 @@
+# Node / frontend
+node_modules/
+dist/
+build/
+.next/
+.vite/
+*.tsbuildinfo
+
+# Python / dataset engine
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Environments
+.env
+.env.local
+.env.*.local
+
+# Model weights (reference copies live elsewhere — see models/README.md)
+models/**/*.pt
+models/**/*.pth
+models/**/*.onnx
+models/**/*.safetensors
+models/**/*.ckpt
+models/**/*.bin
+models/**/*.hef
+models/**/*.engine
+
+# Generated datasets (regenerate from dataset/ engine)
+dataset/data/out/
+models/sentry_classifier/data/sentry_train*.jsonl
+models/sentry_classifier/data/sentry_train*.json
+models/*/runs/
+models/*/checkpoints/
+
+# Local DB / runtime state
+*.sqlite
+*.sqlite-*
+*.db
+audit.log
+runtime/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
