@@ -7,9 +7,16 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body, HTTPException
 
 from ..state import get_dataset
+from ..persistence import (
+    feedback_summary,
+    log as audit_log,
+    recent_entries,
+    secure_wipe,
+    verify_chain,
+)
 
 router = APIRouter()
 
@@ -32,6 +39,7 @@ def _dataset_fingerprint() -> str:
 async def status():
     ds = get_dataset()
     err = sum(1 for v in ds.violations if v.severity == "error")
+    chain = verify_chain()
     return {
         "mode": os.environ.get("SPIRE_MODE", "full"),
         "version": "0.1.0",
@@ -63,15 +71,61 @@ async def status():
             "bastion": True,
             "nl_queries": False,  # flips when LLM proxy reachable
         },
+        "security": {
+            "audit_chain_intact": chain["ok"],
+            "audit_entries": chain["entries"],
+            "audit_head_hash": chain.get("head_hash", ""),
+            "encrypted_at_rest": bool(os.environ.get("SPIRE_DB_PASSPHRASE")),
+        },
+        "models": _model_status(),
+        "network_egress": _network_egress_summary(),
     }
+
+
+def _model_status() -> dict:
+    try:
+        from ..model_hooks import STATE as MS
+        return MS.status()
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+def _network_egress_summary() -> dict:
+    try:
+        from ..network_monitor import recent, unapproved_count
+        return {
+            "armed": True,
+            "recent": recent()[-10:],
+            "unapproved_attempts": unapproved_count(),
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"armed": False, "error": str(e)}
 
 
 @router.get("/audit")
-async def audit():
-    """Placeholder audit log endpoint. The real append-only hash-chained log
-    will live in SQLite. For the hackathon we return a synthetic trailing
-    window of the most recent actions tracked in-memory."""
+async def audit(limit: int = 50):
+    """Append-only hash-chained audit log backed by SQLite. Each entry is
+    SHA-256 chained to the previous; any mutation breaks the chain and
+    verify_chain() reports the first offending id."""
+    chain = verify_chain()
+    entries = recent_entries(limit=limit)
     return {
-        "note": "Audit log persistence is in-memory for the hackathon. Production uses SHA-256 hash-chained SQLite.",
-        "entries": [],
+        "chain": chain,
+        "entries": entries,
+        "feedback_summary": feedback_summary(),
+        "storage": {
+            "encrypted_at_rest": bool(os.environ.get("SPIRE_DB_PASSPHRASE")),
+            "db_path": "runtime/spire.db (plaintext)" if not os.environ.get("SPIRE_DB_PASSPHRASE") else "runtime/spire.db.enc (AES-256 via Fernet/PBKDF2-200k)",
+        },
     }
+
+
+@router.post("/secure-wipe")
+async def _secure_wipe(payload: dict = Body(default={})):
+    """Destructive. Requires payload {'confirm': 'CONFIRM'}."""
+    token = (payload or {}).get("confirm", "")
+    if token != "CONFIRM":
+        raise HTTPException(status_code=400, detail="Send {confirm: 'CONFIRM'} to execute")
+    actor = (payload or {}).get("actor_role", "security_manager")
+    result = secure_wipe(actor=actor)
+    return result

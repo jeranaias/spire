@@ -4,10 +4,6 @@ import { MetricCard } from "../../components/MetricCard";
 import { Heatmap } from "../../components/Heatmap";
 import { AlertCard } from "../../components/AlertCard";
 
-function pctFmt(v: number) {
-  return `${(v * 100).toFixed(1)}%`;
-}
-
 export function FleetOverviewTab() {
   const [data, setData] = useState<FleetOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +34,7 @@ export function FleetOverviewTab() {
         <div className="mb-4 grid grid-cols-4 gap-3">
           <MetricCard
             label="Fleet MC"
-            value={pctFmt(hero.fleet_mc_rate)}
+            value={(hero.fleet_mc_rate * 100).toFixed(1)}
             delta={hero.fleet_mc_delta_7d * 100}
             unit="%"
             tone={hero.fleet_mc_rate >= 0.75 ? "success" : hero.fleet_mc_rate >= 0.65 ? "warning" : "danger"}

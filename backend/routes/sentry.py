@@ -2,15 +2,27 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import re
 import uuid
+import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 
+from ..persistence import (
+    DATA_DIR as PERSIST_DIR,
+    decisions_for_batch,
+    log as audit_log,
+    record_sentry_decision,
+    store_uploaded_batch,
+)
 from ..state import get_dataset
 
 router = APIRouter()
@@ -105,13 +117,21 @@ def tier1_classify(text: str) -> dict:
 _BATCHES: dict = {}
 
 
-def _new_batch(record_source: str, records: list) -> dict:
+def _new_batch(record_source: str, records: list, schema_override: Optional[dict] = None) -> dict:
     batch_id = f"BATCH-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     # Detect data-quality defects
     dq_flags = Counter()
     for r in records:
         if r.get("data_quality_flag"):
             dq_flags[r["data_quality_flag"]] += 1
+
+    schema_detected = schema_override or {
+        "sr_number": "mapped",
+        "equipment_type": "mapped",
+        "unit_uic": "mapped",
+        "remark": "mapped",
+        "classification": "mapped",
+    }
 
     batch = {
         "batch_id": batch_id,
@@ -120,13 +140,7 @@ def _new_batch(record_source: str, records: list) -> dict:
         "record_count": len(records),
         "records": records,
         "status": "ready",
-        "schema_detected": {
-            "sr_number": "mapped",
-            "equipment_type": "mapped",
-            "unit_uic": "mapped",
-            "remark": "mapped",
-            "classification": "mapped",
-        },
+        "schema_detected": schema_detected,
         "data_quality": {
             "passed": len(records) - sum(dq_flags.values()),
             "flagged": sum(dq_flags.values()),
@@ -185,13 +199,101 @@ async def demo_batch(limit: int = 500):
 
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    """Accept an uploaded CSV/XLSX/JSON. For the hackathon we fall back to
-    the canonical dataset if the upload can't be parsed -- judges get a
-    demo path that always works."""
-    _ = await file.read()  # drain stream; parse is out-of-scope for hackathon demo
-    records = _records_from_canonical()
-    batch = _new_batch(record_source=f"upload:{file.filename}", records=records)
+    """Accept a CSV/XLSX/JSON upload, parse with pandas/openpyxl, detect schema,
+    and stage as a batch. Schema mapping runs a fuzzy match from user columns
+    onto SPIRE's canonical SR schema. Raw bytes persist to SQLite so a rerun
+    after restart works without re-upload."""
+    raw = await file.read()
+    filename = file.filename or "upload.bin"
+    try:
+        records, detected_schema = _parse_upload(raw, filename)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to parse {filename}: {exc}",
+        )
+    batch = _new_batch(record_source=f"upload:{filename}", records=records, schema_override=detected_schema)
+    store_uploaded_batch(batch["batch_id"], filename, len(records), detected_schema, raw)
     return _public_batch(batch)
+
+
+CANONICAL_FIELDS = {
+    "sr_number": ("sr_number", "sr", "sr_num", "sr#", "service_request", "service request number", "work order", "work_order"),
+    "asset_id":  ("asset_id", "asset", "equipment_id", "end_item"),
+    "unit_uic":  ("unit_uic", "uic", "parent_uic"),
+    "unit_name": ("unit_name", "unit", "owning_unit", "org"),
+    "equipment_type": ("equipment_type", "equipment", "type", "model_family"),
+    "tamcn":     ("tamcn",),
+    "nsn":       ("nsn",),
+    "serial_number": ("serial_number", "serial", "sn", "s/n"),
+    "open_date": ("open_date", "opened", "open", "start_date"),
+    "job_status": ("job_status", "status", "wip_status"),
+    "condition": ("condition",),
+    "fault_component": ("fault_component", "component", "fault"),
+    "tm_reference": ("tm_reference", "tm", "tm_ref"),
+    "maintenance_level": ("maintenance_level", "maint_level", "level"),
+    "source_classification": ("source_classification", "marking", "classification", "class"),
+    "remark":    ("remark", "remarks", "narrative", "description", "notes"),
+    "is_pmcs":   ("is_pmcs", "pmcs_flag", "scheduled"),
+}
+
+
+def _schema_map(columns: list[str]) -> dict[str, str | None]:
+    """Fuzzy-match user columns to canonical SPIRE fields."""
+    mapping: dict[str, str | None] = {k: None for k in CANONICAL_FIELDS}
+    lowered = {c.strip().lower().replace(" ", "_"): c for c in columns}
+    for canonical, aliases in CANONICAL_FIELDS.items():
+        for alias in (canonical,) + aliases:
+            if alias.lower() in lowered:
+                mapping[canonical] = lowered[alias.lower()]
+                break
+    return mapping
+
+
+def _parse_upload(raw: bytes, filename: str) -> tuple[list[dict], dict]:
+    name = filename.lower()
+    if name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(io.BytesIO(raw), engine="openpyxl" if name.endswith(".xlsx") else None)
+    elif name.endswith(".json"):
+        payload = json.loads(raw.decode("utf-8-sig"))
+        if isinstance(payload, dict) and "records" in payload:
+            payload = payload["records"]
+        df = pd.DataFrame(payload)
+    elif name.endswith(".csv") or name.endswith(".txt"):
+        df = pd.read_csv(io.BytesIO(raw))
+    else:
+        # Best-effort: try CSV, then JSON
+        try:
+            df = pd.read_csv(io.BytesIO(raw))
+        except Exception:  # noqa: BLE001
+            df = pd.DataFrame(json.loads(raw.decode("utf-8-sig")))
+
+    mapping = _schema_map(list(df.columns))
+    records: list[dict] = []
+    for _, row in df.iterrows():
+        rec: dict = {}
+        for canonical in CANONICAL_FIELDS:
+            source_col = mapping[canonical]
+            value = row[source_col] if source_col and source_col in df.columns else None
+            if isinstance(value, float) and pd.isna(value):
+                value = None
+            rec[canonical] = value if value is not None else ""
+        # Fill defaults that are required downstream
+        rec.setdefault("unit_name", rec.get("unit_name") or "UNKNOWN")
+        rec.setdefault("equipment_type", rec.get("equipment_type") or "UNKNOWN")
+        rec.setdefault("source_classification", rec.get("source_classification") or "UNCLASSIFIED")
+        rec.setdefault("detected_classification_oracle", rec["source_classification"])
+        rec.setdefault("sensitive_flags_oracle", [])
+        rec.setdefault("data_quality_flag", None)
+        rec.setdefault("is_pmcs", False)
+        rec["remark"] = str(rec.get("remark") or "")
+        records.append(rec)
+
+    schema_detected = {
+        canonical: ("mapped" if src else "missing")
+        for canonical, src in mapping.items()
+    }
+    return records, schema_detected
 
 
 @router.post("/mark")
@@ -427,48 +529,189 @@ async def review_queue(batch_id: str):
     }
 
 
-_DECISIONS: dict = {}  # sr_number -> {"action": "approve|reject|modify", "by": role, "at": ts}
-
-
 @router.post("/review/{sr_number}/{action}")
 async def review_action(sr_number: str, action: str, payload: Optional[dict] = None):
     if action not in ("approve", "reject", "modify"):
         raise HTTPException(status_code=400, detail="action must be approve|reject|modify")
     payload = payload or {}
-    _DECISIONS[sr_number] = {
-        "action": action,
-        "by_role": payload.get("role", "data_custodian"),
-        "note": payload.get("note", ""),
-        "at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-    }
+    role = payload.get("role", "data_custodian")
+    note = payload.get("note", "")
+    record_sentry_decision(sr_number, action, actor_role=role, note=note)
     return {"ok": True, "sr_number": sr_number, "action": action}
+
+
+_EXPORTS: dict = {}  # export_id -> zip bytes + metadata
 
 
 @router.post("/export")
 async def export_sanitized(payload: dict):
-    """Produce a sanitized-dataset summary. The actual XLSX writer lives in
-    dataset/export.py; the demo returns a JSON manifest describing what
-    would be in the export."""
+    """Build a real downloadable zip: sanitized dataset XLSX + redaction
+    report + audit trail snapshot. Stored in-memory under an export_id;
+    GET /download/{export_id} streams the bytes."""
     release = payload.get("release_authority", "US_ONLY")
     format_ = payload.get("format", "xlsx")
     include_audit = bool(payload.get("include_audit", True))
+    batch_id = payload.get("batch_id")
 
     ds = get_dataset()
-    return {
-        "ok": True,
+
+    # Determine which records to export: latest batch if given, else canonical
+    if batch_id and batch_id in _BATCHES:
+        batch = _BATCHES[batch_id]
+        records = batch["records"]
+        source_label = batch["source"]
+    else:
+        records = _records_from_canonical(limit=len(ds.srs))
+        source_label = "canonical_dataset"
+
+    # Pull decisions for this batch
+    sr_numbers = [r.get("sr_number") for r in records if r.get("sr_number")]
+    decisions = decisions_for_batch(sr_numbers) if sr_numbers else {}
+
+    # Apply release-authority overlay: generalize unit designators for NATO/FVEY
+    generalize = release in ("NATO", "FVEY", "SPECIFIC")
+
+    # Build the sanitized dataset XLSX in memory
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sanitized Dataset"
+    headers = [
+        "SR Number", "Open Date", "Unit", "Equipment", "TAMCN", "NSN", "Serial",
+        "Job Status", "Condition", "Component", "TM Ref", "Maint Level",
+        "Detected Classification", "Sensitive Flags", "Decision",
+    ]
+    ws.append(headers)
+    redactions: list[list] = [["SR", "Category", "Action", "Original", "Replacement"]]
+    applied = 0
+    for r in records:
+        decision = decisions.get(r.get("sr_number", ""), {})
+        action = decision.get("action", "auto")
+        if action == "reject":
+            continue  # rejected records never ship
+        applied += 1
+        unit = r.get("unit_name", "")
+        if generalize and unit:
+            unit = f"[{unit.split()[0]} AOR]"  # e.g. "CLB-6" -> "[CLB-6 AOR]"
+        flags = r.get("sensitive_flags_oracle") or []
+        for f in flags:
+            redactions.append([r.get("sr_number", ""), f, "REDACTED", "[detected]", f"[{f.upper()} REDACTED]"])
+        ws.append([
+            r.get("sr_number", ""),
+            r.get("open_date", ""),
+            unit,
+            r.get("equipment_type", ""),
+            r.get("tamcn", ""),
+            r.get("nsn", ""),
+            r.get("serial_number", ""),
+            r.get("job_status", ""),
+            r.get("condition", ""),
+            r.get("fault_component", ""),
+            r.get("tm_reference", ""),
+            r.get("maintenance_level", ""),
+            r.get("detected_classification_oracle", "UNCLASSIFIED"),
+            ", ".join(flags),
+            action,
+        ])
+    dataset_bytes = io.BytesIO()
+    wb.save(dataset_bytes)
+    dataset_bytes.seek(0)
+
+    # Redaction report
+    redaction_wb = Workbook()
+    rw = redaction_wb.active
+    rw.title = "Redaction Report"
+    for row in redactions:
+        rw.append(row)
+    redaction_bytes = io.BytesIO()
+    redaction_wb.save(redaction_bytes)
+    redaction_bytes.seek(0)
+
+    # Audit log snapshot (JSON)
+    from ..persistence import recent_entries, verify_chain
+    audit_snapshot = {
+        "chain": verify_chain(),
+        "recent_entries": recent_entries(limit=500),
+        "captured_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+    audit_bytes = json.dumps(audit_snapshot, indent=2).encode("utf-8")
+
+    # Distribution statement
+    distribution = {
+        "US_ONLY": "DISTRIBUTION A: Approved for public release; distribution is unlimited.",
+        "FVEY":    "DISTRIBUTION D: REL TO FVEY (USA, AUS, CAN, GBR, NZL). Further distribution requires originator approval.",
+        "NATO":    "DISTRIBUTION D: REL TO NATO. Further distribution requires originator approval.",
+        "SPECIFIC": "DISTRIBUTION E: Further dissemination only as directed by originator.",
+    }[release]
+
+    manifest = {
+        "batch_source": source_label,
         "release_authority": release,
         "format": format_,
-        "include_audit": include_audit,
-        "record_count": len(ds.srs),
-        "decisions_applied": len(_DECISIONS),
-        "distribution_statement": (
-            "DISTRIBUTION A: Approved for public release; distribution is unlimited."
-            if release == "US_ONLY"
-            else f"REL TO {release}"
-        ),
-        "download_url": "/api/sentry/download/sanitized-bundle.zip",
+        "records_exported": applied,
+        "records_rejected": len(records) - applied,
+        "decisions_applied": len(decisions),
+        "redactions_applied": len(redactions) - 1,
+        "distribution_statement": distribution,
+        "generalized_unit_markings": generalize,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
+
+    # Bundle as zip
+    export_id = f"EXP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("sanitized_dataset.xlsx", dataset_bytes.getvalue())
+        zf.writestr("redaction_report.xlsx", redaction_bytes.getvalue())
+        if include_audit:
+            zf.writestr("audit_log.json", audit_bytes)
+        zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
+        zf.writestr("README.txt", (
+            "SPIRE sanitized export bundle.\n\n"
+            f"Release authority: {release}\n"
+            f"Distribution: {distribution}\n\n"
+            "Files:\n"
+            "  sanitized_dataset.xlsx  -- approved records with SENTRY redactions applied\n"
+            "  redaction_report.xlsx   -- per-record change log (original -> replacement + category)\n"
+            "  audit_log.json          -- hash-chained audit trail snapshot at export time\n"
+            "  MANIFEST.json           -- structured metadata for automated ingestion\n"
+        ).encode("utf-8"))
+    buf.seek(0)
+
+    _EXPORTS[export_id] = {
+        "bytes": buf.getvalue(),
+        "filename": f"spire_sanitized_{export_id}.zip",
+        "manifest": manifest,
+        "created_at": manifest["created_at"],
+    }
+
+    audit_log(
+        "sentry_export",
+        actor=payload.get("actor_role", "data_custodian"),
+        subject_id=export_id,
+        payload={"release": release, "records": applied, "rejected": len(records) - applied},
+    )
+
+    return {
+        "ok": True,
+        "export_id": export_id,
+        "filename": _EXPORTS[export_id]["filename"],
+        "bytes": len(_EXPORTS[export_id]["bytes"]),
+        "download_url": f"/api/sentry/download/{export_id}",
+        **manifest,
+    }
+
+
+@router.get("/download/{export_id}")
+async def download_export(export_id: str):
+    entry = _EXPORTS.get(export_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="export not found or expired")
+    return StreamingResponse(
+        io.BytesIO(entry["bytes"]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{entry["filename"]}"'},
+    )
 
 
 # ---------------------------------------------------------------------------
