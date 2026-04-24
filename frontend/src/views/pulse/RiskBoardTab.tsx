@@ -3,8 +3,10 @@ import clsx from "clsx";
 import { api, type RiskBoard, type RiskBoardAsset, type AssetDeepDive } from "../../api";
 import { RiskBar } from "../../components/RiskBar";
 import { LoadingOverlay } from "./FleetOverviewTab";
+import { useSpireStore } from "../../state/store";
 
 export function RiskBoardTab() {
+  const role = useSpireStore((s) => s.role);
   const [board, setBoard] = useState<RiskBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -12,8 +14,11 @@ export function RiskBoardTab() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
+    setBoard(null);
+    setSelected(null);
+    setDetail(null);
     api.pulse.riskBoard(30).then(setBoard).catch((e) => setError(String(e)));
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     if (!selected) return;

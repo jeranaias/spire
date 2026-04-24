@@ -6,6 +6,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type IncidentResponse, type ThermalHawkSim } from "../api";
+import { useSpireStore } from "../state/store";
 
 // Ensure default Leaflet icons don't throw at import time
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -31,6 +32,7 @@ function colorForMc(rate: number): string {
 }
 
 export function BastionView() {
+  const role = useSpireStore((s) => s.role);
   const [cop, setCop] = useState<BastionCOP | null>(null);
   const [alerts, setAlerts] = useState<BastionAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<BastionAlert | null>(null);
@@ -40,9 +42,10 @@ export function BastionView() {
   const [nlResult, setNlResult] = useState<any | null>(null);
 
   useEffect(() => {
+    setCop(null);
     api.bastion.cop().then(setCop);
     refreshAlerts();
-  }, []);
+  }, [role]);
 
   async function refreshAlerts() {
     try {
