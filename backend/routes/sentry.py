@@ -337,7 +337,7 @@ async def mark_text(payload: dict):
         "evidence": rule_reasons,
         "release_authority_requested": release,
         "audit": {
-            "engine": "SENTRY Tier-1 (regex ensemble; HawkStack classifier pending)",
+            "engine": "SENTRY Tier-1 regex ensemble + Tier-2 LLM gate",
             "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         },
     }
@@ -657,6 +657,50 @@ async def export_sanitized(payload: dict):
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
+    # Pick 3 representative before/after diffs so the UI can show operators
+    # exactly what the sanitizer did rather than making them trust a count.
+    # We walk the records that (a) survived approval and (b) had ≥ 1 flag,
+    # and produce a sanitized remark by replacing each flag's detected span
+    # with the `[FLAG REDACTED]` token.
+    sample_diffs: list[dict] = []
+    seen_flags: set = set()
+    for r in records:
+        decision = decisions.get(r.get("sr_number", ""), {})
+        if decision.get("action") == "reject":
+            continue
+        flags = r.get("sensitive_flags_oracle") or []
+        if not flags:
+            continue
+        # Try to diversify — prefer samples that cover a flag we haven't shown.
+        new_flags = [f for f in flags if f not in seen_flags]
+        if not new_flags and len(sample_diffs) >= 3:
+            continue
+        original = r.get("remark", "")
+        sanitized = original
+        # Lightweight redaction preview — uses highlights if available to keep
+        # the redacted span lined up with what the classifier actually found.
+        highlights = sorted(r.get("highlights", []), key=lambda h: h.get("start", 0), reverse=True)
+        for h in highlights:
+            if h.get("category") not in flags:
+                continue
+            s, e = h.get("start", 0), h.get("end", 0)
+            token = f"[{h['category'].upper()} REDACTED]"
+            sanitized = sanitized[:s] + token + sanitized[e:]
+        if sanitized == original:
+            # Fallback: just append a classification marking trailer
+            sanitized = f"{original}  [{' / '.join(f.upper() for f in flags)} REDACTED]"
+        sample_diffs.append({
+            "sr_number": r.get("sr_number", ""),
+            "unit_name": r.get("unit_name", ""),
+            "equipment_type": r.get("equipment_type", ""),
+            "flags": flags,
+            "original": original,
+            "sanitized": sanitized,
+        })
+        seen_flags.update(flags)
+        if len(sample_diffs) >= 3:
+            break
+
     # Bundle as zip
     export_id = f"EXP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     buf = io.BytesIO()
@@ -698,6 +742,7 @@ async def export_sanitized(payload: dict):
         "filename": _EXPORTS[export_id]["filename"],
         "bytes": len(_EXPORTS[export_id]["bytes"]),
         "download_url": f"/api/sentry/download/{export_id}",
+        "sample_diffs": sample_diffs,
         **manifest,
     }
 

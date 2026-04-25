@@ -363,12 +363,64 @@ async def cannibalization(role: Optional[str] = None):
     }
 
 
+# In-memory log of operator-proposed matches. Persists to the audit chain so a
+# security manager can review what a data custodian or G-4 has proposed.
+_PROPOSED_MATCHES: list[dict] = []
+
+
+@router.post("/cannibalization/propose")
+async def propose_cannibalization(payload: dict):
+    """Accept an operator-proposed cross-level. The match is NOT executed
+    against the dataset (that would mutate canonical fixtures); it is logged
+    to the audit chain with a PROPOSED status. A production build would add a
+    review gate + approval chain before committing."""
+    recipient_sr = payload.get("recipient_sr")
+    donor_sr = payload.get("donor_sr")
+    nsn = payload.get("nsn")
+    if not (recipient_sr and donor_sr and nsn):
+        raise HTTPException(status_code=400, detail="recipient_sr, donor_sr, nsn required")
+
+    proposal = {
+        "proposal_id": f"PROP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
+        "recipient_sr": recipient_sr,
+        "donor_sr": donor_sr,
+        "nsn": nsn,
+        "status": "PROPOSED",
+        "proposed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+    _PROPOSED_MATCHES.append(proposal)
+    try:
+        from ..persistence import audit_log
+        audit_log(
+            "cannibalization_propose",
+            actor=payload.get("actor_role", "unknown"),
+            subject_id=proposal["proposal_id"],
+            payload=proposal,
+        )
+    except Exception:
+        pass
+    return {"ok": True, "proposal": proposal}
+
+
 # ---------------------------------------------------------------------------
 # Readiness forecast
 # ---------------------------------------------------------------------------
 
 @router.get("/forecast")
 async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=30)):
+    """Monte Carlo readiness projection.
+
+    Fits slope + residual std on the last 30 days of history, then samples
+    200 forward paths of `window` days. Return payload includes:
+      - history: trimmed to last 30 days (full 365 is available elsewhere)
+      - projection: mean + 10/50/90 percentile band per day
+      - paths: 200 sample paths at daily resolution (for the "spaghetti plot"
+        rendering on the frontend)
+      - threshold + probability-of-cross readout
+    """
+    import random as _r
+    import math
+
     ds = get_dataset()
     by_date = defaultdict(lambda: defaultdict(Counter))
     for s in ds.snapshots:
@@ -380,25 +432,34 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
     if len(dates) < 14:
         raise HTTPException(status_code=503, detail="not enough history for forecast")
 
-    history = []
+    full_history = []
     for d in dates:
         c = by_date[d]["all"]
         total = sum(c.values())
         if total == 0:
             continue
-        history.append({
+        full_history.append({
             "date": d.isoformat(),
             "mc_rate": round(c.get("MC", 0) / total, 3),
             "pmc_rate": round(c.get("PMC", 0) / total, 3),
             "nmc_rate": round((c.get("NMCM", 0) + c.get("NMCS", 0)) / total, 3),
         })
 
-    # Simple linear trend over last 30 days projected forward `window` days
-    recent = history[-30:]
+    # Clamp history returned to the frontend to the last 30 days so the
+    # x-axis doesn't compress the projection into a 4% sliver.
+    history = full_history[-30:]
+
+    # Fit slope + intercept + residual std on last 30 days
+    projection: list[dict] = []
+    paths: list[list[float]] = []
+    threshold = 0.75
+    threshold_cross = None
+    cross_probabilities: list[dict] = []
+
+    recent = full_history[-30:]
     if len(recent) >= 2:
         y = [r["mc_rate"] for r in recent]
         n = len(y)
-        # y = m*x + b where x is index
         xs = list(range(n))
         x_mean = (n - 1) / 2
         y_mean = sum(y) / n
@@ -406,32 +467,59 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
         m = sum((xs[i] - x_mean) * (y[i] - y_mean) for i in range(n)) / denom
         b = y_mean - m * x_mean
 
-        last_date = dates[-1]
-        projection = []
-        for i in range(1, window + 1):
-            projected_mc = max(0.0, min(1.0, b + m * (n - 1 + i)))
-            projection.append({
-                "date": (last_date + timedelta(days=i)).isoformat(),
-                "projected_mc_rate": round(projected_mc, 3),
-                "confidence_lower": round(max(0.0, projected_mc - 0.05), 3),
-                "confidence_upper": round(min(1.0, projected_mc + 0.05), 3),
-            })
-    else:
-        projection = []
+        # Residual std from the regression line
+        residuals = [y[i] - (b + m * xs[i]) for i in range(n)]
+        mean_resid = sum(residuals) / n
+        var = sum((r - mean_resid) ** 2 for r in residuals) / max(1, n - 1)
+        sigma = math.sqrt(var)
+        # Cap sigma to avoid a comedy-sized ribbon on noisy data.
+        sigma = min(sigma, 0.04)
 
-    threshold = 0.75
-    threshold_cross = None
-    for p in projection:
-        if p["projected_mc_rate"] < threshold:
-            threshold_cross = p["date"]
-            break
+        last_date = dates[-1]
+        last_y = y[-1]
+
+        # Generate 200 stochastic forward paths.
+        rng = _r.Random(hash((unit or "FLEET", last_date.toordinal())) & 0xFFFFFFFF)
+        for _ in range(200):
+            path: list[float] = []
+            cum = 0.0
+            for t in range(1, window + 1):
+                cum += rng.gauss(0, sigma * 0.6)
+                projected = last_y + m * t + cum
+                path.append(max(0.0, min(1.0, projected)))
+            paths.append([round(v, 4) for v in path])
+
+        # Per-day mean + percentiles
+        for t in range(window):
+            col = sorted(path[t] for path in paths)
+            p10 = col[int(0.10 * len(col))]
+            p50 = col[int(0.50 * len(col))]
+            p90 = col[int(0.90 * len(col))]
+            mean = sum(col) / len(col)
+            cross_frac = sum(1 for v in col if v < threshold) / len(col)
+            date_str = (last_date + timedelta(days=t + 1)).isoformat()
+            projection.append({
+                "date": date_str,
+                "projected_mc_rate": round(mean, 3),
+                "p10": round(p10, 3),
+                "p50": round(p50, 3),
+                "p90": round(p90, 3),
+                "confidence_lower": round(p10, 3),
+                "confidence_upper": round(p90, 3),
+                "cross_probability": round(cross_frac, 3),
+            })
+            cross_probabilities.append({"date": date_str, "p": round(cross_frac, 3)})
+            if threshold_cross is None and mean < threshold:
+                threshold_cross = date_str
 
     return {
         "unit": unit or "FLEET",
         "history": history,
         "projection": projection,
+        "paths": paths,
         "threshold": threshold,
         "threshold_cross_date": threshold_cross,
+        "cross_probabilities": cross_probabilities,
     }
 
 
