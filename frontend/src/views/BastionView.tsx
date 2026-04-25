@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
 import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
+import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
 
 const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: "#ef4444",
@@ -150,6 +151,7 @@ export function BastionView() {
           </span>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
+          <FusedThreatsPanel />
           {dedupeAlerts(alerts).map((a) => (
             <AlertRow
               key={a.id}

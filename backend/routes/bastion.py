@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from ..scoping import allowed_units
 from ..state import get_dataset, last_day_snapshots
 from .streams import all_streams
+from ..fusion import fuse_alerts
 
 router = APIRouter()
 
@@ -251,7 +252,62 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
                 filtered.append(a)
         out = filtered
 
-    return {"alerts": out[:limit]}
+    # GC-4: run sensor fusion on the post-scoped alert window. Fused threats
+    # are prepended above the raw alerts so an operator sees "the chain"
+    # before the individual events. Same TTL semantics as raw alerts via
+    # the fused_id stability — re-running fusion on the same chain emits
+    # the same id, so poll-based callers don't get dupes.
+    fused = fuse_alerts(out, window_minutes=60)
+    fused_records = [t.to_alert_dict() for t in fused]
+
+    return {
+        "alerts": out[:limit],
+        "fused_threats": fused_records,
+    }
+
+
+@router.get("/fused-threats")
+async def fused_threats(role: Optional[str] = None):
+    """Return the current fused-threat list independently. Useful for the
+    BASTION fused-threats panel that polls more aggressively than the full
+    alert stream."""
+    ds = get_dataset()
+    allowed = allowed_units(ds, role)
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
+    out: list[dict] = []
+
+    last = last_day_snapshots(ds)
+    unit_counts: dict = {}
+    for s in last:
+        uc = unit_counts.setdefault(s.unit_name, Counter())
+        uc[s.readiness_code] += 1
+    for unit_name, c in unit_counts.items():
+        total = sum(c.values())
+        if not total:
+            continue
+        mc_rate = c.get("MC", 0) / total
+        if mc_rate < 0.70:
+            nmcs = c.get("NMCS", 0)
+            out.append({
+                "id": f"pulse-readiness-{unit_name}",
+                "source": "PULSE",
+                "severity": "HIGH" if mc_rate < 0.60 else "MODERATE",
+                "timestamp": _jittered_timestamp(last_day, f"readiness:{unit_name}"),
+                "title": _readiness_title(unit_name, mc_rate, nmcs, total),
+                "body": f"{unit_name} MC rate {mc_rate:.1%}",
+                "unit": unit_name,
+            })
+    out.extend(all_streams(ds))
+    now = datetime.utcnow()
+    for sim_id, sim in _ACTIVE_SIMS.items():
+        if now - sim["started"] <= SIM_TTL:
+            out.insert(0, sim["alert"])
+
+    if allowed is not None:
+        out = [a for a in out if a.get("unit") is None or a.get("unit") in allowed]
+
+    fused = fuse_alerts(out, window_minutes=60)
+    return {"fused_threats": [t.to_alert_dict() for t in fused]}
 
 
 # ---------------------------------------------------------------------------
