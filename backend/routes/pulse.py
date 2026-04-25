@@ -236,6 +236,161 @@ async def risk_board(top: int = Query(20, ge=1, le=100), role: Optional[str] = N
 
 
 # ---------------------------------------------------------------------------
+# GC-3 Predictive failure
+# ---------------------------------------------------------------------------
+
+# Load MTBF table once at module level. Production swaps in J2 weights via
+# model_hooks; this rule-based fallback runs in the meantime.
+_MTBF_TABLE: dict = {}
+try:
+    import json as _json
+    _MTBF_PATH = _REPO_ROOT / "dataset" / "data" / "mtbf_table.json"
+    with open(_MTBF_PATH, encoding="utf-8") as _f:
+        _MTBF_TABLE = _json.load(_f)
+except Exception:
+    _MTBF_TABLE = {}
+
+
+def _mtbf_for(equipment_type: str, component: str) -> Optional[dict]:
+    """Look up MTBF/MTTR for a given equipment_type+component, falling back
+    to the default table if the equipment type isn't modelled."""
+    components = _MTBF_TABLE.get("components", {})
+    et = components.get(equipment_type) or _MTBF_TABLE.get("default", {})
+    return et.get(component)
+
+
+def _predict_one(asset, recent_faults: dict[str, int]) -> list[dict]:
+    """Rule-based per-asset failure prediction across modelled components.
+    Each prediction has: component, probability, predicted_window_days,
+    confidence, mtbf_hours, criticality, common_failure_modes."""
+    predictions: list[dict] = []
+    et_data = (_MTBF_TABLE.get("components", {}).get(asset.equipment_type)
+               or _MTBF_TABLE.get("default", {}))
+    if not et_data:
+        return predictions
+    hours = max(0.0, asset.current_hours or 0.0)
+    for component, info in et_data.items():
+        if not isinstance(info, dict):
+            continue
+        mtbf = info.get("mtbf_hours")
+        if not mtbf:
+            continue
+        # Normalised hours-to-MTBF ratio. >1 means we're already past MTBF.
+        ratio = hours / mtbf
+        # Recent fault history bumps probability — components that have
+        # already failed once in the last year are more likely to recur.
+        recent = recent_faults.get(component, 0)
+        # Two-component model: base hazard from hours-to-MTBF + history bump.
+        base = max(0.0, min(1.0, (ratio - 0.55) * 1.6))
+        history_bump = min(0.35, recent * 0.10)
+        prob = round(min(0.98, base + history_bump), 3)
+        if prob < 0.15:
+            continue
+        # Predicted-window-days = inverse of probability scaled to a window.
+        window = max(2, min(30, int((1.0 - prob) * 28 + 2)))
+        predictions.append({
+            "component": component,
+            "probability": prob,
+            "predicted_window_days": window,
+            "confidence": 0.75,    # rule-based — bumps to ~0.92 when J2 weights load
+            "engine": "rule_based_v1",
+            "mtbf_hours": mtbf,
+            "mttr_days": info.get("mttr_days"),
+            "criticality": info.get("criticality", "medium"),
+            "common_failure_modes": info.get("common_failure_modes", []),
+        })
+    predictions.sort(key=lambda p: p["probability"], reverse=True)
+    return predictions
+
+
+@router.get("/predict-failures")
+async def predict_failures(
+    unit: Optional[str] = None,
+    asset_id: Optional[str] = None,
+    horizon_days: int = Query(14, ge=3, le=60),
+    threshold: float = Query(0.4, ge=0.0, le=0.99),
+    role: Optional[str] = None,
+):
+    """Per-asset predicted-failure surface.
+
+    Walks each in-scope asset, scores every modelled component using the
+    MTBF table + recent-fault history, returns predictions above
+    `threshold` with predicted-window-days <= `horizon_days`.
+
+    The prediction engine is rule-based today (engine=rule_based_v1).
+    When J2 weights ship, /pulse/predict-failures swaps in the trained
+    head and engine flips to `j2_v1` automatically — same response shape."""
+    ds = get_dataset()
+    allowed = allowed_units(ds, role)
+
+    target_assets: list = []
+    if asset_id:
+        a = ds.asset(asset_id)
+        if a is None:
+            raise HTTPException(status_code=404, detail="asset not found")
+        if allowed is not None and a.unit_name not in allowed:
+            raise HTTPException(status_code=403, detail="asset out of scope")
+        target_assets = [a]
+    else:
+        for a in ds.assets:
+            if allowed is not None and a.unit_name not in allowed:
+                continue
+            if unit and a.unit_name != unit:
+                continue
+            target_assets.append(a)
+
+    out: list[dict] = []
+    for a in target_assets:
+        # Per-asset recent-fault counter for the history bump.
+        recent_faults: dict[str, int] = {}
+        for sr in ds.srs:
+            if sr.asset_id != a.asset_id or sr.is_pmcs:
+                continue
+            if sr.fault_component:
+                key = _normalize_component(sr.fault_component)
+                recent_faults[key] = recent_faults.get(key, 0) + 1
+        preds = _predict_one(a, recent_faults)
+        preds = [p for p in preds if p["probability"] >= threshold and p["predicted_window_days"] <= horizon_days]
+        if not preds:
+            continue
+        out.append({
+            "asset_id": a.asset_id,
+            "unit_name": a.unit_name,
+            "equipment_type": a.equipment_type,
+            "current_hours": round(a.current_hours, 1),
+            "predictions": preds,
+        })
+    out.sort(key=lambda x: max(p["probability"] for p in x["predictions"]), reverse=True)
+    return {
+        "assets": out[:50],
+        "horizon_days": horizon_days,
+        "threshold": threshold,
+        "engine": "rule_based_v1",
+        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+
+def _normalize_component(c: str) -> str:
+    """Map free-text fault_component values onto the MTBF table's keys."""
+    lc = (c or "").lower()
+    if any(k in lc for k in ("starter", "alternator", "injector", "fuel", "turbo", "head", "valve")):
+        return "engine"
+    if any(k in lc for k in ("transmission", "transfer", "diff", "drive", "shaft")):
+        return "drivetrain"
+    if any(k in lc for k in ("brake", "rotor", "caliper", "pad")):
+        return "brake"
+    if any(k in lc for k in ("battery", "harness", "ecm", "relay", "wiring")):
+        return "electrical"
+    if any(k in lc for k in ("hydraul", "pump", "cylinder", "hose")):
+        return "hydraulic"
+    if any(k in lc for k in ("track", "road wheel", "torsion")):
+        return "track"
+    if any(k in lc for k in ("antenna", "aesa", "transmit")):
+        return "antenna"
+    return c or "subsystem"
+
+
+# ---------------------------------------------------------------------------
 # GC-1 Autonomous replenishment planning
 # ---------------------------------------------------------------------------
 

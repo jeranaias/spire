@@ -6,6 +6,7 @@ import { api, type RiskBoard, type RiskBoardAsset, type AssetDeepDive } from "..
 import { RiskBar } from "../../components/RiskBar";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
+import { PredictedFailurePanel } from "../../components/PredictedFailurePanel";
 
 export function RiskBoardTab() {
   const role = useSpireStore((s) => s.role);
@@ -56,6 +57,7 @@ export function RiskBoardTab() {
   return (
     <div className="flex h-full">
       <div className="flex-1 overflow-y-auto p-4">
+        <PredictedFailurePanel unit={unitFilter} />
         <div className="mb-3 flex items-end justify-between">
           <div>
             <h2
