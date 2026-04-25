@@ -91,22 +91,76 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const recent = all.slice(Math.max(0, displayIdx - 10), displayIdx).reverse();
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-baseline justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2">
+    <div className="relative flex h-full flex-col overflow-hidden">
+      {/* Subtle CRT scanline overlay across the whole processing view */}
+      <div
+        className="pointer-events-none absolute inset-0 z-10 overflow-hidden opacity-[0.06]"
+        aria-hidden
+      >
+        <div
+          className="crt-scan absolute inset-x-0"
+          style={{
+            height: "3px",
+            background:
+              "linear-gradient(90deg, transparent 0%, var(--color-primary) 50%, transparent 100%)",
+            boxShadow: "0 0 20px var(--color-primary), 0 0 40px var(--color-primary)",
+          }}
+        />
+      </div>
+
+      <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
         <div className="flex items-baseline gap-4">
-          <h2 className="text-sm font-semibold">Processing</h2>
-          <span className="font-mono text-xs text-[var(--color-text-muted)]">
+          <div className="flex items-center gap-2">
+            <span
+              className={clsx(
+                "inline-block h-2 w-2 rounded-full",
+                done ? "bg-[var(--color-success)]" : "bg-[var(--color-primary)]",
+              )}
+              style={{
+                boxShadow: done
+                  ? "0 0 8px var(--color-success)"
+                  : "0 0 8px var(--color-primary)",
+                animation: done ? undefined : "pulse 1.4s ease-in-out infinite",
+              }}
+            />
+            <h2
+              className="font-mono text-[11px] font-semibold uppercase text-[var(--color-text)]"
+              style={{ letterSpacing: "0.18em" }}
+            >
+              {done ? "Processing · Complete" : "Processing · Live"}
+            </h2>
+          </div>
+          <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
             Batch {ctx.batchId} · Job {ctx.jobId}
           </span>
         </div>
-        <div className="flex items-center gap-3 text-xs">
-          <span className="text-[var(--color-text-muted)]">{processed.toLocaleString()}</span>
-          <span className="text-[var(--color-text-muted)]">/</span>
-          <span className="font-mono tabular-nums text-[var(--color-text)]">{all.length.toLocaleString()}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-baseline gap-1 font-mono">
+            <span
+              className="text-[18px] font-semibold tabular-nums text-[var(--color-text)]"
+              style={{ letterSpacing: "-0.02em", lineHeight: 1 }}
+            >
+              {processed.toLocaleString()}
+            </span>
+            <span className="text-[var(--color-text-muted)]">/</span>
+            <span
+              className="tabular-nums text-[var(--color-text-secondary)]"
+              style={{ letterSpacing: "0.04em" }}
+            >
+              {all.length.toLocaleString()}
+            </span>
+            <span
+              className="ml-1 text-[9px] uppercase text-[var(--color-text-muted)]"
+              style={{ letterSpacing: "0.14em" }}
+            >
+              records
+            </span>
+          </div>
           {done && (
             <button
               onClick={() => nav("/sentry/review")}
-              className="ml-3 rounded border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 text-white hover:bg-[var(--color-primary-hover)]"
+              className="ml-3 rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+              style={{ letterSpacing: "0.14em" }}
             >
               Review queue →
             </button>
@@ -146,13 +200,33 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
       {/* Bottom strip */}
       <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-[var(--color-bg)]">
+          <div className="relative h-[3px] flex-1 overflow-hidden rounded-full bg-[var(--color-bg)]">
             <div
-              className="absolute inset-y-0 left-0 bg-[var(--color-primary)] transition-all"
-              style={{ width: `${pct * 100}%` }}
+              className="absolute inset-y-0 left-0 transition-all"
+              style={{
+                width: `${pct * 100}%`,
+                background:
+                  "linear-gradient(90deg, var(--color-primary) 0%, color-mix(in oklab, var(--color-primary) 70%, white) 100%)",
+                boxShadow: "0 0 12px var(--color-primary)",
+              }}
             />
+            {/* Leading edge glow */}
+            {!done && pct > 0 && (
+              <div
+                className="absolute inset-y-0 w-4"
+                style={{
+                  left: `calc(${pct * 100}% - 1rem)`,
+                  background:
+                    "linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--color-primary) 80%, white) 100%)",
+                  filter: "blur(2px)",
+                }}
+              />
+            )}
           </div>
-          <span className="w-12 text-right font-mono text-sm tabular-nums text-[var(--color-text)]">
+          <span
+            className="w-14 text-right font-mono text-sm font-semibold tabular-nums text-[var(--color-text)]"
+            style={{ letterSpacing: "-0.01em" }}
+          >
             {(pct * 100).toFixed(1)}%
           </span>
         </div>
@@ -201,7 +275,14 @@ function RawRecord({ record, isMostRecent }: { record: any; isMostRecent: boolea
       )}
     >
       {isMostRecent && (
-        <div className="scan-line pointer-events-none absolute inset-x-0 top-0 h-full bg-gradient-to-b from-transparent via-[var(--color-primary)] to-transparent opacity-40" />
+        <>
+          <div className="scan-line pointer-events-none absolute inset-x-0 top-0 h-full bg-gradient-to-b from-transparent via-[var(--color-primary)] to-transparent opacity-40" />
+          {/* Reticle corners — tactical engagement framing */}
+          <span className="pointer-events-none absolute -left-[2px] -top-[2px] h-2 w-2 border-l border-t border-[var(--color-primary)]" aria-hidden />
+          <span className="pointer-events-none absolute -right-[2px] -top-[2px] h-2 w-2 border-r border-t border-[var(--color-primary)]" aria-hidden />
+          <span className="pointer-events-none absolute -bottom-[2px] -left-[2px] h-2 w-2 border-b border-l border-[var(--color-primary)]" aria-hidden />
+          <span className="pointer-events-none absolute -bottom-[2px] -right-[2px] h-2 w-2 border-b border-r border-[var(--color-primary)]" aria-hidden />
+        </>
       )}
       <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
         <span className="font-mono">{record.sr_number}</span>

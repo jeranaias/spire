@@ -200,9 +200,15 @@ export interface Forecast {
     projected_mc_rate: number;
     confidence_lower: number;
     confidence_upper: number;
+    p10: number;
+    p50: number;
+    p90: number;
+    cross_probability: number;
   }[];
+  paths: number[][];
   threshold: number;
   threshold_cross_date: string | null;
+  cross_probabilities: { date: string; p: number }[];
 }
 
 export interface SentryBatch {
@@ -295,12 +301,47 @@ export interface BastionCOPUnit {
   data_integrity_flags: number;
 }
 
+export interface Building {
+  id: string;
+  name: string;
+  type: string;
+  grid: string;
+  occupancy_capacity: number;
+  current_occupancy: number;
+  floors: number;
+  hazmat_present: boolean;
+  critical_infrastructure: boolean;
+  nearest_rally_point: string;
+  utilities?: Record<string, string>;
+  notes?: string;
+}
+
+export interface RallyPoint {
+  id: string;
+  name: string;
+  grid: string;
+  capacity: number;
+}
+
+export interface ECP {
+  id: string;
+  name: string;
+  grid: string;
+  status: string;
+  lanes_in: number;
+  lanes_out: number;
+  commercial_access?: boolean;
+  notes?: string;
+}
+
 export interface BastionCOP {
   installation: { name: string; description: string; fictional: boolean };
   center: { lat: number; lon: number };
   units: BastionCOPUnit[];
+  buildings: Building[];
   buildings_count: number;
-  ecps: any[];
+  ecps: ECP[];
+  rally_points: RallyPoint[];
   response_forces_count: number;
   as_of: string;
 }

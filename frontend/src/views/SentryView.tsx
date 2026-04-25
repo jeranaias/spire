@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Routes, Route, NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { UploadTab } from "./sentry/UploadTab";
@@ -6,6 +5,7 @@ import { ProcessingTab } from "./sentry/ProcessingTab";
 import { ReviewQueueTab } from "./sentry/ReviewQueueTab";
 import { ExportTab } from "./sentry/ExportTab";
 import { MarkTab } from "./sentry/MarkTab";
+import { useSpireStore } from "../state/store";
 
 export interface SentryContext {
   batchId: string | null;
@@ -23,14 +23,17 @@ const tabs = [
 ];
 
 export function SentryView() {
-  const [batchId, setBatchId] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
+  // Batch context lives in the Zustand store so role switches (which unmount
+  // SentryView) and tab nav don't wipe the in-flight batch.
+  const batchId = useSpireStore((s) => s.sentryBatchId);
+  const jobId = useSpireStore((s) => s.sentryJobId);
+  const setBatchStore = useSpireStore((s) => s.setSentryBatch);
 
   const ctx: SentryContext = {
     batchId,
     jobId,
-    setBatch: setBatchId,
-    setJob: setJobId,
+    setBatch: (b) => setBatchStore(b, jobId),
+    setJob:   (j) => setBatchStore(batchId, j),
   };
 
   return (
@@ -54,7 +57,7 @@ function SentrySubnav() {
   const nav = useNavigate();
   return (
     <div className="h-10 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
-      <div className="flex h-full items-center gap-1">
+      <div className="flex h-full items-center gap-0">
         {tabs.map((t) => (
           <NavLink
             key={t.to}
@@ -67,14 +70,31 @@ function SentrySubnav() {
             }}
             className={({ isActive }) =>
               clsx(
-                "rounded-sm px-3 py-1 text-xs font-medium transition-colors",
+                "relative px-4 py-2 font-mono text-[11px] font-semibold uppercase transition-colors",
                 isActive
-                  ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-                  : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]",
+                  ? "text-[var(--color-text)]"
+                  : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
               )
             }
+            style={{ letterSpacing: "0.16em" }}
           >
-            {t.label}
+            {({ isActive }) => (
+              <>
+                {t.label}
+                {isActive && (
+                  <>
+                    <span
+                      className="absolute inset-x-2 -bottom-[1px] h-[2px]"
+                      style={{
+                        background: "var(--color-primary)",
+                        boxShadow: "0 0 8px var(--color-primary)",
+                      }}
+                    />
+                    <span className="absolute left-1 top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-[var(--color-primary)]" />
+                  </>
+                )}
+              </>
+            )}
           </NavLink>
         ))}
       </div>

@@ -1,29 +1,53 @@
 import { useState } from "react";
-import clsx from "clsx";
 import { api, type ExportResult } from "../../api";
 import type { SentryContext } from "../SentryView";
+import { SegmentedControl } from "../../components/SegmentedControl";
+import { useSpireStore } from "../../state/store";
+import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 
 const AUTHORITIES = [
-  { id: "US_ONLY", label: "U.S. Only" },
-  { id: "FVEY",    label: "FVEY" },
-  { id: "NATO",    label: "NATO" },
-  { id: "SPECIFIC", label: "Specific Partner" },
-];
+  { value: "US_ONLY",  label: "U.S. Only" },
+  { value: "FVEY",     label: "FVEY" },
+  { value: "NATO",     label: "NATO" },
+  { value: "SPECIFIC", label: "Partner" },
+] as const;
 
-const FORMATS = ["xlsx", "csv", "json"];
+const FORMATS = [
+  { value: "xlsx", label: "XLSX" },
+  { value: "csv",  label: "CSV" },
+  { value: "json", label: "JSON" },
+] as const;
+
+type Authority = typeof AUTHORITIES[number]["value"];
+type Format    = typeof FORMATS[number]["value"];
 
 export function ExportTab({ ctx }: { ctx: SentryContext }) {
-  const [authority, setAuthority] = useState("US_ONLY");
-  const [format, setFormat] = useState("xlsx");
+  const role = useSpireStore((s) => s.role);
+  const [authority, setAuthority] = useState<Authority>("US_ONLY");
+  const [format, setFormat] = useState<Format>("xlsx");
   const [includeAudit, setIncludeAudit] = useState(true);
-  const [result, setResult] = useState<ExportResult | null>(null);
+  const [result, setResult] = useState<(ExportResult & { sample_diffs?: DiffSample[] }) | null>(null);
   const [loading, setLoading] = useState(false);
+  const pushToast = useSpireStore((s) => s.pushToast);
+
+  if (role !== "data_custodian" && role !== "security_manager") {
+    return (
+      <InsufficientPrivilege
+        feature="Sanitized Export"
+        requiredRoles={["data_custodian", "security_manager"]}
+        description="Release packaging of sanitized records requires Data Custodian or Security Manager authorization."
+      />
+    );
+  }
 
   async function doExport() {
     setLoading(true);
     try {
       const r = await api.sentry.export(authority, format);
-      setResult(r);
+      setResult(r as any);
+      pushToast({ tone: "ok", text: `Export prepared · ${(r.records_exported ?? 0).toLocaleString()} records` });
+    } catch (err) {
+      pushToast({ tone: "error", text: "Export failed" });
     } finally {
       setLoading(false);
     }
@@ -32,64 +56,58 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-4">
-        <h2 className="text-lg font-semibold">Export sanitized dataset</h2>
-        <div className="text-xs text-[var(--color-text-muted)]">
-          Release-authority selection adjusts sanitization rules. A NATO release, for example, further generalizes
-          unit designators and strips REL TO USA-only markings.
+        <h2
+          className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+          style={{ letterSpacing: "0.2em" }}
+        >
+          Export Sanitized Dataset
+        </h2>
+        <div className="mt-1 spire-body-muted">
+          Release-authority selection adjusts sanitization rules. A NATO release, for example, further
+          generalizes unit designators and strips REL TO USA-only markings.
         </div>
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-6">
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            Release authority
+          <h4
+            className="mb-3 font-mono text-[10px] font-semibold uppercase text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.2em" }}
+          >
+            Release Authority
           </h4>
-          <div className="flex flex-col gap-2">
-            {AUTHORITIES.map((a) => (
-              <label key={a.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="authority"
-                  checked={authority === a.id}
-                  onChange={() => setAuthority(a.id)}
-                  className="accent-[var(--color-primary)]"
-                />
-                {a.label}
-              </label>
-            ))}
+          <SegmentedControl
+            value={authority}
+            options={AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
+            onChange={setAuthority}
+          />
+          <div className="mt-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+            {DISTRIBUTION_BLURB[authority]}
           </div>
         </div>
 
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            Format + options
+          <h4
+            className="mb-3 font-mono text-[10px] font-semibold uppercase text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.2em" }}
+          >
+            Format + Options
           </h4>
-          <div className="mb-3 flex gap-2">
-            {FORMATS.map((f) => (
-              <button
-                key={f}
-                onClick={() => setFormat(f)}
-                className={clsx(
-                  "rounded border px-3 py-1 text-xs font-mono uppercase",
-                  format === f
-                    ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
-                    : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]",
-                )}
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <SegmentedControl
+            value={format}
+            options={FORMATS.map((f) => ({ value: f.value, label: f.label }))}
+            onChange={setFormat}
+          />
+          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={includeAudit}
               onChange={() => setIncludeAudit(!includeAudit)}
               className="accent-[var(--color-primary)]"
             />
-            Include append-only audit log (SHA-256 chained)
+            <span className="spire-body">Include append-only audit log (SHA-256 chained)</span>
           </label>
-          <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+          <div className="mt-2 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
             Recommended on — lets the receiving partner verify provenance without re-inspecting every record.
           </div>
         </div>
@@ -99,59 +117,207 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         <button
           onClick={doExport}
           disabled={loading || !ctx.batchId}
-          className="rounded border border-[var(--color-success)] bg-[var(--color-success)] px-6 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-50"
+          className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-6 py-2 font-mono text-[12px] font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50"
+          style={{ letterSpacing: "0.2em" }}
         >
-          {loading ? "Building bundle ..." : "Export sanitized bundle"}
+          {loading ? "Building bundle …" : "Export Sanitized Bundle"}
         </button>
-        {!ctx.batchId && <span className="ml-3 text-xs text-[var(--color-text-muted)]">Requires a processed batch.</span>}
+        {!ctx.batchId && (
+          <span className="ml-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+            Requires a processed batch.
+          </span>
+        )}
       </div>
 
       {result && (
         <div className="mt-6 rounded-md border border-[var(--color-success-muted)] bg-[color-mix(in_oklab,var(--color-success-muted)_15%,var(--color-surface))] p-4">
-          <div className="mb-2 flex items-baseline justify-between">
-            <h4 className="font-semibold text-[var(--color-success)]">Export prepared</h4>
-            <span className="font-mono text-xs text-[var(--color-text-muted)]">{result.created_at}</span>
+          <div className="mb-3 flex items-baseline justify-between">
+            <h4
+              className="font-mono text-[12px] font-semibold uppercase text-[var(--color-success)]"
+              style={{ letterSpacing: "0.2em" }}
+            >
+              Export Prepared
+            </h4>
+            <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+              {result.created_at}
+            </span>
           </div>
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Records exported</div>
-              <div className="font-mono text-[var(--color-text)]">
-                {(result.records_exported ?? 0).toLocaleString()}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Rejected</div>
-              <div className="font-mono text-[var(--color-text)]">
-                {(result.records_rejected ?? 0).toLocaleString()}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Decisions applied</div>
-              <div className="font-mono text-[var(--color-text)]">{result.decisions_applied ?? 0}</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Redactions applied</div>
-              <div className="font-mono text-[var(--color-text)]">{result.redactions_applied ?? 0}</div>
+          <div className="grid grid-cols-2 gap-3">
+            <Stat label="Records Exported" value={(result.records_exported ?? 0).toLocaleString()} />
+            <Stat label="Rejected"          value={(result.records_rejected ?? 0).toLocaleString()} />
+            <Stat label="Decisions Applied" value={`${result.decisions_applied ?? 0}`} />
+            <Stat label="Redactions Applied" value={`${result.redactions_applied ?? 0}`} />
+            <div className="col-span-2">
+              <StatLabel>Distribution Statement</StatLabel>
+              <div className="spire-body-muted">{result.distribution_statement}</div>
             </div>
             <div className="col-span-2">
-              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Distribution statement</div>
-              <div className="font-mono text-[var(--color-text-secondary)]">{result.distribution_statement}</div>
-            </div>
-            <div className="col-span-2">
-              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Download</div>
+              <StatLabel>Download</StatLabel>
               <a
                 href={result.download_url}
-                className="font-mono text-[var(--color-primary)] hover:underline"
+                className="font-mono text-[13px] text-[var(--color-primary)] hover:underline"
               >
                 {result.download_url}
               </a>
               {result.bytes != null && (
-                <span className="ml-2 text-[var(--color-text-muted)]">({(result.bytes / 1024).toFixed(1)} KB)</span>
+                <span className="ml-2 font-mono text-[10px] text-[var(--color-text-muted)]">
+                  ({(result.bytes / 1024).toFixed(1)} KB)
+                </span>
               )}
             </div>
           </div>
+
+          {result.sample_diffs && result.sample_diffs.length > 0 && (
+            <SampleDiffPanel diffs={result.sample_diffs} />
+          )}
         </div>
       )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Sample-record diff accordion — shows operators exactly what the sanitizer
+// did rather than making them trust a single `redactions_applied: 875` number.
+// ---------------------------------------------------------------------------
+
+type DiffSample = {
+  sr_number: string;
+  unit_name: string;
+  equipment_type: string;
+  flags: string[];
+  original: string;
+  sanitized: string;
+};
+
+const FLAG_COLOR: Record<string, string> = {
+  pii: "var(--color-info)",
+  geo: "var(--color-primary)",
+  comms: "var(--color-warning)",
+  classified: "var(--color-danger)",
+  controlled: "#fb923c",
+};
+
+function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
+  const [expanded, setExpanded] = useState<string | null>(diffs[0]?.sr_number ?? null);
+  return (
+    <div className="mt-4 border-t border-[var(--color-border)] pt-4">
+      <div
+        className="mb-2 font-mono text-[10px] font-semibold uppercase text-[var(--color-text-muted)]"
+        style={{ letterSpacing: "0.2em" }}
+      >
+        Before / After · {diffs.length} Sample Records
+      </div>
+      <div className="flex flex-col gap-2">
+        {diffs.map((d) => {
+          const open = expanded === d.sr_number;
+          return (
+            <div
+              key={d.sr_number}
+              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]"
+            >
+              <button
+                onClick={() => setExpanded(open ? null : d.sr_number)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left"
+              >
+                <span className="font-mono text-[11px] text-[var(--color-text)]">{d.sr_number}</span>
+                <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                  {d.unit_name} · {d.equipment_type}
+                </span>
+                <div className="ml-auto flex items-center gap-1">
+                  {d.flags.map((f) => (
+                    <span
+                      key={f}
+                      className="rounded-sm border px-1 py-[1px] font-mono text-[9px] font-semibold uppercase"
+                      style={{
+                        color: FLAG_COLOR[f] || "var(--color-text-muted)",
+                        borderColor: `color-mix(in oklab, ${FLAG_COLOR[f] || "#666"} 40%, var(--color-border))`,
+                        letterSpacing: "0.14em",
+                      }}
+                    >
+                      {f}
+                    </span>
+                  ))}
+                  <span className="ml-1 font-mono text-[var(--color-text-muted)]">{open ? "▾" : "▸"}</span>
+                </div>
+              </button>
+              {open && (
+                <div className="grid grid-cols-2 gap-0 border-t border-[var(--color-border)]">
+                  <div className="border-r border-[var(--color-border)] p-3">
+                    <div
+                      className="mb-1 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                      style={{ letterSpacing: "0.2em" }}
+                    >
+                      Original
+                    </div>
+                    <div className="font-mono text-[12px] leading-relaxed text-[var(--color-text)]">
+                      {d.original}
+                    </div>
+                  </div>
+                  <div className="p-3">
+                    <div
+                      className="mb-1 font-mono text-[9px] uppercase text-[var(--color-success)]"
+                      style={{ letterSpacing: "0.2em" }}
+                    >
+                      Sanitized · Export Bundle
+                    </div>
+                    <div className="font-mono text-[12px] leading-relaxed text-[var(--color-text)]">
+                      {d.sanitized.split(/(\[[A-Z]+\s+REDACTED\])/g).map((chunk, i) => {
+                        const match = /^\[([A-Z]+)\s+REDACTED\]$/.exec(chunk);
+                        if (match) {
+                          const cat = match[1].toLowerCase();
+                          return (
+                            <span
+                              key={i}
+                              className="rounded-sm px-1 font-semibold"
+                              style={{
+                                background: `color-mix(in oklab, ${FLAG_COLOR[cat] || "#666"} 25%, transparent)`,
+                                color: FLAG_COLOR[cat] || "inherit",
+                              }}
+                            >
+                              {chunk}
+                            </span>
+                          );
+                        }
+                        return <span key={i}>{chunk}</span>;
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <StatLabel>{label}</StatLabel>
+      <div className="font-mono text-[16px] font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "-0.01em" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function StatLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+      style={{ letterSpacing: "0.22em" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+const DISTRIBUTION_BLURB: Record<Authority, string> = {
+  US_ONLY:  "Distribution A · public release · no foreign disclosure restrictions.",
+  FVEY:     "Distribution D · REL TO FVEY (USA, AUS, CAN, GBR, NZL).",
+  NATO:     "Distribution D · REL TO NATO. Further dissemination requires originator approval.",
+  SPECIFIC: "Distribution E · case-by-case partner release, originator-controlled.",
+};

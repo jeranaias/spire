@@ -26,10 +26,18 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
   }
 
   useEffect(() => {
-    // Auto-seed with canonical dataset on first mount for the demo flow.
-    if (!batch && !loading) loadCanonical();
-
-  }, []);
+    // Auto-seed with canonical dataset on first mount for demo flow.
+    // Toggleable via `VITE_AUTO_SEED=false` or `?seed=off` so the production
+    // narrative (drop-zone first, manual ingest) can be shown on command.
+    const autoSeedEnv = import.meta.env.VITE_AUTO_SEED;
+    const hashSearch = typeof window !== "undefined" ? window.location.hash : "";
+    const seedOff = hashSearch.includes("seed=off") || autoSeedEnv === "false";
+    if (ctx.batchId) {
+      // Batch already in-flight via the Zustand store — don't re-seed.
+      return;
+    }
+    if (!batch && !loading && !seedOff) loadCanonical();
+  }, [ctx.batchId]);
 
   async function onDrop(e: React.DragEvent) {
     e.preventDefault();
