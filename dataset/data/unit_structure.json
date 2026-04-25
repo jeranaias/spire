@@ -35,10 +35,10 @@
     {
       "uic": "M33200",
       "name": "3d Maint Bn",
-      "parent": "3d MLG",
-      "location": "Camp Kinser, Okinawa",
+      "parent": "2d MLG",
+      "location": "Camp Henderson, NC",
       "optempo": "medium",
-      "deployment_status": "forward_deployed",
+      "deployment_status": "garrison",
       "equipment": {
         "JLTV":       {"tamcn": "D1196", "count": 12, "fsc": "2320"},
         "MTVR_CARGO": {"tamcn": "D0082", "count": 10, "fsc": "2320"},
@@ -132,8 +132,8 @@
     {
       "uic": "M22100",
       "name": "7th ESB",
-      "parent": "1st MLG",
-      "location": "Camp Pendleton, CA",
+      "parent": "2d MLG",
+      "location": "Camp Henderson, NC",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
