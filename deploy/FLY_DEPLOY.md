@@ -79,6 +79,51 @@ the image in ~3 minutes.
 - **Issue filing**: works identically to local — Shift+F drawer creates
   GitHub issues against `jeranaias/spire`.
 
+## Wire LLM-backed features (NL queries, Tier-2 SENTRY)
+
+The lean public image ships with rule-based fallbacks. To unlock the
+LLM-backed features without exposing your inference rig, join the Fly
+machine to the same Tailscale tailnet as the rig.
+
+### One-time
+
+1. **Rig side:** confirm the LLM proxy is reachable on the tailnet IP, not
+   just `127.0.0.1`. If it's localhost-only, rebind it to `0.0.0.0:8095`
+   — Tailscale ACLs will keep it private.
+2. **Tailscale admin:** define `tag:fly` and `tag:rigrun-llm` in the ACL
+   policy file, with a rule restricting `tag:fly` to `tag:rigrun-llm:8095`
+   only.
+3. **Auth key:** generate at
+   https://login.tailscale.com/admin/settings/keys — Reusable, Ephemeral,
+   Pre-approved, tagged `tag:fly`, 90-day expiration.
+4. **Fly secrets:**
+   ```
+   fly secrets set --app spire-mdm \
+       TS_AUTHKEY=tskey-auth-... \
+       TS_HOSTNAME=spire-mdm \
+       TS_TAGS=tag:fly \
+       SPIRE_LLM_PROXY=http://rigrun-llm.<tailnet>.ts.net:8095
+   ```
+5. `fly deploy --remote-only --ha=false --app spire-mdm`
+
+### Verify
+
+```
+curl https://spire-mdm.fly.dev/api/system/status | jq '.llm, .features.nl_queries'
+# expect: { reachable: true, model: "gemma4-…" }, true
+```
+
+### How it works
+
+- The image includes `tailscaled` running in **userspace mode** — no TUN
+  device, no NET_ADMIN, no privileged container.
+- A SOCKS5 proxy at `127.0.0.1:1055` and HTTP proxy at `127.0.0.1:1099`
+  route container traffic over the tailnet for tailnet-only hostnames.
+- `TS_AUTHKEY` unset → tailscale-up script exits cleanly, backend reverts
+  to rule-based fallback. Same as before this commit.
+- ACLs ensure even if the auth-key leaks, an attacker only gets access to
+  the rig's port 8095 — not SSH, not the rest of your tailnet.
+
 ## Custom domain (optional)
 
 ```
