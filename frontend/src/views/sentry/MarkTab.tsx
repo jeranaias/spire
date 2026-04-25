@@ -1,12 +1,17 @@
 import { useState } from "react";
 import clsx from "clsx";
 import { api, type MarkResult } from "../../api";
+import { SegmentedControl } from "../../components/SegmentedControl";
+import { useSpireStore } from "../../state/store";
+import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 
 const RELEASE_AUTHS = [
-  { id: "US_ONLY", label: "U.S. Only" },
-  { id: "FVEY",    label: "FVEY" },
-  { id: "NATO",    label: "NATO" },
-];
+  { value: "US_ONLY", label: "U.S." },
+  { value: "FVEY",    label: "FVEY" },
+  { value: "NATO",    label: "NATO" },
+] as const;
+
+type Auth = typeof RELEASE_AUTHS[number]["value"];
 
 const SAMPLES = [
   {
@@ -27,11 +32,24 @@ const SAMPLES = [
 ];
 
 export function MarkTab() {
+  const role = useSpireStore((s) => s.role);
   const [text, setText] = useState("");
-  const [release, setRelease] = useState("US_ONLY");
+  const [release, setRelease] = useState<Auth>("US_ONLY");
   const [result, setResult] = useState<MarkResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const pushToast = useSpireStore((s) => s.pushToast);
+
+  if (role !== "data_custodian" && role !== "security_manager") {
+    return (
+      <InsufficientPrivilege
+        feature="Mark Draft"
+        requiredRoles={["data_custodian", "security_manager"]}
+        description="Classification-marking recommendations alter records' authoritative marking and require Data Custodian or Security Manager privileges per DoDM 5200.01."
+      />
+    );
+  }
 
   async function mark() {
     if (!text.trim()) return;
@@ -75,27 +93,25 @@ export function MarkTab() {
           className="min-h-[240px] flex-1 resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-sm leading-relaxed text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
         />
 
-        <div className="mt-3 flex items-center gap-3">
-          <label className="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
-            Release authority
-            <select
-              value={release}
-              onChange={(e) => setRelease(e.target.value)}
-              className="appearance-none rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-[var(--color-text)] hover:border-[var(--color-border-active)] focus:border-[var(--color-primary)] focus:outline-none"
-            >
-              {RELEASE_AUTHS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <span
+            className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.18em" }}
+          >
+            Release Authority
+          </span>
+          <SegmentedControl
+            value={release}
+            options={RELEASE_AUTHS.map((r) => ({ value: r.value, label: r.label }))}
+            onChange={setRelease}
+          />
           <button
             onClick={mark}
             disabled={loading || !text.trim()}
-            className="rounded border border-[var(--color-primary)] bg-[var(--color-primary)] px-5 py-1.5 text-xs font-medium text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
+            className="ml-auto rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-5 py-1.5 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
+            style={{ letterSpacing: "0.18em" }}
           >
-            {loading ? "Marking ..." : "Recommend marking"}
+            {loading ? "Marking …" : "Recommend Marking"}
           </button>
           {error && <span className="text-xs text-[var(--color-danger)]">{error}</span>}
         </div>
@@ -109,36 +125,44 @@ export function MarkTab() {
         )}
         {result && (
           <>
-            <div
-              className={clsx(
-                "mb-3 rounded-md border p-4",
-                result.recommended_classification === "SECRET" && "border-[var(--color-danger-muted)] bg-[color-mix(in_oklab,var(--color-danger-muted)_20%,var(--color-surface))]",
-                result.recommended_classification === "CUI" && "border-[var(--color-warning-muted)] bg-[color-mix(in_oklab,var(--color-warning-muted)_20%,var(--color-surface))]",
-                result.recommended_classification === "UNCLASSIFIED" && "border-[var(--color-success-muted)] bg-[color-mix(in_oklab,var(--color-success-muted)_15%,var(--color-surface))]",
-              )}
-            >
-              <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Recommended marking</div>
-              <div className="mt-1 font-mono text-xl font-semibold tracking-wide"
-                style={{
-                  color:
-                    result.recommended_classification === "SECRET"
-                      ? "var(--color-danger)"
-                      : result.recommended_classification === "CUI"
-                        ? "var(--color-warning)"
-                        : "var(--color-success)",
+            <MarkingBanner result={result} />
+            <div className="mb-4 flex items-center gap-3">
+              <div className="font-mono text-[11px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+                Confidence <span className="tabular-nums text-[var(--color-text)]">{(result.confidence * 100).toFixed(0)}%</span>
+                <span className="mx-2 text-[var(--color-border-active)]">│</span>
+                Release: <span className="text-[var(--color-text)]">{result.release_authority_requested}</span>
+              </div>
+              <button
+                onClick={async () => {
+                  setDownloading(true);
+                  try {
+                    const attest = {
+                      input_hash: await sha256(text),
+                      recommended_marking: result.recommended_classification,
+                      caveats: result.caveats_recommended,
+                      confidence: result.confidence,
+                      evidence: result.evidence,
+                      engine: result.audit.engine,
+                      timestamp: result.audit.timestamp,
+                      release_authority: release,
+                    };
+                    const blob = new Blob([JSON.stringify(attest, null, 2)], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `spire_mark_attestation_${Date.now()}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    pushToast({ tone: "ok", text: "Attestation downloaded" });
+                  } finally {
+                    setDownloading(false);
+                  }
                 }}
+                className="ml-auto rounded-sm border border-[var(--color-border)] px-3 py-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
+                style={{ letterSpacing: "0.18em" }}
               >
-                {result.recommended_classification}
-                {result.caveats_recommended.length > 0 && (
-                  <span className="ml-2 text-base text-[var(--color-text-secondary)]">
-                    // {result.caveats_recommended.join(" / ")}
-                  </span>
-                )}
-              </div>
-              <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Confidence: {(result.confidence * 100).toFixed(0)}% · Release authority requested:{" "}
-                {result.release_authority_requested}
-              </div>
+                {downloading ? "…" : "↓ Attestation"}
+              </button>
             </div>
 
             <section className="mb-4">
@@ -188,4 +212,66 @@ export function MarkTab() {
       </div>
     </div>
   );
+}
+
+// Full-width DoDM-5200.01-style marking banner. Coloured left-border bar,
+// hero-sized classification text, caveat string on a second line in mono.
+function MarkingBanner({ result }: { result: MarkResult }) {
+  const cls = result.recommended_classification;
+  const color =
+    cls === "SECRET" || cls === "TOP_SECRET"
+      ? "var(--color-danger)"
+      : cls === "CUI"
+      ? "var(--color-warning)"
+      : "var(--color-success)";
+  return (
+    <div
+      className={clsx(
+        "mb-4 overflow-hidden rounded-sm border-l-[6px]",
+      )}
+      style={{
+        borderLeftColor: color,
+        background: `color-mix(in oklab, ${color} 10%, var(--color-surface))`,
+        borderTop: "1px solid color-mix(in oklab, " + color + " 30%, var(--color-border))",
+        borderRight: "1px solid color-mix(in oklab, " + color + " 30%, var(--color-border))",
+        borderBottom: "1px solid color-mix(in oklab, " + color + " 30%, var(--color-border))",
+      }}
+    >
+      <div className="flex items-center justify-between px-4 py-3">
+        <div>
+          <div
+            className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.22em" }}
+          >
+            Recommended Marking
+          </div>
+          <div
+            className="mt-1 font-mono text-[22px] font-semibold uppercase"
+            style={{ color, letterSpacing: "0.08em", lineHeight: 1 }}
+          >
+            {cls.replace("_", " ")}
+            {result.caveats_recommended.length > 0 && (
+              <span className="ml-2 text-[18px] text-[var(--color-text-secondary)]">
+                // {result.caveats_recommended.join(" / ")}
+              </span>
+            )}
+          </div>
+        </div>
+        <div
+          className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+          style={{ letterSpacing: "0.22em" }}
+        >
+          DoDM 5200.01
+        </div>
+      </div>
+    </div>
+  );
+}
+
+async function sha256(text: string): Promise<string> {
+  const buf = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
