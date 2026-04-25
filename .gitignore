@@ -51,3 +51,10 @@ runtime/
 .DS_Store
 Thumbs.db
 *.swp
+
+# Local scratch — screenshots, Playwright outputs, debug artefacts
+tmp/
+
+# One-shot debug scripts — kept unversioned so the repo stays tidy
+scripts/forecast_debug*.py
+scripts/mgrs_test.py
