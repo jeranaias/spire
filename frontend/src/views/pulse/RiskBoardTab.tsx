@@ -7,6 +7,7 @@ import { RiskBar } from "../../components/RiskBar";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
 import { PredictedFailurePanel } from "../../components/PredictedFailurePanel";
+import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 
 // Track-G1 — role-shaped default scope. A Maintenance Chief landing on the
 // Risk Board cold should see CLB-6 only (their unit), not the whole MEF.
@@ -81,7 +82,34 @@ export function RiskBoardTab() {
   return (
     <div className="flex h-full">
       <div className="flex-1 overflow-y-auto p-4">
-        <PredictedFailurePanel unit={unitFilter} />
+        {/* Track-G2 — G-4 sees too many panels at once on landing. Collapse
+         * Predicted Failures by default for G-4 (they have BASTION as their
+         * primary surface; PULSE is a drill-down). Maintenance Chief and
+         * MEF Commander see it expanded as before. */}
+        <div className="mb-3">
+          <CollapsiblePanel
+            view="pulse.risk"
+            panel="predicted"
+            defaultCollapsedFor={{ g4: true }}
+            header={
+              <span
+                className="font-mono uppercase text-[var(--color-warning)]"
+                style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
+              >
+                Predicted Failures · GC-3
+              </span>
+            }
+            collapsedSummary={
+              <span>
+                Assets likely to fail in the configured window. Click ▾ to expand.
+              </span>
+            }
+          >
+            <div className="border-t border-[var(--color-border)]">
+              <PredictedFailurePanel unit={unitFilter} />
+            </div>
+          </CollapsiblePanel>
+        </div>
         <div className="mb-3 flex items-end justify-between">
           <div>
             <h2

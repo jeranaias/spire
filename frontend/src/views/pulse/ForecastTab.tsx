@@ -12,6 +12,7 @@ import { api, type Forecast } from "../../api";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { RecommendPanel } from "../../components/RecommendPanel";
+import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 
 type Horizon = "7" | "14" | "30";
 
@@ -304,9 +305,36 @@ export function ForecastTab() {
       {/* GC-1: ranked replenishment actions, scoped to whichever unit the
        * forecast is currently looking at. Forecast tells you "you're going
        * to drop below 75%"; this panel tells you which actions, in what
-       * order, get you back above. */}
+       * order, get you back above.
+       *
+       * Track-G2 — Maintenance Chief lands on PULSE Risk Board first; when
+       * they land here on Forecast, they want the chart, not the action list
+       * (which is also surfaced via PULSE/Cannibalization). Default-collapse
+       * for Maintenance Chief so the chart breathes. Other roles see it
+       * expanded as before. */}
       <div className="mt-4">
-        <RecommendPanel unit={unit === "FLEET" ? undefined : unit} />
+        <CollapsiblePanel
+          view="pulse.forecast"
+          panel="recommend"
+          defaultCollapsedFor={{ maintenance_chief: true }}
+          header={
+            <span
+              className="font-mono uppercase text-[var(--color-primary)]"
+              style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
+            >
+              Recommended Actions · GC-1 Auto Replenishment
+            </span>
+          }
+          collapsedSummary={
+            <span>
+              Top at-risk asset actions ranked by impact-per-dollar-per-day. Click ▾ to expand.
+            </span>
+          }
+        >
+          <div className="border-t border-[var(--color-border)]">
+            <RecommendPanel unit={unit === "FLEET" ? undefined : unit} />
+          </div>
+        </CollapsiblePanel>
       </div>
     </div>
   );
