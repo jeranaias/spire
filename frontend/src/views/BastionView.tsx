@@ -5,6 +5,7 @@ import { withRetry } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
+import { CollapsiblePanel } from "../components/CollapsiblePanel";
 
 const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: "#ef4444",
@@ -245,7 +246,34 @@ export function BastionView() {
           </span>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          <FusedThreatsPanel />
+          {/* Track-G2 — Fused threats live at the top of the alert sidebar.
+           * Security Manager wants them on cold (it's their job to triage
+           * cross-sensor correlations). MEF Commander wants the alert wall
+           * not to be visually pre-empted by a CRITICAL fused-threat block
+           * before they've had a chance to scan the room. Collapse for
+           * MEF Commander; expand for Security Manager. */}
+          <div className="mb-2">
+            <CollapsiblePanel
+              view="bastion"
+              panel="fused"
+              defaultCollapsedFor={{ mef_commander: true, security_manager: false }}
+              header={
+                <span
+                  className="font-mono uppercase text-[var(--color-danger)]"
+                  style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
+                >
+                  ◆ Fused Threats · GC-4
+                </span>
+              }
+              collapsedSummary={
+                <span>
+                  Cross-sensor correlations. Click ▾ to expand.
+                </span>
+              }
+            >
+              <FusedThreatsPanel />
+            </CollapsiblePanel>
+          </div>
           {dedupeAlerts(alerts).map((a) => (
             <AlertRow
               key={a.id}
