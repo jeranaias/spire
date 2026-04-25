@@ -130,7 +130,7 @@ export function HelpOverlay() {
               className="mt-4 mb-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.22em" }}
             >
-              Game-changers shipped (v1.0.0-rc1)
+              Capabilities delivered (v1.0.0-rc1)
             </div>
             <ul className="flex flex-col gap-0.5 font-mono text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
               <li>✓ GC-1 Autonomous replenishment · PULSE Forecast</li>

@@ -206,7 +206,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
               {loading ? "Starting ..." : "Process batch"}
             </button>
             <span className="text-xs text-[var(--color-text-muted)]">
-              SENTRY Tier-1 regex ensemble runs first on CPU; ambiguous records route to Gemma 4.
+              Tier-1 pattern engine runs first; ambiguous records escalate to the language-model gate.
             </span>
           </div>
         </div>
