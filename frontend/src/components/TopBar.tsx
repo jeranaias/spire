@@ -42,8 +42,7 @@ export function TopBar() {
                 SPIRE
               </span>
               <span
-                className="mt-[3px] font-mono text-xs uppercase text-[var(--color-text-muted)]"
-                style={{ letterSpacing: "0.22em" }}
+                className="mt-[3px] font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
               >
                 Contested Logistics
               </span>
@@ -56,19 +55,17 @@ export function TopBar() {
                 to={tab.to}
                 className={({ isActive }) =>
                   clsx(
-                    "group relative px-4 py-2 font-mono text-sm font-semibold uppercase transition-colors",
+                    "group relative px-4 py-2 font-mono text-sm font-semibold uppercase transition-colors tracking-widest",
                     isActive
                       ? "text-[var(--color-text)]"
                       : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
                   )
                 }
-                style={{ letterSpacing: "0.18em" }}
               >
                 {({ isActive }) => (
                   <>
                     <span
-                      className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)]"
-                      style={{ letterSpacing: "0.1em" }}
+                      className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
                     >
                       {String(idx + 1).padStart(2, "0")}
                     </span>
@@ -178,14 +175,12 @@ function RoleSelector({ role, onChange }: { role: Role; onChange: (r: Role) => v
         className="hidden select-none flex-col items-end sm:flex"
       >
         <span
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
         >
           Operator
         </span>
         <span
-          className="font-mono text-xs text-[var(--color-primary)]"
-          style={{ letterSpacing: "0.14em" }}
+          className="font-mono text-xs text-[var(--color-primary)] tracking-wider"
         >
           ◆ {ROLE_SCOPE_HINT[role]}
         </span>
@@ -194,8 +189,7 @@ function RoleSelector({ role, onChange }: { role: Role; onChange: (r: Role) => v
         <select
           value={role}
           onChange={(e) => onChange(e.target.value as Role)}
-          className="appearance-none rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] py-1 pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none"
-          style={{ letterSpacing: "0.14em" }}
+          className="appearance-none rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] py-1 pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none tracking-wider"
         >
           {(Object.keys(ROLE_LABELS) as Role[]).map((k) => (
             <option key={k} value={k}>{ROLE_LABELS[k]}</option>
@@ -217,9 +211,8 @@ function ModeBadge({ mode }: { mode: "full" | "lite" }) {
   const isFull = mode === "full";
   return (
     <div
-      className="flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-xs uppercase"
+      className="flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-xs uppercase tracking-wider"
       style={{
-        letterSpacing: "0.14em",
         borderColor: isFull
           ? "color-mix(in oklab, var(--color-success) 35%, var(--color-border))"
           : "color-mix(in oklab, var(--color-warning) 35%, var(--color-border))",
@@ -267,8 +260,7 @@ function AlertBadge({ count }: { count: number }) {
                          "var(--color-danger)";
   return (
     <div
-      className="flex items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs uppercase"
-      style={{ letterSpacing: "0.14em" }}
+      className="flex items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs uppercase tracking-wider"
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ color }}>
         <path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" />
@@ -318,11 +310,10 @@ function AirGapToggle() {
   return (
     <button
       onClick={toggle}
-      className={clsx(
+      className={(clsx(
         "flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-xs uppercase transition-colors",
-      )}
+      )) + " tracking-wider"}
       style={{
-        letterSpacing: "0.16em",
         borderColor: airGap ? "var(--color-danger)" : "var(--color-border)",
         background: airGap
           ? "color-mix(in oklab, var(--color-danger-muted) 25%, transparent)"

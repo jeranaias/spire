@@ -215,8 +215,7 @@ export function FeedbackDrawer() {
             }}
           >
             <div
-              className="font-mono text-xs uppercase text-[var(--color-primary)]"
-              style={{ letterSpacing: "0.22em" }}
+              className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
             >
               Report defect, enhancement, or inquiry
             </div>
@@ -232,9 +231,8 @@ export function FeedbackDrawer() {
         )}
         <button
           onClick={() => { setOpen(true); dismissCoach(); }}
-          className="pointer-events-auto flex items-center gap-2 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] px-3 py-2 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] shadow-lg backdrop-blur transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-surface))]"
+          className="pointer-events-auto flex items-center gap-2 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] px-3 py-2 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] shadow-lg backdrop-blur transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-surface))] tracking-widest"
           style={{
-            letterSpacing: "0.18em",
             animation: coachVisible ? "feedback-pulse 1.6s ease-in-out infinite" : undefined,
           }}
           title="Report issue / idea / question (Shift+F)"
@@ -263,8 +261,7 @@ export function FeedbackDrawer() {
               <div>
                 <div
                   id="spire-feedback-title"
-                  className="font-mono text-xs uppercase text-[var(--color-primary)]"
-                  style={{ letterSpacing: "0.22em" }}
+                  className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
                 >
                   Pilot Feedback
                 </div>
@@ -294,9 +291,8 @@ export function FeedbackDrawer() {
                   <button
                     key={t.value}
                     onClick={() => setIssueType(t.value)}
-                    className="rounded-sm px-2 py-1.5 font-mono text-xs font-semibold uppercase transition-colors"
+                    className="rounded-sm px-2 py-1.5 font-mono text-xs font-semibold uppercase transition-colors tracking-wider"
                     style={{
-                      letterSpacing: "0.16em",
                       background: active ? "var(--color-primary)" : "transparent",
                       color: active ? "white" : "var(--color-text-secondary)",
                     }}
@@ -307,16 +303,15 @@ export function FeedbackDrawer() {
               })}
             </div>
             <div
-              className="-mt-1 font-mono text-xs italic text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.04em" }}
+              className="-mt-1 font-mono text-xs italic text-[var(--color-text-muted)] tracking-wide"
             >
               {activeType.tagline}
             </div>
 
             <div className="flex items-center gap-2">
               <span
-                className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-                style={{ letterSpacing: "0.18em", minWidth: "5rem" }}
+                className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
+                style={{ minWidth: "5rem" }}
               >
                 Submitted by
               </span>
@@ -353,8 +348,7 @@ export function FeedbackDrawer() {
             {showSeverity && (
               <div className="flex items-center gap-2">
                 <span
-                  className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-                  style={{ letterSpacing: "0.18em" }}
+                  className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
                 >
                   Severity
                 </span>
@@ -363,9 +357,8 @@ export function FeedbackDrawer() {
                     <button
                       key={s.value}
                       onClick={() => setSeverity(s.value)}
-                      className="px-2 py-1 font-mono text-xs font-semibold uppercase transition-colors"
+                      className="px-2 py-1 font-mono text-xs font-semibold uppercase transition-colors tracking-wider"
                       style={{
-                        letterSpacing: "0.16em",
                         borderLeft: i === 0 ? "none" : "1px solid var(--color-border)",
                         background: severity === s.value ? "var(--color-primary)" : "transparent",
                         color: severity === s.value ? "white" : "var(--color-text-secondary)",
@@ -382,16 +375,14 @@ export function FeedbackDrawer() {
 
             <div className="flex items-center justify-between gap-2 pt-1">
               <span
-                className="font-mono text-xs text-[var(--color-text-muted)]"
-                style={{ letterSpacing: "0.14em" }}
+                className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
               >
                 Audit chain · GitHub Issues (when token set)
               </span>
               <button
                 onClick={submit}
                 disabled={submitting || !title.trim() || !body.trim()}
-                className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
-                style={{ letterSpacing: "0.18em" }}
+                className="inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50 tracking-widest"
               >
                 {submitting ? "Filing …" : "Submit"}
               </button>
@@ -453,8 +444,7 @@ function DiagnosticsRow({ d }: { d: Diagnostics }) {
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
       <button
         onClick={() => setShow((v) => !v)}
-        className="flex w-full items-center justify-between px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-        style={{ letterSpacing: "0.18em" }}
+        className="flex w-full items-center justify-between px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-widest"
       >
         <span>Diagnostics auto-attached · {d.viewport} · {d.air_gap ? "AIR-GAP" : d.comms_state}</span>
         <span>{show ? "▾" : "▸"}</span>
@@ -463,7 +453,7 @@ function DiagnosticsRow({ d }: { d: Diagnostics }) {
         <ul className="border-t border-[var(--color-border)] px-2 py-2 font-mono text-xs text-[var(--color-text-secondary)]">
           {Object.entries(d).map(([k, v]) => (
             <li key={k} className="flex items-baseline justify-between gap-2 py-[1px]">
-              <span className="text-[var(--color-text-muted)]" style={{ letterSpacing: "0.04em" }}>{k}</span>
+              <span className="text-[var(--color-text-muted)] tracking-wide">{k}</span>
               <span className="truncate text-right text-[var(--color-text)]" title={String(v)}>
                 {String(v ?? "—")}
               </span>
