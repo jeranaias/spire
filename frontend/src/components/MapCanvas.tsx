@@ -69,29 +69,36 @@ function mcColor(rate: number): string {
 }
 
 // --- Build a GeoJSON polygon rectangle centered on (lat, lon) sized by type.
-// Dimensions are approximate — enough to read at installation zoom.
+// Dimensions are approximate but tuned to look right at installation zoom
+// (z ≈ 14.5–17). A slight per-id rotation jitter keeps things from looking
+// like a parking-lot of identical rectangles.
 function buildingPolygon(b: Building, lat: number, lon: number): GeoJSON.Feature {
   const sizes: Record<string, [number, number]> = {
-    motor_pool: [260, 140], training: [500, 120], housing: [180, 110],
-    aviation: [200, 130], supply: [170, 90], maintenance: [160, 90],
-    billeting: [130, 50], fuel: [120, 80], tactical: [110, 70],
-    medical: [100, 70], support: [100, 60], hazmat: [90, 60],
-    admin: [90, 60], emergency: [90, 60], ammunition: [80, 60],
-    arms_storage: [70, 50], communications: [70, 50], utility: [60, 50],
+    motor_pool: [130, 80], training: [240, 100], housing: [120, 75],
+    aviation: [110, 70], supply: [120, 75], maintenance: [110, 70],
+    billeting: [80, 30], fuel: [80, 55], tactical: [70, 50],
+    medical: [80, 55], support: [70, 45], hazmat: [60, 45],
+    admin: [70, 45], emergency: [70, 45], ammunition: [55, 40],
+    arms_storage: [50, 36], communications: [50, 36], utility: [42, 32],
   };
-  const [w, h] = sizes[b.type] ?? [80, 60];
-  // Approximate meters-per-degree (Camp Henderson ~34°N)
+  const [w, h] = sizes[b.type] ?? [60, 40];
+  // Per-id deterministic micro-rotation so adjacent same-type buildings
+  // don't look like Xerox copies of each other.
+  let seed = 0;
+  for (let i = 0; i < b.id.length; i++) seed = (seed * 31 + b.id.charCodeAt(i)) >>> 0;
+  const rot = (((seed % 11) - 5) * Math.PI) / 180; // ±5°
+  const cos = Math.cos(rot), sin = Math.sin(rot);
   const mPerDegLat = 111_320;
   const mPerDegLon = 111_320 * Math.cos((lat * Math.PI) / 180);
-  const dLat = (h / 2) / mPerDegLat;
-  const dLon = (w / 2) / mPerDegLon;
-  const coords = [
-    [lon - dLon, lat - dLat],
-    [lon + dLon, lat - dLat],
-    [lon + dLon, lat + dLat],
-    [lon - dLon, lat + dLat],
-    [lon - dLon, lat - dLat],
+  const corners: Array<[number, number]> = [
+    [-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2],
   ];
+  const coords = corners.map(([x, y]): [number, number] => {
+    const xr = x * cos - y * sin;
+    const yr = x * sin + y * cos;
+    return [lon + xr / mPerDegLon, lat + yr / mPerDegLat];
+  });
+  coords.push(coords[0]);
   const style = TYPE_COLOR[b.type] ?? TYPE_COLOR.admin;
   return {
     type: "Feature",
@@ -99,12 +106,50 @@ function buildingPolygon(b: Building, lat: number, lon: number): GeoJSON.Feature
       id: b.id,
       name: b.name,
       type: b.type,
+      label: style.label,
       fill: style.fill,
       stroke: style.stroke,
       critical: b.critical_infrastructure,
       hazmat: b.hazmat_present,
     },
     geometry: { type: "Polygon", coordinates: [coords] },
+  };
+}
+
+// --- Installation cantonment perimeter — irregular polygon hugging the
+// building cluster with a soft buffer. Returns one Feature ready to drop
+// into a Source.
+function perimeterPolygon(buildings: Building[]): GeoJSON.Feature | null {
+  const pts = buildings.filter((b) => b.lat != null && b.lon != null);
+  if (pts.length < 3) return null;
+  let minLat = +Infinity, maxLat = -Infinity, minLon = +Infinity, maxLon = -Infinity;
+  for (const b of pts) {
+    minLat = Math.min(minLat, b.lat!); maxLat = Math.max(maxLat, b.lat!);
+    minLon = Math.min(minLon, b.lon!); maxLon = Math.max(maxLon, b.lon!);
+  }
+  // 350m buffer outward.
+  const cLat = (minLat + maxLat) / 2;
+  const mPerDegLat = 111_320;
+  const mPerDegLon = 111_320 * Math.cos((cLat * Math.PI) / 180);
+  const bufLat = 350 / mPerDegLat;
+  const bufLon = 350 / mPerDegLon;
+  minLat -= bufLat; maxLat += bufLat;
+  minLon -= bufLon; maxLon += bufLon;
+  // Octagon-ish — chamfer the four corners by ~20% so it doesn't read as a
+  // perfect rectangle. Looks like a real cantonment perimeter.
+  const dx = (maxLon - minLon) * 0.18;
+  const dy = (maxLat - minLat) * 0.18;
+  const ring: Array<[number, number]> = [
+    [minLon + dx, minLat], [maxLon - dx, minLat],
+    [maxLon, minLat + dy], [maxLon, maxLat - dy],
+    [maxLon - dx, maxLat], [minLon + dx, maxLat],
+    [minLon, maxLat - dy], [minLon, minLat + dy],
+    [minLon + dx, minLat],
+  ];
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: { type: "Polygon", coordinates: [ring] },
   };
 }
 
@@ -224,6 +269,28 @@ export function MapCanvas({
       .map((b) => buildingPolygon(b, b.lat!, b.lon!)),
   }), [buildings]);
 
+  // Building label points — typed badges shown at high zoom.
+  const labelGeoJson = useMemo<GeoJSON.FeatureCollection>(() => ({
+    type: "FeatureCollection",
+    features: buildings
+      .filter((b) => b.lat != null && b.lon != null)
+      .map((b): GeoJSON.Feature => {
+        const style = TYPE_COLOR[b.type] ?? TYPE_COLOR.admin;
+        return {
+          type: "Feature",
+          properties: { id: b.id, label: style.label, stroke: style.stroke },
+          geometry: { type: "Point", coordinates: [b.lon!, b.lat!] },
+        };
+      }),
+  }), [buildings]);
+
+  // Cantonment perimeter — once per buildings change.
+  const perimeterGeoJson = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    const p = perimeterPolygon(buildings);
+    if (!p) return null;
+    return { type: "FeatureCollection", features: [p] };
+  }, [buildings]);
+
   // Unit markers with home-building lat/lon resolution.
   const placedUnits = useMemo(() => {
     return units.map((u) => {
@@ -277,7 +344,7 @@ export function MapCanvas({
         initialViewState={{
           longitude: centerLon,
           latitude: centerLat,
-          zoom: 14.2,
+          zoom: 14.7,
           bearing: 0,
           pitch: 0,
         }}
@@ -285,6 +352,30 @@ export function MapCanvas({
         onMouseMove={onMouseMove}
         style={{ width: "100%", height: "100%" }}
       >
+        {/* Cantonment perimeter — chamfered polygon below the buildings. */}
+        {perimeterGeoJson && (
+          <Source id="perimeter" type="geojson" data={perimeterGeoJson}>
+            <Layer
+              id="perimeter-fill"
+              type="fill"
+              paint={{
+                "fill-color": "#1d2740",
+                "fill-opacity": 0.18,
+              }}
+            />
+            <Layer
+              id="perimeter-outline"
+              type="line"
+              paint={{
+                "line-color": "#3b82f6",
+                "line-width": 1.4,
+                "line-opacity": 0.55,
+                "line-dasharray": [3, 3],
+              }}
+            />
+          </Source>
+        )}
+
         {/* Buildings — polygon fill + outline layer driven by GeoJSON. */}
         <Source id="buildings" type="geojson" data={buildingGeoJson}>
           <Layer
@@ -292,7 +383,12 @@ export function MapCanvas({
             type="fill"
             paint={{
               "fill-color": ["get", "fill"],
-              "fill-opacity": 0.85,
+              "fill-opacity": [
+                "interpolate", ["linear"], ["zoom"],
+                12, 0.55,
+                15, 0.86,
+                18, 0.94,
+              ],
             }}
           />
           <Layer
@@ -300,7 +396,39 @@ export function MapCanvas({
             type="line"
             paint={{
               "line-color": ["get", "stroke"],
-              "line-width": ["case", ["get", "critical"], 2, 0.8],
+              "line-width": ["case", ["get", "critical"], 2, 0.9],
+              "line-opacity": [
+                "interpolate", ["linear"], ["zoom"],
+                12, 0.65,
+                15, 0.95,
+              ],
+            }}
+          />
+        </Source>
+
+        {/* Building label badges — rendered over fills, only at close zoom. */}
+        <Source id="building-labels" type="geojson" data={labelGeoJson}>
+          <Layer
+            id="building-labels-text"
+            type="symbol"
+            minzoom={15.4}
+            layout={{
+              "text-field": ["get", "label"],
+              "text-size": [
+                "interpolate", ["linear"], ["zoom"],
+                15.4, 9,
+                17, 11,
+                19, 13,
+              ],
+              "text-letter-spacing": 0.18,
+              "text-allow-overlap": false,
+              "text-padding": 2,
+            }}
+            paint={{
+              "text-color": ["get", "stroke"],
+              "text-halo-color": "#0a0c13",
+              "text-halo-width": 1.4,
+              "text-halo-blur": 0.4,
             }}
           />
         </Source>
