@@ -41,6 +41,39 @@ _QUEUE: list[dict] = []
 router = APIRouter()
 
 
+async def _probe_llm_brief() -> dict:
+    """Live probe of the configured LLM proxy.
+
+    Reads the proxy URL from env at request time (not module import) so that
+    rotating SPIRE_LLM_PROXY via Fly secrets is reflected without restart.
+    Returns a small block suitable for embedding in /status; never raises.
+    """
+    proxy = os.environ.get("SPIRE_LLM_PROXY", "http://127.0.0.1:8095")
+    model = os.environ.get("SPIRE_LLM_MODEL", "gemma4-26b-a4b-fp8")
+    info: dict = {
+        "reachable": False,
+        "model": model,
+        "max_context": 524288,
+        "proxy": proxy,
+    }
+    try:
+        import httpx  # local import keeps cold-start lean
+        async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as client:
+            resp = await client.get(f"{proxy}/v1/models")
+            if resp.status_code == 200:
+                info["reachable"] = True
+                try:
+                    data = resp.json().get("data") or []
+                    info["available_models"] = [m.get("id") for m in data if m.get("id")]
+                except Exception:
+                    pass
+            else:
+                info["error"] = f"HTTP {resp.status_code}"
+    except Exception as e:  # noqa: BLE001
+        info["error"] = str(e)[:160]
+    return info
+
+
 def _dataset_fingerprint() -> str:
     """Stable 16-char digest of the current in-memory dataset for status ping."""
     ds = get_dataset()
@@ -60,6 +93,7 @@ async def status():
     ds = get_dataset()
     err = sum(1 for v in ds.violations if v.severity == "error")
     chain = verify_chain()
+    llm_probe = await _probe_llm_brief()
     return {
         "mode": os.environ.get("SPIRE_MODE", "full"),
         "version": "0.1.0",
@@ -79,17 +113,12 @@ async def status():
             "data_quality_defects": ds.dq_defects,
             "consistency_errors": err,
         },
-        "llm": {
-            "reachable": False,  # filled in when Gemma4 is online
-            "model": "gemma4-26b-a4b-fp8",
-            "max_context": 524288,
-            "proxy": "http://127.0.0.1:8095",
-        },
+        "llm": llm_probe,
         "features": {
             "sentry": True,
             "pulse": True,
             "bastion": True,
-            "nl_queries": False,  # flips when LLM proxy reachable
+            "nl_queries": llm_probe["reachable"],
         },
         "security": {
             "audit_chain_intact": chain["ok"],
