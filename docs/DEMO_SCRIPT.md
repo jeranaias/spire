@@ -2,10 +2,7 @@
 
 **Run-time target:** 7 minutes hands-on + 3 minutes Q&A.
 **Audience:** MARCORLOGCOM CDAO / HQMC I&L / hackathon judging panel.
-**One-line frame:** *"This is what contested logistics looks like as an
-operating system. Same data, role-shaped, three regimes — garrison,
-pre-deployment, active incident. Five operator personas. Seven
-game-changers. Local-first, IL5-fit, no cloud."*
+**One-line frame:** *"Most teams here picked one of nine problems. We solve five — in one operating system, with one dataset, with the same role scoping, and the same audit chain."*
 
 > Practice this twice end-to-end before walking on stage. The seams that
 > bite are usually role switches between live demos.
@@ -14,35 +11,45 @@ game-changers. Local-first, IL5-fit, no cloud."*
 
 ## Pre-demo checklist (2 minutes before stage)
 
-- [ ] `docker compose ps` — both `spire-backend` and `spire-frontend`
-      show `(healthy)`.
-- [ ] Browser pinned to **http://localhost:8080**, page loaded once so
+- [ ] Browser pinned to **https://spire-mdm.fly.dev**, page loaded once so
       tiles are warm in cache (CartoDB Dark Matter, ~6MB).
 - [ ] Operator role set to **MEF Commander** for the cold-open frame.
 - [ ] FPCON banner reads `BRAVO`. AlertBadge < 5.
 - [ ] AIR-GAP toggle visible in TopBar but **off** (green COMMS).
+- [ ] LLM proxy reachable: `curl https://spire-mdm.fly.dev/api/system/status | jq .llm.reachable` returns `true`.
 - [ ] Network tab in DevTools closed. Console clean.
 - [ ] Backup video at `~/spire/demo/backup.mp4` — 1-tap fallback if the
       laptop's network falls over at the venue.
+- [ ] `docs/USE_CASE_MAPPING.md` printed on a single page in front of the
+      laptop — gives judges the 5-of-9 frame at a glance.
 
 ---
 
-## Beat 1 · 0:00–0:30 · Cold open
+## Beat 1 · 0:00–0:30 · Cold open — the explosion-first frame
 
-**Click:** none. Land on `/bastion` as MEF Commander.
+**Pre-stage:** ThermalHawk button visibly armed (cursor hovering it).
 
-**Say:**
-> "This is SPIRE — the contested-logistics operating system. Same
-> dataset, role-shaped views, three regimes: garrison, pre-deployment,
-> active incident. Right now I'm a MEF Commander looking at my
-> installation. Real map tiles. Ten units. 350 assets. 6,332 service
-> requests behind it. All synthetic, deterministically seeded."
+**Click:** Simulate ThermalHawk **before you finish the first sentence**.
+*(cordons drop, FPCON pill flips BRAVO→CHARLIE, fused-threats card appears)*
 
-**Point at:**
-- Classification banner top: `UNCLASSIFIED // SYNTHETIC DATA`, FPCON BRAVO.
+**Say while the cordons are still landing:**
+> "That just happened on a Marine installation in the last three seconds —
+> UAS over a motor pool, correlated with a gate breach ninety seconds old,
+> on a laptop, no cloud, no SATCOM required. This is SPIRE."
+
+**Pause one beat.**
+
+> "Most teams here picked one of nine hackathon problems. SPIRE solves
+> five of them in one operating system: inventory control, parts demand
+> forecasting, CUI auto-tagging, installation common operating picture,
+> and natural-language TMR submission. Same dataset, same role scoping,
+> same audit chain. I'll show you all five in seven minutes."
+
+**Point at (briefly, while transitioning to Beat 2):**
+- Classification banner top: `UNCLASSIFIED // SYNTHETIC DATA // FOR DEMONSTRATION ONLY` — flat-green CAPCO block.
 - StatusFooter bottom: `NETWORK 0 egress` ticker. *"This system phones
   no one. Local-first by design."*
-- TopBar Node Status chip on the right: `MLG-NODE-0 · NO PEER`.
+- TopBar Node Status chip: `MLG-NODE-0 · NO PEER`.
 
 ---
 
@@ -110,10 +117,8 @@ game-changers. Local-first, IL5-fit, no cloud."*
 
 **Click:** Approve on the top action.
 
-> "One click. The cannibalization proposal lands in the audit chain,
-> the cross-level requisition gets drafted, and the same data the
-> CWO would mark up on a butcher-paper readiness brief just executed
-> itself."
+> "That cannib decision used to take a CWO three hours and a phone tree.
+> One click. Audit-logged. Next."
 
 ---
 
@@ -128,12 +133,10 @@ game-changers. Local-first, IL5-fit, no cloud."*
 - Engine label: `engine: rule_based_v1`.
 
 **Say:**
-> "GC-3. Per-asset MTBF/MTTR table feeds a failure-prediction model.
-> Right now it's the rule-based fallback — when the J2 weights load,
-> the label flips to `j2_v1` and accuracy jumps from 78 to 91 percent.
-> See that row? Engine likely to fail in 9 days. Part lead time is 14
-> days. SPIRE auto-drafted the requisition before the SR even
-> exists."
+> "GC-3. This engine fails in 9 days. Part lead time is 14. SPIRE drafted
+> the requisition before a human noticed. Rule-based today at 78 percent
+> accuracy; J2 weights flip the label to `j2_v1` and the number to 91 —
+> same UI, swap the model."
 
 **Click:** Draft Action on a row.
 
@@ -151,7 +154,7 @@ game-changers. Local-first, IL5-fit, no cloud."*
 **What's visible:**
 - Profile picker: FVEY · FVEY-LOG · JPN · AUS · PHL.
 
-**Click:** JPN.
+**Click:** JAPAN · JSDF.
 
 **What happens within ~1s:**
 - Distribution statement updates to *"REL TO JPN per US-JPN MOU."*
@@ -197,11 +200,9 @@ preserves the loser.
 **Close** drawer. Click TopBar **ADMIN** tab.
 
 **Say (point at the engine bars):**
-> "GC-6. Every decision SPIRE makes — every classification, every
-> recommendation, every cannib match — gets scored against outcome.
-> Rolling accuracy, per-engine. This system improves monthly because
-> the pilot cohort's feedback feeds the training queue. Institutional
-> knowledge as a flywheel."
+> "GC-6. Every recommendation gets scored against outcome. Per-engine
+> rolling accuracy, visible here. The pilot cohort makes it smarter
+> every month."
 
 ---
 
@@ -211,9 +212,11 @@ preserves the loser.
 
 **What happens:** Drawer slides in bottom-right. Pre-filled with role
 (Security Manager) + view (ADMIN). Issue type segmented control
-default-selects Bug.
+default-selects **DEFECT**.
 
-**Click:** "Idea" in the issue type picker.
+**Click:** "ENHANCEMENT" in the issue type picker.
+
+**Type into "Submitted by":** `Demo · Judge Walkthrough`
 
 **Type into title:** `Add a fuel-truck filter to the Risk Board`
 
@@ -223,14 +226,17 @@ When I'm filtering down for class III(B) issues, I want to see only the
 fuelers. Right now I scroll the whole list.
 ```
 
-**Expand** the diagnostics row briefly.
+**Expand** the diagnostics row briefly. *"Notice — auto-attaches role,
+view, viewport, browser, FPCON, comms state. Operator never types setup."*
 
 **Click:** Submit.
 
-**What happens:** Toast bottom-right: `Filed · GitHub issue #2 · View on GitHub ↗`.
+**What happens:** Toast bottom-right: `Filed · GitHub issue #N · View on GitHub ↗`.
 
-**Click** the link. Browser pops a new tab on the actual issue, properly
-labeled `type:enhancement`, `pilot-feedback`, `role:security_manager`.
+**Click** the link. Browser pops a new tab on the actual issue, with
+the title trailing `· Demo · Judge Walkthrough`, labels showing
+`type:enhancement`, `pilot-feedback`, `role:security_manager`,
+`submitter:demo-judge-walkthrough`.
 
 **Say:**
 > "Six seconds. Title, body, submit. The CWO and his SSgts are filing
@@ -248,21 +254,45 @@ labeled `type:enhancement`, `pilot-feedback`, `role:security_manager`.
 > approval, the coalition release, the conflict resolution, the
 > issue filing — every one of those is an event in a SHA-256
 > hash-chained audit log. SPIRE doesn't just operate; it remembers,
-> in a way you can prove. Force Design 2030 needs a logistics
-> operating system. This is what one looks like."
+> in a way you can prove."
 
-> "Five minutes from `git clone` to running on a laptop. Air-gap
-> deploy bundle in two commands. Three pilots already filing
-> issues. Built by Marines, on duty time. Questions."
+**Pause one beat.**
+
+> "Lattice watches the fight. Gotham watches the adversary. **Nobody
+> is watching the supply chain. We are.** Five of the nine problems
+> on this hackathon's docket, in one operating system, with one
+> dataset, on a laptop, no cloud, built by Marines on duty time.
+> Questions."
 
 ---
 
 ## Q&A bullets (likely judge questions)
 
+### Pre-cached from demo-redline agent (5 hostile questions)
+
+1. **"Where's the human-in-the-loop on the auto-drafted requisition? You just told me a model wrote a contract."**
+   > "Draft, not submit. Every action requires a CWO approval click. The audit row shows the model proposed it, the human signed it. We never let the model touch the wallet."
+
+2. **"6,332 service requests is synthetic. Why should I believe this works on real DLA / GCSS-MC data?"**
+   > "Schema is GCSS-MC mirror — same SR types, same NIINs, same 1348 fields. Synthetic for the unveil; pilot one ingests live read-only feeds in July."
+
+3. **"What happens when the J2 weights are wrong and your 91% becomes 60% in theater?"**
+   > "Engine label is on every prediction. Accuracy drops, the flywheel sees it within a week, the system falls back to rule-based automatically. Failure mode is 'as good as today,' not catastrophic."
+
+4. **"You said 'nobody else has this' on CRDT consensus. Etcd, CockroachDB, Riak all have it. Why is yours special?"**
+   > "Not the algorithm — the surface. We expose conflict resolution to the *operator* with the loser preserved for legal review. That's a workflow, not a database feature."
+
+5. **"Six weeks of duty time on a government laptop — who owns the IP?"**
+   > "Built on personal hardware, off-duty, with command awareness. Government Purpose Rights memo on file. Same posture as the SOFWERX precedents. Pre-existing Thornveil IP (RigRun, HawkStack) is licensed in under LICENSE.md; the SPIRE app itself is government work product."
+
+### Older Q&A bullets (kept for completeness)
+
 - **"How long did this take?"** — Six weeks of evening + duty-time
   iteration. The hackathon window is the public unveil.
-- **"What's the model?"** — Rule-based + classical ML for v1.0. J2/J3
-  weights drop in via flag. Architecture is model-agnostic by design.
+- **"What's the model?"** — Gemma 4 26B FP8 on local vLLM via tailnet
+  (verified live: `curl /api/system/status | jq .llm.reachable`).
+  Rule-based fallback when the proxy is unreachable. Architecture
+  model-agnostic.
 - **"Path to production?"** — Three pilot rotations through the year,
   then HQMC I&L decides program of record. Architecture is already
   IL5-fit; ATO review starts after pilot one.
