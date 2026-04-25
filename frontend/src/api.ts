@@ -306,6 +306,8 @@ export interface Building {
   name: string;
   type: string;
   grid: string;
+  lat?: number;
+  lon?: number;
   occupancy_capacity: number;
   current_occupancy: number;
   floors: number;
@@ -320,6 +322,8 @@ export interface RallyPoint {
   id: string;
   name: string;
   grid: string;
+  lat?: number;
+  lon?: number;
   capacity: number;
 }
 
@@ -327,6 +331,8 @@ export interface ECP {
   id: string;
   name: string;
   grid: string;
+  lat?: number;
+  lon?: number;
   status: string;
   lanes_in: number;
   lanes_out: number;

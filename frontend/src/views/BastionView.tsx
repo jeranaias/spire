@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
 import { useSpireStore } from "../state/store";
-import { InstallationSchematic } from "../components/InstallationSchematic";
+import { MapCanvas } from "../components/MapCanvas";
 
 const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: "#ef4444",
@@ -180,11 +180,13 @@ export function BastionView() {
 
       {/* Center: schematic */}
       <div className="relative flex-1">
-        <InstallationSchematic
+        <MapCanvas
           buildings={cop.buildings}
           units={cop.units}
           ecps={cop.ecps}
           rallyPoints={cop.rally_points}
+          centerLat={cop.center.lat}
+          centerLon={cop.center.lon}
           selectedUnit={selectedUnit}
           onUnitClick={onUnitClick}
           flyToBuilding={flyToBuilding}
