@@ -98,7 +98,6 @@ export function BastionView() {
   }, []);
 
   const setFpcon = useSpireStore((s) => s.setFpcon);
-  const pushToast = useSpireStore((s) => s.pushToast);
   const [recentAlertIds, setRecentAlertIds] = useState<Set<string>>(new Set());
 
   // Detect new alerts arriving in the poll so we can scan-line the row.
@@ -180,7 +179,7 @@ export function BastionView() {
       <div className="flex h-full items-center justify-center p-12">
         <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
           <div
-            className="font-mono text-[10px] uppercase text-[var(--color-danger)]"
+            className="font-mono text-xs uppercase text-[var(--color-danger)]"
             style={{ letterSpacing: "0.22em" }}
           >
             Installation Offline
@@ -188,7 +187,7 @@ export function BastionView() {
           <div className="mt-2 spire-body text-sm">
             BASTION schematic unreachable after 4 attempts. Backend may be cycling — wait a moment, then switch role to retry.
           </div>
-          <div className="mt-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
             {copError}
           </div>
           <button
@@ -211,7 +210,7 @@ export function BastionView() {
                   setWaking(false);
                 });
             }}
-            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
             style={{ letterSpacing: "0.18em" }}
           >
             Retry
@@ -223,7 +222,7 @@ export function BastionView() {
   if (!cop) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">
-        <div className="flex items-center gap-3 font-mono text-[11px]" style={{ letterSpacing: "0.1em" }}>
+        <div className="flex items-center gap-3 font-mono text-sm" style={{ letterSpacing: "0.1em" }}>
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
           {waking ? "Waking up — one moment" : "Loading installation schematic ..."}
         </div>
@@ -237,13 +236,13 @@ export function BastionView() {
       <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] p-3">
           <h3
-            className="font-mono text-[10px] font-semibold uppercase text-[var(--color-text)]"
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-text)]"
             style={{ letterSpacing: "0.18em" }}
           >
             Alert Stream
           </h3>
           <span
-            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[var(--color-text-muted)]"
+            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs tabular-nums text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.08em" }}
           >
             {alerts.length}
@@ -268,12 +267,12 @@ export function BastionView() {
         <div className="border-t border-[var(--color-border)] p-3">
           <button
             onClick={triggerThermalHawk}
-            className="w-full rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_40%,var(--color-surface))] px-3 py-2 font-mono text-[11px] font-semibold uppercase text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger)] hover:text-white"
+            className="w-full rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_40%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger)] hover:text-white"
             style={{ letterSpacing: "0.16em" }}
           >
             ⚠ Simulate ThermalHawk
           </button>
-          <div className="mt-1.5 font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-1.5 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
             UAS event over CLB-6 motor pool. Auto-correlates with PULSE readiness.
           </div>
         </div>
@@ -301,7 +300,7 @@ export function BastionView() {
           className="pointer-events-none absolute left-3 top-3 z-[6] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
         >
           <div
-            className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.22em" }}
           >
             Common Operating Picture
@@ -313,7 +312,7 @@ export function BastionView() {
             {cop.installation.name}
           </div>
           <div
-            className="mt-0.5 font-mono text-[9px] text-[var(--color-text-secondary)]"
+            className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)]"
             style={{ letterSpacing: "0.1em" }}
           >
             {cop.buildings_count} buildings · {cop.ecps.length} ECPs · {cop.response_forces_count} RF · FPCON BRAVO
@@ -333,7 +332,7 @@ export function BastionView() {
           >
             <div className="flex items-center gap-2">
               <span
-                className="pl-1.5 pr-0.5 font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+                className="pl-1.5 pr-0.5 font-mono text-xs uppercase text-[var(--color-text-muted)]"
                 style={{ letterSpacing: "0.18em" }}
               >
                 ASK·BASTION
@@ -348,7 +347,7 @@ export function BastionView() {
               <button
                 onClick={handleNL}
                 disabled={nlSubmitting || !nlText.trim()}
-                className="inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
+                className="inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
                 style={{ letterSpacing: "0.14em" }}
               >
                 {nlSubmitting ? "Working …" : "Submit"}
@@ -429,7 +428,7 @@ function AlertRow({
           }}
         />
       )}
-      <div className="flex items-center gap-1 font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="flex items-center gap-1 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
         <span className="font-semibold" style={{ color }}>{alert.severity}</span>
         <span>· {alert.source}</span>
@@ -450,8 +449,8 @@ function AlertRow({
           {new Date(alert.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}
         </span>
       </div>
-      <div className="mt-0.5 text-[12px] font-medium text-[var(--color-text)]">{alert.title}</div>
-      <div className="line-clamp-2 text-[10px] text-[var(--color-text-secondary)]">{alert.body}</div>
+      <div className="mt-0.5 text-base font-medium text-[var(--color-text)]">{alert.title}</div>
+      <div className="line-clamp-2 text-xs text-[var(--color-text-secondary)]">{alert.body}</div>
     </div>
   );
 }
@@ -474,19 +473,19 @@ function MissionHUD() {
       className="pointer-events-none absolute right-3 top-3 z-[6] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
     >
       <div
-        className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+        className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
         style={{ letterSpacing: "0.18em" }}
       >
         Mission Clock
       </div>
       <div
-        className="mt-0.5 font-mono text-[17px] font-semibold tabular-nums text-[var(--color-text)]"
+        className="mt-0.5 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)]"
         style={{ letterSpacing: "0.05em", lineHeight: 1 }}
       >
         {zulu}
       </div>
       <div
-        className="mt-0.5 font-mono text-[9px] text-[var(--color-text-secondary)]"
+        className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)]"
         style={{ letterSpacing: "0.14em" }}
       >
         {datestamp}
@@ -549,7 +548,7 @@ function ResponsePanel({
         <div className="flex items-start justify-between">
           <div>
             <div
-              className="font-mono text-[10px] font-semibold uppercase"
+              className="font-mono text-xs font-semibold uppercase"
               style={{ letterSpacing: "0.18em", color: SEVERITY_COLOR[alert.severity] }}
             >
               {alert.severity} · {alert.source}
@@ -569,14 +568,14 @@ function ResponsePanel({
         <section>
           <div className="text-[var(--color-text-secondary)]">{alert.body}</div>
           {alert.grid && (
-            <div className="mt-2 font-mono text-[11px] text-[var(--color-text-muted)]">Grid: {alert.grid}</div>
+            <div className="mt-2 font-mono text-sm text-[var(--color-text-muted)]">Grid: {alert.grid}</div>
           )}
         </section>
 
         {alert.model_info && (
           <section className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
             <div
-              className="mb-1 font-mono text-[9px] font-semibold uppercase text-[var(--color-text-muted)]"
+              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.18em" }}
             >
               Detection Model
@@ -585,7 +584,7 @@ function ResponsePanel({
             <div className="text-[var(--color-text-secondary)]">
               {alert.model_info.parameters.toLocaleString()} parameters · {alert.model_info.architecture}
             </div>
-            <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
+            <div className="mt-1 text-xs text-[var(--color-text-muted)]">
               {alert.model_info.training} · target: {alert.model_info.deployment_target}
             </div>
           </section>
@@ -594,13 +593,13 @@ function ResponsePanel({
         {alert.correlated_with && alert.correlated_with.length > 0 && (
           <section>
             <div
-              className="mb-1 font-mono text-[9px] font-semibold uppercase text-[var(--color-text-muted)]"
+              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.18em" }}
             >
               Auto-correlated with
             </div>
             {alert.correlated_with.map((c, i) => (
-              <div key={i} className="rounded-sm border-l-2 border-[var(--color-primary)] bg-[var(--color-bg)] px-2 py-1 text-[11px]">
+              <div key={i} className="rounded-sm border-l-2 border-[var(--color-primary)] bg-[var(--color-bg)] px-2 py-1 text-sm">
                 <span className="font-mono text-[var(--color-primary)]">{c.source}</span> — {c.note}
               </div>
             ))}
@@ -611,12 +610,12 @@ function ResponsePanel({
           <section>
             <div className="mb-2 text-xs font-semibold">{checklist.title}</div>
             <div
-              className="mb-2 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+              className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.18em" }}
             >
               Immediate (0-5 MIN)
             </div>
-            <ul className="flex flex-col gap-1.5 text-[11px]">
+            <ul className="flex flex-col gap-1.5 text-sm">
               {scopedImmediate.map((item, i) => (
                 <li key={i} className="flex items-start gap-2">
                   <input
@@ -630,12 +629,12 @@ function ResponsePanel({
               ))}
             </ul>
             <div
-              className="mb-2 mt-3 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+              className="mb-2 mt-3 font-mono text-xs uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.18em" }}
             >
               Follow-on (5-30 MIN)
             </div>
-            <ul className="flex flex-col gap-1.5 text-[11px]">
+            <ul className="flex flex-col gap-1.5 text-sm">
               {scopedFollowOn.map((item, i) => (
                 <li key={i} className="flex items-start gap-2">
                   <input
@@ -649,16 +648,16 @@ function ResponsePanel({
               ))}
             </ul>
             <div
-              className="mb-2 mt-3 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+              className="mb-2 mt-3 font-mono text-xs uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.18em" }}
             >
               Notifications
             </div>
-            <ul className="flex flex-col gap-1.5 text-[11px]">
+            <ul className="flex flex-col gap-1.5 text-sm">
               {checklist.notifications.map((n, i) => (
                 <li key={i} className="flex items-center gap-2">
                   <span className="font-mono text-[var(--color-text)]">{n.who}</span>
-                  <button className="ml-auto rounded border border-[var(--color-primary)] bg-[var(--color-surface)] px-2 py-0.5 text-[10px] text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white">
+                  <button className="ml-auto rounded border border-[var(--color-primary)] bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white">
                     [Draft Ready] Send
                   </button>
                 </li>
@@ -670,7 +669,7 @@ function ResponsePanel({
         {sim && (
           <section>
             <div
-              className="mb-1 font-mono text-[9px] font-semibold uppercase text-[var(--color-text-muted)]"
+              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.18em" }}
             >
               Response forces dispatched
@@ -679,7 +678,7 @@ function ResponsePanel({
               {sim.response_forces_dispatched.map((rf) => (
                 <span
                   key={rf}
-                  className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 font-mono text-[10px] text-[var(--color-text)]"
+                  className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 font-mono text-xs text-[var(--color-text)]"
                 >
                   {rf}
                 </span>
@@ -699,7 +698,7 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
       <div className="mt-2 rounded-sm border border-[var(--color-primary)] bg-[var(--color-surface)] p-3">
         <div className="mb-2 flex items-baseline justify-between">
           <div
-            className="font-mono text-[9px] font-semibold uppercase text-[var(--color-primary)]"
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-primary)]"
             style={{ letterSpacing: "0.18em" }}
           >
             Parsed as TMR
@@ -717,7 +716,7 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
           <KV label="Hazmat" value={r.tmr.hazmat ? "Yes" : "No"} />
         </div>
         {r.validation.issues.length > 0 && (
-          <div className="mt-2 rounded-sm bg-[var(--color-danger-muted)] p-2 text-[11px] text-[var(--color-danger)]">
+          <div className="mt-2 rounded-sm bg-[var(--color-danger-muted)] p-2 text-sm text-[var(--color-danger)]">
             <strong>Issues:</strong>
             <ul className="ml-4 list-disc">
               {r.validation.issues.map((i: string) => (
@@ -727,7 +726,7 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
           </div>
         )}
         {r.validation.warnings.length > 0 && (
-          <div className="mt-2 rounded-sm bg-[var(--color-warning-muted)] p-2 text-[11px] text-[var(--color-warning)]">
+          <div className="mt-2 rounded-sm bg-[var(--color-warning-muted)] p-2 text-sm text-[var(--color-warning)]">
             <strong>Warnings:</strong>
             <ul className="ml-4 list-disc">
               {r.validation.warnings.map((w: string) => (
@@ -737,12 +736,12 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
           </div>
         )}
         <div
-          className="mt-2 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+          className="mt-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
           style={{ letterSpacing: "0.18em" }}
         >
           Approval chain
         </div>
-        <div className="mt-1 flex items-center gap-1 text-[11px]">
+        <div className="mt-1 flex items-center gap-1 text-sm">
           {r.approval_chain.map((s: any, i: number) => (
             <span key={i} className="flex items-center gap-1">
               {i > 0 && <span className="text-[var(--color-text-muted)]">→</span>}
@@ -755,7 +754,7 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
             </span>
           ))}
         </div>
-        <div className="mt-2 text-[10px] italic text-[var(--color-text-muted)]">{r.engine}</div>
+        <div className="mt-2 text-xs italic text-[var(--color-text-muted)]">{r.engine}</div>
       </div>
     );
   }
@@ -763,7 +762,7 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
     <div className="mt-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text-secondary)]">
       <div className="flex items-baseline justify-between">
         <div
-          className="font-mono text-[9px] font-semibold uppercase text-[var(--color-text-muted)]"
+          className="font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
           style={{ letterSpacing: "0.18em" }}
         >
           {result.intent}
@@ -781,7 +780,7 @@ function KV({ label, value }: { label: string; value: any }) {
   return (
     <div>
       <div
-        className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+        className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
         style={{ letterSpacing: "0.16em" }}
       >
         {label}

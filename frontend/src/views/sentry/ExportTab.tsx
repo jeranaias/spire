@@ -57,7 +57,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-4">
         <h2
-          className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+          className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
           style={{ letterSpacing: "0.2em" }}
         >
           Export Sanitized Dataset
@@ -71,7 +71,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
       <div className="mb-6 grid grid-cols-2 gap-6">
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <h4
-            className="mb-3 font-mono text-[10px] font-semibold uppercase text-[var(--color-text-muted)]"
+            className="mb-3 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.2em" }}
           >
             Release Authority
@@ -81,14 +81,14 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             options={AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
             onChange={setAuthority}
           />
-          <div className="mt-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
             {DISTRIBUTION_BLURB[authority]}
           </div>
         </div>
 
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <h4
-            className="mb-3 font-mono text-[10px] font-semibold uppercase text-[var(--color-text-muted)]"
+            className="mb-3 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.2em" }}
           >
             Format + Options
@@ -107,7 +107,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             />
             <span className="spire-body">Include append-only audit log (SHA-256 chained)</span>
           </label>
-          <div className="mt-2 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+          <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
             Recommended on — lets the receiving partner verify provenance without re-inspecting every record.
           </div>
         </div>
@@ -117,13 +117,13 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         <button
           onClick={doExport}
           disabled={loading || !ctx.batchId}
-          className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-6 py-2 font-mono text-[12px] font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50"
+          className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-6 py-2 font-mono text-base font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50"
           style={{ letterSpacing: "0.2em" }}
         >
           {loading ? "Building bundle …" : "Export Sanitized Bundle"}
         </button>
         {!ctx.batchId && (
-          <span className="ml-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <span className="ml-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
             Requires a processed batch.
           </span>
         )}
@@ -133,12 +133,12 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         <div className="mt-6 rounded-md border border-[var(--color-success-muted)] bg-[color-mix(in_oklab,var(--color-success-muted)_15%,var(--color-surface))] p-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h4
-              className="font-mono text-[12px] font-semibold uppercase text-[var(--color-success)]"
+              className="font-mono text-base font-semibold uppercase text-[var(--color-success)]"
               style={{ letterSpacing: "0.2em" }}
             >
               Export Prepared
             </h4>
-            <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+            <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
               {result.created_at}
             </span>
           </div>
@@ -155,12 +155,12 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
               <StatLabel>Download</StatLabel>
               <a
                 href={result.download_url}
-                className="font-mono text-[13px] text-[var(--color-primary)] hover:underline"
+                className="font-mono text-base text-[var(--color-primary)] hover:underline"
               >
                 {result.download_url}
               </a>
               {result.bytes != null && (
-                <span className="ml-2 font-mono text-[10px] text-[var(--color-text-muted)]">
+                <span className="ml-2 font-mono text-xs text-[var(--color-text-muted)]">
                   ({(result.bytes / 1024).toFixed(1)} KB)
                 </span>
               )}
@@ -203,7 +203,7 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
   return (
     <div className="mt-4 border-t border-[var(--color-border)] pt-4">
       <div
-        className="mb-2 font-mono text-[10px] font-semibold uppercase text-[var(--color-text-muted)]"
+        className="mb-2 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
         style={{ letterSpacing: "0.2em" }}
       >
         Before / After · {diffs.length} Sample Records
@@ -220,15 +220,15 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                 onClick={() => setExpanded(open ? null : d.sr_number)}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left"
               >
-                <span className="font-mono text-[11px] text-[var(--color-text)]">{d.sr_number}</span>
-                <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                <span className="font-mono text-sm text-[var(--color-text)]">{d.sr_number}</span>
+                <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
                   {d.unit_name} · {d.equipment_type}
                 </span>
                 <div className="ml-auto flex items-center gap-1">
                   {d.flags.map((f) => (
                     <span
                       key={f}
-                      className="rounded-sm border px-1 py-[1px] font-mono text-[9px] font-semibold uppercase"
+                      className="rounded-sm border px-1 py-[1px] font-mono text-xs font-semibold uppercase"
                       style={{
                         color: FLAG_COLOR[f] || "var(--color-text-muted)",
                         borderColor: `color-mix(in oklab, ${FLAG_COLOR[f] || "#666"} 40%, var(--color-border))`,
@@ -245,23 +245,23 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                 <div className="grid grid-cols-2 gap-0 border-t border-[var(--color-border)]">
                   <div className="border-r border-[var(--color-border)] p-3">
                     <div
-                      className="mb-1 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                      className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)]"
                       style={{ letterSpacing: "0.2em" }}
                     >
                       Original
                     </div>
-                    <div className="font-mono text-[12px] leading-relaxed text-[var(--color-text)]">
+                    <div className="font-mono text-base leading-relaxed text-[var(--color-text)]">
                       {d.original}
                     </div>
                   </div>
                   <div className="p-3">
                     <div
-                      className="mb-1 font-mono text-[9px] uppercase text-[var(--color-success)]"
+                      className="mb-1 font-mono text-xs uppercase text-[var(--color-success)]"
                       style={{ letterSpacing: "0.2em" }}
                     >
                       Sanitized · Export Bundle
                     </div>
-                    <div className="font-mono text-[12px] leading-relaxed text-[var(--color-text)]">
+                    <div className="font-mono text-base leading-relaxed text-[var(--color-text)]">
                       {d.sanitized.split(/(\[[A-Z]+\s+REDACTED\])/g).map((chunk, i) => {
                         const match = /^\[([A-Z]+)\s+REDACTED\]$/.exec(chunk);
                         if (match) {
@@ -297,7 +297,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <StatLabel>{label}</StatLabel>
-      <div className="font-mono text-[16px] font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "-0.01em" }}>
+      <div className="font-mono text-lg font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "-0.01em" }}>
         {value}
       </div>
     </div>
@@ -307,7 +307,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 function StatLabel({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+      className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
       style={{ letterSpacing: "0.22em" }}
     >
       {children}

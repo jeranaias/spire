@@ -89,7 +89,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
       <div className="flex h-full items-center justify-center p-12">
         <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
           <div
-            className="font-mono text-[10px] uppercase text-[var(--color-danger)]"
+            className="font-mono text-xs uppercase text-[var(--color-danger)]"
             style={{ letterSpacing: "0.22em" }}
           >
             Processing Unavailable
@@ -97,12 +97,12 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           <div className="mt-2 spire-body text-sm">
             SENTRY processing pipeline did not respond. Re-load the batch from Upload to retry.
           </div>
-          <div className="mt-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
             {error}
           </div>
           <button
             onClick={() => nav("/sentry/upload")}
-            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
             style={{ letterSpacing: "0.18em" }}
           >
             ← Back to Upload
@@ -114,7 +114,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   if (!queue || !job) {
     return (
       <div className="flex h-full items-center justify-center p-12 text-sm text-[var(--color-text-secondary)]">
-        <div className="flex items-center gap-3 font-mono text-[11px]" style={{ letterSpacing: "0.1em" }}>
+        <div className="flex items-center gap-3 font-mono text-sm" style={{ letterSpacing: "0.1em" }}>
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
           Initializing processing …
         </div>
@@ -163,20 +163,20 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
               }}
             />
             <h2
-              className="font-mono text-[11px] font-semibold uppercase text-[var(--color-text)]"
+              className="font-mono text-sm font-semibold uppercase text-[var(--color-text)]"
               style={{ letterSpacing: "0.18em" }}
             >
               {done ? "Processing · Complete" : "Processing · Live"}
             </h2>
           </div>
-          <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+          <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
             Batch {ctx.batchId} · Job {ctx.jobId}
           </span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-baseline gap-1 font-mono">
             <span
-              className="text-[18px] font-semibold tabular-nums text-[var(--color-text)]"
+              className="text-xl font-semibold tabular-nums text-[var(--color-text)]"
               style={{ letterSpacing: "-0.02em", lineHeight: 1 }}
             >
               {processed.toLocaleString()}
@@ -189,7 +189,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
               {all.length.toLocaleString()}
             </span>
             <span
-              className="ml-1 text-[9px] uppercase text-[var(--color-text-muted)]"
+              className="ml-1 text-xs uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.14em" }}
             >
               records
@@ -198,7 +198,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           {done && (
             <button
               onClick={() => nav("/sentry/review")}
-              className="ml-3 rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+              className="ml-3 rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
               style={{ letterSpacing: "0.14em" }}
             >
               Review queue →
@@ -210,7 +210,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
       <div className="flex flex-1 overflow-hidden">
         {/* Raw input column */}
         <div className="flex w-[55%] flex-col overflow-hidden border-r border-[var(--color-border)]">
-          <div className="bg-[var(--color-bg)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="bg-[var(--color-bg)] px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Raw input
           </div>
           <div className="flex-1 overflow-y-auto p-3">
@@ -225,7 +225,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
 
         {/* Sanitized column */}
         <div className="flex w-[45%] flex-col overflow-hidden">
-          <div className="bg-[var(--color-bg)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="bg-[var(--color-bg)] px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Sanitized output
           </div>
           <div className="flex-1 overflow-y-auto p-3">
@@ -269,7 +269,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
             {(pct * 100).toFixed(1)}%
           </span>
         </div>
-        <div className="mt-2 flex items-center gap-6 text-[11px]">
+        <div className="mt-2 flex items-center gap-6 text-sm">
           <Counter label="Tier 1 (HawkStack)" value={counts.tier1} total={processed} tone="primary" />
           <Counter label="Tier 2 (LLM)" value={counts.tier2} total={processed} tone="info" />
           <div className="ml-auto flex gap-3">
@@ -280,7 +280,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
             <FlagCounter label="CONTROLLED" value={counts.controlled} color={FLAG_COLORS.controlled} />
           </div>
         </div>
-        <div className="mt-1 flex items-center gap-6 text-[11px] text-[var(--color-text-muted)]">
+        <div className="mt-1 flex items-center gap-6 text-sm text-[var(--color-text-muted)]">
           <span>Classification discrepancies: <span className="font-mono tabular-nums text-[var(--color-warning)]">{job.mismatches}</span></span>
           <span>Aggregation risks: <span className="font-mono tabular-nums text-[var(--color-warning)]">{job.aggregation_risks.length}</span></span>
         </div>
@@ -323,7 +323,7 @@ function RawRecord({ record, isMostRecent }: { record: any; isMostRecent: boolea
           <span className="pointer-events-none absolute -bottom-[2px] -right-[2px] h-2 w-2 border-b border-r border-[var(--color-primary)]" aria-hidden />
         </>
       )}
-      <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
+      <div className="mb-1 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
         <span className="font-mono">{record.sr_number}</span>
         <span>·</span>
         <span>{record.unit_name}</span>
@@ -358,13 +358,13 @@ function SanitizedRecord({ record }: { record: any }) {
   const flags: string[] = record.flags || [];
   return (
     <div className="mb-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs">
-      <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
+      <div className="mb-1 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
         <span className="font-mono">{record.sr_number}</span>
         <span className="ml-auto font-mono" style={{ color: record.detected_classification === "UNCLASSIFIED" ? "var(--color-success)" : record.detected_classification === "CUI" ? "var(--color-warning)" : "var(--color-danger)" }}>
           {record.detected_classification}
         </span>
         {record.classification_discrepancy && (
-          <span className="rounded-sm bg-[var(--color-danger-muted)] px-1 text-[9px] font-semibold uppercase tracking-wider text-[var(--color-danger)]">
+          <span className="rounded-sm bg-[var(--color-danger-muted)] px-1 text-xs font-semibold uppercase tracking-wider text-[var(--color-danger)]">
             MIS-MARKED
           </span>
         )}
@@ -376,7 +376,7 @@ function SanitizedRecord({ record }: { record: any }) {
         {flags.map((f) => (
           <span
             key={f}
-            className="rounded-sm px-1.5 py-0.5 text-[10px] font-mono"
+            className="rounded-sm px-1.5 py-0.5 text-xs font-mono"
             style={{
               background: `color-mix(in oklab, ${FLAG_COLORS[f] || "#fff"} 20%, var(--color-bg))`,
               color: FLAG_COLORS[f] || "inherit",
@@ -387,7 +387,7 @@ function SanitizedRecord({ record }: { record: any }) {
           </span>
         ))}
       </div>
-      <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+      <div className="mt-1 text-sm text-[var(--color-text-muted)]">
         Routed to {record.routed_to === "tier2_llm" ? "Tier 2 LLM" : "Tier 1 classifier"} · confidence {record.confidence?.toFixed(2)}
       </div>
     </div>

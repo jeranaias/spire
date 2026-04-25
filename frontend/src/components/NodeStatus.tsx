@@ -111,7 +111,7 @@ export function NodeStatus() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 rounded-sm border px-2 py-1 font-mono text-[10px] uppercase transition-colors"
+        className="flex items-center gap-2 rounded-sm border px-2 py-1 font-mono text-xs uppercase transition-colors"
         style={{
           letterSpacing: "0.16em",
           borderColor: hasConflicts ? "var(--color-danger)" : "var(--color-border)",
@@ -134,7 +134,7 @@ export function NodeStatus() {
         <span style={{ color }}>{label}</span>
         {hasConflicts && (
           <span
-            className="rounded-sm border border-[var(--color-danger)] px-1 text-[9px] tabular-nums"
+            className="rounded-sm border border-[var(--color-danger)] px-1 text-xs tabular-nums"
             style={{ letterSpacing: "0.08em" }}
           >
             {conflicts.length}
@@ -154,22 +154,22 @@ export function NodeStatus() {
             <div className="flex items-baseline justify-between">
               <div>
                 <div
-                  className="font-mono text-[10px] uppercase text-[var(--color-primary)]"
+                  className="font-mono text-xs uppercase text-[var(--color-primary)]"
                   style={{ letterSpacing: "0.22em" }}
                 >
                   Distributed Sync · GC-2
                 </div>
-                <div className="mt-0.5 font-mono text-[14px] font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+                <div className="mt-0.5 font-mono text-lg font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
                   {state.node_id} ↔ {state.peer_node_id}
                 </div>
-                <div className="mt-1 spire-body-muted text-[11px]">
+                <div className="mt-1 spire-body-muted text-sm">
                   Vector-clock-based reconciliation. Loser-preserving last-writer-wins on conflict.
                   Works offline; replays on restore.
                 </div>
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="rounded px-2 py-1 font-mono text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+                className="rounded px-2 py-1 font-mono text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
               >
                 ✕
               </button>
@@ -183,7 +183,7 @@ export function NodeStatus() {
 
             <div className="flex items-center gap-2">
               <span
-                className="rounded-sm border px-2 py-[2px] font-mono text-[10px] font-semibold uppercase"
+                className="rounded-sm border px-2 py-[2px] font-mono text-xs font-semibold uppercase"
                 style={{
                   letterSpacing: "0.18em",
                   color,
@@ -193,12 +193,12 @@ export function NodeStatus() {
               >
                 {label}
               </span>
-              <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+              <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
                 {state.events_logged} events logged
               </span>
               <button
                 onClick={seed}
-                className="ml-auto rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_25%,transparent)] px-2 py-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_40%,transparent)]"
+                className="ml-auto rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_25%,transparent)] px-2 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_40%,transparent)]"
                 style={{ letterSpacing: "0.16em" }}
                 title="Inject a deliberate conflict for demo / training"
               >
@@ -209,13 +209,13 @@ export function NodeStatus() {
             {/* Pending conflicts */}
             <div>
               <div
-                className="mb-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+                className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
                 style={{ letterSpacing: "0.22em" }}
               >
                 Pending conflicts ({conflicts.length})
               </div>
               {conflicts.length === 0 && (
-                <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+                <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
                   NO CONFLICTS — clocks reconciled
                 </div>
               )}
@@ -236,12 +236,12 @@ function ClockCard({ title, clock }: { title: string; clock: Record<string, numb
   return (
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono">
       <div
-        className="mb-1 text-[9px] uppercase text-[var(--color-text-muted)]"
+        className="mb-1 text-xs uppercase text-[var(--color-text-muted)]"
         style={{ letterSpacing: "0.22em" }}
       >
         {title}
       </div>
-      <div className="flex flex-col gap-0.5 text-[10px]" style={{ letterSpacing: "0.04em" }}>
+      <div className="flex flex-col gap-0.5 text-xs" style={{ letterSpacing: "0.04em" }}>
         {Object.entries(clock).length === 0 && (
           <span className="text-[var(--color-text-muted)]">[ no entries ]</span>
         )}
@@ -266,10 +266,10 @@ function ConflictRow({
   return (
     <div className="rounded-sm border border-[var(--color-danger-muted)] bg-[color-mix(in_oklab,var(--color-danger-muted)_15%,var(--color-surface))] p-3">
       <div className="flex items-baseline justify-between">
-        <div className="font-mono text-[11px] font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="font-mono text-sm font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
           {conflict.op_kind} · {conflict.record_id}
         </div>
-        <div className="font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+        <div className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
           {(conflict.detected_at || "").slice(11, 19)}Z detected
         </div>
       </div>
@@ -285,7 +285,7 @@ function ConflictRow({
           onPick={() => onResolve(conflict.id, "peer")}
         />
       </div>
-      <div className="mt-2 font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.12em" }}>
+      <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.12em" }}>
         Whichever side you pick wins. Loser preserved in audit chain via comms_conflict_resolved entry.
       </div>
     </div>
@@ -304,27 +304,27 @@ function ConflictSide({
   return (
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono">
       <div className="flex items-baseline justify-between">
-        <span className="text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+        <span className="text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
           {label}
         </span>
         <button
           onClick={onPick}
-          className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-2 py-[1px] text-[9px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+          className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-2 py-[1px] text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
           style={{ letterSpacing: "0.18em" }}
         >
           Pick
         </button>
       </div>
-      <div className="mt-1 text-[10px]">
+      <div className="mt-1 text-xs">
         <div className="text-[var(--color-text)]">{ev?.actor || "—"}</div>
-        <div className="text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+        <div className="text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
           {(ev?.at || "").slice(5, 19).replace("T", " ")}
         </div>
       </div>
-      <div className="mt-2 text-[9px] text-[var(--color-text-secondary)]">
+      <div className="mt-2 text-xs text-[var(--color-text-secondary)]">
         clock: <span className="tabular-nums text-[var(--color-text)]">{JSON.stringify(ev.clock)}</span>
       </div>
-      <div className="mt-1 text-[9px] text-[var(--color-text-secondary)]">
+      <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
         payload:{" "}
         <span className="text-[var(--color-text)]">
           {Object.entries(ev.payload).slice(0, 2).map(([k, v]) => (

@@ -140,7 +140,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
               {batch.data_quality.flags.map((f) => (
                 <div
                   key={f.type}
-                  className="flex items-center gap-2 rounded-sm border border-[var(--color-warning-muted)] bg-[color-mix(in_oklab,var(--color-warning-muted)_20%,var(--color-surface))] px-2 py-1 text-[11px]"
+                  className="flex items-center gap-2 rounded-sm border border-[var(--color-warning-muted)] bg-[color-mix(in_oklab,var(--color-warning-muted)_20%,var(--color-surface))] px-2 py-1 text-sm"
                 >
                   <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]" />
                   <span className="font-mono">{f.type.replace(/_/g, " ")}</span>
@@ -159,7 +159,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
               Preview (first {batch.preview.length})
             </div>
             <div className="overflow-hidden rounded-sm border border-[var(--color-border)]">
-              <table className="w-full border-collapse font-mono text-[11px]">
+              <table className="w-full border-collapse font-mono text-sm">
                 <thead>
                   <tr className="bg-[var(--color-bg)] text-[var(--color-text-muted)]">
                     <th className="p-2 text-left">SR</th>
@@ -218,7 +218,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
 function KV({ label, value, mono }: { label: string; value: any; mono?: boolean }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">{label}</div>
       <div className={clsx(mono && "font-mono", "text-[var(--color-text)]")}>{String(value)}</div>
     </div>
   );

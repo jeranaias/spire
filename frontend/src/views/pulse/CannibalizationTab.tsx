@@ -99,7 +99,7 @@ export function CannibalizationTab() {
       <section className="flex w-5/12 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
         <div className="mb-3">
           <h3
-            className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+            className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
             style={{ letterSpacing: "0.2em" }}
           >
             Needs · Open NMCS Assets ({needs.length})
@@ -121,19 +121,19 @@ export function CannibalizationTab() {
             >
               <div className="flex items-baseline justify-between gap-2">
                 <div>
-                  <div className="font-mono text-[13px] font-semibold text-[var(--color-text)]">{n.asset_id}</div>
-                  <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                  <div className="font-mono text-base font-semibold text-[var(--color-text)]">{n.asset_id}</div>
+                  <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
                     {n.equipment_type} · {n.unit} · open {n.days_open}d · fault: {n.fault_component}
                   </div>
                 </div>
                 <span
-                  className="rounded-sm border border-[var(--color-danger)] px-1.5 py-[1px] font-mono text-[9px] font-semibold uppercase text-[var(--color-danger)]"
+                  className="rounded-sm border border-[var(--color-danger)] px-1.5 py-[1px] font-mono text-xs font-semibold uppercase text-[var(--color-danger)]"
                   style={{ letterSpacing: "0.16em", background: "color-mix(in oklab, var(--color-danger-muted) 20%, transparent)" }}
                 >
                   NMCS
                 </span>
               </div>
-              <div className="mt-2 flex items-center gap-3 font-mono text-[11px]">
+              <div className="mt-2 flex items-center gap-3 font-mono text-sm">
                 <span className="text-[var(--color-text)]">{n.needed_part.nsn}</span>
                 <span className="text-[var(--color-text-secondary)]">{n.needed_part.nomenclature}</span>
                 <span className="ml-auto text-[var(--color-text-muted)]">${n.needed_part.unit_cost}</span>
@@ -146,7 +146,7 @@ export function CannibalizationTab() {
       <section className="flex w-3/12 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
         <div className="mb-3">
           <h3
-            className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+            className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
             style={{ letterSpacing: "0.2em" }}
           >
             Candidate Donors {selectedNeed && `(${donors.length})`}
@@ -158,12 +158,12 @@ export function CannibalizationTab() {
           </div>
         </div>
         {!selectedNeed && (
-          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
             NO SELECTION
           </div>
         )}
         {selectedNeed && donors.length === 0 && (
-          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
             NO COMPATIBLE DONORS
           </div>
         )}
@@ -175,15 +175,15 @@ export function CannibalizationTab() {
               className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-left transition-colors hover:border-[var(--color-primary)] hover:bg-[var(--color-surface-hover)]"
             >
               <div className="flex items-baseline justify-between">
-                <div className="font-mono text-[13px] font-semibold text-[var(--color-text)]">{d.asset_id}</div>
-                <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                <div className="font-mono text-base font-semibold text-[var(--color-text)]">{d.asset_id}</div>
+                <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
                   propose ▸
                 </span>
               </div>
-              <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+              <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
                 {d.equipment_type} · {d.unit} · open {d.days_open}d
               </div>
-              <div className="mt-1 font-mono text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+              <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
                 Fault: {d.fault_component}
               </div>
             </button>
@@ -194,7 +194,7 @@ export function CannibalizationTab() {
       <section className="flex w-4/12 flex-col overflow-y-auto p-4">
         <div className="mb-3">
           <h3
-            className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+            className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
             style={{ letterSpacing: "0.2em" }}
           >
             Completed Matches ({matches.length}) · Engine-Verified
@@ -220,19 +220,19 @@ export function CannibalizationTab() {
                 }}
               >
                 <div className="flex items-baseline justify-between">
-                  <div className="font-mono text-[13px] font-semibold text-[var(--color-text)]">{m.event_id}</div>
-                  <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                  <div className="font-mono text-base font-semibold text-[var(--color-text)]">{m.event_id}</div>
+                  <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
                     {m.event_date}
                     {isLocal && (
-                      <span className="ml-2 rounded-sm border border-[var(--color-primary)] px-1 text-[9px] uppercase text-[var(--color-primary)]">
+                      <span className="ml-2 rounded-sm border border-[var(--color-primary)] px-1 text-xs uppercase text-[var(--color-primary)]">
                         New
                       </span>
                     )}
                   </span>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+                    <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
                       Recipient
                     </div>
                     <div className="font-mono text-[var(--color-text)]">{m.recipient.asset_id}</div>
@@ -241,7 +241,7 @@ export function CannibalizationTab() {
                     </div>
                   </div>
                   <div>
-                    <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+                    <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
                       Donor
                     </div>
                     <div className="font-mono text-[var(--color-text)]">{m.donor.asset_id}</div>
@@ -250,12 +250,12 @@ export function CannibalizationTab() {
                     </div>
                   </div>
                 </div>
-                <div className="mt-2 font-mono text-[11px] text-[var(--color-text-secondary)]">
+                <div className="mt-2 font-mono text-sm text-[var(--color-text-secondary)]">
                   <span>{m.nsn}</span>
                   <span className="mx-1 text-[var(--color-border-active)]">·</span>
                   <span>{m.nomenclature}</span>
                 </div>
-                <div className="mt-1 spire-body-muted text-[11px] italic">{m.impact}</div>
+                <div className="mt-1 spire-body-muted text-sm italic">{m.impact}</div>
               </div>
             );
           })}
@@ -296,43 +296,43 @@ function ConfirmProposeModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div
-          className="mb-2 font-mono text-[10px] uppercase text-[var(--color-primary)]"
+          className="mb-2 font-mono text-xs uppercase text-[var(--color-primary)]"
           style={{ letterSpacing: "0.22em" }}
         >
           Propose Cannibalization Match
         </div>
-        <div className="mb-3 font-mono text-[14px] font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
           Confirm cross-level of {need.needed_part.nomenclature}
         </div>
         <div className="mb-3 grid grid-cols-2 gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
           <div>
-            <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
               Recipient
             </div>
-            <div className="mt-0.5 font-mono text-[13px] font-semibold text-[var(--color-text)]">{need.asset_id}</div>
-            <div className="font-mono text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+            <div className="mt-0.5 font-mono text-base font-semibold text-[var(--color-text)]">{need.asset_id}</div>
+            <div className="font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
               {need.unit} · {need.equipment_type}
             </div>
           </div>
           <div>
-            <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
               Donor
             </div>
-            <div className="mt-0.5 font-mono text-[13px] font-semibold text-[var(--color-text)]">{donor.asset_id}</div>
-            <div className="font-mono text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+            <div className="mt-0.5 font-mono text-base font-semibold text-[var(--color-text)]">{donor.asset_id}</div>
+            <div className="font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
               {donor.unit} · {donor.equipment_type}
             </div>
           </div>
           <div className="col-span-2">
-            <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
               NSN
             </div>
-            <div className="mt-0.5 font-mono text-[12px] text-[var(--color-text)]">
+            <div className="mt-0.5 font-mono text-base text-[var(--color-text)]">
               {need.needed_part.nsn} · {need.needed_part.nomenclature}
             </div>
           </div>
         </div>
-        <div className="mb-4 spire-body-muted text-[11px]">
+        <div className="mb-4 spire-body-muted text-sm">
           {crossUnit
             ? "Cross-unit match — requires coordination between recipient and donor commands."
             : "Intra-unit match — direct motor pool transfer."}
@@ -341,7 +341,7 @@ function ConfirmProposeModal({
         <div className="flex items-center justify-end gap-2">
           <button
             onClick={onCancel}
-            className="rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-[11px] font-semibold uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+            className="rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
             style={{ letterSpacing: "0.18em" }}
           >
             Cancel
@@ -349,7 +349,7 @@ function ConfirmProposeModal({
           <button
             onClick={onConfirm}
             disabled={committing}
-            className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
+            className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
             style={{ letterSpacing: "0.18em" }}
           >
             {committing ? "Committing…" : "Commit Proposal"}

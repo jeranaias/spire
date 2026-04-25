@@ -215,14 +215,14 @@ export function FeedbackDrawer() {
             }}
           >
             <div
-              className="font-mono text-[9px] uppercase text-[var(--color-primary)]"
+              className="font-mono text-xs uppercase text-[var(--color-primary)]"
               style={{ letterSpacing: "0.22em" }}
             >
               Report defect, enhancement, or inquiry
             </div>
-            <div className="mt-1 font-mono text-[11px] leading-snug text-[var(--color-text)]">
+            <div className="mt-1 font-mono text-sm leading-snug text-[var(--color-text)]">
               Bug, idea, question, even praise — drop it here any time.
-              Press <kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1 text-[10px]">Shift</kbd>+<kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1 text-[10px]">F</kbd> from anywhere.
+              Press <kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1 text-xs">Shift</kbd>+<kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1 text-xs">F</kbd> from anywhere.
             </div>
             <div
               className="absolute bottom-[-7px] right-6 h-3 w-3 rotate-45 border-b border-r border-[var(--color-primary)] bg-[var(--color-surface)]"
@@ -232,7 +232,7 @@ export function FeedbackDrawer() {
         )}
         <button
           onClick={() => { setOpen(true); dismissCoach(); }}
-          className="pointer-events-auto flex items-center gap-2 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] px-3 py-2 font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] shadow-lg backdrop-blur transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-surface))]"
+          className="pointer-events-auto flex items-center gap-2 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] px-3 py-2 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] shadow-lg backdrop-blur transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-surface))]"
           style={{
             letterSpacing: "0.18em",
             animation: coachVisible ? "feedback-pulse 1.6s ease-in-out infinite" : undefined,
@@ -263,12 +263,12 @@ export function FeedbackDrawer() {
               <div>
                 <div
                   id="spire-feedback-title"
-                  className="font-mono text-[10px] uppercase text-[var(--color-primary)]"
+                  className="font-mono text-xs uppercase text-[var(--color-primary)]"
                   style={{ letterSpacing: "0.22em" }}
                 >
                   Pilot Feedback
                 </div>
-                <div className="mt-0.5 spire-body-muted text-[11px]">
+                <div className="mt-0.5 spire-body-muted text-sm">
                   Filing as <span className="text-[var(--color-text)]">{ROLE_LABELS[role]}</span>
                   &nbsp;from <span className="text-[var(--color-text)]">{friendlyView(location.pathname)}</span>
                   {airGap && (
@@ -278,7 +278,7 @@ export function FeedbackDrawer() {
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="flex h-11 w-11 items-center justify-center rounded font-mono text-[14px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+                className="flex h-11 w-11 items-center justify-center rounded font-mono text-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
                 aria-label="Close feedback drawer"
               >
                 ✕
@@ -294,7 +294,7 @@ export function FeedbackDrawer() {
                   <button
                     key={t.value}
                     onClick={() => setIssueType(t.value)}
-                    className="rounded-sm px-2 py-1.5 font-mono text-[10px] font-semibold uppercase transition-colors"
+                    className="rounded-sm px-2 py-1.5 font-mono text-xs font-semibold uppercase transition-colors"
                     style={{
                       letterSpacing: "0.16em",
                       background: active ? "var(--color-primary)" : "transparent",
@@ -307,7 +307,7 @@ export function FeedbackDrawer() {
               })}
             </div>
             <div
-              className="-mt-1 font-mono text-[10px] italic text-[var(--color-text-muted)]"
+              className="-mt-1 font-mono text-xs italic text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.04em" }}
             >
               {activeType.tagline}
@@ -315,7 +315,7 @@ export function FeedbackDrawer() {
 
             <div className="flex items-center gap-2">
               <span
-                className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
                 style={{ letterSpacing: "0.18em", minWidth: "5rem" }}
               >
                 Submitted by
@@ -324,7 +324,7 @@ export function FeedbackDrawer() {
                 value={submitter}
                 onChange={(e) => setSubmitter(e.target.value)}
                 placeholder="optional · e.g. SSgt Jones, CWO Smith"
-                className="flex-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[11px] text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                className="flex-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
                 autoComplete="name"
               />
             </div>
@@ -339,7 +339,7 @@ export function FeedbackDrawer() {
               : issueType === "question" ? "Your question in one line (e.g. 'how do I queue a TMR offline?')"
               :                            "What worked well, in one line"
               }
-              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono text-[12px] text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono text-base text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
             />
 
             <textarea
@@ -347,13 +347,13 @@ export function FeedbackDrawer() {
               onChange={(e) => setBody(e.target.value)}
               rows={6}
               placeholder={activeType.placeholder}
-              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono text-[12px] text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono text-base text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
             />
 
             {showSeverity && (
               <div className="flex items-center gap-2">
                 <span
-                  className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+                  className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
                   style={{ letterSpacing: "0.18em" }}
                 >
                   Severity
@@ -363,7 +363,7 @@ export function FeedbackDrawer() {
                     <button
                       key={s.value}
                       onClick={() => setSeverity(s.value)}
-                      className="px-2 py-1 font-mono text-[10px] font-semibold uppercase transition-colors"
+                      className="px-2 py-1 font-mono text-xs font-semibold uppercase transition-colors"
                       style={{
                         letterSpacing: "0.16em",
                         borderLeft: i === 0 ? "none" : "1px solid var(--color-border)",
@@ -382,7 +382,7 @@ export function FeedbackDrawer() {
 
             <div className="flex items-center justify-between gap-2 pt-1">
               <span
-                className="font-mono text-[9px] text-[var(--color-text-muted)]"
+                className="font-mono text-xs text-[var(--color-text-muted)]"
                 style={{ letterSpacing: "0.14em" }}
               >
                 Audit chain · GitHub Issues (when token set)
@@ -390,7 +390,7 @@ export function FeedbackDrawer() {
               <button
                 onClick={submit}
                 disabled={submitting || !title.trim() || !body.trim()}
-                className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
+                className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
                 style={{ letterSpacing: "0.18em" }}
               >
                 {submitting ? "Filing …" : "Submit"}
@@ -453,14 +453,14 @@ function DiagnosticsRow({ d }: { d: Diagnostics }) {
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
       <button
         onClick={() => setShow((v) => !v)}
-        className="flex w-full items-center justify-between px-2 py-1 font-mono text-[10px] uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        className="flex w-full items-center justify-between px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
         style={{ letterSpacing: "0.18em" }}
       >
         <span>Diagnostics auto-attached · {d.viewport} · {d.air_gap ? "AIR-GAP" : d.comms_state}</span>
         <span>{show ? "▾" : "▸"}</span>
       </button>
       {show && (
-        <ul className="border-t border-[var(--color-border)] px-2 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]">
+        <ul className="border-t border-[var(--color-border)] px-2 py-2 font-mono text-xs text-[var(--color-text-secondary)]">
           {Object.entries(d).map(([k, v]) => (
             <li key={k} className="flex items-baseline justify-between gap-2 py-[1px]">
               <span className="text-[var(--color-text-muted)]" style={{ letterSpacing: "0.04em" }}>{k}</span>
