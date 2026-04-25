@@ -1,0 +1,44 @@
+# Keep the build context small — speeds up `fly deploy` + Docker builds.
+.git
+.gitignore
+.env
+.env.local
+.env.*.local
+.venv
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/coverage
+
+# Docs + scripts not shipped in image
+docs/
+scripts/
+tmp/
+.tmp/
+.tmp_e2e/
+ABLATION_*.md
+*.log
+backend.out.log
+backend.err.log
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+.devcontainer/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models — never ship raw weights into the public image
+models/

@@ -1,0 +1,46 @@
+# SPIRE — Fly.io deployment.
+#
+# One-time bootstrap (after `fly auth login`):
+#   fly launch --no-deploy --copy-config --name spire-mdm --region iad
+#   fly volume create spire_runtime --region iad --size 1 --yes
+#   fly secrets set \
+#       SPIRE_GITHUB_TOKEN=$(cat .env | grep ^SPIRE_GITHUB_TOKEN= | cut -d= -f2) \
+#       SPIRE_GITHUB_REPO=jeranaias/spire \
+#       SPIRE_DB_PASSPHRASE=$(openssl rand -base64 32)
+#   fly deploy
+#
+# Subsequent deploys: just `fly deploy`.
+
+app = "spire-mdm"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.web"
+
+[env]
+  SPIRE_MODE = "full"
+  PYTHONUNBUFFERED = "1"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout  = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/healthz"
+
+[mounts]
+  source = "spire_runtime"
+  destination = "/opt/spire/runtime"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1gb"
