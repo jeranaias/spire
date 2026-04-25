@@ -58,6 +58,17 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
           {toast.undo.label}
         </button>
       )}
+      {toast.link && (
+        <a
+          href={toast.link.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-[10px] uppercase text-[var(--color-primary)] hover:underline"
+          style={{ letterSpacing: "0.14em" }}
+        >
+          {toast.link.label} ↗
+        </a>
+      )}
       <button
         onClick={onDismiss}
         className="font-mono text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"

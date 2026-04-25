@@ -297,20 +297,28 @@ async def submit_feedback(payload: dict = Body(default={})):
     if not title or not body:
         raise HTTPException(status_code=400, detail="title + body required")
 
+    issue_type = (payload.get("issue_type") or "bug").lower()
+    if issue_type not in ("bug", "idea", "question", "praise"):
+        issue_type = "bug"
     severity = payload.get("severity", "minor")
     role = payload.get("role", "unknown")
     view = payload.get("view", "")
     actor = payload.get("actor", role)
+    diagnostics = payload.get("diagnostics") or {}
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
 
     record = {
         "id": f"FB-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
         "title": title,
         "body": body,
-        "severity": severity,
+        "issue_type": issue_type,
+        "severity": severity if issue_type == "bug" else "n/a",
         "role": role,
         "view": view,
         "submitted_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "actor": actor,
+        "diagnostics": diagnostics,
         "github_issue_url": None,
     }
 
@@ -318,7 +326,10 @@ async def submit_feedback(payload: dict = Body(default={})):
         "pilot_feedback_submitted",
         actor=actor,
         subject_id=record["id"],
-        payload={"title": title, "severity": severity, "role": role, "view": view},
+        payload={
+            "title": title, "issue_type": issue_type, "severity": record["severity"],
+            "role": role, "view": view,
+        },
     )
 
     # Optional GitHub issue creation. Token + repo come from env so an
@@ -329,25 +340,49 @@ async def submit_feedback(payload: dict = Body(default={})):
         try:
             import urllib.request
             import urllib.error
+            type_titles = {
+                "bug":      ("[Bug]",      "bug"),
+                "idea":     ("[Idea]",     "enhancement"),
+                "question": ("[Question]", "question"),
+                "praise":   ("[Praise]",   "praise"),
+            }
+            title_prefix, type_label = type_titles.get(issue_type, ("[Bug]", "bug"))
+            severity_labels = {
+                "cosmetic": ["cosmetic"],
+                "minor":    [],
+                "major":    ["priority"],
+                "critical": ["priority", "incident"],
+            }
+            sev_labels = severity_labels.get(severity, []) if issue_type == "bug" else []
+            diag_block = ""
+            if diagnostics:
+                diag_lines = "\n".join(
+                    f"  - **{k}**: `{v}`" for k, v in diagnostics.items() if v not in (None, "")
+                )
+                if diag_lines:
+                    diag_block = (
+                        "\n\n<details><summary>Diagnostics auto-attached</summary>\n\n"
+                        f"{diag_lines}\n\n</details>"
+                    )
             issue_body = (
                 f"**Filed via in-app feedback drawer.**\n\n"
+                f"- **Type:** {issue_type}\n"
                 f"- **Role:** {role}\n"
                 f"- **View:** {view or 'unspecified'}\n"
-                f"- **Severity:** {severity}\n"
-                f"- **Submitted at:** {record['submitted_at']}\n"
+                + (f"- **Severity:** {severity}\n" if issue_type == "bug" else "")
+                + f"- **Submitted at:** {record['submitted_at']}\n"
                 f"- **Local feedback id:** `{record['id']}`\n\n"
                 f"---\n\n{body}"
+                f"{diag_block}"
             )
-            label_map = {
-                "cosmetic": ["bug", "cosmetic"],
-                "minor":    ["bug"],
-                "major":    ["bug", "priority"],
-                "critical": ["bug", "priority", "incident"],
-            }
+            labels = (
+                [f"type:{type_label}", "pilot-feedback", f"role:{role}"]
+                + sev_labels
+            )
             data = json.dumps({
-                "title": f"[{severity}] {title}",
+                "title": f"{title_prefix} {title}",
                 "body": issue_body,
-                "labels": label_map.get(severity, ["bug"]) + [f"role:{role}", "pilot-feedback"],
+                "labels": labels,
             }).encode("utf-8")
             req = urllib.request.Request(
                 f"https://api.github.com/repos/{gh_repo}/issues",
