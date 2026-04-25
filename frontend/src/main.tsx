@@ -5,6 +5,21 @@ import { createRoot } from "react-dom/client";
 // keeps deep links (sentry/review, pulse/cannibalization) functional if a
 // judge reloads or clicks a share link while we're offline.
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+
+// Self-hosted fonts — eliminates the Google Fonts cross-origin DNS +
+// TLS handshake on every cold start. Vite emits these as same-origin
+// woff2 with content-hash + 1y immutable cache (see nginx.fly.conf).
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/500.css";
+import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource/ibm-plex-sans/700.css";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "@fontsource/ibm-plex-mono/600.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/jetbrains-mono/600.css";
+
 import App from "./App";
 import { SentryView } from "./views/SentryView";
 import { PulseView } from "./views/PulseView";
@@ -66,3 +81,11 @@ createRoot(document.getElementById("root")!).render(
     </ErrorBoundary>
   </StrictMode>
 );
+
+// Remove the static hero once React has hydrated. Done on the next animation
+// frame so the React tree paints before we yank the placeholder — no
+// flash-of-unstyled-content.
+requestAnimationFrame(() => {
+  const hero = document.getElementById("spire-static-hero");
+  if (hero) hero.remove();
+});
