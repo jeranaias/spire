@@ -1,20 +1,8 @@
-// @ts-nocheck -- react-leaflet 5 type defs for Circle/CircleMarker/Tooltip
-// props are broken in our TS config; runtime works correctly.
-import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, CircleMarker, Tooltip as LTooltip, Popup, Circle, useMap } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import { api, type BastionAlert, type BastionCOP, type IncidentResponse, type ThermalHawkSim } from "../api";
+import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
 import { useSpireStore } from "../state/store";
-
-// Ensure default Leaflet icons don't throw at import time
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-});
+import { InstallationSchematic } from "../components/InstallationSchematic";
 
 const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: "#ef4444",
@@ -24,20 +12,28 @@ const SEVERITY_COLOR: Record<string, string> = {
   INFO: "#3b82f6",
 };
 
-function colorForMc(rate: number): string {
-  if (rate >= 0.90) return "#22c55e";
-  if (rate >= 0.75) return "#f59e0b";
-  if (rate >= 0.60) return "#fb923c";
-  return "#ef4444";
-}
+// Maps a unit name to the building id its markers live on. Kept in sync
+// with InstallationSchematic's UNIT_BUILDING table.
+const UNIT_BUILDING: Record<string, string> = {
+  "CLB-6":        "CLB6-MP",
+  "CLB-1":        "MLG-SSC",
+  "3d Maint Bn":  "MLG-SSC",
+  "2d Tank Bn":   "TANK-MP",
+  "2d LAR Bn":    "LAR-MP",
+  "MALS-31":      "HH-1",
+  "MWSS-372":     "DL-HQ",
+  "2d LAAD Bn":   "LAAD-TOC",
+  "5/11 Marines": "TOC-MAIN",
+  "7th ESB":      "ESB-WS",
+};
 
 export function BastionView() {
   const role = useSpireStore((s) => s.role);
   const [cop, setCop] = useState<BastionCOP | null>(null);
   const [alerts, setAlerts] = useState<BastionAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<BastionAlert | null>(null);
+  const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [sim, setSim] = useState<ThermalHawkSim | null>(null);
-  const [response, setResponse] = useState<IncidentResponse | null>(null);
   const [nlText, setNlText] = useState("");
   const [nlResult, setNlResult] = useState<any | null>(null);
 
@@ -61,10 +57,40 @@ export function BastionView() {
     return () => window.clearInterval(t);
   }, []);
 
+  const setFpcon = useSpireStore((s) => s.setFpcon);
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const [recentAlertIds, setRecentAlertIds] = useState<Set<string>>(new Set());
+
+  // Detect new alerts arriving in the poll so we can scan-line the row.
+  const prevAlertIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const prev = prevAlertIdsRef.current;
+    const fresh = new Set<string>();
+    for (const a of alerts) {
+      if (!prev.has(a.id)) fresh.add(a.id);
+    }
+    if (fresh.size > 0) {
+      setRecentAlertIds(fresh);
+      window.setTimeout(() => setRecentAlertIds(new Set()), 700);
+    }
+    prevAlertIdsRef.current = new Set(alerts.map((a) => a.id));
+  }, [alerts]);
+
   async function triggerThermalHawk() {
     const s = await api.bastion.simulateThermalHawk("CLB-6");
     setSim(s);
     setSelectedAlert(s.alert);
+    setSelectedUnit("CLB-6");
+    // Escalate FPCON BRAVO → CHARLIE for the duration of the incident.
+    setFpcon("CHARLIE");
+    pushToast({
+      tone: "warn",
+      text: "FPCON elevated to CHARLIE · ThermalHawk UAS incident active",
+      ttlMs: 4500,
+    });
+    // De-escalate automatically after 30s for demo purposes (production would
+    // follow the response-force disposition event chain).
+    window.setTimeout(() => setFpcon("BRAVO"), 30_000);
     refreshAlerts();
   }
 
@@ -74,134 +100,158 @@ export function BastionView() {
     setNlResult(r);
   }
 
+  function onUnitClick(unitName: string) {
+    setSelectedUnit(unitName);
+    // Promote the most relevant alert for that unit, if any
+    const unitAlerts = alerts.filter((a) => a.unit === unitName);
+    if (unitAlerts.length > 0) setSelectedAlert(unitAlerts[0]);
+  }
+
+  const simTargetBuilding = useMemo(() => {
+    if (!sim) return undefined;
+    return UNIT_BUILDING[sim.alert.unit || "CLB-6"] || "CLB6-MP";
+  }, [sim]);
+
+  // When an alert is selected, derive a "fly to" target building:
+  // - Alerts with a `unit` map to that unit's home building
+  // - Alerts with a `grid` fall back to the nearest named building (future)
+  const flyToBuilding = useMemo(() => {
+    if (!selectedAlert) return null;
+    if (selectedAlert.unit && UNIT_BUILDING[selectedAlert.unit]) {
+      return UNIT_BUILDING[selectedAlert.unit];
+    }
+    return null;
+  }, [selectedAlert]);
+
   if (!cop) {
-    return <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">Loading COP ...</div>;
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">
+        Loading installation schematic ...
+      </div>
+    );
   }
 
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left sidebar: alert stream */}
-      <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
+      <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            Alert stream
+          <h3
+            className="font-mono text-[10px] font-semibold uppercase text-[var(--color-text)]"
+            style={{ letterSpacing: "0.18em" }}
+          >
+            Alert Stream
           </h3>
-          <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] tabular-nums text-[var(--color-text-muted)]">
+          <span
+            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.08em" }}
+          >
             {alerts.length}
           </span>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
-          {alerts.map((a) => (
-            <AlertRow key={a.id} alert={a} selected={selectedAlert?.id === a.id} onClick={() => setSelectedAlert(a)} />
+          {dedupeAlerts(alerts).map((a) => (
+            <AlertRow
+              key={a.id}
+              alert={a}
+              groupCount={a._groupCount}
+              justArrived={recentAlertIds.has(a.id)}
+              selected={selectedAlert?.id === a.id}
+              onClick={() => {
+                setSelectedAlert(a);
+                if (a.unit) setSelectedUnit(a.unit);
+              }}
+            />
           ))}
         </div>
         <div className="border-t border-[var(--color-border)] p-3">
           <button
             onClick={triggerThermalHawk}
-            className="w-full rounded border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_40%,var(--color-surface))] px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white"
+            className="w-full rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_40%,var(--color-surface))] px-3 py-2 font-mono text-[11px] font-semibold uppercase text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger)] hover:text-white"
+            style={{ letterSpacing: "0.16em" }}
           >
-            ⚠ Simulate ThermalHawk detection
+            ⚠ Simulate ThermalHawk
           </button>
-          <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
-            Drops a UAS event over CLB-6 motor pool. Auto-correlates with PULSE readiness.
+          <div className="mt-1.5 font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+            UAS event over CLB-6 motor pool. Auto-correlates with PULSE readiness.
           </div>
         </div>
       </aside>
 
-      {/* Center: map */}
+      {/* Center: schematic */}
       <div className="relative flex-1">
-        <MapContainer
-          center={[cop.center.lat, cop.center.lon]}
-          zoom={13}
-          scrollWheelZoom
-          className="h-full w-full"
-          style={{ background: "var(--color-bg)" }}
+        <InstallationSchematic
+          buildings={cop.buildings}
+          units={cop.units}
+          ecps={cop.ecps}
+          rallyPoints={cop.rally_points}
+          selectedUnit={selectedUnit}
+          onUnitClick={onUnitClick}
+          flyToBuilding={flyToBuilding}
+          simActive={!!sim}
+          simTargetBuilding={simTargetBuilding}
+          simCordons={sim?.cordon_zones}
+        />
+
+        {/* Installation title badge — top-left */}
+        <div
+          className="pointer-events-none absolute left-3 top-3 z-[6] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
         >
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            subdomains="abcd"
-            attribution="© OpenStreetMap contributors © CARTO"
-          />
+          <div
+            className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.22em" }}
+          >
+            Common Operating Picture
+          </div>
+          <div
+            className="mt-0.5 font-mono text-sm font-semibold uppercase text-[var(--color-text)]"
+            style={{ letterSpacing: "0.14em" }}
+          >
+            {cop.installation.name}
+          </div>
+          <div
+            className="mt-0.5 font-mono text-[9px] text-[var(--color-text-secondary)]"
+            style={{ letterSpacing: "0.1em" }}
+          >
+            {cop.buildings_count} buildings · {cop.ecps.length} ECPs · {cop.response_forces_count} RF · FPCON BRAVO
+            {cop.installation.fictional && (
+              <span className="ml-2 text-[var(--color-warning)]">· SYNTHETIC</span>
+            )}
+          </div>
+        </div>
 
-          {/* Units */}
-          {cop.units.map((u) => {
-            const color = colorForMc(u.mc_rate);
-            const radius = 8 + Math.min(20, u.total_equipment / 4);
-            const hasAlert = u.alerts.length > 0 || (u.mc_rate < 0.70);
-            return (
-              <g key={u.unit}>
-                {hasAlert && (
-                  <Circle
-                    center={[u.lat, u.lon]}
-                    radius={radius * 200}
-                    pathOptions={{ color, fillColor: color, fillOpacity: 0.05, weight: 1, opacity: 0.4, dashArray: "4 4" }}
-                  />
-                )}
-                <CircleMarker
-                  center={[u.lat, u.lon]}
-                  radius={radius}
-                  pathOptions={{ color, fillColor: color, fillOpacity: 0.6, weight: 2 }}
-                >
-                  <LTooltip direction="top" offset={[0, -radius]} opacity={1}>
-                    <div style={{ color: "var(--color-text)", fontSize: 11 }}>
-                      <strong>{u.unit}</strong> · {(u.mc_rate * 100).toFixed(0)}% MC · {u.total_equipment} assets
-                    </div>
-                  </LTooltip>
-                  <Popup>
-                    <div style={{ minWidth: 220 }}>
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>{u.unit}</div>
-                      <div style={{ fontSize: 11, color: "#6b7280" }}>
-                        {u.parent} · {u.location}
-                      </div>
-                      <div style={{ marginTop: 6, fontFamily: "monospace", fontSize: 12 }}>
-                        MC: {(u.mc_rate * 100).toFixed(1)}% ({u.mc_count}/{u.total_equipment})
-                      </div>
-                      <div style={{ marginTop: 4, fontSize: 11 }}>
-                        PMC {u.pmc_count} · NMCM {u.nmcm_count} · NMCS {u.nmcs_count}
-                      </div>
-                      {u.data_integrity_flags > 0 && (
-                        <div style={{ marginTop: 4, color: "#f59e0b", fontSize: 11 }}>
-                          ⚠ {u.data_integrity_flags} data-quality flag{u.data_integrity_flags === 1 ? "" : "s"}
-                        </div>
-                      )}
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              </g>
-            );
-          })}
+        {/* Mission HUD — top-right */}
+        <MissionHUD />
 
-          {/* ThermalHawk simulation rendering */}
-          {sim && <ThermalHawkOverlay sim={sim} />}
-        </MapContainer>
-
-        {/* NL query bar */}
-        <div className="absolute inset-x-0 top-0 z-[500] p-3">
-          <div className="mx-auto max-w-2xl rounded-md border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_92%,transparent)] p-2 shadow-lg backdrop-blur">
+        {/* NL query bar — bottom-centered so it doesn't fight with the title */}
+        <div className="absolute inset-x-0 bottom-3 z-[7] flex justify-center px-3">
+          <div
+            className="w-full max-w-2xl rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] p-2 shadow-lg backdrop-blur"
+          >
             <div className="flex items-center gap-2">
-              <span className="px-2 text-xs text-[var(--color-text-muted)]">🔍</span>
+              <span
+                className="pl-1.5 pr-0.5 font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+                style={{ letterSpacing: "0.18em" }}
+              >
+                ASK·BASTION
+              </span>
               <input
                 value={nlText}
                 onChange={(e) => setNlText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleNL()}
-                placeholder='Ask BASTION... e.g. "Submit TMR Lejeune to Geiger 5 MTVRs Wednesday urgent"'
+                placeholder='e.g. "Submit TMR Lejeune to Geiger 5 MTVRs Wednesday urgent"'
                 className="flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
               />
               <button
                 onClick={handleNL}
-                className="rounded border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 text-xs text-white hover:bg-[var(--color-primary-hover)]"
+                className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+                style={{ letterSpacing: "0.14em" }}
               >
                 Submit
               </button>
             </div>
             {nlResult && <NLResultPanel result={nlResult} onClose={() => setNlResult(null)} />}
           </div>
-        </div>
-
-        {/* Installation info footer */}
-        <div className="absolute bottom-3 left-3 z-[500] rounded border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_92%,transparent)] px-3 py-1.5 text-[10px] text-[var(--color-text-muted)] backdrop-blur">
-          {cop.installation.name} · {cop.buildings_count} buildings · {cop.ecps.length} ECPs · {cop.response_forces_count} response forces
-          {cop.installation.fictional && <span className="ml-2 text-[var(--color-warning)]">⚠ synthetic</span>}
         </div>
       </div>
 
@@ -212,7 +262,6 @@ export function BastionView() {
           sim={sim}
           onClose={() => {
             setSelectedAlert(null);
-            setResponse(null);
           }}
         />
       )}
@@ -220,77 +269,148 @@ export function BastionView() {
   );
 }
 
-function AlertRow({ alert, selected, onClick }: { alert: BastionAlert; selected: boolean; onClick: () => void }) {
+// Collapse adjacent identical (source, title) alerts into a single row with
+// a count badge so 11 copies of "UAS DETECTED" read as "UAS DETECTED ×11"
+// instead of a wall of red.
+type GroupedAlert = BastionAlert & { _groupCount?: number };
+function dedupeAlerts(alerts: BastionAlert[]): GroupedAlert[] {
+  const seen = new Map<string, GroupedAlert>();
+  for (const a of alerts) {
+    const key = `${a.source}::${a.title}`;
+    const existing = seen.get(key);
+    if (existing) {
+      existing._groupCount = (existing._groupCount ?? 1) + 1;
+      // Keep the newest timestamp visible
+      if (new Date(a.timestamp) > new Date(existing.timestamp)) {
+        existing.timestamp = a.timestamp;
+      }
+    } else {
+      seen.set(key, { ...a });
+    }
+  }
+  return Array.from(seen.values()).sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+}
+
+function AlertRow({
+  alert,
+  selected,
+  onClick,
+  groupCount,
+  justArrived,
+}: {
+  alert: BastionAlert;
+  selected: boolean;
+  onClick: () => void;
+  groupCount?: number;
+  justArrived?: boolean;
+}) {
   const color = SEVERITY_COLOR[alert.severity] || SEVERITY_COLOR.INFO;
   return (
     <div
       onClick={onClick}
       className={clsx(
-        "mb-1.5 cursor-pointer rounded-sm border-l-4 bg-[var(--color-surface)] px-2 py-1.5 transition-colors",
+        "relative mb-1.5 cursor-pointer overflow-hidden rounded-sm border-l-4 bg-[var(--color-surface)] px-2 py-1.5 transition-colors",
         selected ? "border border-[var(--color-primary)]" : "border-r border-t border-b border-[var(--color-border)]",
       )}
       style={{ borderLeftColor: color }}
     >
-      <div className="flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
+      {justArrived && (
+        <div
+          className="scan-line pointer-events-none absolute inset-y-0 left-0 w-full"
+          style={{
+            background: `linear-gradient(90deg, transparent 0%, ${color} 50%, transparent 100%)`,
+            opacity: 0.35,
+          }}
+        />
+      )}
+      <div className="flex items-center gap-1 font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
         <span className="font-semibold" style={{ color }}>{alert.severity}</span>
         <span>· {alert.source}</span>
-        <span className="ml-auto font-mono">{new Date(alert.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
+        {groupCount && groupCount > 1 && (
+          <span
+            className="rounded-sm border px-1 font-semibold tabular-nums"
+            style={{
+              color,
+              borderColor: `color-mix(in oklab, ${color} 40%, var(--color-border))`,
+              background: `color-mix(in oklab, ${color} 12%, transparent)`,
+              letterSpacing: "0.05em",
+            }}
+          >
+            ×{groupCount}
+          </span>
+        )}
+        <span className="ml-auto tabular-nums">
+          {new Date(alert.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}
+        </span>
       </div>
-      <div className="mt-0.5 text-xs font-medium text-[var(--color-text)]">{alert.title}</div>
+      <div className="mt-0.5 text-[12px] font-medium text-[var(--color-text)]">{alert.title}</div>
       <div className="line-clamp-2 text-[10px] text-[var(--color-text-secondary)]">{alert.body}</div>
     </div>
   );
 }
 
-function ThermalHawkOverlay({ sim }: { sim: ThermalHawkSim }) {
-  const map = useMap();
-  // Drone track — fake moving dot; we place the start near the alert's grid.
-  // For v1 we just plot a hot dot at CLB-6 motor pool offset.
-  const center: [number, number] = [34.6690, -77.4210]; // CLB-6 MP
-  const [pos, setPos] = useState<[number, number]>(center);
-
+function MissionHUD() {
+  const [now, setNow] = useState(new Date());
   useEffect(() => {
-    // Sweep the drone 600m east over 6s
-    let ms = 0;
-    const id = window.setInterval(() => {
-      ms += 100;
-      const t = Math.min(1, ms / 6000);
-      setPos([center[0] + t * 0.002, center[1] + t * 0.008]);
-    }, 100);
+    const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    map.flyTo(center, 15, { duration: 1.2 });
-  }, [map]);
+  const z = (n: number, w = 2) => String(n).padStart(w, "0");
+  const zulu = `${z(now.getUTCHours())}${z(now.getUTCMinutes())}${z(now.getUTCSeconds())}Z`;
+  const datestamp = `${z(now.getUTCDate())} ${now
+    .toLocaleString("en-US", { month: "short", timeZone: "UTC" })
+    .toUpperCase()} ${now.getUTCFullYear().toString().slice(2)}`;
 
   return (
-    <>
-      {sim.cordon_zones.map((cz) => (
-        <Circle
-          key={cz.radius_m}
-          center={center}
-          radius={cz.radius_m}
-          pathOptions={{
-            color: cz.radius_m <= 300 ? "#ef4444" : cz.radius_m <= 500 ? "#f59e0b" : "#3b82f6",
-            fillOpacity: 0.04,
-            weight: 1,
-            dashArray: "3 6",
-          }}
-        />
-      ))}
-      <CircleMarker
-        center={pos}
-        radius={6}
-        pathOptions={{ color: "#ef4444", fillColor: "#fca5a5", fillOpacity: 0.95, weight: 2, className: "animate-pulse" }}
+    <div
+      className="pointer-events-none absolute right-3 top-3 z-[6] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
+    >
+      <div
+        className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+        style={{ letterSpacing: "0.18em" }}
       >
-        <LTooltip permanent direction="top">
-          <span style={{ color: "#ef4444", fontWeight: 600 }}>UAS</span>
-        </LTooltip>
-      </CircleMarker>
-    </>
+        Mission Clock
+      </div>
+      <div
+        className="mt-0.5 font-mono text-[17px] font-semibold tabular-nums text-[var(--color-text)]"
+        style={{ letterSpacing: "0.05em", lineHeight: 1 }}
+      >
+        {zulu}
+      </div>
+      <div
+        className="mt-0.5 font-mono text-[9px] text-[var(--color-text-secondary)]"
+        style={{ letterSpacing: "0.14em" }}
+      >
+        {datestamp}
+      </div>
+    </div>
   );
+}
+
+// Role-specific filter over the canonical checklist. Keeps the scope of the
+// response panel honest — a Maintenance Chief shouldn't see tasks for FPCON
+// escalation or regional notification; a MEF Commander sees decision-level
+// summaries; a Security Manager gets the full tasklist.
+function filterChecklistForRole(
+  items: string[],
+  role: string,
+): string[] {
+  if (role === "maintenance_chief") {
+    return items.filter((it) => /equipment|facility|unit|update|motor|MEL|parts|shop/i.test(it));
+  }
+  if (role === "g4") {
+    return items.filter((it) => /notify|dispatch|coordinate|MLG|convoy|TMR|expedite|response/i.test(it));
+  }
+  if (role === "mef_commander") {
+    // Commander view: keep only 3-5 decision-critical lines
+    return items.slice(0, Math.max(3, Math.ceil(items.length / 3)));
+  }
+  // Security Manager + Data Custodian default: full checklist
+  return items;
 }
 
 function ResponsePanel({
@@ -302,8 +422,18 @@ function ResponsePanel({
   sim: ThermalHawkSim | null;
   onClose: () => void;
 }) {
+  const role = useSpireStore((s) => s.role);
   const checklist = sim && sim.alert.id === alert.id ? sim.checklist : null;
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+
+  const scopedImmediate = useMemo(
+    () => (checklist ? filterChecklistForRole(checklist.immediate, role) : []),
+    [checklist, role],
+  );
+  const scopedFollowOn = useMemo(
+    () => (checklist ? filterChecklistForRole(checklist.followon, role) : []),
+    [checklist, role],
+  );
 
   function toggle(key: string) {
     setChecked((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -314,7 +444,10 @@ function ResponsePanel({
       <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div className="flex items-start justify-between">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: SEVERITY_COLOR[alert.severity] }}>
+            <div
+              className="font-mono text-[10px] font-semibold uppercase"
+              style={{ letterSpacing: "0.18em", color: SEVERITY_COLOR[alert.severity] }}
+            >
               {alert.severity} · {alert.source}
             </div>
             <div className="mt-0.5 text-sm font-semibold">{alert.title}</div>
@@ -338,8 +471,11 @@ function ResponsePanel({
 
         {alert.model_info && (
           <section className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-              Detection model
+            <div
+              className="mb-1 font-mono text-[9px] font-semibold uppercase text-[var(--color-text-muted)]"
+              style={{ letterSpacing: "0.18em" }}
+            >
+              Detection Model
             </div>
             <div className="font-mono text-[var(--color-text)]">{alert.model_info.model}</div>
             <div className="text-[var(--color-text-secondary)]">
@@ -353,7 +489,10 @@ function ResponsePanel({
 
         {alert.correlated_with && alert.correlated_with.length > 0 && (
           <section>
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div
+              className="mb-1 font-mono text-[9px] font-semibold uppercase text-[var(--color-text-muted)]"
+              style={{ letterSpacing: "0.18em" }}
+            >
               Auto-correlated with
             </div>
             {alert.correlated_with.map((c, i) => (
@@ -367,11 +506,14 @@ function ResponsePanel({
         {checklist && (
           <section>
             <div className="mb-2 text-xs font-semibold">{checklist.title}</div>
-            <div className="mb-2 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div
+              className="mb-2 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+              style={{ letterSpacing: "0.18em" }}
+            >
               Immediate (0-5 MIN)
             </div>
             <ul className="flex flex-col gap-1.5 text-[11px]">
-              {checklist.immediate.map((item, i) => (
+              {scopedImmediate.map((item, i) => (
                 <li key={i} className="flex items-start gap-2">
                   <input
                     type="checkbox"
@@ -383,11 +525,14 @@ function ResponsePanel({
                 </li>
               ))}
             </ul>
-            <div className="mt-3 mb-2 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div
+              className="mb-2 mt-3 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+              style={{ letterSpacing: "0.18em" }}
+            >
               Follow-on (5-30 MIN)
             </div>
             <ul className="flex flex-col gap-1.5 text-[11px]">
-              {checklist.followon.map((item, i) => (
+              {scopedFollowOn.map((item, i) => (
                 <li key={i} className="flex items-start gap-2">
                   <input
                     type="checkbox"
@@ -399,7 +544,10 @@ function ResponsePanel({
                 </li>
               ))}
             </ul>
-            <div className="mt-3 mb-2 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div
+              className="mb-2 mt-3 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+              style={{ letterSpacing: "0.18em" }}
+            >
               Notifications
             </div>
             <ul className="flex flex-col gap-1.5 text-[11px]">
@@ -417,14 +565,17 @@ function ResponsePanel({
 
         {sim && (
           <section>
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div
+              className="mb-1 font-mono text-[9px] font-semibold uppercase text-[var(--color-text-muted)]"
+              style={{ letterSpacing: "0.18em" }}
+            >
               Response forces dispatched
             </div>
             <div className="flex flex-wrap gap-1">
               {sim.response_forces_dispatched.map((rf) => (
                 <span
                   key={rf}
-                  className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 text-[10px] font-mono text-[var(--color-text)]"
+                  className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 font-mono text-[10px] text-[var(--color-text)]"
                 >
                   {rf}
                 </span>
@@ -441,9 +592,12 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
   if (result.intent === "tmr_submission") {
     const r = result.result;
     return (
-      <div className="mt-2 rounded-md border border-[var(--color-primary)] bg-[var(--color-surface)] p-3">
+      <div className="mt-2 rounded-sm border border-[var(--color-primary)] bg-[var(--color-surface)] p-3">
         <div className="mb-2 flex items-baseline justify-between">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-primary)]">
+          <div
+            className="font-mono text-[9px] font-semibold uppercase text-[var(--color-primary)]"
+            style={{ letterSpacing: "0.18em" }}
+          >
             Parsed as TMR
           </div>
           <button onClick={onClose} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
@@ -478,7 +632,10 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
             </ul>
           </div>
         )}
-        <div className="mt-2 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+        <div
+          className="mt-2 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+          style={{ letterSpacing: "0.18em" }}
+        >
           Approval chain
         </div>
         <div className="mt-1 flex items-center gap-1 text-[11px]">
@@ -499,9 +656,12 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
     );
   }
   return (
-    <div className="mt-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text-secondary)]">
+    <div className="mt-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text-secondary)]">
       <div className="flex items-baseline justify-between">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+        <div
+          className="font-mono text-[9px] font-semibold uppercase text-[var(--color-text-muted)]"
+          style={{ letterSpacing: "0.18em" }}
+        >
           {result.intent}
         </div>
         <button onClick={onClose} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
@@ -516,7 +676,12 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
 function KV({ label, value }: { label: string; value: any }) {
   return (
     <div>
-      <div className="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)]">{label}</div>
+      <div
+        className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+        style={{ letterSpacing: "0.16em" }}
+      >
+        {label}
+      </div>
       <div className="font-mono text-[var(--color-text)]">{String(value)}</div>
     </div>
   );
