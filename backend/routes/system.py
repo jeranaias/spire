@@ -20,6 +20,13 @@ from ..persistence import (
     secure_wipe,
     verify_chain,
 )
+from ..scoping import (
+    require_role,
+    SECURE_WIPE_ROLES,
+    AIRGAP_ROLES,
+    ADMIN_TELEMETRY_ROLES,
+    AUDIT_READ_ROLES,
+)
 
 # Comms-state primitives — backs GC-7 air-gap toggle.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -47,6 +54,11 @@ async def _probe_llm_brief() -> dict:
     Reads the proxy URL from env at request time (not module import) so that
     rotating SPIRE_LLM_PROXY via Fly secrets is reflected without restart.
     Returns a small block suitable for embedding in /status; never raises.
+
+    The upstream proxy may advertise routing aliases (haiku/sonnet/opus/cloud)
+    that route off-rig to commercial APIs — that breaks SPIRE's local-first /
+    no-cloud / IL5-fit posture if surfaced. We filter to only show the local
+    routes so an inspector sees a no-cloud model surface.
     """
     proxy = os.environ.get("SPIRE_LLM_PROXY", "http://127.0.0.1:8095")
     model = os.environ.get("SPIRE_LLM_MODEL", "gemma4-26b-a4b-fp8")
@@ -56,6 +68,10 @@ async def _probe_llm_brief() -> dict:
         "max_context": 524288,
         "proxy": proxy,
     }
+    # Cloud-routing aliases that must NEVER appear in SPIRE's public surface.
+    # Anything matching these gets dropped from available_models and would be
+    # rejected by call_llm_chat() if requested as the model.
+    cloud_aliases = {"cloud", "openrouter", "anthropic", "haiku", "sonnet", "opus", "gpt", "gpt-4", "gpt-4o", "claude"}
     try:
         import httpx  # local import keeps cold-start lean
         async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as client:
@@ -64,7 +80,12 @@ async def _probe_llm_brief() -> dict:
                 info["reachable"] = True
                 try:
                     data = resp.json().get("data") or []
-                    info["available_models"] = [m.get("id") for m in data if m.get("id")]
+                    all_ids = [m.get("id") for m in data if m.get("id")]
+                    local_ids = [i for i in all_ids if i.lower() not in cloud_aliases]
+                    info["available_models"] = local_ids
+                    cloud_seen = [i for i in all_ids if i.lower() in cloud_aliases]
+                    if cloud_seen:
+                        info["cloud_aliases_filtered"] = cloud_seen
                 except Exception:
                     pass
             else:
@@ -152,10 +173,14 @@ def _network_egress_summary() -> dict:
 
 
 @router.get("/audit")
-async def audit(limit: int = 50):
+async def audit(limit: int = 50, role: str | None = None):
     """Append-only hash-chained audit log backed by SQLite. Each entry is
     SHA-256 chained to the previous; any mutation breaks the chain and
-    verify_chain() reports the first offending id."""
+    verify_chain() reports the first offending id.
+
+    Audit chain mining can reconstruct cross-role decision history, so
+    read access is gated to security_manager only."""
+    require_role(role, AUDIT_READ_ROLES, "audit.read")
     chain = verify_chain()
     entries = recent_entries(limit=limit)
     return {
@@ -171,11 +196,17 @@ async def audit(limit: int = 50):
 
 @router.post("/secure-wipe")
 async def _secure_wipe(payload: dict = Body(default={})):
-    """Destructive. Requires payload {'confirm': 'CONFIRM'}."""
+    """Destructive. Requires payload {'confirm': 'CONFIRM', 'actor_role': 'security_manager'}.
+
+    Server-side gate: only security_manager may invoke. Without this gate,
+    any role could wipe the audit chain and the demo's "tamper-proof"
+    narrative collapses (verified live during adversarial audit: a
+    maintenance_chief reduced 20→1 entries, fileable as bug #7)."""
+    actor = (payload or {}).get("actor_role")
+    require_role(actor, SECURE_WIPE_ROLES, "audit.secure_wipe")
     token = (payload or {}).get("confirm", "")
     if token != "CONFIRM":
         raise HTTPException(status_code=400, detail="Send {confirm: 'CONFIRM'} to execute")
-    actor = (payload or {}).get("actor_role", "security_manager")
     result = secure_wipe(actor=actor)
     return result
 
@@ -209,13 +240,16 @@ async def comms_state():
 
 @router.post("/comms/airgap")
 async def comms_airgap(payload: dict = Body(default={})):
-    """Toggle air-gap mode. Body: {enable: bool, actor_role?: str}.
+    """Toggle air-gap mode. Body: {enable: bool, actor_role: str}.
     When enabled: subsequent /comms/queue calls accept mutations to the
     local queue. When disabled: queue replays to the master, returns a
-    sync-resolution log."""
+    sync-resolution log.
+
+    Gated to security_manager + mef_commander; lower roles return 403."""
     global _AIR_GAPPED
     enable = bool(payload.get("enable", not _AIR_GAPPED))
-    actor = payload.get("actor_role", "security_manager")
+    actor = payload.get("actor_role")
+    require_role(actor, AIRGAP_ROLES, "comms.airgap.toggle")
     if enable == _AIR_GAPPED:
         return {"ok": True, "no_change": True, "air_gap_active": _AIR_GAPPED}
 
@@ -541,15 +575,16 @@ async def admin_record_outcome(payload: dict = Body(default={})):
 
 
 @router.get("/admin/telemetry")
-async def admin_telemetry():
+async def admin_telemetry(role: str | None = None):
     """Aggregate telemetry for the AdminTab dashboard.
 
     Computes per-engine + per-decision-kind accuracy rolling averages,
     bucketed time-series of correct vs incorrect outcomes, and a
     recommendation flag when accuracy drops below a threshold.
 
-    Restricted at the FRONTEND to security_manager via the AdminTab
-    scope guard. Backend doesn't enforce — this is read-only telemetry."""
+    Gated server-side to security_manager. Telemetry exposes per-actor
+    decision histories which other roles must not be able to mine."""
+    require_role(role, ADMIN_TELEMETRY_ROLES, "admin.telemetry.read")
     if not _DECISION_OUTCOMES:
         return {
             "total_outcomes": 0,
@@ -623,8 +658,11 @@ async def admin_telemetry():
 
 
 @router.get("/admin/outcomes")
-async def admin_list_outcomes(limit: int = 50, decision_kind: Optional[str] = None):
-    """List recent outcomes for the AdminTab activity log."""
+async def admin_list_outcomes(limit: int = 50, decision_kind: Optional[str] = None, role: str | None = None):
+    """List recent outcomes for the AdminTab activity log.
+
+    Gated server-side to security_manager — see admin_telemetry."""
+    require_role(role, ADMIN_TELEMETRY_ROLES, "admin.outcomes.read")
     log = _DECISION_OUTCOMES
     if decision_kind:
         log = [o for o in log if o["decision_kind"] == decision_kind]
