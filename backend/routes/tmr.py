@@ -326,16 +326,18 @@ async def parse_tmr_text_llm(text: str) -> dict:
                 raw = raw[:-3]
             raw = raw.strip()
         data = _json.loads(raw)
-        # Coerce equipment list into the TMRRequest shape.
+        # Coerce equipment list into the TMRRequest shape — must use the
+        # same key names the rule-based parser emits ("quantity") so
+        # _validate doesn't KeyError when it reads item["quantity"].
         equipment_in = data.get("equipment") or []
         equipment = []
         for item in equipment_in:
             if not isinstance(item, dict):
                 continue
             etype = item.get("type") or item.get("equipment") or ""
-            qty = int(item.get("qty") or item.get("count") or 1)
+            qty = int(item.get("quantity") or item.get("qty") or item.get("count") or 1)
             if etype:
-                equipment.append({"type": etype.upper().replace(" ", "_"), "qty": qty})
+                equipment.append({"type": etype.upper().replace(" ", "_"), "quantity": qty})
         priority = (data.get("priority") or "ROUTINE").upper()
         if priority not in ("ROUTINE", "PRIORITY", "IMMEDIATE", "FLASH"):
             priority = "ROUTINE"
@@ -346,7 +348,7 @@ async def parse_tmr_text_llm(text: str) -> dict:
         tmr = TMRRequest(
             origin=data.get("origin") or "Camp Lejeune, NC",
             destination=data.get("destination") or "Camp Geiger, NC",
-            equipment=equipment or [{"type": "MTVR_CARGO", "qty": 1}],
+            equipment=equipment or [{"type": "MTVR_CARGO", "quantity": 1}],
             scheduled_date=scheduled,
             hazmat=bool(data.get("hazmat", False)),
             escort_required=bool(data.get("hazmat", False)),
