@@ -24,31 +24,31 @@ type IssueType = "bug" | "idea" | "question" | "praise";
 const ISSUE_TYPES: { value: IssueType; label: string; tag: string; tagline: string; placeholder: string }[] = [
   {
     value: "bug",
-    label: "Bug",
-    tag: "Something's broken",
-    tagline: "Something rendered wrong, crashed, or behaves contrary to what you expected.",
-    placeholder: "What did you do? What did SPIRE do? What did you expect instead? Include logs if you saw any.",
+    label: "Defect",
+    tag: "Defect Report",
+    tagline: "System rendered wrong, crashed, or behaved contrary to expected behavior.",
+    placeholder: "What were you doing. What SPIRE did. What you expected instead. Include any error message you saw.",
   },
   {
     value: "idea",
-    label: "Idea",
-    tag: "Make it better",
-    tagline: "A feature, a workflow change, a panel rearrangement — anything you want changed.",
-    placeholder: "What would make SPIRE more useful for you? Be specific — \"this column doesn't help me\" or \"add a button to do X.\"",
+    label: "Enhancement",
+    tag: "Enhancement Request",
+    tagline: "A feature, workflow change, or panel rearrangement you want shipped.",
+    placeholder: "Describe the change you want and what task it would support. Be specific about the surface and the operator action.",
   },
   {
     value: "question",
-    label: "Question",
-    tag: "I'm not sure how this works",
-    tagline: "Anything that confused you. We'll answer in-thread and update the docs.",
-    placeholder: "What were you trying to do, and what was unclear? Screenshot the screen if it helps.",
+    label: "Inquiry",
+    tag: "Inquiry",
+    tagline: "Workflow that wasn't clear. Maintainers respond in-thread and update the user guide.",
+    placeholder: "What you were trying to accomplish, and what was unclear or ambiguous in the UI.",
   },
   {
     value: "praise",
-    label: "Praise",
-    tag: "This worked well",
-    tagline: "Something you used and liked. Tells us what to keep doing.",
-    placeholder: "What did you use and what did it help you do?",
+    label: "Endorsement",
+    tag: "Positive Feedback",
+    tagline: "Workflow that worked well. Tells us what to preserve.",
+    placeholder: "What you used and what task it helped you complete.",
   },
 ];
 
@@ -185,7 +185,7 @@ export function FeedbackDrawer() {
               className="font-mono text-[9px] uppercase text-[var(--color-primary)]"
               style={{ letterSpacing: "0.22em" }}
             >
-              Found something? Tell us.
+              Report defect, enhancement, or inquiry
             </div>
             <div className="mt-1 font-mono text-[11px] leading-snug text-[var(--color-text)]">
               Bug, idea, question, even praise — drop it here any time.

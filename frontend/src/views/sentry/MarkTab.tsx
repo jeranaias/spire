@@ -70,8 +70,8 @@ export function MarkTab() {
       <div className="flex w-1/2 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
         <h2 className="mb-1 text-sm font-semibold">Upstream marking — recommend before release</h2>
         <div className="mb-4 text-xs text-[var(--color-text-muted)]">
-          Paste a paragraph, remark, or draft section. SENTRY Tier-1 runs the same regex ensemble as the batch
-          processor and returns a classification + caveat recommendation per DoDM 5200.01. No LLM required.
+          Paste a paragraph, remark, or draft section. The Tier-1 pattern engine returns a recommended
+          classification and caveat set per DoDM 5200.01. Runs entirely local; no language model required.
         </div>
 
         <div className="mb-2 flex flex-wrap gap-2">
