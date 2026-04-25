@@ -87,8 +87,8 @@ async def call_llm_chat(*, messages: list, response_format: Optional[dict] = Non
         payload["response_format"] = response_format
     headers = {
         "Content-Type": "application/json",
-        "X-Caller-Clearance": "UNCLASS",
-        "X-Classification": "UNCLASS",
+        "X-Caller-Clearance": "UNCLASSIFIED",
+        "X-Classification": "UNCLASSIFIED",
     }
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
