@@ -112,6 +112,48 @@ class CannibalizationEvent:
     readiness_impact_note: str
 
 
+# Pool of impact-note patterns. Each pattern has two placeholder slots:
+# {fc} = fault component, {part} = part nomenclature. We pick by donor job
+# status + days-deadlined bucket so the copy reads as a maintenance chief's
+# assessment, not a templated string.
+_IMPACT_EVACUATED = [
+    "Donor awaiting depot return (est 90+ days); zero impact on donor unit readiness.",
+    "Donor evacuated to depot for {fc} overhaul; recovery ETA 90+ days, opportunistic harvest.",
+    "Donor is at SRA on long-cycle teardown; no MC impact — part would have sat.",
+    "Donor queued for depot-level {fc} repair; NMCS posture unchanged.",
+    "Donor downed > 60 days pending depot; donating {part} does not extend NMC time.",
+]
+_IMPACT_LONG_DEADLINE = [
+    "Donor deadlined on slow-path order; readiness impact negligible.",
+    "Donor on backordered {part} (ASL depth 0); cannibalization does not alter its status.",
+    "Donor waiting on DLA slow-path requisition; donating {part} accelerates recipient without cost.",
+    "Donor's own {fc} fault blocks RFI regardless; no net readiness delta for donor.",
+    "Donor on SHT PART ≥ 45 days; parts flow unlikely inside 30d window.",
+]
+_IMPACT_SHORT_DEADLINE = [
+    "Donor recently deadlined; cross-levelling avoids double-downtime on critical {part}.",
+    "Donor in maintenance cycle but part salvageable; 1 asset saved vs 2 waiting.",
+    "Donor's {fc} awaits parts ordered ≤ 14 days ago; controlled substitution approved by MCC.",
+    "Donor MEL-eligible pending same {part}; match closes gap on both SRs in parallel.",
+]
+
+
+def _compose_impact_note(donor, needed_part, days_deadlined: int, rng: random.Random) -> str:
+    """Produce a per-event impact note that varies with donor status and
+    deadline age so the cannibalization table doesn't read as a templated
+    paste. Values stay deterministic under a shared RNG."""
+    fc = (donor.fault_component or "subsystem").replace("_", " ").lower()
+    part = needed_part.nomenclature
+    if donor.job_status == "EVACUATED":
+        pool = _IMPACT_EVACUATED
+    elif days_deadlined >= 30:
+        pool = _IMPACT_LONG_DEADLINE
+    else:
+        pool = _IMPACT_SHORT_DEADLINE
+    template = rng.choice(pool)
+    return template.format(fc=fc, part=part)
+
+
 def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent]:
     """
     Pair NMCS recipients with long-deadline donors from the SAME equipment
@@ -176,6 +218,7 @@ def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent
         )
         for donor in ranked:
             event_date = recip.open_date + timedelta(days=rng.randint(3, 10))
+            days_deadlined = (event_date - donor.open_date).days
             events.append(CannibalizationEvent(
                 event_id=f"CAN-{len(events)+1:04d}",
                 event_date=event_date,
@@ -187,10 +230,11 @@ def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent
                 nomenclature=needed_part.nomenclature,
                 recipient_unit=recip.unit_name,
                 donor_unit=donor.unit_name,
-                readiness_impact_note=(
-                    "Donor awaiting depot return (est 90+ days); zero impact on donor unit readiness."
-                    if donor.job_status == "EVACUATED"
-                    else "Donor deadlined on slow-path order; readiness impact negligible."
+                readiness_impact_note=_compose_impact_note(
+                    donor=donor,
+                    needed_part=needed_part,
+                    days_deadlined=days_deadlined,
+                    rng=rng,
                 ),
             ))
 

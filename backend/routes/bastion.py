@@ -1,10 +1,11 @@
 """BASTION endpoints: COP, alerts, response, ThermalHawk sim, NL TMR."""
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +16,41 @@ from ..state import get_dataset, last_day_snapshots
 from .streams import all_streams
 
 router = APIRouter()
+
+
+def _jittered_timestamp(base_date, key: str) -> str:
+    """Deterministic per-key time offset within the last 12 hours of base_date.
+
+    Gives each alert a distinct plausible timestamp so the feed doesn't read
+    as "everything happened at 17:00". Deterministic across restarts because
+    the key hash is stable."""
+    h = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16)
+    minutes_offset = h % (12 * 60)  # 0..719 minutes into the last 12 hours
+    t = time(hour=5, minute=0)      # last-12h window starts at 05:00 on base_date
+    dt = datetime.combine(base_date, t) + timedelta(minutes=minutes_offset)
+    return dt.isoformat(timespec="seconds")
+
+
+# Pool of varied readiness-alert title templates so every row doesn't read
+# "X readiness below threshold". Picked deterministically per (unit, band).
+_READINESS_TITLE_TEMPLATES_HIGH = [
+    "{unit} MC below critical floor",
+    "{unit} deadlining — MC crossed red threshold",
+    "{unit} readiness critical (MC {pct:.0f}%)",
+    "{unit} red-condition — {nmcs} NMCS / {total} fleet",
+]
+_READINESS_TITLE_TEMPLATES_MOD = [
+    "{unit} readiness amber — trending down",
+    "{unit} degraded — MC {pct:.0f}%, watch list",
+    "{unit} below-threshold advisory",
+    "{unit} approaching red — {nmcs} NMCS assets",
+]
+
+
+def _readiness_title(unit: str, mc_rate: float, nmcs: int, total: int) -> str:
+    pool = _READINESS_TITLE_TEMPLATES_HIGH if mc_rate < 0.60 else _READINESS_TITLE_TEMPLATES_MOD
+    idx = int(hashlib.sha256(f"{unit}:rd".encode()).hexdigest(), 16) % len(pool)
+    return pool[idx].format(unit=unit, pct=mc_rate * 100, nmcs=nmcs, total=total)
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "dataset" / "data"
 
@@ -109,8 +145,10 @@ async def cop(role: Optional[str] = None):
             "lon": inst["installation"]["center_lon"],
         },
         "units": units_out,
+        "buildings": inst["buildings"],
         "buildings_count": len(inst["buildings"]),
         "ecps": inst["ecps"],
+        "rally_points": inst.get("rally_points", []),
         "response_forces_count": len(inst["response_forces"]),
         "as_of": last_day.isoformat(),
     }
@@ -139,13 +177,14 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
             continue
         mc_rate = c.get("MC", 0) / total
         if mc_rate < 0.70:
+            nmcs = c.get("NMCS", 0)
             out.append({
                 "id": f"pulse-readiness-{unit_name}",
                 "source": "PULSE",
                 "severity": "HIGH" if mc_rate < 0.60 else "MODERATE",
-                "timestamp": last_day.isoformat(),
-                "title": f"{unit_name} readiness below threshold",
-                "body": f"{unit_name} MC rate {mc_rate:.1%} ({c.get('MC',0)}/{total} assets)",
+                "timestamp": _jittered_timestamp(last_day, f"readiness:{unit_name}"),
+                "title": _readiness_title(unit_name, mc_rate, nmcs, total),
+                "body": f"{unit_name} MC rate {mc_rate:.1%} ({c.get('MC',0)}/{total} assets · {nmcs} NMCS)",
                 "unit": unit_name,
             })
 
@@ -173,7 +212,7 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
             "id": f"sentry-mismark-{sr.sr_number}",
             "source": "SENTRY",
             "severity": "MODERATE",
-            "timestamp": sr.open_date.isoformat(),
+            "timestamp": _jittered_timestamp(sr.open_date, f"mismark:{sr.sr_number}"),
             "title": f"Classification discrepancy: {sr.sr_number}",
             "body": f"Source marking UNCLASSIFIED, SENTRY detected {sr.detected_classification} ({sr.unit_name} / {sr.equipment_type})",
             "unit": sr.unit_name,
@@ -182,15 +221,25 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
     # Multi-stream feeds (gate access, utilities, weather)
     out.extend(all_streams(ds))
 
-    # Sort newest-first, cap
+    # Sort newest-first
     out.sort(key=lambda a: a["timestamp"], reverse=True)
 
-    # Prepend any active BASTION incidents from the sim queue
-    for sim in _ACTIVE_SIMS.values():
+    # Prepend any active BASTION incidents from the sim queue.
+    # Expire sims older than SIM_TTL so a ThermalHawk trigger doesn't stick in
+    # the feed as 11 identical CRITICAL rows for an hour.
+    now = datetime.utcnow()
+    expired: list[str] = []
+    for sim_id, sim in _ACTIVE_SIMS.items():
+        if now - sim["started"] > SIM_TTL:
+            expired.append(sim_id)
+            continue
         out.insert(0, sim["alert"])
+    for sid in expired:
+        del _ACTIVE_SIMS[sid]
 
-    # Apply role scoping (installation-wide streams are unscoped; unit-scoped
-    # alerts hide when role can't see that unit)
+    # Apply role scoping AFTER sim prepend so incident alerts honour the
+    # operator's authorization (Maintenance Chief only sees sims for their
+    # unit; Data Custodian sees none).
     if allowed is not None:
         filtered: list[dict] = []
         for a in out:
@@ -312,6 +361,9 @@ async def list_incidents(limit: int = 50):
 # ---------------------------------------------------------------------------
 
 _ACTIVE_SIMS: dict = {}
+# Sims expire from the alert feed after this window, preventing duplicate
+# "UAS DETECTED — CRITICAL" rows from piling up on the 5-second poll.
+SIM_TTL = timedelta(minutes=30)
 
 
 @router.post("/simulate/thermalhawk-detection")
