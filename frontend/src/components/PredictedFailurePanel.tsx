@@ -1,0 +1,199 @@
+/**
+ * PredictedFailurePanel — GC-3 surface.
+ *
+ * Mounted at the top of the Risk Board. Pulls /pulse/predict-failures and
+ * renders the assets most likely to fail within the configured horizon
+ * window. Each prediction shows component + probability + days-out and a
+ * "Draft Requisition" button that pre-fills a parts order routed through
+ * the existing /pulse/recommend-actions surface (cannib / expedite /
+ * cross-level — the operator picks the right action).
+ *
+ * Engine label visible on every card so the operator knows whether the
+ * score came from the rule-based fallback or the J2 trained predictor
+ * once weights are loaded.
+ */
+import { useEffect, useState } from "react";
+import { api, type PredictedFailureAsset, type FailurePrediction } from "../api";
+import { useSpireStore } from "../state/store";
+import { useNavigate } from "react-router-dom";
+
+export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
+  const role = useSpireStore((s) => s.role);
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const nav = useNavigate();
+  const [data, setData] = useState<PredictedFailureAsset[] | null>(null);
+  const [engine, setEngine] = useState<string>("");
+  const [horizon, setHorizon] = useState(14);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    api.pulse
+      .predictFailures({ unit: unit ?? undefined, horizon_days: horizon, threshold: 0.4 })
+      .then((r) => {
+        setData(r.assets);
+        setEngine(r.engine);
+      })
+      .catch((e) => setError(String(e)));
+  }, [unit, horizon, role]);
+
+  if (error) {
+    return (
+      <div className="mb-4 rounded-sm border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-danger)]">
+        Predictive engine unavailable: {error}
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="mb-4 flex items-center gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-[11px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
+        Computing predicted failures …
+      </div>
+    );
+  }
+  if (data.length === 0) {
+    return null; // Quiet when nothing crosses the threshold.
+  }
+
+  return (
+    <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2">
+        <div>
+          <div className="font-mono text-[10px] uppercase text-[var(--color-warning)]" style={{ letterSpacing: "0.22em" }}>
+            Predicted Failures · GC-3
+          </div>
+          <div className="mt-0.5 spire-body-muted text-[12px]">
+            {data.length} asset{data.length === 1 ? "" : "s"} flagged within {horizon}d horizon
+            <span className="ml-2 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+              engine: {engine}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+            Horizon
+          </span>
+          {[7, 14, 30].map((h) => (
+            <button
+              key={h}
+              onClick={() => setHorizon(h)}
+              className="rounded-sm border px-2 py-[2px] font-mono text-[10px] font-semibold uppercase transition-colors"
+              style={{
+                letterSpacing: "0.14em",
+                borderColor: horizon === h ? "var(--color-primary)" : "var(--color-border)",
+                background: horizon === h ? "var(--color-primary)" : "transparent",
+                color: horizon === h ? "white" : "var(--color-text-secondary)",
+              }}
+            >
+              {h}d
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col divide-y divide-[var(--color-border)]">
+        {data.slice(0, 6).map((a) => (
+          <PredictedRow
+            key={a.asset_id}
+            asset={a}
+            onDraftRequisition={() => {
+              pushToast({
+                tone: "info",
+                text: `Draft requisition started for ${a.asset_id} · choose action below`,
+                ttlMs: 4000,
+              });
+              nav(`/pulse/risk?unit=${encodeURIComponent(a.unit_name)}&equipment=${encodeURIComponent(a.equipment_type)}`);
+            }}
+          />
+        ))}
+        {data.length > 6 && (
+          <div className="px-4 py-2 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+            + {data.length - 6} more flagged · scope to a unit to see them
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PredictedRow({
+  asset,
+  onDraftRequisition,
+}: {
+  asset: PredictedFailureAsset;
+  onDraftRequisition: () => void;
+}) {
+  const top: FailurePrediction = asset.predictions[0];
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 font-mono text-[11px]" style={{ letterSpacing: "0.04em" }}>
+          <span className="font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
+          <span className="text-[var(--color-text-muted)]">{asset.equipment_type}</span>
+          <span className="text-[var(--color-text-muted)]">· {asset.unit_name}</span>
+          <span className="text-[var(--color-text-muted)]">· {asset.current_hours.toFixed(0)} hrs</span>
+        </div>
+        <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+          {asset.predictions.slice(0, 3).map((p, i) => (
+            <span key={i} className="mr-3">
+              <span style={{ color: criticalityColor(p.criticality) }}>
+                {p.component}
+              </span>{" "}
+              <span className="text-[var(--color-text-muted)]">in {p.predicted_window_days}d</span>
+              {p.common_failure_modes && p.common_failure_modes.length > 0 && (
+                <span className="text-[var(--color-text-muted)]">
+                  {" "}({p.common_failure_modes.slice(0, 2).join(", ")})
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 font-mono">
+        <ProbBar prob={top.probability} />
+        <span
+          className="rounded-sm border px-1.5 py-[1px] text-[9px] uppercase"
+          style={{
+            letterSpacing: "0.16em",
+            borderColor: criticalityColor(top.criticality),
+            color: criticalityColor(top.criticality),
+            background: `color-mix(in oklab, ${criticalityColor(top.criticality)} 12%, transparent)`,
+          }}
+        >
+          {top.criticality}
+        </span>
+      </div>
+      <button
+        onClick={onDraftRequisition}
+        className="rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_30%,transparent)] px-3 py-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_50%,transparent)]"
+        style={{ letterSpacing: "0.16em" }}
+      >
+        Draft Action
+      </button>
+    </div>
+  );
+}
+
+function ProbBar({ prob }: { prob: number }) {
+  const color = prob >= 0.75 ? "var(--color-danger)" : prob >= 0.55 ? "#fb923c" : "var(--color-warning)";
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="relative h-[5px] w-[60px] overflow-hidden rounded-[1px] border" style={{ borderColor: `color-mix(in oklab, ${color} 30%, var(--color-border))` }}>
+        <div
+          className="absolute inset-y-0 left-0"
+          style={{ width: `${prob * 100}%`, background: color }}
+        />
+      </div>
+      <span className="font-mono text-[10px] tabular-nums" style={{ color, letterSpacing: "0.04em" }}>
+        {(prob * 100).toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
+function criticalityColor(c: string): string {
+  if (c === "high") return "var(--color-danger)";
+  if (c === "medium") return "var(--color-warning)";
+  return "var(--color-text-secondary)";
+}

@@ -72,6 +72,14 @@ export const api = {
       sp.set("top", String(params.top ?? 5));
       return jsonFetch<RecommendActionsResponse>(`/pulse/recommend-actions?${sp}`);
     },
+    predictFailures: (params: { unit?: string; asset_id?: string; horizon_days?: number; threshold?: number } = {}) => {
+      const sp = new URLSearchParams();
+      if (params.unit) sp.set("unit", params.unit);
+      if (params.asset_id) sp.set("asset_id", params.asset_id);
+      sp.set("horizon_days", String(params.horizon_days ?? 14));
+      sp.set("threshold", String(params.threshold ?? 0.4));
+      return jsonFetch<PredictFailuresResponse>(`/pulse/predict-failures?${sp}`);
+    },
   },
   sentry: {
     demoBatch: (limit = 500) => jsonFetch<SentryBatch>(`/sentry/demo-batch?limit=${limit}`),
@@ -285,6 +293,34 @@ export interface CoalitionReleaseResult {
   caveats_applied: string[];
   audit_logged: boolean;
   created_at: string;
+}
+
+export interface FailurePrediction {
+  component: string;
+  probability: number;
+  predicted_window_days: number;
+  confidence: number;
+  engine: string;
+  mtbf_hours: number;
+  mttr_days?: number;
+  criticality: string;
+  common_failure_modes: string[];
+}
+
+export interface PredictedFailureAsset {
+  asset_id: string;
+  unit_name: string;
+  equipment_type: string;
+  current_hours: number;
+  predictions: FailurePrediction[];
+}
+
+export interface PredictFailuresResponse {
+  assets: PredictedFailureAsset[];
+  horizon_days: number;
+  threshold: number;
+  engine: string;
+  as_of: string;
 }
 
 export interface RecommendedAction {
