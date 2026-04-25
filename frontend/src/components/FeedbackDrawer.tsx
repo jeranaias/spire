@@ -74,6 +74,22 @@ export function FeedbackDrawer() {
   const [severity, setSeverity] = useState<Severity>("minor");
   const [submitting, setSubmitting] = useState(false);
 
+  // Optional submitter identity. Persisted in localStorage so an SSgt
+  // doesn't retype their name on every submission. Stays optional —
+  // anonymous submissions still work and show "Anonymous" in the GH
+  // issue title. The pilot maintainer can scroll Issues and see real
+  // contributor names instead of every issue showing as filed by the
+  // PAT-holder.
+  const SUBMITTER_KEY = "spire.feedback.submitter";
+  const [submitter, setSubmitter] = useState<string>(() => {
+    try { return localStorage.getItem(SUBMITTER_KEY) ?? ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    try {
+      if (submitter.trim()) localStorage.setItem(SUBMITTER_KEY, submitter.trim());
+    } catch {}
+  }, [submitter]);
+
   // First-run coachmark — once-only, dismissed on first click or after 6s.
   const COACH_KEY = "spire.feedback.coach.seen";
   const [coachVisible, setCoachVisible] = useState(false);
@@ -130,6 +146,7 @@ export function FeedbackDrawer() {
         role,
         view,
         actor: role,
+        submitter: submitter.trim() || null,
         diagnostics,
       };
       const r = await fetch("/api/system/feedback", {
@@ -273,6 +290,22 @@ export function FeedbackDrawer() {
               style={{ letterSpacing: "0.04em" }}
             >
               {activeType.tagline}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span
+                className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                style={{ letterSpacing: "0.18em", minWidth: "5rem" }}
+              >
+                Submitted by
+              </span>
+              <input
+                value={submitter}
+                onChange={(e) => setSubmitter(e.target.value)}
+                placeholder="optional · e.g. SSgt Jones, CWO Smith"
+                className="flex-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[11px] text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+                autoComplete="name"
+              />
             </div>
 
             <input
