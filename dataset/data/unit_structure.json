@@ -56,7 +56,7 @@
       "equipment": {
         "JLTV":           {"tamcn": "D1196", "count": 14, "fsc": "2320"},
         "MTVR_CARGO":     {"tamcn": "D0082", "count": 8,  "fsc": "2320"},
-        "M2_HMG":         {"tamcn": "C7300", "count": 12, "fsc": "1005"}
+        "MRAP_RG31":      {"tamcn": "D1127", "count": 6,  "fsc": "2355"}
       }
     },
     {
