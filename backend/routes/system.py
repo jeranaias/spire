@@ -367,6 +367,13 @@ async def submit_feedback(payload: dict = Body(default={})):
     role = payload.get("role", "unknown")
     view = payload.get("view", "")
     actor = payload.get("actor", role)
+    # Optional self-identified submitter — kept distinct from `actor` (role).
+    # Sanitized to strip newlines and clamp length so it can't break the
+    # GitHub issue title or smuggle markdown into the body.
+    submitter_raw = payload.get("submitter")
+    submitter = ""
+    if isinstance(submitter_raw, str):
+        submitter = " ".join(submitter_raw.split())[:80]
     diagnostics = payload.get("diagnostics") or {}
     if not isinstance(diagnostics, dict):
         diagnostics = {}
@@ -381,6 +388,7 @@ async def submit_feedback(payload: dict = Body(default={})):
         "view": view,
         "submitted_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "actor": actor,
+        "submitter": submitter or None,
         "diagnostics": diagnostics,
         "github_issue_url": None,
     }
@@ -391,7 +399,7 @@ async def submit_feedback(payload: dict = Body(default={})):
         subject_id=record["id"],
         payload={
             "title": title, "issue_type": issue_type, "severity": record["severity"],
-            "role": role, "view": view,
+            "role": role, "view": view, "submitter": submitter or None,
         },
     )
 
@@ -427,8 +435,18 @@ async def submit_feedback(payload: dict = Body(default={})):
                         "\n\n<details><summary>Diagnostics auto-attached</summary>\n\n"
                         f"{diag_lines}\n\n</details>"
                     )
+            # Surface the self-identified submitter prominently. Title gets a
+            # trailing "· Name" so the issue list scans clearly; body opens
+            # with a Submitted-by callout above the structured fields.
+            submitter_label = submitter if submitter else "Anonymous"
+            submitter_callout = (
+                f"> **Submitted by:** {submitter_label}  \n"
+                f"> *(GitHub issue authored by the maintainer's PAT; the line above is the in-app submitter identity.)*\n\n"
+            )
             issue_body = (
+                f"{submitter_callout}"
                 f"**Filed via in-app feedback drawer.**\n\n"
+                f"- **Submitter:** {submitter_label}\n"
                 f"- **Type:** {issue_type}\n"
                 f"- **Role:** {role}\n"
                 f"- **View:** {view or 'unspecified'}\n"
@@ -438,12 +456,25 @@ async def submit_feedback(payload: dict = Body(default={})):
                 f"---\n\n{body}"
                 f"{diag_block}"
             )
+            # Title trailer with submitter (if provided) makes the Issues list
+            # readable at a glance instead of every issue looking like solo work.
+            issue_title = f"{title_prefix} {title}"
+            if submitter:
+                issue_title = f"{issue_title} · {submitter}"
             labels = (
                 [f"type:{type_label}", "pilot-feedback", f"role:{role}"]
                 + sev_labels
             )
+            if submitter:
+                # Slugged label so an investigator can filter to one submitter
+                # quickly. Lowercased + non-alnum collapsed to dash, length
+                # capped at 40 chars per GitHub's label rules.
+                slug = "".join(c.lower() if c.isalnum() else "-" for c in submitter)
+                slug = "-".join(p for p in slug.split("-") if p)[:40]
+                if slug:
+                    labels.append(f"submitter:{slug}")
             data = json.dumps({
-                "title": f"{title_prefix} {title}",
+                "title": issue_title,
                 "body": issue_body,
                 "labels": labels,
             }).encode("utf-8")
