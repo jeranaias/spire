@@ -54,25 +54,51 @@ export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
     );
   }
   if (data.length === 0) {
-    return null; // Quiet when nothing crosses the threshold.
+    // Visible "no predictions" line so operators don't wonder whether the
+    // panel is broken vs. simply quiet. Engine label is preserved so the
+    // J2-vs-rule_based distinction is still legible at a glance.
+    return (
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+        <span
+          className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
+          style={{ boxShadow: "0 0 4px var(--color-success)" }}
+          aria-hidden
+        />
+        <span
+          className="font-mono text-xs font-semibold uppercase text-[var(--color-success)]"
+          style={{ letterSpacing: "0.22em" }}
+        >
+          Predicted Failures · GC-3
+        </span>
+        <span
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
+          style={{ letterSpacing: "0.18em" }}
+        >
+          No assets above threshold within {horizon}d horizon
+        </span>
+        <span className="ml-auto font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+          engine: {engine}
+        </span>
+      </div>
+    );
   }
 
   return (
     <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2">
         <div>
-          <div className="font-mono text-xs uppercase text-[var(--color-warning)]" style={{ letterSpacing: "0.22em" }}>
+          <div className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
             Predicted Failures · GC-3
           </div>
           <div className="mt-0.5 spire-body-muted text-base">
             {data.length} asset{data.length === 1 ? "" : "s"} flagged within {horizon}d horizon
-            <span className="ml-2 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+            <span className="ml-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
               engine: {engine}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+          <span className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             Horizon
           </span>
           {[7, 14, 30].map((h) => (
@@ -128,13 +154,13 @@ function PredictedRow({
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2 font-mono text-sm" style={{ letterSpacing: "0.04em" }}>
+        <div className="flex items-baseline gap-2 font-mono text-sm tracking-wide">
           <span className="font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
           <span className="text-[var(--color-text-muted)]">{asset.equipment_type}</span>
           <span className="text-[var(--color-text-muted)]">· {asset.unit_name}</span>
           <span className="text-[var(--color-text-muted)]">· {asset.current_hours.toFixed(0)} hrs</span>
         </div>
-        <div className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
           {asset.predictions.slice(0, 3).map((p, i) => (
             <span key={i} className="mr-3">
               <span style={{ color: criticalityColor(p.criticality) }}>

@@ -53,21 +53,42 @@ export function FusedThreatsPanel({
     };
   }, [initialThreats, role]);
 
-  if (threats.length === 0) return null;
+  if (threats.length === 0) {
+    // Quiet "all clear" line. The empty-state audit flagged the silent return
+    // null as a confidence gap — operators want to see that the fusion engine
+    // is up and reporting zero, not nothing-at-all.
+    return (
+      <div className="mb-2 flex items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5">
+        <span
+          className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
+          style={{ boxShadow: "0 0 4px var(--color-success)" }}
+          aria-hidden
+        />
+        <span
+          className="font-mono text-xs font-semibold uppercase text-[var(--color-success)] tracking-widest"
+        >
+          Fused Threats · GC-4
+        </span>
+        <span
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
+        >
+          All clear · 0 active correlations
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="mb-2 rounded-sm border border-[var(--color-danger-muted)] bg-[color-mix(in_oklab,var(--color-danger-muted)_18%,var(--color-bg))]">
       <div className="border-b border-[var(--color-danger-muted)] px-3 py-1.5">
         <div className="flex items-baseline justify-between">
           <span
-            className="font-mono text-xs font-semibold uppercase text-[var(--color-danger)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-danger)] tracking-widest"
           >
             ◆ Fused Threats · GC-4
           </span>
           <span
-            className="font-mono text-xs tabular-nums text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.14em" }}
+            className="font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wider"
           >
             {threats.length} active
           </span>
@@ -103,17 +124,17 @@ export function FusedThreatsPanel({
                   }}
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1 font-mono text-xs" style={{ letterSpacing: "0.12em" }}>
+                  <div className="flex items-center gap-1 font-mono text-xs tracking-wider">
                     <span className="font-semibold uppercase" style={{ color }}>{t.severity}</span>
                     <span className="text-[var(--color-text-muted)]">·</span>
                     <span className="text-[var(--color-text-muted)]">{(t.confidence * 100).toFixed(0)}% confidence</span>
                     <span className="ml-auto text-[var(--color-text-muted)]">{open ? "▾" : "▸"}</span>
                   </div>
-                  <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+                  <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)] tracking-wide">
                     {t.title}
                   </div>
                   {/* Correlation chain — visible at all times */}
-                  <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs" style={{ letterSpacing: "0.14em" }}>
+                  <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs tracking-wider">
                     {t.correlation_chain.map((c, i) => (
                       <span key={i} className="flex items-center gap-1">
                         {i > 0 && <span className="text-[var(--color-text-muted)]">→</span>}

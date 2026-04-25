@@ -88,8 +88,7 @@ export function ForecastTab() {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2
-            className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
-            style={{ letterSpacing: "0.2em" }}
+            className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
           >
             Readiness Forecast · Monte Carlo
           </h2>
@@ -100,8 +99,7 @@ export function ForecastTab() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span
-              className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.18em" }}
+              className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Horizon
             </span>
@@ -115,13 +113,12 @@ export function ForecastTab() {
               onChange={setHorizon}
             />
           </div>
-          <label className="flex items-center gap-2 font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+          <label className="flex items-center gap-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             Unit
             <select
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
-              className="appearance-none rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-sm text-[var(--color-text)] hover:border-[var(--color-border-active)] focus:border-[var(--color-primary)] focus:outline-none"
-              style={{ letterSpacing: "0.06em" }}
+              className="appearance-none rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-sm text-[var(--color-text)] hover:border-[var(--color-border-active)] focus:border-[var(--color-primary)] focus:outline-none tracking-wide"
             >
               <option value="FLEET">Fleet</option>
               {units.map((u) => (
@@ -237,10 +234,10 @@ export function ForecastTab() {
           readout row and let the filled ribbon tell the distributional story. */}
       <div className="mt-3 grid grid-cols-3 gap-3">
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             Projected · Horizon End
           </div>
-          <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "-0.01em", lineHeight: 1 }}>
+          <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)]" style={{ lineHeight: 1 }}>
             {(data.projection.length > 0 ? data.projection[data.projection.length - 1].projected_mc_rate * 100 : 0).toFixed(1)}
             <span className="ml-0.5 text-base text-[var(--color-text-muted)]">%</span>
           </div>
@@ -258,7 +255,7 @@ export function ForecastTab() {
               : "var(--color-surface)",
           }}
         >
-          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             P(cross {(data.threshold * 100).toFixed(0)}% threshold)
           </div>
           <div

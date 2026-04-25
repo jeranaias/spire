@@ -95,8 +95,7 @@ export function MarkTab() {
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <span
-            className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.18em" }}
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
             Release Authority
           </span>
@@ -108,8 +107,7 @@ export function MarkTab() {
           <button
             onClick={mark}
             disabled={loading || !text.trim()}
-            className="ml-auto rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-5 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
-            style={{ letterSpacing: "0.18em" }}
+            className="ml-auto rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-5 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50 tracking-widest"
           >
             {loading ? "Marking …" : "Recommend Marking"}
           </button>

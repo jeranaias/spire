@@ -152,7 +152,7 @@
 **Click:** SENTRY → Coalition tab.
 
 **What's visible:**
-- Profile picker: FVEY · FVEY-LOG · JPN · AUS · PHL.
+- Profile picker: FVEY · FVEY-LOG · JAPAN · JSDF · AUS · PHL.
 
 **Click:** JAPAN · JSDF.
 
