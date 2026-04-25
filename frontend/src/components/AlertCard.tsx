@@ -29,7 +29,19 @@ const SEVERITY_DOT: Record<string, string> = {
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    const now = Date.now();
+    const diffSec = Math.floor((now - d.getTime()) / 1000);
+    // Dataset is synthetic; timestamps can live in the future relative to the
+    // real wall clock. In that case fall back to absolute day-month + HH:MM so
+    // the row still reads as a plausible event log rather than "0s ago".
+    if (diffSec < 0) {
+      return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+    }
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    if (diffSec < 604800) return `${Math.floor(diffSec / 86400)}d ago`;
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
   } catch {
     return iso;
   }

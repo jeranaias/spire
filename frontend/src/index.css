@@ -7,44 +7,30 @@
 @source "../src/**/*.{ts,tsx,html}";
 @source "../index.html";
 
-/* Self-hosted font faces -- no Google Fonts dependency, keeps the app
- * fully offline-capable. The .woff2 files live in public/fonts/ and are
- * bundled at build time. */
-@font-face {
-  font-family: "Inter";
-  src: local("Inter"), local("Inter-Regular");
-  font-weight: 400;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Inter";
-  src: local("Inter SemiBold"), local("Inter-SemiBold");
-  font-weight: 600;
-  font-display: swap;
-}
-@font-face {
-  font-family: "JetBrains Mono";
-  src: local("JetBrains Mono"), local("JetBrainsMono-Regular");
-  font-weight: 400;
-  font-display: swap;
-}
-
-/* SPIRE palette — locked per spec §UI DESIGN. Do not colorize ad-hoc.
+/* ------------------------------------------------------------------ *
+ * SPIRE design tokens
  *
- * Tailwind 4's @theme{} directive is not processed by Lightning CSS (Vite's
- * minifier) -- it passes through as an unknown at-rule and the variables
- * never land on :root. We define them on :root explicitly so they are always
- * available to var() lookups, and @theme mirrors them so Tailwind utility
- * generation can still reference the same tokens. */
+ * Post-design-review identity:
+ *   IBM Plex Sans  — display + body (industrial/defense heritage)
+ *   JetBrains Mono — data surfaces, labels, metrics
+ *
+ * Tailwind 4's @theme{} directive is not processed by Lightning CSS
+ * (Vite's minifier); it passes through as an unknown at-rule and the
+ * variables never land on :root. We define them on :root explicitly so
+ * they are always available to var() lookups, and @theme mirrors them
+ * for Tailwind utility generation.
+ * ------------------------------------------------------------------ */
 :root {
   --color-bg: #0a0c13;
   --color-surface: #12151e;
+  --color-surface-raised: #161a27;
   --color-surface-hover: #1a1e2e;
   --color-border: #1e2235;
   --color-border-active: #2a3050;
 
   --color-primary: #3b82f6;
   --color-primary-hover: #2563eb;
+  --color-primary-glow: rgba(59, 130, 246, 0.35);
 
   --color-danger: #ef4444;
   --color-danger-muted: #7f1d1d;
@@ -58,13 +44,19 @@
   --color-text-secondary: #9ca3af;
   --color-text-muted: #6b7280;
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-sans: "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-display: "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* Ambient grid substrate -- 24px command-center feel, 2% opacity */
+  --grid-size: 24px;
+  --grid-line: rgba(59, 130, 246, 0.035);
 }
 
 @theme {
   --color-bg: #0a0c13;
   --color-surface: #12151e;
+  --color-surface-raised: #161a27;
   --color-surface-hover: #1a1e2e;
   --color-border: #1e2235;
   --color-border-active: #2a3050;
@@ -80,26 +72,86 @@
   --color-text: #e5e7eb;
   --color-text-secondary: #9ca3af;
   --color-text-muted: #6b7280;
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-sans: "IBM Plex Sans", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 html, body, #root {
   height: 100%;
 }
 
+/* ------------------------------------------------------------------ *
+ * Atmospheric body: ambient grid + radial glow near the logo corner
+ * ------------------------------------------------------------------ */
 body {
   background-color: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
-  font-feature-settings: "cv11", "ss01";
+  font-feature-settings: "cv11", "ss01", "ss03";
+  font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   margin: 0;
+  /* Layered backgrounds: grid substrate + radial logo glow */
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+    radial-gradient(circle at 2% 0%, var(--color-primary-glow) 0%, transparent 28%);
+  background-size: var(--grid-size) var(--grid-size), var(--grid-size) var(--grid-size), 100% 100%;
+  background-attachment: fixed;
 }
 
+/* ------------------------------------------------------------------ *
+ * Typography utility helpers
+ * ------------------------------------------------------------------ */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+.spire-label {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+/* Mid-tier body text. Fills the hierarchy gap between the 10px mono labels
+ * and the 18-20px mono heroes. Used for card bodies, inspector-pane content,
+ * section intros, deep-dive copy. */
+.spire-body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-text);
+  letter-spacing: -0.005em;
+}
+.spire-body-muted {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  letter-spacing: -0.005em;
+}
+
+.spire-hero-num {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum", "zero";
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  font-weight: 600;
+}
+
+.spire-section-title {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ------------------------------------------------------------------ *
+ * Signature scan motifs
+ * ------------------------------------------------------------------ */
 
 @keyframes scan-line {
   0%   { transform: translateX(-8%); opacity: 0; }
@@ -107,7 +159,161 @@ body {
   90%  { opacity: 1; }
   100% { transform: translateX(108%); opacity: 0; }
 }
-
 .scan-line {
   animation: scan-line 150ms ease-out forwards;
+}
+
+/* Vertical obelisk scan — the product heartbeat. Runs continuously. */
+@keyframes obelisk-scan {
+  0%   { transform: translateY(-10%); opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateY(110%); opacity: 0; }
+}
+.obelisk-scan {
+  animation: obelisk-scan 6s ease-in-out infinite;
+  animation-delay: 1.5s;
+}
+
+/* Full-viewport CRT scanline overlay, used on SENTRY Processing only. */
+@keyframes crt-sweep {
+  0%   { transform: translateY(-5%); }
+  100% { transform: translateY(105%); }
+}
+.crt-scan {
+  animation: crt-sweep 6s linear infinite;
+}
+
+/* Cordon ring expansion — ThermalHawk choreography.
+ * The rings SETTLE at 0.7 opacity rather than fading to 0.35, so they stay
+ * readable while the response panel is open. Pulled from fade-to-ghost
+ * behaviour after the 2026-04-24 BASTION review. */
+@keyframes cordon-pulse {
+  0%   { transform: scale(0.4); opacity: 0; }
+  30%  { opacity: 1; }
+  80%  { transform: scale(1);   opacity: 0.78; }
+  100% { transform: scale(1);   opacity: 0.72; }
+}
+.cordon-expand {
+  transform-origin: center;
+  animation: cordon-pulse 1.2s ease-out forwards;
+}
+
+/* Ambient rotation on alert-ring markers — legacy 28s drift */
+@keyframes slow-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.ring-rotate {
+  animation: slow-spin 28s linear infinite;
+  transform-origin: center;
+}
+
+/* Active reticle spin — 10s reads as an engaged scan, not accidental drift */
+@keyframes reticle-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.reticle-spin {
+  animation: reticle-spin 10s linear infinite;
+  transform-origin: center;
+}
+
+/* Perimeter trace-in — 1s stroke-dashoffset reveal on BASTION mount.
+ * stroke-dasharray must be set inline on the element (perimeter length
+ * varies with the polygon shape); the keyframe just walks offset to 0. */
+@keyframes perimeter-trace {
+  from { stroke-dashoffset: 6000; }
+  to   { stroke-dashoffset: 0;    }
+}
+.perimeter-trace {
+  animation: perimeter-trace 1.2s ease-out forwards;
+}
+
+/* UAS entry-vector arc — drawn before cordons drop to kill the
+ * "drone teleported here" read. 600ms dash-offset reveal. */
+@keyframes uas-track-draw {
+  from { stroke-dashoffset: 3000; opacity: 0.9; }
+  80%  { stroke-dashoffset: 0;    opacity: 0.9; }
+  100% { stroke-dashoffset: 0;    opacity: 0;   }
+}
+.uas-track {
+  animation: uas-track-draw 2s ease-out forwards;
+}
+
+/* QRF dot trajectory — animates from TOC-MAIN to the cordon inner ring
+ * during ThermalHawk sim. Uses motion-path when available; fallback below
+ * uses offset-path on the element. */
+@keyframes qrf-move {
+  from { offset-distance: 0%;  opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0.9; }
+}
+
+/* Marquee ticker (footer telemetry) */
+@keyframes ticker-slide {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.ticker {
+  display: inline-flex;
+  animation: ticker-slide 72s linear infinite;
+  white-space: nowrap;
+}
+
+/* Subtle counter tick-up — CSS-property animated number */
+@property --num {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+/* Toast entry */
+@keyframes toast-in {
+  0%   { transform: translateY(8px); opacity: 0; }
+  100% { transform: translateY(0);   opacity: 1; }
+}
+
+/* FPCON DELTA flash — reserved for critical incidents */
+@keyframes fpcon-flash {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-danger) 60%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-danger) 40%, transparent); }
+}
+
+/* Reticle sweep — raw-record processing polish */
+@keyframes reticle-in {
+  0%   { transform: scale(1.8); opacity: 0; }
+  60%  { opacity: 1; }
+  100% { transform: scale(1); opacity: 0.6; }
+}
+.reticle {
+  animation: reticle-in 200ms ease-out forwards;
+}
+
+/* Leaflet tile filter -- shifts CartoDB Dark Matter toward neutral/military grey */
+.leaflet-tile-pane .leaflet-layer {
+  filter: hue-rotate(-18deg) saturate(0.5) brightness(0.92);
+}
+
+/* Custom scrollbar for dark surfaces */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-active);
+}
+
+/* Focus ring consistency */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
