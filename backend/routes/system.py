@@ -6,6 +6,7 @@ import json
 import os
 import sys as _sys
 import uuid
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -374,3 +375,193 @@ async def submit_feedback(payload: dict = Body(default={})):
 async def list_feedback(limit: int = 50):
     """Read-only feedback log for the maintainer."""
     return {"feedback": _FEEDBACK_LOG[-limit:], "total": len(_FEEDBACK_LOG)}
+
+
+# ---------------------------------------------------------------------------
+# GC-6 Training data flywheel — decision outcomes + model telemetry
+# ---------------------------------------------------------------------------
+
+# In-memory decision-outcome log. Production swaps this for the SQLite
+# persistence module so outcomes survive restarts; keeping it in-memory
+# during the demo so the AdminTab is reactive to feedback in the same
+# session.
+_DECISION_OUTCOMES: list[dict] = []
+
+
+def _seed_outcomes() -> None:
+    """Seed the outcome log with plausible historical data so the AdminTab
+    has a meaningful trend on first load. Deterministic. The seeded outcomes
+    span the last 14 days of synthetic operator activity."""
+    if _DECISION_OUTCOMES:
+        return
+    import random as _r
+    rng = _r.Random(42)
+    kinds = ["cannibalization_proposal", "expedite_request", "predicted_failure_action", "classification_mark", "fpcon_change"]
+    engines = ["rule_based_v1", "j2_v1", "regex_v1", "llm_gate_v1"]
+    actors = ["maintenance_chief", "g4", "mef_commander", "data_custodian", "security_manager"]
+    base = datetime.utcnow() - timedelta(days=14)
+    for i in range(48):
+        ts = base + timedelta(hours=i * 7 + rng.randint(0, 5), minutes=rng.randint(0, 59))
+        kind = rng.choice(kinds)
+        engine = rng.choice(engines)
+        # Per-engine accuracy varies — rule_based ~78%, j2 ~91%, regex ~83%, llm ~88%
+        target_acc = {"rule_based_v1": 0.78, "j2_v1": 0.91, "regex_v1": 0.83, "llm_gate_v1": 0.88}[engine]
+        was_correct = rng.random() < target_acc
+        _DECISION_OUTCOMES.append({
+            "id": f"OC-SEED-{i:03d}",
+            "decision_kind": kind,
+            "decision_id": f"DEC-{i:04d}",
+            "decided_by": rng.choice(actors),
+            "was_correct": was_correct,
+            "observed_at": ts.isoformat(timespec="seconds") + "Z",
+            "notes": "" if was_correct else rng.choice([
+                "operator overrode automatic recommendation",
+                "outcome did not match prediction window",
+                "downstream supply path closed before action took effect",
+                "ground truth differed from classifier output",
+            ]),
+            "scoring_engine": engine,
+            "logged_at": ts.isoformat(timespec="seconds") + "Z",
+        })
+
+
+_seed_outcomes()
+
+
+def record_outcome(*, decision_kind: str, decision_id: str, decided_by: str,
+                   was_correct: bool, observed_at: str = "",
+                   notes: str = "", scoring_engine: str = "rule_based_v1") -> dict:
+    """Append one decision-outcome record. Called by the admin UI's manual
+    rating tool, by the existing /pulse/feedback endpoint via the persistence
+    layer, and by future automated paths (cannibalization closed-out the SR =
+    decision was correct)."""
+    rec = {
+        "id": f"OC-{uuid.uuid4().hex[:10]}",
+        "decision_kind": decision_kind,
+        "decision_id": decision_id,
+        "decided_by": decided_by,
+        "was_correct": bool(was_correct),
+        "observed_at": observed_at or datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "notes": notes,
+        "scoring_engine": scoring_engine,
+        "logged_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+    _DECISION_OUTCOMES.append(rec)
+    audit_log(
+        "decision_outcome_logged",
+        actor=decided_by,
+        subject_id=rec["id"],
+        payload={"decision_kind": decision_kind, "was_correct": was_correct, "engine": scoring_engine},
+    )
+    return rec
+
+
+@router.post("/admin/outcome")
+async def admin_record_outcome(payload: dict = Body(default={})):
+    """Manual outcome submission from the AdminTab. Body:
+    {decision_kind, decision_id, decided_by, was_correct, notes?,
+     scoring_engine?}."""
+    required = ["decision_kind", "decision_id", "decided_by"]
+    for k in required:
+        if k not in payload:
+            raise HTTPException(status_code=400, detail=f"missing {k}")
+    return record_outcome(
+        decision_kind=payload["decision_kind"],
+        decision_id=payload["decision_id"],
+        decided_by=payload["decided_by"],
+        was_correct=bool(payload.get("was_correct", True)),
+        observed_at=payload.get("observed_at", ""),
+        notes=payload.get("notes", ""),
+        scoring_engine=payload.get("scoring_engine", "rule_based_v1"),
+    )
+
+
+@router.get("/admin/telemetry")
+async def admin_telemetry():
+    """Aggregate telemetry for the AdminTab dashboard.
+
+    Computes per-engine + per-decision-kind accuracy rolling averages,
+    bucketed time-series of correct vs incorrect outcomes, and a
+    recommendation flag when accuracy drops below a threshold.
+
+    Restricted at the FRONTEND to security_manager via the AdminTab
+    scope guard. Backend doesn't enforce — this is read-only telemetry."""
+    if not _DECISION_OUTCOMES:
+        return {
+            "total_outcomes": 0,
+            "by_engine": {},
+            "by_decision_kind": {},
+            "rolling_accuracy": [],
+            "retraining_recommended": False,
+            "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        }
+
+    # Per-engine + per-kind accuracy
+    by_engine: dict = defaultdict(lambda: {"correct": 0, "incorrect": 0, "total": 0})
+    by_kind: dict = defaultdict(lambda: {"correct": 0, "incorrect": 0, "total": 0})
+    for o in _DECISION_OUTCOMES:
+        e = o.get("scoring_engine", "unknown")
+        k = o.get("decision_kind", "unknown")
+        by_engine[e]["total"] += 1
+        by_kind[k]["total"] += 1
+        if o["was_correct"]:
+            by_engine[e]["correct"] += 1
+            by_kind[k]["correct"] += 1
+        else:
+            by_engine[e]["incorrect"] += 1
+            by_kind[k]["incorrect"] += 1
+
+    def _acc(b: dict) -> float:
+        return round(b["correct"] / b["total"], 4) if b["total"] else 0.0
+
+    by_engine_out = {e: {**b, "accuracy": _acc(b)} for e, b in by_engine.items()}
+    by_kind_out = {k: {**b, "accuracy": _acc(b)} for k, b in by_kind.items()}
+
+    # Rolling-accuracy time series: bucketed daily, last 30 days.
+    # For demo purposes we bucket the in-memory log directly.
+    rolling: list[dict] = []
+    if len(_DECISION_OUTCOMES) >= 5:
+        # Sort by logged_at, take last 30 entries, group into 5-record buckets
+        sorted_oc = sorted(_DECISION_OUTCOMES, key=lambda x: x["logged_at"])
+        bucket = []
+        for o in sorted_oc:
+            bucket.append(o)
+            if len(bucket) >= 5:
+                correct = sum(1 for x in bucket if x["was_correct"])
+                rolling.append({
+                    "bucket_end": bucket[-1]["logged_at"],
+                    "n": len(bucket),
+                    "accuracy": round(correct / len(bucket), 3),
+                })
+                bucket = []
+        if bucket:
+            correct = sum(1 for x in bucket if x["was_correct"])
+            rolling.append({
+                "bucket_end": bucket[-1]["logged_at"],
+                "n": len(bucket),
+                "accuracy": round(correct / len(bucket), 3),
+            })
+
+    overall_acc = sum(b["correct"] for b in by_engine.values()) / max(
+        1, sum(b["total"] for b in by_engine.values())
+    )
+    retrain_needed = overall_acc < 0.80 and len(_DECISION_OUTCOMES) >= 20
+
+    return {
+        "total_outcomes": len(_DECISION_OUTCOMES),
+        "by_engine": by_engine_out,
+        "by_decision_kind": by_kind_out,
+        "rolling_accuracy": rolling,
+        "overall_accuracy": round(overall_acc, 4),
+        "retraining_recommended": retrain_needed,
+        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+
+@router.get("/admin/outcomes")
+async def admin_list_outcomes(limit: int = 50, decision_kind: Optional[str] = None):
+    """List recent outcomes for the AdminTab activity log."""
+    log = _DECISION_OUTCOMES
+    if decision_kind:
+        log = [o for o in log if o["decision_kind"] == decision_kind]
+    return {"outcomes": log[-limit:], "total": len(log)}
