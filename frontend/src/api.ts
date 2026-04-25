@@ -44,7 +44,11 @@ export const api = {
     setAirGap: (enable: boolean, reason?: string) =>
       jsonFetch<AirGapToggleResult>("/system/comms/airgap", {
         method: "POST",
-        body: JSON.stringify({ enable, reason: reason ?? "operator-initiated" }),
+        body: JSON.stringify({
+          enable,
+          reason: reason ?? "operator-initiated",
+          actor_role: _getRole(),
+        }),
       }, false),
     queueOp: (op_kind: string, payload: unknown, actor: string) =>
       jsonFetch<{ ok: boolean; local_id: string; queued_at: string; queue_depth: number }>(
@@ -129,7 +133,7 @@ export const api = {
     coalitionRelease: (profileKey: string) =>
       jsonFetch<CoalitionReleaseResult>(`/sentry/coalition/${encodeURIComponent(profileKey)}/release`, {
         method: "POST",
-        body: JSON.stringify({ actor_role: "data_custodian" }),
+        body: JSON.stringify({ actor_role: _getRole() }),
       }),
   },
   bastion: {

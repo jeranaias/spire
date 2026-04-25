@@ -18,7 +18,41 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
+from fastapi import HTTPException
+
 from .state import CanonicalDataset
+
+
+# Per-action role allowlists. Server-side enforcement so URL-hacking past
+# the frontend's ScopeGuard returns 403 instead of executing. The full
+# CAC-bound identity layer migrates pre-ATO; this is the durable subset
+# that defangs the catastrophic surfaces (audit-chain wipe, coalition
+# release, air-gap toggle, admin telemetry read) without waiting for it.
+SECURE_WIPE_ROLES        = frozenset({"security_manager"})
+AIRGAP_ROLES             = frozenset({"security_manager", "mef_commander"})
+COALITION_RELEASE_ROLES  = frozenset({"data_custodian", "security_manager"})
+ADMIN_TELEMETRY_ROLES    = frozenset({"security_manager"})
+AUDIT_READ_ROLES         = frozenset({"security_manager"})
+
+
+def require_role(role: Optional[str], allowed: frozenset[str], action: str) -> str:
+    """Raise 403 unless `role` is in `allowed`. Returns the role on success.
+
+    `action` is a short label included in the error body so the operator
+    sees which gate denied them. Audit-log entries elsewhere reference the
+    same string so an investigator can correlate.
+    """
+    if not role or role not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "InsufficientPrivilege",
+                "action": action,
+                "role_seen": role or "unknown",
+                "roles_allowed": sorted(allowed),
+            },
+        )
+    return role
 
 
 ROLE_TO_UNITS_FILTER: dict[str, dict] = {

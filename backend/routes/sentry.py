@@ -880,17 +880,24 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
 async def coalition_release(profile_key: str, payload: Optional[dict] = None):
     """Generate a release-package event for the selected coalition profile.
     Hashes a manifest of what would ship and writes the event to the audit
-    chain so a security manager can later inspect every coalition release."""
+    chain so a security manager can later inspect every coalition release.
+
+    Server-side gate: only data_custodian or security_manager may release.
+    Without this, any role could execute an FVEY release on the live deploy
+    (verified during adversarial audit, fileable as bug #6)."""
+    from ..scoping import require_role, COALITION_RELEASE_ROLES
     if not _COALITION_AVAILABLE:
         raise HTTPException(status_code=503, detail="coalition profiles unavailable")
+    payload = payload or {}
+    actor = payload.get("actor_role")
+    require_role(actor, COALITION_RELEASE_ROLES, "sentry.coalition.release")
     profile_data = _coalition_profiles().get("profiles", {}).get(profile_key)
     if not profile_data:
         raise HTTPException(status_code=404, detail=f"unknown profile {profile_key}")
-    payload = payload or {}
     release_id = f"REL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     audit_log(
         "sentry_coalition_release",
-        actor=payload.get("actor_role", "data_custodian"),
+        actor=actor,
         subject_id=release_id,
         payload={
             "profile": profile_key,
