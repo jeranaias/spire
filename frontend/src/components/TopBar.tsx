@@ -4,9 +4,10 @@ import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, type Role } from "../sta
 import { api } from "../api";
 
 const tabs = [
-  { to: "/sentry",  label: "SENTRY" },
-  { to: "/pulse",   label: "PULSE" },
-  { to: "/bastion", label: "BASTION" },
+  { to: "/sentry",  label: "SENTRY", restrict: null as Role | null },
+  { to: "/pulse",   label: "PULSE",   restrict: null as Role | null },
+  { to: "/bastion", label: "BASTION", restrict: null as Role | null },
+  { to: "/admin",   label: "ADMIN",   restrict: "security_manager" as Role },
 ];
 
 export function TopBar() {
@@ -48,7 +49,7 @@ export function TopBar() {
             </div>
           </div>
           <nav className="flex items-center gap-0">
-            {tabs.map((tab, idx) => (
+            {tabs.filter((t) => t.restrict == null || t.restrict === role).map((tab, idx) => (
               <NavLink
                 key={tab.to}
                 to={tab.to}

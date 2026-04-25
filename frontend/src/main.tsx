@@ -9,6 +9,7 @@ import App from "./App";
 import { SentryView } from "./views/SentryView";
 import { PulseView } from "./views/PulseView";
 import { BastionView } from "./views/BastionView";
+import { AdminView } from "./views/AdminView";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ScopeGuard } from "./components/ScopeGuard";
 import { registerRoleSource } from "./api";
@@ -56,6 +57,9 @@ createRoot(document.getElementById("root")!).render(
                 </ScopeGuard>
               }
             />
+            {/* GC-6 Admin / Training Flywheel — Security Manager only,
+             * scope-gated inside the view itself. */}
+            <Route path="admin" element={<AdminView />} />
           </Route>
         </Routes>
       </HashRouter>
