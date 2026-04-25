@@ -17,7 +17,17 @@ if [ -z "${TS_AUTHKEY:-}" ]; then
   exit 0
 fi
 
-mkdir -p /var/lib/tailscale /var/run/tailscale
+mkdir -p /var/run/tailscale
+
+# Persist Tailscale state on the spire_runtime volume so the node identity
+# survives auto-stop/wake cycles. Without this, the ephemeral node has to
+# re-auth from scratch on every wake, and the prior session is already gone
+# from the coordination server, leaving the machine "Logged out" until the
+# tailscale-up runs again. With persistent state, the prior identity is
+# reused across restarts and the tunnel comes up immediately.
+TS_STATEDIR=/opt/spire/runtime/tailscale
+mkdir -p "$TS_STATEDIR"
+chmod 700 "$TS_STATEDIR"
 
 # Userspace mode: no TUN, no NET_ADMIN. SOCKS5 proxy bound at 127.0.0.1:1055,
 # HTTP proxy at 127.0.0.1:1099. The backend reads SPIRE_LLM_PROXY which we
@@ -27,7 +37,7 @@ mkdir -p /var/lib/tailscale /var/run/tailscale
     --tun=userspace-networking \
     --socks5-server=127.0.0.1:1055 \
     --outbound-http-proxy-listen=127.0.0.1:1099 \
-    --statedir=/var/lib/tailscale \
+    --statedir="$TS_STATEDIR" \
     >/var/log/tailscaled.log 2>&1 &
 TSD_PID=$!
 
@@ -41,11 +51,12 @@ done
 HOSTNAME_FLAG="--hostname=${TS_HOSTNAME:-spire-mdm}"
 TAGS_FLAG="--advertise-tags=${TS_TAGS:-tag:fly}"
 
-# `tailscale up` is idempotent. --reset clears any prior state if the auth-key
-# rotated. Disable Tailscale SSH and DNS overlap to keep the surface tight.
+# Idempotent: if persisted state already authed, this re-syncs without a fresh
+# auth round-trip. No --reset so we keep prior identity across wakes.
+# If the auth-key changes externally, delete /opt/spire/runtime/tailscale and
+# the next boot starts clean.
 /usr/bin/tailscale up \
     --authkey="$TS_AUTHKEY" \
-    --reset \
     --ssh=false \
     --accept-dns=true \
     --accept-routes=false \
