@@ -82,7 +82,7 @@ export function FleetOverviewTab() {
           <div
             className="mb-3 rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))] px-3 py-2 spire-body-muted"
           >
-            <span className="font-mono text-xs uppercase text-[var(--color-primary)]" style={{ letterSpacing: "0.18em" }}>
+            <span className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
               Narrative
             </span>{" "}
             <span className="text-[var(--color-text)]">{narrative}</span>
@@ -92,8 +92,7 @@ export function FleetOverviewTab() {
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2
-              className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
-              style={{ letterSpacing: "0.2em" }}
+              className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
             >
               {view === "heatmap" ? "Fleet Readiness · Heatmap" : "Fleet Readiness · CONUS"}
             </h2>
@@ -111,7 +110,7 @@ export function FleetOverviewTab() {
               onChange={setView}
             />
             {view === "heatmap" && (
-              <label className="flex cursor-pointer items-center gap-2 font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.16em" }}>
+              <label className="flex cursor-pointer items-center gap-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider">
                 <input
                   type="checkbox"
                   checked={hideEmptyColumns}
@@ -121,7 +120,7 @@ export function FleetOverviewTab() {
                 Hide Empty Columns
               </label>
             )}
-            <div className="flex items-center gap-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+            <div className="flex items-center gap-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
               <LegendDot color="var(--color-success)" label="≥90%" />
               <LegendDot color="var(--color-warning)" label="75-89%" />
               <LegendDot color="#fb923c" label="60-74%" />
@@ -145,14 +144,12 @@ export function FleetOverviewTab() {
       <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-bg)] p-3">
         <div className="mb-2 flex items-center justify-between">
           <h3
-            className="font-mono text-xs font-semibold uppercase text-[var(--color-text)]"
-            style={{ letterSpacing: "0.2em" }}
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-text)] tracking-widest"
           >
             Alert Feed
           </h3>
           <span
-            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs tabular-nums text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.08em" }}
+            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide"
           >
             {data.alerts.length}
           </span>
@@ -181,7 +178,7 @@ export function FleetOverviewTab() {
             />
           ))}
           {data.alerts.length === 0 && (
-            <div className="rounded border border-dashed border-[var(--color-border)] p-6 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+            <div className="rounded border border-dashed border-[var(--color-border)] p-6 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
               NO ACTIVE ALERTS
             </div>
           )}
@@ -295,23 +292,21 @@ function ConusMap({ data }: { data: FleetOverview }) {
               stroke="#0a0c13"
               strokeWidth="1.5"
             />
-            <text
+            <text className="tracking-wide"
               x={u.x + 12}
               y={u.y - 8}
               fontFamily="JetBrains Mono, monospace"
               fontSize="11"
               fill="var(--color-text)"
-              style={{ letterSpacing: "0.04em" }}
             >
               {u.unit}
             </text>
-            <text
+            <text className="tracking-wider"
               x={u.x + 12}
               y={u.y + 5}
               fontFamily="JetBrains Mono, monospace"
               fontSize="9"
               fill="var(--color-text-muted)"
-              style={{ letterSpacing: "0.1em" }}
             >
               {(u.avg * 100).toFixed(0)}% MC · {u.label}
             </text>
@@ -334,7 +329,7 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 export function LoadingOverlay({ message }: { message: string }) {
   return (
     <div className="flex h-full items-center justify-center p-12">
-      <div className="flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wider">
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
         {message}
       </div>
