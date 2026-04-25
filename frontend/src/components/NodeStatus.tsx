@@ -92,6 +92,14 @@ export function NodeStatus() {
   async function seed() {
     try {
       const c = await api.system.syncSeedConflict(role);
+      // Defensive: backend should always return a fully-formed conflict, but
+      // an older code path could return {} if vector-clock comparison didn't
+      // classify the seeded events as concurrent. Reject incomplete objects
+      // so we don't push a half-conflict that crashes the renderer.
+      if (!c || !c.id || !c.detected_at || !c.local_event || !c.peer_event) {
+        pushToast({ tone: "error", text: "Seed returned an incomplete conflict — check backend logs" });
+        return;
+      }
       setConflicts((prev) => [...prev.filter((x) => x.id !== c.id), c]);
       pushToast({ tone: "info", text: "Demo conflict seeded · open Node Status to resolve", ttlMs: 4500 });
     } catch (e) {
@@ -262,7 +270,7 @@ function ConflictRow({
           {conflict.op_kind} · {conflict.record_id}
         </div>
         <div className="font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
-          {conflict.detected_at.slice(11, 19)}Z detected
+          {(conflict.detected_at || "").slice(11, 19)}Z detected
         </div>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
@@ -308,9 +316,9 @@ function ConflictSide({
         </button>
       </div>
       <div className="mt-1 text-[10px]">
-        <div className="text-[var(--color-text)]">{ev.actor}</div>
+        <div className="text-[var(--color-text)]">{ev?.actor || "—"}</div>
         <div className="text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
-          {ev.at.slice(5, 19).replace("T", " ")}
+          {(ev?.at || "").slice(5, 19).replace("T", " ")}
         </div>
       </div>
       <div className="mt-2 text-[9px] text-[var(--color-text-secondary)]">
