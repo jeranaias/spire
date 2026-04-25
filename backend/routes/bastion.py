@@ -56,6 +56,9 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "dataset" / "data"
 
 
 def _load_installation() -> dict:
+    """Load installation_data.json. Lat/lon is baked into the JSON during
+    dataset prep (scripts/bake_latlon.py) via flat-earth projection from the
+    installation center; the backend just reads — no runtime MGRS dependency."""
     with open(DATA_DIR / "installation_data.json", encoding="utf-8") as f:
         return json.load(f)
 
