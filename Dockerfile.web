@@ -32,9 +32,20 @@ FROM python:3.12-slim
 WORKDIR /opt/spire
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      nginx supervisor curl \
+      nginx supervisor curl ca-certificates iptables iproute2 \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/nginx/sites-enabled/default
+
+# Tailscale — userspace tunnel to Jesse's rig so SPIRE_LLM_PROXY can resolve
+# to a tailnet hostname without ever exposing the rig publicly. Pinned to a
+# specific Debian release so the apt cache layer is reproducible.
+RUN curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+        | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null \
+ && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+        | tee /etc/apt/sources.list.d/tailscale.list >/dev/null \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends tailscale \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY --from=pydeps   /install                 /usr/local
 COPY --from=frontend /app/dist                /usr/share/nginx/html
@@ -42,6 +53,8 @@ COPY backend/                                  ./backend/
 COPY dataset/                                  ./dataset/
 COPY deploy/nginx.fly.conf                     /etc/nginx/conf.d/spire.conf
 COPY deploy/supervisord.conf                   /etc/supervisor/conf.d/spire.conf
+COPY deploy/tailscale-up.sh                    /usr/local/bin/tailscale-up.sh
+RUN chmod +x /usr/local/bin/tailscale-up.sh
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/opt/spire
