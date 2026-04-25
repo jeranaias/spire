@@ -60,6 +60,18 @@ export const api = {
       return jsonFetch<{ outcomes: DecisionOutcome[]; total: number }>(`/system/admin/outcomes?${sp}`);
     },
     adminFeedback: () => jsonFetch<{ feedback: FeedbackRecord[]; total: number }>("/system/feedback"),
+    syncState: () => jsonFetch<SyncStateResponse>("/system/sync/state"),
+    syncConflicts: () => jsonFetch<SyncConflictsResponse>("/system/sync/conflicts"),
+    syncResolve: (conflictId: string, winner: "local" | "peer", actor: string) =>
+      jsonFetch<SyncConflict>(`/system/sync/resolve/${encodeURIComponent(conflictId)}`, {
+        method: "POST",
+        body: JSON.stringify({ winner, actor }),
+      }, false),
+    syncSeedConflict: (actor: string) =>
+      jsonFetch<SyncConflict>("/system/sync/seed-conflict", {
+        method: "POST",
+        body: JSON.stringify({ actor_role: actor }),
+      }, false),
   },
   pulse: {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
@@ -235,6 +247,42 @@ export interface Cannibalization {
   open_needs: any[];
   completed_matches: any[];
   total_events: number;
+}
+
+export interface SyncStateResponse {
+  node_id: string;
+  peer_node_id: string;
+  local_clock: Record<string, number>;
+  peer_clock: Record<string, number>;
+  events_logged: number;
+  conflicts_pending: number;
+  compare: "before" | "after" | "equal" | "concurrent" | "no_peer_data";
+}
+
+export interface SyncEventBrief {
+  event_id: string;
+  actor: string;
+  at: string;
+  clock: Record<string, number>;
+  payload: Record<string, unknown>;
+}
+
+export interface SyncConflict {
+  id: string;
+  record_id: string;
+  op_kind: string;
+  local_event: SyncEventBrief;
+  peer_event: SyncEventBrief;
+  detected_at: string;
+  resolved_at: string | null;
+  winner: "local" | "peer" | null;
+  resolved_by?: string;
+}
+
+export interface SyncConflictsResponse {
+  pending: SyncConflict[];
+  all: SyncConflict[];
+  node_id: string;
 }
 
 export interface AdminEngineStat {
