@@ -33,14 +33,13 @@ function PulseSubnav() {
   const nav = useNavigate();
   return (
     <div className="h-10 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
-      <div className="flex h-full items-center gap-1">
+      <div className="flex h-full items-center gap-0">
         {tabs.map((t) => (
           <NavLink
             key={t.to}
             to={t.to}
             end={t.to === "/pulse/overview"}
             onClick={(e) => {
-              // ensure /pulse lands on overview
               if (t.to === "/pulse/overview") {
                 e.preventDefault();
                 nav("/pulse/overview");
@@ -48,14 +47,31 @@ function PulseSubnav() {
             }}
             className={({ isActive }) =>
               clsx(
-                "rounded-sm px-3 py-1 text-xs font-medium transition-colors",
+                "relative px-4 py-2 font-mono text-[11px] font-semibold uppercase transition-colors",
                 isActive
-                  ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-                  : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]",
+                  ? "text-[var(--color-text)]"
+                  : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
               )
             }
+            style={{ letterSpacing: "0.16em" }}
           >
-            {t.label}
+            {({ isActive }) => (
+              <>
+                {t.label}
+                {isActive && (
+                  <>
+                    <span
+                      className="absolute inset-x-2 -bottom-[1px] h-[2px]"
+                      style={{
+                        background: "var(--color-primary)",
+                        boxShadow: "0 0 8px var(--color-primary)",
+                      }}
+                    />
+                    <span className="absolute left-1 top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-[var(--color-primary)]" />
+                  </>
+                )}
+              </>
+            )}
           </NavLink>
         ))}
       </div>
