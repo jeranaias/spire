@@ -27,11 +27,20 @@ export function HelpOverlay() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const inField =
+        e.target instanceof HTMLInputElement
+        || e.target instanceof HTMLTextAreaElement
+        || (e.target instanceof HTMLElement && e.target.isContentEditable);
+
+      // Shift+/ (= "?") always opens — modifier combo, fires from anywhere.
       if (e.key === "?" || (e.shiftKey && e.key === "/")) {
         e.preventDefault();
         setOpen((v) => !v);
-      } else if (e.key === "Escape" && open) {
+        return;
+      }
+
+      // Esc closes only if open AND focus isn't in a field.
+      if (e.key === "Escape" && open && !inField) {
         setOpen(false);
       }
     }

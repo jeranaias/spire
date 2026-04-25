@@ -8,10 +8,10 @@ import { HelpOverlay } from "./components/HelpOverlay";
 
 export default function App() {
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col overflow-x-hidden">
       <TopBar />
       <ClassificationBand />
-      <main className="flex-1 overflow-hidden">
+      <main className="min-w-0 flex-1 overflow-hidden">
         <Outlet />
       </main>
       <StatusFooter />

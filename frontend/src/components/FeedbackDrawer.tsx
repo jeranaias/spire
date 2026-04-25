@@ -108,14 +108,30 @@ export function FeedbackDrawer() {
   }
 
   // Quick-keys: Shift+F to open, Esc to close.
+  // Shift+F is a deliberate modifier combo — it should fire from anywhere,
+  // including while the operator is typing in an input. (The previous
+  // implementation early-returned on input focus and effectively killed the
+  // shortcut anywhere a Marine had a cursor.) Plain "f" still does nothing
+  // in inputs because the condition requires Shift.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === "F" || (e.shiftKey && e.key === "f")) {
+      const inField =
+        e.target instanceof HTMLInputElement
+        || e.target instanceof HTMLTextAreaElement
+        || (e.target instanceof HTMLElement && e.target.isContentEditable);
+
+      // Shift+F always opens. e.key normalizes to "F" with shift on most
+      // browsers, "f" with shift on a few — accept both for safety.
+      if (e.shiftKey && (e.key === "F" || e.key === "f")) {
         e.preventDefault();
         setOpen((v) => !v);
         dismissCoach();
-      } else if (e.key === "Escape" && open) {
+        return;
+      }
+
+      // Esc closes only if the drawer is open AND focus isn't in a field
+      // (so we don't steal focus while a Marine is mid-sentence).
+      if (e.key === "Escape" && open && !inField) {
         setOpen(false);
       }
     }
@@ -234,14 +250,19 @@ export function FeedbackDrawer() {
         <div
           className="fixed inset-0 z-[8800] flex items-end justify-end bg-black/40 backdrop-blur-sm"
           onClick={() => setOpen(false)}
+          role="presentation"
         >
           <div
-            className="m-4 flex w-[30rem] flex-col gap-3 rounded-md border border-[var(--color-primary)] bg-[var(--color-surface)] p-4 shadow-2xl"
+            className="m-2 flex w-full max-w-[30rem] flex-col gap-3 rounded-md border border-[var(--color-primary)] bg-[var(--color-surface)] p-4 shadow-2xl sm:m-4"
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="spire-feedback-title"
           >
             <div className="flex items-baseline justify-between">
               <div>
                 <div
+                  id="spire-feedback-title"
                   className="font-mono text-[10px] uppercase text-[var(--color-primary)]"
                   style={{ letterSpacing: "0.22em" }}
                 >
@@ -257,8 +278,8 @@ export function FeedbackDrawer() {
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="rounded px-2 py-1 font-mono text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-                aria-label="Close"
+                className="flex h-11 w-11 items-center justify-center rounded font-mono text-[14px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+                aria-label="Close feedback drawer"
               >
                 ✕
               </button>
