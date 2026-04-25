@@ -114,7 +114,8 @@ export const api = {
   },
   bastion: {
     cop: () => jsonFetch<BastionCOP>("/bastion/cop"),
-    alerts: (limit = 30) => jsonFetch<{ alerts: BastionAlert[] }>(`/bastion/alerts?limit=${limit}`),
+    alerts: (limit = 30) => jsonFetch<{ alerts: BastionAlert[]; fused_threats?: FusedThreat[] }>(`/bastion/alerts?limit=${limit}`),
+    fusedThreats: () => jsonFetch<{ fused_threats: FusedThreat[] }>("/bastion/fused-threats"),
     incidents: (limit = 50) => jsonFetch<{ incidents: any[] }>(`/bastion/incidents?limit=${limit}`),
     incidentResponse: (id: string) => jsonFetch<IncidentResponse>(`/bastion/incidents/${id}/response`),
     simulateThermalHawk: (unit = "CLB-6") =>
@@ -508,6 +509,21 @@ export interface BastionCOP {
   rally_points: RallyPoint[];
   response_forces_count: number;
   as_of: string;
+}
+
+export interface FusedThreat {
+  id: string;
+  source: "FUSION";
+  severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "INFO";
+  timestamp: string;
+  title: string;
+  body: string;
+  unit?: string | null;
+  building?: string | null;
+  fused: true;
+  confidence: number;
+  correlation_chain: { source: string; id: string; title: string; timestamp: string }[];
+  response_taskings: string[];
 }
 
 export interface BastionAlert {

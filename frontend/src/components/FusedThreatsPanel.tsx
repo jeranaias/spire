@@ -1,0 +1,183 @@
+/**
+ * FusedThreatsPanel — GC-4 multi-sensor fusion surface.
+ *
+ * Mounted at the top of the BASTION alert sidebar. Pulls
+ * /bastion/fused-threats and renders correlation chains as expandable
+ * rows. Each fused threat shows the contributing alert sources in
+ * order, the inferred severity (CRITICAL when chain crosses sensor
+ * boundaries — e.g. PACS gate event + ThermalHawk UAS), and the auto-
+ * generated response taskings.
+ */
+import { useEffect, useState } from "react";
+import { api, type FusedThreat } from "../api";
+import { useSpireStore } from "../state/store";
+
+const SEV_COLOR: Record<string, string> = {
+  CRITICAL: "var(--color-danger)",
+  HIGH: "#fb923c",
+  MODERATE: "var(--color-warning)",
+  LOW: "var(--color-success)",
+  INFO: "var(--color-primary)",
+};
+
+export function FusedThreatsPanel({
+  initialThreats,
+  onSelectFused,
+}: {
+  initialThreats?: FusedThreat[];
+  onSelectFused?: (t: FusedThreat) => void;
+}) {
+  const role = useSpireStore((s) => s.role);
+  const [threats, setThreats] = useState<FusedThreat[]>(initialThreats ?? []);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (initialThreats && initialThreats.length > 0) {
+      setThreats(initialThreats);
+      return;
+    }
+    let alive = true;
+    const fetch = async () => {
+      try {
+        const r = await api.bastion.fusedThreats();
+        if (alive) setThreats(r.fused_threats || []);
+      } catch {
+        /* tolerate */
+      }
+    };
+    fetch();
+    const id = setInterval(fetch, 5000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [initialThreats, role]);
+
+  if (threats.length === 0) return null;
+
+  return (
+    <div className="mb-2 rounded-sm border border-[var(--color-danger-muted)] bg-[color-mix(in_oklab,var(--color-danger-muted)_18%,var(--color-bg))]">
+      <div className="border-b border-[var(--color-danger-muted)] px-3 py-1.5">
+        <div className="flex items-baseline justify-between">
+          <span
+            className="font-mono text-[9px] font-semibold uppercase text-[var(--color-danger)]"
+            style={{ letterSpacing: "0.22em" }}
+          >
+            ◆ Fused Threats · GC-4
+          </span>
+          <span
+            className="font-mono text-[9px] tabular-nums text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.14em" }}
+          >
+            {threats.length} active
+          </span>
+        </div>
+      </div>
+      <div className="flex flex-col">
+        {threats.map((t) => {
+          const open = expanded.has(t.id);
+          const color = SEV_COLOR[t.severity];
+          return (
+            <div
+              key={t.id}
+              className="border-b border-[var(--color-border)] last:border-b-0"
+            >
+              <button
+                onClick={() => {
+                  setExpanded((prev) => {
+                    const n = new Set(prev);
+                    if (n.has(t.id)) n.delete(t.id);
+                    else n.add(t.id);
+                    return n;
+                  });
+                  onSelectFused?.(t);
+                }}
+                className="flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-[color-mix(in_oklab,var(--color-danger-muted)_30%,transparent)]"
+              >
+                <span
+                  className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full"
+                  style={{
+                    background: color,
+                    boxShadow: `0 0 6px ${color}`,
+                    animation: t.severity === "CRITICAL" ? "pulse 1.6s ease-in-out infinite" : undefined,
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1 font-mono text-[9px]" style={{ letterSpacing: "0.12em" }}>
+                    <span className="font-semibold uppercase" style={{ color }}>{t.severity}</span>
+                    <span className="text-[var(--color-text-muted)]">·</span>
+                    <span className="text-[var(--color-text-muted)]">{(t.confidence * 100).toFixed(0)}% confidence</span>
+                    <span className="ml-auto text-[var(--color-text-muted)]">{open ? "▾" : "▸"}</span>
+                  </div>
+                  <div className="mt-0.5 font-mono text-[11px] font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+                    {t.title}
+                  </div>
+                  {/* Correlation chain — visible at all times */}
+                  <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-[9px]" style={{ letterSpacing: "0.14em" }}>
+                    {t.correlation_chain.map((c, i) => (
+                      <span key={i} className="flex items-center gap-1">
+                        {i > 0 && <span className="text-[var(--color-text-muted)]">→</span>}
+                        <span
+                          className="rounded-sm border px-1 py-[1px]"
+                          style={{
+                            color,
+                            borderColor: `color-mix(in oklab, ${color} 40%, var(--color-border))`,
+                            background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
+                          }}
+                        >
+                          {c.source}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </button>
+
+              {open && (
+                <div className="bg-[var(--color-surface)] px-3 py-2">
+                  <div className="text-[11px] text-[var(--color-text-secondary)]">
+                    {t.body}
+                  </div>
+                  {t.response_taskings.length > 0 && (
+                    <div className="mt-2">
+                      <div
+                        className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                        style={{ letterSpacing: "0.18em" }}
+                      >
+                        Auto-generated taskings
+                      </div>
+                      <ul className="mt-1 flex flex-col gap-0.5 font-mono text-[10px]" style={{ letterSpacing: "0.04em" }}>
+                        {t.response_taskings.map((task, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-[var(--color-text-secondary)]">
+                            <span className="text-[var(--color-text-muted)]">›</span>
+                            <span>{task}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {/* Full chain detail */}
+                  <div
+                    className="mt-2 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                    style={{ letterSpacing: "0.18em" }}
+                  >
+                    Correlation chain · {t.correlation_chain.length} contributing alerts
+                  </div>
+                  <div className="mt-1 flex flex-col gap-0.5 font-mono text-[10px]">
+                    {t.correlation_chain.map((c, i) => (
+                      <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1">
+                        <span className="text-[var(--color-text)]">{c.source}</span>
+                        <span className="mx-1 text-[var(--color-text-muted)]">·</span>
+                        <span className="text-[var(--color-text-secondary)]">{c.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
