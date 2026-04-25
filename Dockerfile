@@ -23,7 +23,6 @@ COPY --from=builder /install /usr/local
 
 COPY backend/ ./backend/
 COPY dataset/ ./dataset/
-COPY shared/ ./shared/
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/opt/spire
