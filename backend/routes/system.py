@@ -274,3 +274,103 @@ async def comms_queue_list(limit: int = 50):
         "depth": len([q for q in _QUEUE if not q.get("replayed_at")]),
         "air_gap_active": _AIR_GAPPED,
     }
+
+
+# ---------------------------------------------------------------------------
+# Pilot feedback — in-app "Report Issue" drawer posts here
+# ---------------------------------------------------------------------------
+
+_FEEDBACK_LOG: list[dict] = []
+
+
+@router.post("/feedback")
+async def submit_feedback(payload: dict = Body(default={})):
+    """Pilot operator feedback submitted from the in-app drawer.
+
+    Always lands locally to the audit chain so we don't lose anything in
+    air-gap conditions. When `SPIRE_GITHUB_TOKEN` is set, also creates a
+    GitHub issue against the configured repo so the maintainer + cohort
+    can triage from the same surface they file PRs."""
+    title = (payload.get("title") or "").strip()
+    body = (payload.get("body") or "").strip()
+    if not title or not body:
+        raise HTTPException(status_code=400, detail="title + body required")
+
+    severity = payload.get("severity", "minor")
+    role = payload.get("role", "unknown")
+    view = payload.get("view", "")
+    actor = payload.get("actor", role)
+
+    record = {
+        "id": f"FB-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
+        "title": title,
+        "body": body,
+        "severity": severity,
+        "role": role,
+        "view": view,
+        "submitted_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "actor": actor,
+        "github_issue_url": None,
+    }
+
+    audit_log(
+        "pilot_feedback_submitted",
+        actor=actor,
+        subject_id=record["id"],
+        payload={"title": title, "severity": severity, "role": role, "view": view},
+    )
+
+    # Optional GitHub issue creation. Token + repo come from env so an
+    # air-gap deploy can leave them unset and feedback still lands locally.
+    gh_token = os.environ.get("SPIRE_GITHUB_TOKEN", "")
+    gh_repo = os.environ.get("SPIRE_GITHUB_REPO", "jeranaias/spire")
+    if gh_token and gh_repo and not _AIR_GAPPED:
+        try:
+            import urllib.request
+            import urllib.error
+            issue_body = (
+                f"**Filed via in-app feedback drawer.**\n\n"
+                f"- **Role:** {role}\n"
+                f"- **View:** {view or 'unspecified'}\n"
+                f"- **Severity:** {severity}\n"
+                f"- **Submitted at:** {record['submitted_at']}\n"
+                f"- **Local feedback id:** `{record['id']}`\n\n"
+                f"---\n\n{body}"
+            )
+            label_map = {
+                "cosmetic": ["bug", "cosmetic"],
+                "minor":    ["bug"],
+                "major":    ["bug", "priority"],
+                "critical": ["bug", "priority", "incident"],
+            }
+            data = json.dumps({
+                "title": f"[{severity}] {title}",
+                "body": issue_body,
+                "labels": label_map.get(severity, ["bug"]) + [f"role:{role}", "pilot-feedback"],
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{gh_repo}/issues",
+                data=data,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {gh_token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                    "User-Agent": "spire-feedback-drawer",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                created = json.loads(resp.read().decode())
+                record["github_issue_url"] = created.get("html_url")
+                record["github_issue_number"] = created.get("number")
+        except Exception as e:  # noqa: BLE001
+            record["github_error"] = str(e)
+
+    _FEEDBACK_LOG.append(record)
+    return record
+
+
+@router.get("/feedback")
+async def list_feedback(limit: int = 50):
+    """Read-only feedback log for the maintainer."""
+    return {"feedback": _FEEDBACK_LOG[-limit:], "total": len(_FEEDBACK_LOG)}
