@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, type Role } from "../state/store";
+import { api } from "../api";
 
 const tabs = [
   { to: "/sentry",  label: "SENTRY" },
@@ -90,6 +91,7 @@ export function TopBar() {
         </div>
 
         <div className="flex items-center gap-4">
+          <AirGapToggle />
           <RoleSelector role={role} onChange={onRoleChange} />
           <ModeBadge mode={operatingMode} />
           <AlertBadge count={alertCount} />
@@ -272,5 +274,69 @@ function AlertBadge({ count }: { count: number }) {
       </span>
       <span className="text-[var(--color-text-muted)]">alerts</span>
     </div>
+  );
+}
+
+// GC-7 Air-gap toggle. When engaged, the StatusFooter pulses red and any
+// mutation goes through the local queue endpoint. When released, the queue
+// flushes to the master and the toggle returns to green/connected. Restricted
+// to security_manager + mef_commander since toggling air-gap is a posture
+// decision, not a routine click.
+function AirGapToggle() {
+  const role = useSpireStore((s) => s.role);
+  const airGap = useSpireStore((s) => s.airGapActive);
+  const setAirGap = useSpireStore((s) => s.setAirGap);
+  const setQueueDepth = useSpireStore((s) => s.setQueueDepth);
+  const pushToast = useSpireStore((s) => s.pushToast);
+
+  const allowed = role === "security_manager" || role === "mef_commander";
+  if (!allowed) return null;
+
+  async function toggle() {
+    try {
+      const r = await api.system.setAirGap(!airGap, "operator-initiated");
+      setAirGap(r.air_gap_active);
+      if (r.air_gap_active) {
+        pushToast({ tone: "warn", text: "Air-gap engaged — local writes will be queued", ttlMs: 4000 });
+      } else if (r.replayed != null) {
+        pushToast({
+          tone: "ok",
+          text: `Air-gap released — ${r.replayed} queued op${r.replayed === 1 ? "" : "s"} replayed`,
+          ttlMs: 5000,
+        });
+        setQueueDepth(0);
+      }
+    } catch (e) {
+      pushToast({ tone: "error", text: `Air-gap toggle failed: ${e}` });
+    }
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      className={clsx(
+        "flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-[10px] uppercase transition-colors",
+      )}
+      style={{
+        letterSpacing: "0.16em",
+        borderColor: airGap ? "var(--color-danger)" : "var(--color-border)",
+        background: airGap
+          ? "color-mix(in oklab, var(--color-danger-muted) 25%, transparent)"
+          : "transparent",
+        color: airGap ? "var(--color-danger)" : "var(--color-text-secondary)",
+      }}
+      title={airGap ? "Click to release air-gap and replay queued ops" : "Engage air-gap mode"}
+    >
+      <span className="relative flex h-2 w-2" aria-hidden>
+        {airGap && (
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-danger)] opacity-60" />
+        )}
+        <span
+          className="relative inline-flex h-2 w-2 rounded-full"
+          style={{ background: airGap ? "var(--color-danger)" : "var(--color-success)" }}
+        />
+      </span>
+      <span>{airGap ? "AIR-GAP ON" : "AIR-GAP"}</span>
+    </button>
   );
 }

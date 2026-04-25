@@ -19,6 +19,8 @@ export interface Toast {
   ttlMs?: number;
 }
 
+export type CommsState = "CONNECTED" | "DEGRADED" | "DISCONNECTED";
+
 export interface SpireState {
   role: Role;
   operatingMode: OperatingMode;
@@ -37,6 +39,12 @@ export interface SpireState {
   // escalates to CHARLIE for the duration of the incident.
   fpcon: "NORMAL" | "ALPHA" | "BRAVO" | "CHARLIE" | "DELTA";
 
+  // GC-7 Air-gap deployment mode — comms-state + queue depth for the
+  // StatusFooter pulse + TopBar toggle.
+  commsState: CommsState;
+  airGapActive: boolean;
+  queueDepth: number;
+
   // Toast queue.
   toasts: Toast[];
 
@@ -46,6 +54,9 @@ export interface SpireState {
   setSentryBatch: (batchId: string | null, jobId: string | null) => void;
   setSelectedAssetId: (id: string | null) => void;
   setFpcon: (level: SpireState["fpcon"]) => void;
+  setCommsState: (s: CommsState) => void;
+  setAirGap: (active: boolean) => void;
+  setQueueDepth: (n: number) => void;
   pushToast: (t: Omit<Toast, "id">) => string;
   dismissToast: (id: string) => void;
 }
@@ -89,6 +100,9 @@ export const useSpireStore = create<SpireState>((set) => ({
   sentryJobId: null,
   selectedAssetId: null,
   fpcon: "BRAVO",
+  commsState: "CONNECTED",
+  airGapActive: false,
+  queueDepth: 0,
   toasts: [],
   setRole: (role) => set({ role }),
   setOperatingMode: (operatingMode) => set({ operatingMode }),
@@ -96,6 +110,9 @@ export const useSpireStore = create<SpireState>((set) => ({
   setSentryBatch: (sentryBatchId, sentryJobId) => set({ sentryBatchId, sentryJobId }),
   setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
   setFpcon: (fpcon) => set({ fpcon }),
+  setCommsState: (commsState) => set({ commsState }),
+  setAirGap: (airGapActive) => set({ airGapActive }),
+  setQueueDepth: (queueDepth) => set({ queueDepth }),
   pushToast: (t) => {
     const id = uid();
     set((s) => ({ toasts: [...s.toasts, { ...t, id }] }));

@@ -40,6 +40,18 @@ async function jsonFetch<T>(path: string, init?: RequestInit, injectRole = true)
 export const api = {
   system: {
     status: () => jsonFetch<SystemStatus>("/system/status"),
+    commsState: () => jsonFetch<CommsStateResponse>("/system/comms/state"),
+    setAirGap: (enable: boolean, reason?: string) =>
+      jsonFetch<AirGapToggleResult>("/system/comms/airgap", {
+        method: "POST",
+        body: JSON.stringify({ enable, reason: reason ?? "operator-initiated" }),
+      }, false),
+    queueOp: (op_kind: string, payload: unknown, actor: string) =>
+      jsonFetch<{ ok: boolean; local_id: string; queued_at: string; queue_depth: number }>(
+        "/system/comms/queue",
+        { method: "POST", body: JSON.stringify({ op_kind, payload, actor }) },
+        false,
+      ),
   },
   pulse: {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
@@ -206,6 +218,25 @@ export interface Cannibalization {
   open_needs: any[];
   completed_matches: any[];
   total_events: number;
+}
+
+export interface CommsStateResponse {
+  current_state: "CONNECTED" | "DEGRADED" | "DISCONNECTED";
+  as_of: string;
+  recent_events: { at: string; from?: string | null; to: string; reason: string; node_id: string }[];
+  queued_ops_count: number;
+  last_sync_at?: string | null;
+  air_gap_active: boolean;
+}
+
+export interface AirGapToggleResult {
+  ok: boolean;
+  air_gap_active: boolean;
+  no_change?: boolean;
+  engaged_at?: string;
+  released_at?: string;
+  replayed?: number;
+  resolutions?: { local_id: string; op_kind: string; actor: string; queued_at: string; replayed_at: string; result: string }[];
 }
 
 export interface CoalitionProfileSummary {
