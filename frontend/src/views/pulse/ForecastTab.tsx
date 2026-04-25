@@ -11,6 +11,7 @@ import {
 import { api, type Forecast } from "../../api";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
+import { RecommendPanel } from "../../components/RecommendPanel";
 
 type Horizon = "7" | "14" | "30";
 
@@ -302,6 +303,14 @@ export function ForecastTab() {
         <span className="ml-auto">
           {visiblePaths.length} of {data.paths.length} sample paths summarized
         </span>
+      </div>
+
+      {/* GC-1: ranked replenishment actions, scoped to whichever unit the
+       * forecast is currently looking at. Forecast tells you "you're going
+       * to drop below 75%"; this panel tells you which actions, in what
+       * order, get you back above. */}
+      <div className="mt-4">
+        <RecommendPanel unit={unit === "FLEET" ? undefined : unit} />
       </div>
     </div>
   );
