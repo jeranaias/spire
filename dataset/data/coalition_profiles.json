@@ -1,0 +1,90 @@
+{
+  "_comment": "Partner-nation release profiles for GC-5 Coalition Interoperability. Each profile defines which data categories the partner is authorized to receive. SENTRY uses this to scope a live view and generate release bundles per partner.",
+
+  "profiles": {
+    "FVEY_BASE": {
+      "display_name": "Five Eyes · Base Release",
+      "partners": ["USA", "GBR", "CAN", "AUS", "NZL"],
+      "distribution_statement": "DISTRIBUTION D · REL TO FVEY. Further dissemination requires originator approval.",
+      "authorized_classifications": ["UNCLASSIFIED", "CUI"],
+      "authorized_unit_parents": ["2d MLG", "1st MLG", "3d MLG", "2d MarDiv", "1st MarDiv", "2d MAW", "3d MAW"],
+      "field_redactions": ["EDIPI", "POC_PHONE", "billet_nickname"],
+      "caveats_applied": ["REL TO FVEY"],
+      "embargo_days_after_event": 0
+    },
+    "FVEY_LOG": {
+      "display_name": "Five Eyes · Logistics Coordination",
+      "partners": ["USA", "GBR", "CAN", "AUS", "NZL"],
+      "distribution_statement": "DISTRIBUTION D · REL TO FVEY LOG. Coordination-purpose only.",
+      "authorized_classifications": ["UNCLASSIFIED", "CUI"],
+      "authorized_unit_parents": ["2d MLG", "1st MLG", "3d MLG"],
+      "authorized_categories": ["readiness_summary", "cannibalization", "requisition_status", "convoy"],
+      "field_redactions": ["EDIPI", "POC_PHONE", "serial_number", "tm_reference"],
+      "caveats_applied": ["REL TO FVEY", "FOR LOGISTICS COORDINATION"],
+      "embargo_days_after_event": 1
+    },
+    "JPN_COALITION": {
+      "display_name": "Japan · JSDF Coalition",
+      "partners": ["USA", "JPN"],
+      "distribution_statement": "DISTRIBUTION D · REL TO JPN. Per 2024 US-JPN Logistics Coordination MOU.",
+      "authorized_classifications": ["UNCLASSIFIED"],
+      "authorized_unit_parents": ["2d MLG", "1st MLG", "3d MLG", "MAG-31", "MAG-39"],
+      "authorized_categories": ["readiness_summary", "convoy", "coalition_exercise_logistics"],
+      "field_redactions": ["EDIPI", "POC_PHONE", "serial_number", "tm_reference", "fault_component"],
+      "caveats_applied": ["REL TO JPN", "FOR COALITION EXERCISE"],
+      "partner_units": [
+        {"name": "JGSDF 1st Logistics Brigade", "type": "logistics", "point_of_contact": "[JSDF-LO]"},
+        {"name": "JASDF Naha Support Wing", "type": "aviation_logistics", "point_of_contact": "[JSDF-LO]"}
+      ],
+      "embargo_days_after_event": 2
+    },
+    "AUS_COALITION": {
+      "display_name": "Australia · ADF Coalition",
+      "partners": ["USA", "AUS"],
+      "distribution_statement": "DISTRIBUTION D · REL TO AUS. Per AUSMIN Logistics Interoperability Annex.",
+      "authorized_classifications": ["UNCLASSIFIED", "CUI"],
+      "authorized_unit_parents": ["2d MLG", "1st MLG", "3d MLG", "2d MarDiv", "1st MarDiv"],
+      "authorized_categories": ["readiness_summary", "convoy", "cannibalization", "combined_exercise_logistics"],
+      "field_redactions": ["EDIPI", "POC_PHONE"],
+      "caveats_applied": ["REL TO AUS"],
+      "partner_units": [
+        {"name": "ADF 9th Combat Service Support Battalion", "type": "logistics", "point_of_contact": "[AUS-LO]"},
+        {"name": "RAAF 395 Expeditionary Combat Support Wing", "type": "aviation_logistics", "point_of_contact": "[AUS-LO]"}
+      ],
+      "embargo_days_after_event": 1
+    },
+    "PHL_COALITION": {
+      "display_name": "Philippines · AFP Coalition",
+      "partners": ["USA", "PHL"],
+      "distribution_statement": "DISTRIBUTION D · REL TO PHL. Per 2024 Enhanced Defense Cooperation Agreement Annex.",
+      "authorized_classifications": ["UNCLASSIFIED"],
+      "authorized_unit_parents": ["1st MLG", "3d MLG", "MAG-39"],
+      "authorized_categories": ["readiness_summary", "coalition_exercise_logistics"],
+      "field_redactions": ["EDIPI", "POC_PHONE", "serial_number", "tm_reference", "fault_component", "supply_path"],
+      "caveats_applied": ["REL TO PHL", "FOR EDCA EXERCISE"],
+      "partner_units": [
+        {"name": "AFP 2nd Service Support Battalion", "type": "logistics", "point_of_contact": "[PHL-LO]"}
+      ],
+      "embargo_days_after_event": 3
+    }
+  },
+
+  "category_definitions": {
+    "readiness_summary": "Per-unit MC/PMC/NMCS percentages (not per-asset).",
+    "cannibalization":  "Cross-unit part transfer events — sanitized of serial numbers.",
+    "requisition_status": "Order status by NSN category — no per-document numbers.",
+    "convoy": "Transportation movement requests — origin/destination/size/date.",
+    "coalition_exercise_logistics": "Scoped to exercise-flagged SRs only.",
+    "combined_exercise_logistics":  "Exercise-flagged SRs + readiness summary."
+  },
+
+  "redaction_rules": {
+    "EDIPI":           "Replace the 10-digit EDIPI with [REDACTED].",
+    "POC_PHONE":       "Strip phone numbers matching \\d{3}[-.]?\\d{3}[-.]?\\d{4}.",
+    "billet_nickname": "Strip anything in parentheses after a name.",
+    "serial_number":   "Replace serial numbers with [SERIAL REDACTED].",
+    "tm_reference":    "Replace TM numbers with [TM REFERENCE REDACTED].",
+    "fault_component": "Generalize component to family (e.g. 'output shaft' → 'drivetrain').",
+    "supply_path":     "Replace supply path code with the MILSTRIP category only."
+  }
+}
