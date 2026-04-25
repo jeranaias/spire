@@ -4,8 +4,8 @@
     "description": "Synthetic Marine Corps installation modeled on a generic east-coast CONUS base for BASTION demo purposes.",
     "fictional": true,
     "center_grid": "18S UJ 30000 70000",
-    "center_lat": 34.658,
-    "center_lon": -77.398,
+    "center_lat": 34.72,
+    "center_lon": -77.345,
     "fpcon_default": "BRAVO",
     "total_area_sq_km": 45,
     "contact_emergency": "DSN 555-911"
@@ -27,8 +27,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.661054,
-      "lon": -77.396689
+      "lat": 34.723054,
+      "lon": -77.343689
     },
     {
       "id": "PMO-101",
@@ -46,8 +46,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.660605,
-      "lon": -77.397072
+      "lat": 34.722605,
+      "lon": -77.344071
     },
     {
       "id": "CLB6-HQ",
@@ -65,8 +65,8 @@
         "water": "Main 2",
         "comms": "Node 3"
       },
-      "lat": 34.668061,
-      "lon": -77.414927
+      "lat": 34.730061,
+      "lon": -77.36194
     },
     {
       "id": "CLB6-MP",
@@ -85,8 +85,8 @@
         "comms": "Node 3"
       },
       "notes": "Contains 60% of CLB-6 operational vehicles",
-      "lat": 34.667342,
-      "lon": -77.413508
+      "lat": 34.729342,
+      "lon": -77.360519
     },
     {
       "id": "TANK-MP",
@@ -104,8 +104,8 @@
         "water": "Main 2",
         "comms": "Node 3"
       },
-      "lat": 34.662312,
-      "lon": -77.420388
+      "lat": 34.724312,
+      "lon": -77.367405
     },
     {
       "id": "LAR-MP",
@@ -123,8 +123,8 @@
         "water": "Main 2",
         "comms": "Node 3"
       },
-      "lat": 34.66348,
-      "lon": -77.416566
+      "lat": 34.72548,
+      "lon": -77.363579
     },
     {
       "id": "LAAD-TOC",
@@ -142,8 +142,8 @@
         "water": "Main 1",
         "comms": "Node 2"
       },
-      "lat": 34.666264,
-      "lon": -77.401932
+      "lat": 34.728264,
+      "lon": -77.348934
     },
     {
       "id": "BR-200",
@@ -161,8 +161,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.669229,
-      "lon": -77.399092
+      "lat": 34.731229,
+      "lon": -77.346093
     },
     {
       "id": "BR-201",
@@ -180,8 +180,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.669453,
-      "lon": -77.399966
+      "lat": 34.731453,
+      "lon": -77.346967
     },
     {
       "id": "BR-202",
@@ -199,8 +199,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.669768,
-      "lon": -77.40073
+      "lat": 34.731768,
+      "lon": -77.347732
     },
     {
       "id": "BR-203",
@@ -218,8 +218,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.670082,
-      "lon": -77.401495
+      "lat": 34.732082,
+      "lon": -77.348497
     },
     {
       "id": "BR-204",
@@ -237,8 +237,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.670397,
-      "lon": -77.402368
+      "lat": 34.732397,
+      "lon": -77.349372
     },
     {
       "id": "DFAC-1",
@@ -256,8 +256,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.670756,
-      "lon": -77.401167
+      "lat": 34.732756,
+      "lon": -77.348169
     },
     {
       "id": "GYM-1",
@@ -275,8 +275,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.67125,
-      "lon": -77.399966
+      "lat": 34.73325,
+      "lon": -77.346967
     },
     {
       "id": "MED-1",
@@ -294,8 +294,8 @@
         "water": "Main 1",
         "comms": "Node 2"
       },
-      "lat": 34.665725,
-      "lon": -77.393632
+      "lat": 34.727725,
+      "lon": -77.340628
     },
     {
       "id": "FD-1",
@@ -313,8 +313,8 @@
         "water": "Main 1",
         "comms": "Node 2"
       },
-      "lat": 34.662402,
-      "lon": -77.39527
+      "lat": 34.724402,
+      "lon": -77.342268
     },
     {
       "id": "FD-2",
@@ -332,8 +332,8 @@
         "water": "Main 2",
         "comms": "Node 3"
       },
-      "lat": 34.665636,
-      "lon": -77.411105
+      "lat": 34.727636,
+      "lon": -77.358115
     },
     {
       "id": "ASP-1",
@@ -352,8 +352,8 @@
         "comms": "Node 4"
       },
       "notes": "Class V storage; ordnance handling only",
-      "lat": 34.672553,
-      "lon": -77.388826
+      "lat": 34.734553,
+      "lon": -77.33582
     },
     {
       "id": "ASP-2",
@@ -371,8 +371,8 @@
         "water": "Main 3",
         "comms": "Node 4"
       },
-      "lat": 34.673092,
-      "lon": -77.387953
+      "lat": 34.735092,
+      "lon": -77.334945
     },
     {
       "id": "ASP-3",
@@ -390,8 +390,8 @@
         "water": "Main 3",
         "comms": "Node 4"
       },
-      "lat": 34.671924,
-      "lon": -77.389482
+      "lat": 34.733924,
+      "lon": -77.336475
     },
     {
       "id": "ARMY-1",
@@ -409,8 +409,8 @@
         "water": "None",
         "comms": "Node 2"
       },
-      "lat": 34.664468,
-      "lon": -77.403024
+      "lat": 34.726468,
+      "lon": -77.350027
     },
     {
       "id": "ARMY-2",
@@ -428,8 +428,8 @@
         "water": "None",
         "comms": "Node 3"
       },
-      "lat": 34.667792,
-      "lon": -77.415692
+      "lat": 34.729792,
+      "lon": -77.362705
     },
     {
       "id": "FUEL-1",
@@ -447,8 +447,8 @@
         "water": "Main 3",
         "comms": "Node 4"
       },
-      "lat": 34.666803,
-      "lon": -77.390574
+      "lat": 34.728803,
+      "lon": -77.337568
     },
     {
       "id": "COMM-1",
@@ -466,8 +466,8 @@
         "water": "None",
         "comms": "Node 1 primary"
       },
-      "lat": 34.664917,
-      "lon": -77.395707
+      "lat": 34.726917,
+      "lon": -77.342705
     },
     {
       "id": "COMM-2",
@@ -485,8 +485,8 @@
         "water": "None",
         "comms": "Node 3 primary"
       },
-      "lat": 34.66357,
-      "lon": -77.409358
+      "lat": 34.72557,
+      "lon": -77.356366
     },
     {
       "id": "TOC-MAIN",
@@ -504,8 +504,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.661683,
-      "lon": -77.395925
+      "lat": 34.723683,
+      "lon": -77.342923
     },
     {
       "id": "WAREHOUSE-1",
@@ -523,8 +523,8 @@
         "water": "None",
         "comms": "Node 3"
       },
-      "lat": 34.665097,
-      "lon": -77.41176
+      "lat": 34.727097,
+      "lon": -77.358771
     },
     {
       "id": "WAREHOUSE-2",
@@ -542,8 +542,8 @@
         "water": "None",
         "comms": "Node 3"
       },
-      "lat": 34.665456,
-      "lon": -77.410996
+      "lat": 34.727456,
+      "lon": -77.358006
     },
     {
       "id": "GEN-1",
@@ -561,8 +561,8 @@
         "water": "None",
         "comms": "Node 1"
       },
-      "lat": 34.662941,
-      "lon": -77.394724
+      "lat": 34.724941,
+      "lon": -77.341721
     },
     {
       "id": "WTP-1",
@@ -580,8 +580,8 @@
         "water": "Source",
         "comms": "Node 1"
       },
-      "lat": 34.660695,
-      "lon": -77.386533
+      "lat": 34.722695,
+      "lon": -77.333524
     },
     {
       "id": "HH-1",
@@ -599,8 +599,8 @@
         "water": "Main 2",
         "comms": "Node 2"
       },
-      "lat": 34.658719,
-      "lon": -77.405972
+      "lat": 34.720719,
+      "lon": -77.352978
     },
     {
       "id": "HH-2",
@@ -618,8 +618,8 @@
         "water": "None",
         "comms": "Node 2"
       },
-      "lat": 34.665995,
-      "lon": -77.39385
+      "lat": 34.727995,
+      "lon": -77.340847
     },
     {
       "id": "MWR-1",
@@ -637,8 +637,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.671834,
-      "lon": -77.398109
+      "lat": 34.733834,
+      "lon": -77.345109
     },
     {
       "id": "CHURCH-1",
@@ -656,8 +656,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.66842,
-      "lon": -77.399311
+      "lat": 34.73042,
+      "lon": -77.346311
     },
     {
       "id": "FAM-1",
@@ -675,8 +675,8 @@
         "water": "Main 4",
         "comms": "Node 5"
       },
-      "lat": 34.675068,
-      "lon": -77.378342
+      "lat": 34.737068,
+      "lon": -77.325328
     },
     {
       "id": "FAM-2",
@@ -694,8 +694,8 @@
         "water": "Main 4",
         "comms": "Node 5"
       },
-      "lat": 34.674619,
-      "lon": -77.37725
+      "lat": 34.736619,
+      "lon": -77.324235
     },
     {
       "id": "SCH-1",
@@ -713,8 +713,8 @@
         "water": "Main 4",
         "comms": "Node 5"
       },
-      "lat": 34.673271,
-      "lon": -77.375066
+      "lat": 34.735271,
+      "lon": -77.322049
     },
     {
       "id": "CDC-1",
@@ -732,8 +732,8 @@
         "water": "Main 4",
         "comms": "Node 5"
       },
-      "lat": 34.67372,
-      "lon": -77.375721
+      "lat": 34.73572,
+      "lon": -77.322705
     },
     {
       "id": "HAZ-1",
@@ -751,8 +751,8 @@
         "water": "Main 3",
         "comms": "Node 4"
       },
-      "lat": 34.659797,
-      "lon": -77.388062
+      "lat": 34.721797,
+      "lon": -77.335055
     },
     {
       "id": "TRAIN-1",
@@ -770,8 +770,8 @@
         "water": "Main 5",
         "comms": "Node 6"
       },
-      "lat": 34.656383,
-      "lon": -77.370916
+      "lat": 34.718383,
+      "lon": -77.317896
     },
     {
       "id": "RANGE-1",
@@ -789,8 +789,8 @@
         "water": "None",
         "comms": "Node 6"
       },
-      "lat": 34.653958,
-      "lon": -77.367421
+      "lat": 34.715958,
+      "lon": -77.314399
     },
     {
       "id": "RANGE-2",
@@ -808,8 +808,8 @@
         "water": "None",
         "comms": "Node 6"
       },
-      "lat": 34.653329,
-      "lon": -77.365783
+      "lat": 34.715329,
+      "lon": -77.312759
     },
     {
       "id": "ESB-WS",
@@ -827,8 +827,8 @@
         "water": "Main 2",
         "comms": "Node 3"
       },
-      "lat": 34.666085,
-      "lon": -77.418531
+      "lat": 34.728085,
+      "lon": -77.365547
     },
     {
       "id": "MLG-SSC",
@@ -846,8 +846,8 @@
         "water": "Main 2",
         "comms": "Node 3"
       },
-      "lat": 34.664827,
-      "lon": -77.413508
+      "lat": 34.726827,
+      "lon": -77.360519
     },
     {
       "id": "PX-1",
@@ -865,8 +865,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.671115,
-      "lon": -77.389809
+      "lat": 34.733115,
+      "lon": -77.336803
     },
     {
       "id": "COMMISS-1",
@@ -884,8 +884,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.670576,
-      "lon": -77.389045
+      "lat": 34.732576,
+      "lon": -77.336038
     },
     {
       "id": "DL-HQ",
@@ -903,8 +903,8 @@
         "water": "Main 1",
         "comms": "Node 2"
       },
-      "lat": 34.660605,
-      "lon": -77.403679
+      "lat": 34.722605,
+      "lon": -77.350683
     },
     {
       "id": "CCP-ADM",
@@ -922,8 +922,8 @@
         "water": "Main 1",
         "comms": "Node 2"
       },
-      "lat": 34.665276,
-      "lon": -77.393195
+      "lat": 34.727276,
+      "lon": -77.340191
     },
     {
       "id": "GATE-H",
@@ -941,8 +941,8 @@
         "water": "Main 1",
         "comms": "Node 1"
       },
-      "lat": 34.656203,
-      "lon": -77.406737
+      "lat": 34.718203,
+      "lon": -77.353743
     },
     {
       "id": "EOD-1",
@@ -960,8 +960,8 @@
         "water": "Main 3",
         "comms": "Node 4"
       },
-      "lat": 34.663929,
-      "lon": -77.383366
+      "lat": 34.725929,
+      "lon": -77.330355
     }
   ],
   "ecps": [
@@ -974,8 +974,8 @@
       "lanes_out": 3,
       "commercial_access": true,
       "notes": "24/7 ops, commercial vehicle inspection",
-      "lat": 34.656203,
-      "lon": -77.406737
+      "lat": 34.718203,
+      "lon": -77.353743
     },
     {
       "id": "ECP-2",
@@ -986,8 +986,8 @@
       "lanes_out": 2,
       "commercial_access": false,
       "notes": "Personnel only, 0500-2200",
-      "lat": 34.677763,
-      "lon": -77.41875
+      "lat": 34.739763,
+      "lon": -77.365765
     },
     {
       "id": "ECP-3",
@@ -998,8 +998,8 @@
       "lanes_out": 2,
       "commercial_access": true,
       "notes": "Heavy equipment lane, adjacent to ASP sector",
-      "lat": 34.657102,
-      "lon": -77.37725
+      "lat": 34.719102,
+      "lon": -77.324235
     },
     {
       "id": "ECP-4",
@@ -1010,8 +1010,8 @@
       "lanes_out": 1,
       "commercial_access": false,
       "notes": "Opens only at FPCON ALPHA",
-      "lat": 34.676865,
-      "lon": -77.366329
+      "lat": 34.738865,
+      "lon": -77.313306
     }
   ],
   "rally_points": [
@@ -1020,64 +1020,64 @@
       "name": "Rally Point ALPHA",
       "grid": "18S UJ 30050 70450",
       "capacity": 600,
-      "lat": 34.662042,
-      "lon": -77.397454
+      "lat": 34.724042,
+      "lon": -77.344454
     },
     {
       "id": "RP-BRAVO",
       "name": "Rally Point BRAVO",
       "grid": "18S UJ 28600 71000",
       "capacity": 400,
-      "lat": 34.666983,
-      "lon": -77.413289
+      "lat": 34.728983,
+      "lon": -77.360301
     },
     {
       "id": "RP-CHARLIE",
       "name": "Rally Point CHARLIE",
       "grid": "18S UJ 28100 70500",
       "capacity": 300,
-      "lat": 34.662492,
-      "lon": -77.41875
+      "lat": 34.724492,
+      "lon": -77.365765
     },
     {
       "id": "RP-DELTA",
       "name": "Rally Point DELTA",
       "grid": "18S UJ 29500 70200",
       "capacity": 250,
-      "lat": 34.659797,
-      "lon": -77.40346
+      "lat": 34.721797,
+      "lon": -77.350465
     },
     {
       "id": "RP-ECHO",
       "name": "Rally Point ECHO",
       "grid": "18S UJ 30800 71200",
       "capacity": 350,
-      "lat": 34.66878,
-      "lon": -77.389263
+      "lat": 34.73078,
+      "lon": -77.336257
     },
     {
       "id": "RP-FOXTROT",
       "name": "Rally Point FOXTROT",
       "grid": "18S UJ 29400 70050",
       "capacity": 200,
-      "lat": 34.658449,
-      "lon": -77.404553
+      "lat": 34.720449,
+      "lon": -77.351557
     },
     {
       "id": "RP-GOLF",
       "name": "Rally Point GOLF",
       "grid": "18S UJ 31900 71900",
       "capacity": 500,
-      "lat": 34.675068,
-      "lon": -77.37725
+      "lat": 34.737068,
+      "lon": -77.324235
     },
     {
       "id": "RP-HOTEL",
       "name": "Rally Point HOTEL",
       "grid": "18S UJ 32700 69700",
       "capacity": 250,
-      "lat": 34.655305,
-      "lon": -77.368514
+      "lat": 34.717305,
+      "lon": -77.315491
     }
   ],
   "casualty_collection_points": [
