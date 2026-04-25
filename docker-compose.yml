@@ -1,0 +1,57 @@
+# SPIRE — local + pilot deployment.
+#
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# The backend persists SQLite + audit chain to a named volume so a restart
+# preserves operator decisions, feedback, and queue state. The frontend is
+# nginx serving the Rolldown build with /api/* proxied to the backend.
+#
+# For an air-gap deploy: bundle this file + both Dockerfiles + the source
+# tree onto a USB. `docker compose build` once on the receive side, then
+# `up -d` brings the system online with no external pulls.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spire-backend
+    restart: unless-stopped
+    environment:
+      SPIRE_MODE: full
+      # Set SPIRE_DB_PASSPHRASE to enable AES-256 at-rest encryption of the
+      # SQLite audit chain. Leave unset for plaintext (dev-only).
+      # SPIRE_DB_PASSPHRASE: change-me-in-production
+    volumes:
+      - spire-runtime:/opt/spire/runtime
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8700/api/system/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - spire
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: spire-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    networks:
+      - spire
+
+volumes:
+  spire-runtime:
+    driver: local
+
+networks:
+  spire:
+    driver: bridge
