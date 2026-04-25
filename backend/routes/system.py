@@ -4,7 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import datetime
+import sys as _sys
+import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException
@@ -17,6 +19,23 @@ from ..persistence import (
     secure_wipe,
     verify_chain,
 )
+
+# Comms-state primitives — backs GC-7 air-gap toggle.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_REPO_ROOT))
+try:
+    from dataset.comms import CommsState, generate_comms_timeline, format_state_for_api  # type: ignore[import-not-found]
+    _COMMS_AVAILABLE = True
+    _TIMELINE = generate_comms_timeline(datetime.utcnow(), seed=42)
+except Exception:
+    _COMMS_AVAILABLE = False
+    _TIMELINE = None
+
+# In-memory air-gap state. Toggled via /comms/airgap; while AIR_GAPPED is True,
+# /comms/queue accepts mutations into a local queue that flushes on toggle-off.
+_AIR_GAPPED: bool = False
+_QUEUE: list[dict] = []
 
 router = APIRouter()
 
@@ -129,3 +148,129 @@ async def _secure_wipe(payload: dict = Body(default={})):
     actor = (payload or {}).get("actor_role", "security_manager")
     result = secure_wipe(actor=actor)
     return result
+
+
+# ---------------------------------------------------------------------------
+# GC-7 Air-gap deployment mode — comms-state + queue-on-disconnect
+# ---------------------------------------------------------------------------
+
+@router.get("/comms/state")
+async def comms_state():
+    """Return the current comms-state plus a 14-day rolling timeline of
+    transitions (seeded from dataset/comms.py). When the air-gap toggle is
+    on, the current_state is forced to DISCONNECTED regardless of the
+    underlying timeline so the StatusFooter reflects operator intent."""
+    if not _COMMS_AVAILABLE or _TIMELINE is None:
+        return {
+            "current_state": "DISCONNECTED" if _AIR_GAPPED else "CONNECTED",
+            "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "recent_events": [],
+            "queued_ops_count": len([q for q in _QUEUE if not q.get("replayed_at")]),
+            "last_sync_at": None,
+            "air_gap_active": _AIR_GAPPED,
+        }
+    body = format_state_for_api(_TIMELINE)
+    if _AIR_GAPPED:
+        body["current_state"] = "DISCONNECTED"
+    body["queued_ops_count"] = len([q for q in _QUEUE if not q.get("replayed_at")])
+    body["air_gap_active"] = _AIR_GAPPED
+    return body
+
+
+@router.post("/comms/airgap")
+async def comms_airgap(payload: dict = Body(default={})):
+    """Toggle air-gap mode. Body: {enable: bool, actor_role?: str}.
+    When enabled: subsequent /comms/queue calls accept mutations to the
+    local queue. When disabled: queue replays to the master, returns a
+    sync-resolution log."""
+    global _AIR_GAPPED
+    enable = bool(payload.get("enable", not _AIR_GAPPED))
+    actor = payload.get("actor_role", "security_manager")
+    if enable == _AIR_GAPPED:
+        return {"ok": True, "no_change": True, "air_gap_active": _AIR_GAPPED}
+
+    if enable:
+        _AIR_GAPPED = True
+        audit_log(
+            "comms_airgap_engaged",
+            actor=actor,
+            subject_id="comms",
+            payload={"reason": payload.get("reason", "operator-initiated"), "queued_at_engagement": len(_QUEUE)},
+        )
+        return {
+            "ok": True,
+            "air_gap_active": True,
+            "engaged_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        }
+
+    # Disable: replay queued ops, mark each replayed_at, return resolution log.
+    resolutions: list[dict] = []
+    now = datetime.utcnow()
+    for q in _QUEUE:
+        if q.get("replayed_at"):
+            continue
+        q["replayed_at"] = now.isoformat(timespec="seconds") + "Z"
+        # In production, conflict detection happens against the master state.
+        # For the demo the LWW resolution is trivial since no concurrent writes.
+        q["replay_result"] = "applied"
+        resolutions.append({
+            "local_id": q.get("local_id"),
+            "op_kind": q.get("op_kind"),
+            "actor": q.get("actor"),
+            "queued_at": q.get("queued_at"),
+            "replayed_at": q["replayed_at"],
+            "result": "applied",
+        })
+        audit_log(
+            "comms_queued_op_replay",
+            actor=q.get("actor", "unknown"),
+            subject_id=q.get("local_id", ""),
+            payload=q,
+        )
+    _AIR_GAPPED = False
+    audit_log(
+        "comms_airgap_released",
+        actor=actor,
+        subject_id="comms",
+        payload={"replayed": len(resolutions)},
+    )
+    return {
+        "ok": True,
+        "air_gap_active": False,
+        "released_at": now.isoformat(timespec="seconds") + "Z",
+        "replayed": len(resolutions),
+        "resolutions": resolutions,
+    }
+
+
+@router.post("/comms/queue")
+async def comms_queue(payload: dict = Body(default={})):
+    """Queue a mutation while air-gapped. Body: {op_kind, payload, actor,
+    actor_edipi?}. Returns the local_id assigned. While the air-gap toggle
+    is OFF, the queue is bypassed and the caller should hit the live
+    endpoint directly — we surface this as a 409 so the frontend can fall
+    through to the canonical write path."""
+    if not _AIR_GAPPED:
+        raise HTTPException(status_code=409, detail="not air-gapped — call the live endpoint directly")
+    op = {
+        "local_id": f"AGQ-{uuid.uuid4().hex[:10]}",
+        "op_kind": payload.get("op_kind", "unknown"),
+        "payload": payload.get("payload", {}),
+        "actor": payload.get("actor", "operator"),
+        "actor_edipi": payload.get("actor_edipi"),
+        "queued_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "replayed_at": None,
+        "replay_result": None,
+    }
+    _QUEUE.append(op)
+    return {"ok": True, "local_id": op["local_id"], "queued_at": op["queued_at"], "queue_depth": len([q for q in _QUEUE if not q["replayed_at"]])}
+
+
+@router.get("/comms/queue")
+async def comms_queue_list(limit: int = 50):
+    """Inspect the queue (read-only)."""
+    return {
+        "queue": _QUEUE[-limit:],
+        "depth": len([q for q in _QUEUE if not q.get("replayed_at")]),
+        "air_gap_active": _AIR_GAPPED,
+    }
