@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, type Role } from "../state/store";
 import { api } from "../api";
+import { NodeStatus } from "./NodeStatus";
 
 const tabs = [
   { to: "/sentry",  label: "SENTRY", restrict: null as Role | null },
@@ -92,6 +93,7 @@ export function TopBar() {
         </div>
 
         <div className="flex items-center gap-4">
+          <NodeStatus />
           <AirGapToggle />
           <RoleSelector role={role} onChange={onRoleChange} />
           <ModeBadge mode={operatingMode} />

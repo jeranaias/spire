@@ -565,3 +565,78 @@ async def admin_list_outcomes(limit: int = 50, decision_kind: Optional[str] = No
     if decision_kind:
         log = [o for o in log if o["decision_kind"] == decision_kind]
     return {"outcomes": log[-limit:], "total": len(log)}
+
+
+# ---------------------------------------------------------------------------
+# GC-2 Distributed consensus / CRDT sync
+# ---------------------------------------------------------------------------
+
+from ..sync import (  # noqa: E402  (imports at module bottom for clarity)
+    state_summary as _sync_state_summary,
+    absorb_peer_state as _sync_absorb,
+    resolve_conflict as _sync_resolve,
+    conflicts_pending as _sync_conflicts_pending,
+    all_conflicts as _sync_all_conflicts,
+    seed_demo_conflict as _sync_seed_conflict,
+    log_mutation as _sync_log_mutation,
+    node_id as _sync_node_id,
+)
+
+
+@router.get("/sync/state")
+async def sync_state():
+    """Snapshot of this node's vector clock + peer state + conflict count."""
+    return _sync_state_summary()
+
+
+@router.post("/sync/gossip")
+async def sync_gossip(payload: dict = Body(default={})):
+    """Accept a peer's gossip payload. Body: {clock: {...}, events: [...]}.
+    Merges clocks, detects concurrent events as conflicts, returns our
+    state + outgoing diff."""
+    return _sync_absorb(payload.get("clock", {}), payload.get("events", []))
+
+
+@router.get("/sync/conflicts")
+async def sync_conflicts():
+    """List all conflicts (pending + resolved). Drives the resolution UI."""
+    return {
+        "pending": _sync_conflicts_pending(),
+        "all": _sync_all_conflicts(),
+        "node_id": _sync_node_id(),
+    }
+
+
+@router.post("/sync/resolve/{conflict_id}")
+async def sync_resolve(conflict_id: str, payload: dict = Body(default={})):
+    """Resolve a conflict by selecting a winner. Body: {winner: 'local' |
+    'peer', actor: str}. Loser stays in the audit chain."""
+    winner = payload.get("winner", "local")
+    actor = payload.get("actor", "security_manager")
+    if winner not in ("local", "peer"):
+        raise HTTPException(status_code=400, detail="winner must be 'local' or 'peer'")
+    resolved = _sync_resolve(conflict_id, winner, actor)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="conflict not found")
+    audit_log(
+        "sync_conflict_resolved",
+        actor=actor,
+        subject_id=conflict_id,
+        payload={"winner": winner, "record_id": resolved["record_id"]},
+    )
+    return resolved
+
+
+@router.post("/sync/seed-conflict")
+async def sync_seed_conflict(payload: dict = Body(default={})):
+    """Demo helper: seed a deliberate conflict scenario so the CWO can
+    walk through the resolution flow without standing up a second node."""
+    actor = payload.get("actor_role", "g4")
+    conflict = _sync_seed_conflict()
+    audit_log(
+        "sync_demo_conflict_seeded",
+        actor=actor,
+        subject_id=conflict.get("id", ""),
+        payload={"record_id": conflict.get("record_id")},
+    )
+    return conflict
