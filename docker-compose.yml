@@ -23,6 +23,11 @@ services:
       # Set SPIRE_DB_PASSPHRASE to enable AES-256 at-rest encryption of the
       # SQLite audit chain. Leave unset for plaintext (dev-only).
       # SPIRE_DB_PASSPHRASE: change-me-in-production
+      # GitHub issue creation for in-app feedback drawer. Both pulled from
+      # host env (or .env file alongside this compose file). Leave unset to
+      # keep feedback local-only.
+      SPIRE_GITHUB_TOKEN: ${SPIRE_GITHUB_TOKEN:-}
+      SPIRE_GITHUB_REPO:  ${SPIRE_GITHUB_REPO:-jeranaias/spire}
     volumes:
       - spire-runtime:/opt/spire/runtime
     healthcheck:

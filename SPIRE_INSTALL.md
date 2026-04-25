@@ -27,6 +27,27 @@ First build takes ~3 minutes. Subsequent starts are instant.
 You'll see two containers come up: `spire-backend` (FastAPI + canonical
 dataset engine) and `spire-frontend` (nginx serving the React UI).
 
+### Optional · wire feedback to GitHub Issues
+The in-app **Report Issue** drawer (Shift+F) always lands feedback into
+the local audit chain. To *also* mirror each report into GitHub Issues so
+the maintainer + cohort can triage from one queue:
+
+1. Generate a fine-grained PAT at
+   https://github.com/settings/personal-access-tokens/new
+   - **Resource owner**: jeranaias
+   - **Repository access**: Only select repositories → `jeranaias/spire`
+   - **Permissions** → Repository → **Issues: Read and write**
+   - **Expiration**: 90 days
+2. Copy the token (it starts with `github_pat_`).
+3. Beside `docker-compose.yml`, copy the template + paste the token in:
+   ```
+   cp .env.example .env
+   # edit .env, set SPIRE_GITHUB_TOKEN=github_pat_...
+   docker compose up -d   # picks up the new env, no rebuild needed
+   ```
+
+Leave it unset and the drawer still works — it just keeps feedback local.
+
 ## Step 3 — Open the app
 Browse to **http://localhost:8080**.
 
