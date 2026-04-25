@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from statistics import mean
 from typing import Optional
 
@@ -20,6 +20,21 @@ from ..state import (
     srs_for_asset,
 )
 from ..scoring import risk_score, top_risk
+
+# Replenishment rate primitives live in the dataset/ module so they're
+# inspectable + reusable. Import once at module load, fail soft if missing.
+import sys as _sys
+from pathlib import Path as _Path
+_REPO_ROOT = _Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_REPO_ROOT))
+try:
+    from dataset.replenishment import (  # type: ignore[import-not-found]
+        cannibalize_cost, expedite_cost, cross_level_cost, convoy_feasible,
+    )
+    _REPLENISHMENT_AVAILABLE = True
+except Exception:
+    _REPLENISHMENT_AVAILABLE = False
 
 router = APIRouter()
 
@@ -218,6 +233,174 @@ async def risk_board(top: int = Query(20, ge=1, le=100), role: Optional[str] = N
             "open_sr_count": len(asset.open_srs),
         })
     return {"assets": out}
+
+
+# ---------------------------------------------------------------------------
+# GC-1 Autonomous replenishment planning
+# ---------------------------------------------------------------------------
+
+@router.get("/recommend-actions")
+async def recommend_actions(
+    unit: Optional[str] = None,
+    asset_id: Optional[str] = None,
+    top: int = Query(5, ge=1, le=20),
+    role: Optional[str] = None,
+):
+    """Rank candidate actions (cannibalize / expedite / cross-level /
+    redistribute) for a unit or specific asset. Returns each option with
+    expected MC% delta, cost, time-to-effect, and the artifact the user
+    would create if they approved.
+
+    Driven by `dataset/replenishment.py` rate primitives + the live risk
+    board state. Safe to call read-only; the approval step is where
+    artifacts are actually created (cannibalization propose endpoint,
+    requisition draft, etc.)."""
+    if not _REPLENISHMENT_AVAILABLE:
+        raise HTTPException(status_code=503, detail="replenishment rates not loaded")
+    ds = get_dataset()
+    allowed = allowed_units(ds, role)
+
+    # Build the candidate set: top-N at-risk assets if no asset_id given.
+    candidates: list[dict] = []
+    if asset_id:
+        a = ds.asset(asset_id)
+        if a is None:
+            raise HTTPException(status_code=404, detail="asset not found")
+        if allowed is not None and a.unit_name not in allowed:
+            raise HTTPException(status_code=403, detail="asset out of scope")
+        candidates.append({"asset_id": asset_id, "asset": a})
+    else:
+        scored = top_risk(ds, n=20)
+        for s in scored:
+            a = ds.asset(s["asset_id"])
+            if a is None:
+                continue
+            if unit and a.unit_name != unit:
+                continue
+            if allowed is not None and a.unit_name not in allowed:
+                continue
+            candidates.append({"asset_id": s["asset_id"], "asset": a, "risk_score": s["risk_score"]})
+            if len(candidates) >= top:
+                break
+
+    out: list[dict] = []
+    for c in candidates:
+        a = c["asset"]
+        # Find the deadlining SR with a pending requisition (if any).
+        open_sr = next(
+            (sr for sr in ds.srs
+             if sr.asset_id == a.asset_id and sr.close_date is None
+             and sr.condition == "Deadlined"),
+            None,
+        )
+        pending_req = None
+        if open_sr:
+            pending_req = next(
+                (r for r in open_sr.requisitions if r.received_date is None),
+                None,
+            )
+
+        actions: list[dict] = []
+
+        # Option 1: cannibalize from another deadlined asset of same equipment type.
+        if pending_req:
+            donor_pool = [
+                sr for sr in ds.srs
+                if sr.asset_id != a.asset_id
+                and sr.close_date is None
+                and sr.condition == "Deadlined"
+                and any(r.nsn == pending_req.nsn for r in sr.requisitions)
+            ]
+            if donor_pool:
+                d = donor_pool[0]
+                cost = cannibalize_cost()
+                actions.append({
+                    "kind": "cannibalize",
+                    "title": f"Cannibalize {pending_req.nomenclature} from {d.asset_id}",
+                    "description": f"Donor {d.asset_id} ({d.unit_name}) is deadlined on a different fault — same NSN available.",
+                    "cost_usd": cost,
+                    "time_to_effect_hours": 12,
+                    "mc_delta_pct": 0.6,
+                    "confidence": 0.85,
+                    "artifact": {
+                        "kind": "cannibalization_proposal",
+                        "recipient_sr": open_sr.sr_number,
+                        "donor_sr": d.sr_number,
+                        "nsn": pending_req.nsn,
+                    },
+                    "approval_roles": ["maintenance_chief", "g4"],
+                })
+
+        # Option 2: expedite the existing requisition (overnight or 3-day).
+        if pending_req:
+            for tier in ("overnight", "3_day", "5_day"):
+                fee, days = expedite_cost(tier)
+                actions.append({
+                    "kind": "expedite",
+                    "title": f"Expedite {pending_req.nomenclature} via {tier.replace('_', '-')} freight",
+                    "description": f"Convert MILSTRIP path to {tier.replace('_', '-')}; reduces wait by ~{max(1, 17 - days)}d.",
+                    "cost_usd": fee,
+                    "time_to_effect_hours": days * 24,
+                    "mc_delta_pct": 0.4 if tier == "5_day" else 0.55 if tier == "3_day" else 0.7,
+                    "confidence": 0.9,
+                    "artifact": {
+                        "kind": "expedite_request",
+                        "sr_number": open_sr.sr_number if open_sr else None,
+                        "nsn": pending_req.nsn,
+                        "tier": tier,
+                    },
+                    "approval_roles": ["g4", "mef_commander"],
+                })
+
+        # Option 3: cross-level a serviceable asset of the same type from a peer unit.
+        peer_serviceable = [
+            other for other in ds.assets
+            if other.asset_id != a.asset_id
+            and other.equipment_type == a.equipment_type
+            and other.unit_name != a.unit_name
+            and other.current_status in ("RFI", "Operational")
+        ]
+        if peer_serviceable:
+            donor_unit = peer_serviceable[0].unit_name
+            # Use Camp Henderson distance as a stand-in (all garrison units co-located).
+            cost, hours = cross_level_cost(distance_mi=85, hazmat=False)
+            feasible = convoy_feasible(
+                f"{a.unit_name.split(',')[0] if ',' in a.unit_name else 'Camp Henderson, NC'}",
+                f"{donor_unit}",
+            )
+            actions.append({
+                "kind": "cross_level",
+                "title": f"Cross-level a serviceable {a.equipment_type} from {donor_unit}",
+                "description": f"Peer unit holds an RFI {a.equipment_type}; relocate while {a.asset_id} is repaired.",
+                "cost_usd": cost,
+                "time_to_effect_hours": hours,
+                "mc_delta_pct": 1.0,
+                "confidence": 0.7 if feasible else 0.55,
+                "artifact": {
+                    "kind": "cross_level_request",
+                    "donor_asset": peer_serviceable[0].asset_id,
+                    "donor_unit": donor_unit,
+                    "recipient_unit": a.unit_name,
+                },
+                "approval_roles": ["g4"],
+            })
+
+        # Sort by impact-per-dollar-per-day score
+        for act in actions:
+            denom = max(1.0, (act["cost_usd"] / 100) * (act["time_to_effect_hours"] / 24 + 1))
+            act["score"] = round(act["mc_delta_pct"] / denom, 5)
+        actions.sort(key=lambda x: x["score"], reverse=True)
+
+        out.append({
+            "asset_id": a.asset_id,
+            "unit_name": a.unit_name,
+            "equipment_type": a.equipment_type,
+            "risk_score": c.get("risk_score"),
+            "primary_factor": "deadlined " + (open_sr.fault_component if open_sr else "fault") if open_sr else None,
+            "actions": actions[:5],
+        })
+
+    return {"assets": out, "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z"}
 
 
 @router.get("/assets/{asset_id}")
