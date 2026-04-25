@@ -153,8 +153,29 @@ function perimeterPolygon(buildings: Building[]): GeoJSON.Feature | null {
   };
 }
 
-// --- MIL-STD-2525C-lite unit marker SVG (ported from schematic).
-function UnitMarkerSVG({ unit, color, selected }: { unit: string; color: string; selected: boolean }) {
+// --- MIL-STD-2525C affiliation. Marcus (ex-Lattice PM) flagged that every
+// unit was rendering as a blue rectangle regardless of side. Per 2525C, the
+// frame shape encodes affiliation:
+//   FRIENDLY  → rectangle (default for SPIRE units)
+//   HOSTILE   → diamond
+//   NEUTRAL   → square (rectangle with equal width and height, framed green)
+//   UNKNOWN   → quatrefoil (4-leaf shape)
+// We carry the affiliation as a prop so the same component renders correctly
+// for the ThermalHawk hostile UAS reticle area + future coalition/neutral
+// scenarios. SPIRE's fixture is all-friendly; the sim target is hostile.
+export type UnitAffiliation = "friendly" | "hostile" | "neutral" | "unknown";
+
+function UnitMarkerSVG({
+  unit,
+  color,
+  selected,
+  affiliation = "friendly",
+}: {
+  unit: string;
+  color: string;
+  selected: boolean;
+  affiliation?: UnitAffiliation;
+}) {
   const n = unit.toLowerCase();
   let modifier: ReactNode;
   if (n.includes("clb") || n.includes("esb") || n.includes("lvsr")) {
@@ -189,7 +210,98 @@ function UnitMarkerSVG({ unit, color, selected }: { unit: string; color: string;
   } else {
     modifier = <circle r="3" fill={color} />;
   }
+
+  // Frame shape + frame color per 2525C affiliation. The fill color stays
+  // tinted by the unit's status (mc_rate -> green/yellow/orange/red), so the
+  // semantic remains: shape = side, color tint = readiness.
   const W = 56, H = 36;
+  const fill = `color-mix(in oklab, ${color} 25%, #0a0c13)`;
+  const strokeWidth = selected ? 3 : 2;
+  // 2525C frame colors (fallback when caller hasn't overridden via `color`):
+  //   friendly = blue, hostile = red, neutral = green, unknown = yellow.
+  // Caller-supplied color overrides for friendly readiness shading.
+  let frame: ReactNode;
+  let selectionRing: ReactNode = null;
+  if (affiliation === "friendly") {
+    // Rectangle.
+    frame = (
+      <rect
+        x={-W / 2} y={-H / 2} width={W} height={H}
+        fill={fill} stroke={color} strokeWidth={strokeWidth} rx="1"
+      />
+    );
+    if (selected) {
+      selectionRing = (
+        <rect
+          x={-W / 2 - 6} y={-H / 2 - 6}
+          width={W + 12} height={H + 12}
+          fill="none" stroke={color} strokeWidth="1.5"
+          strokeDasharray="5 4" opacity="0.75" rx="2"
+        />
+      );
+    }
+  } else if (affiliation === "hostile") {
+    // Diamond (rotated square). 2525C hostile frame is a red diamond. We size
+    // it to match the rectangle's bounding box visually so labels still align.
+    const HX = 14, HY = 12;
+    frame = (
+      <polygon
+        points={`0,${-HY} ${HX},0 0,${HY} ${-HX},0`}
+        fill={fill} stroke={color} strokeWidth={strokeWidth}
+      />
+    );
+    if (selected) {
+      selectionRing = (
+        <polygon
+          points={`0,${-HY - 4} ${HX + 4},0 0,${HY + 4} ${-HX - 4},0`}
+          fill="none" stroke={color} strokeWidth="1.5"
+          strokeDasharray="5 4" opacity="0.75"
+        />
+      );
+    }
+  } else if (affiliation === "neutral") {
+    // Square — same dimensions on both axes. 2525C neutral frame is green.
+    const S = 32;
+    frame = (
+      <rect
+        x={-S / 2} y={-S / 2} width={S} height={S}
+        fill={fill} stroke={color} strokeWidth={strokeWidth}
+      />
+    );
+    if (selected) {
+      selectionRing = (
+        <rect
+          x={-S / 2 - 5} y={-S / 2 - 5}
+          width={S + 10} height={S + 10}
+          fill="none" stroke={color} strokeWidth="1.5"
+          strokeDasharray="5 4" opacity="0.75"
+        />
+      );
+    }
+  } else {
+    // Unknown — quatrefoil (4-leaf clover). 2525C unknown frame is yellow.
+    // Approximated as a path of four arcs meeting at the center; small enough
+    // to read as the distinctive 4-leaf silhouette at marker scale.
+    const R = 14;
+    const d = `
+      M 0 ${-R}
+      A ${R} ${R} 0 0 1 ${R} 0
+      A ${R} ${R} 0 0 1 0 ${R}
+      A ${R} ${R} 0 0 1 ${-R} 0
+      A ${R} ${R} 0 0 1 0 ${-R}
+      Z
+    `;
+    frame = (
+      <path d={d} fill={fill} stroke={color} strokeWidth={strokeWidth} />
+    );
+    if (selected) {
+      selectionRing = (
+        <circle r={R + 5} fill="none" stroke={color} strokeWidth="1.5"
+                strokeDasharray="5 4" opacity="0.75" />
+      );
+    }
+  }
+
   return (
     <svg
       width={W + 8}
@@ -197,23 +309,16 @@ function UnitMarkerSVG({ unit, color, selected }: { unit: string; color: string;
       viewBox={`${-(W + 8) / 2} ${-(H + 18) / 2} ${W + 8} ${H + 18}`}
       style={{ overflow: "visible", filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.7))" }}
     >
-      {selected && (
-        <rect
-          x={-W / 2 - 6} y={-H / 2 - 6}
-          width={W + 12} height={H + 12}
-          fill="none" stroke={color} strokeWidth="1.5"
-          strokeDasharray="5 4" opacity="0.75" rx="2"
-        />
+      {selectionRing}
+      {frame}
+      {/* Antenna dots — unit-id markers, only for the rectangular friendly
+       * frame (the diamond/quatrefoil silhouettes don't accommodate them). */}
+      {affiliation === "friendly" && (
+        <>
+          <circle cx="-6" cy={-H / 2 - 5} r="1.8" fill={color} />
+          <circle cx="6"  cy={-H / 2 - 5} r="1.8" fill={color} />
+        </>
       )}
-      <rect
-        x={-W / 2} y={-H / 2} width={W} height={H}
-        fill={`color-mix(in oklab, ${color} 25%, #0a0c13)`}
-        stroke={color}
-        strokeWidth={selected ? 3 : 2}
-        rx="1"
-      />
-      <circle cx="-6" cy={-H / 2 - 5} r="1.8" fill={color} />
-      <circle cx="6"  cy={-H / 2 - 5} r="1.8" fill={color} />
       <g opacity="0.9">{modifier}</g>
     </svg>
   );
@@ -547,7 +652,9 @@ export function MapCanvas({
               }}
             >
               <div className="relative flex flex-col items-center" style={{ cursor: "pointer" }}>
-                <UnitMarkerSVG unit={u.unit} color={color} selected={selected} />
+                {/* SPIRE units are friendly. Marcus (ex-Lattice) flagged that
+                 * 2525C affiliation must drive frame shape, not just color. */}
+                <UnitMarkerSVG unit={u.unit} color={color} selected={selected} affiliation="friendly" />
                 <div
                   className="mt-1 rounded-sm bg-[color-mix(in_oklab,#0a0c13_80%,transparent)] px-1.5 py-[1px] font-mono text-xs tabular-nums tracking-wide"
                   style={{ color }}
@@ -558,6 +665,25 @@ export function MapCanvas({
             </Marker>
           );
         })}
+
+        {/* Sim hostile UAS — 2525C diamond frame with red fill, sits beside
+         * the existing reticle so the hostile "unit" is symbol-correct rather
+         * than just a target indicator. The reticle remains as the targeting
+         * cue; this is the hostile unit symbol per 2525C spec.
+         * Offset slightly NE of the target so it doesn't overlap the reticle. */}
+        {simActive && simTarget && simTarget.lat != null && simTarget.lon != null && (
+          <Marker longitude={simTarget.lon + 0.0009} latitude={simTarget.lat + 0.0006} anchor="bottom">
+            <div className="relative flex flex-col items-center" style={{ pointerEvents: "none" }}>
+              <UnitMarkerSVG unit="UAS" color="#ef4444" selected={false} affiliation="hostile" />
+              <div
+                className="mt-1 rounded-sm bg-[color-mix(in_oklab,#0a0c13_85%,transparent)] px-1.5 py-[1px] font-mono text-xs tabular-nums tracking-wide"
+                style={{ color: "#ef4444" }}
+              >
+                UAS · GROUP 1
+              </div>
+            </div>
+          </Marker>
+        )}
 
         {/* Sim target reticle */}
         {simActive && simTarget && simTarget.lat != null && simTarget.lon != null && (
