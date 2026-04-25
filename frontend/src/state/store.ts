@@ -10,6 +10,12 @@ export type Role =
 export type OperatingMode = "full" | "lite";
 export type ToastTone = "ok" | "info" | "warn" | "error";
 
+// Information-density mode. `dense` is the existing staff layout (more
+// columns, tighter padding, smaller type). `sparse` bumps font tiers, pads
+// cards, hides decorative columns — for Marines on iPads in motor pools
+// where tap targets and breathing room matter more than info per square inch.
+export type Density = "dense" | "sparse";
+
 export interface Toast {
   id: string;
   tone: ToastTone;
@@ -50,6 +56,9 @@ export interface SpireState {
   // Toast queue.
   toasts: Toast[];
 
+  // Track-G3 — density toggle. Persisted per role in localStorage.
+  density: Density;
+
   setRole: (r: Role) => void;
   setOperatingMode: (m: OperatingMode) => void;
   setAlertCount: (n: number) => void;
@@ -59,6 +68,7 @@ export interface SpireState {
   setCommsState: (s: CommsState) => void;
   setAirGap: (active: boolean) => void;
   setQueueDepth: (n: number) => void;
+  setDensity: (d: Density) => void;
   pushToast: (t: Omit<Toast, "id">) => string;
   dismissToast: (id: string) => void;
 }
@@ -94,8 +104,32 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-export const useSpireStore = create<SpireState>((set) => ({
-  role: "mef_commander",
+// Density localStorage helpers — keyed per role so the field-Marine on
+// CLB-6's iPad doesn't drag a sparse layout into the G-4 staff seat.
+function densityKey(role: Role): string {
+  return `spire.density.${role}`;
+}
+function loadDensity(role: Role): Density {
+  try {
+    const raw = window.localStorage.getItem(densityKey(role));
+    if (raw === "dense" || raw === "sparse") return raw;
+  } catch {
+    /* SSR / private mode tolerant */
+  }
+  return "dense";
+}
+function saveDensity(role: Role, d: Density): void {
+  try {
+    window.localStorage.setItem(densityKey(role), d);
+  } catch {
+    /* tolerant */
+  }
+}
+
+const INITIAL_ROLE: Role = "mef_commander";
+
+export const useSpireStore = create<SpireState>((set, get) => ({
+  role: INITIAL_ROLE,
   operatingMode: "full",
   alertCount: 0,
   sentryBatchId: null,
@@ -106,7 +140,13 @@ export const useSpireStore = create<SpireState>((set) => ({
   airGapActive: false,
   queueDepth: 0,
   toasts: [],
-  setRole: (role) => set({ role }),
+  density: typeof window !== "undefined" ? loadDensity(INITIAL_ROLE) : "dense",
+  setRole: (role) =>
+    set({
+      role,
+      // Re-hydrate density from per-role localStorage on every role swap.
+      density: typeof window !== "undefined" ? loadDensity(role) : "dense",
+    }),
   setOperatingMode: (operatingMode) => set({ operatingMode }),
   setAlertCount: (alertCount) => set({ alertCount }),
   setSentryBatch: (sentryBatchId, sentryJobId) => set({ sentryBatchId, sentryJobId }),
@@ -115,6 +155,10 @@ export const useSpireStore = create<SpireState>((set) => ({
   setCommsState: (commsState) => set({ commsState }),
   setAirGap: (airGapActive) => set({ airGapActive }),
   setQueueDepth: (queueDepth) => set({ queueDepth }),
+  setDensity: (density) => {
+    saveDensity(get().role, density);
+    set({ density });
+  },
   pushToast: (t) => {
     const id = uid();
     set((s) => ({ toasts: [...s.toasts, { ...t, id }] }));

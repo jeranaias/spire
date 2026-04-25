@@ -95,6 +95,7 @@ export function TopBar() {
         <div className="flex items-center gap-4">
           <NodeStatus />
           <AirGapToggle />
+          <DensityToggle />
           <RoleSelector role={role} onChange={onRoleChange} />
           <ModeBadge mode={operatingMode} />
           <AlertBadge count={alertCount} />
@@ -340,6 +341,39 @@ function AirGapToggle() {
         />
       </span>
       <span>{airGap ? "AIR-GAP ON" : "AIR-GAP"}</span>
+    </button>
+  );
+}
+
+// Track-G3 density toggle. Two modes:
+//   • Dense  — current staff layout, more columns, tighter padding.
+//   • Sparse — field/iPad layout, larger tap targets, bigger type, fewer
+//     columns. Persisted per role in localStorage via the Zustand slice.
+//
+// Rendered as a compact pill dropdown to match the existing chrome rhythm.
+function DensityToggle() {
+  const density = useSpireStore((s) => s.density);
+  const setDensity = useSpireStore((s) => s.setDensity);
+  const next: Density = density === "dense" ? "sparse" : "dense";
+  return (
+    <button
+      type="button"
+      onClick={() => setDensity(next)}
+      title={
+        density === "dense"
+          ? "Currently DENSE (staff). Click to switch to SPARSE — larger tap targets, fewer columns, for iPad / motor-pool use."
+          : "Currently SPARSE (field). Click to switch to DENSE — staff layout, more columns, more info per square inch."
+      }
+      className="flex items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1 font-mono uppercase text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+      style={{
+        fontSize: "var(--text-xs)",
+        letterSpacing: "var(--tracking-wider)",
+      }}
+    >
+      <span aria-hidden className="text-[var(--color-text-muted)]">
+        {density === "dense" ? "▦" : "▤"}
+      </span>
+      <span>{density === "dense" ? "Dense" : "Sparse"}</span>
     </button>
   );
 }
