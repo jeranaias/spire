@@ -267,5 +267,104 @@ def parse_tmr_text(text: str) -> dict:
         "tmr": tmr.model_dump(),
         "validation": validation.model_dump(),
         "approval_chain": chain,
-        "engine": "Rule-based parser (Gemma4 path pending — classification-proxy :8095)",
+        "engine": "rule-based",
     }
+
+
+async def parse_tmr_text_llm(text: str) -> dict:
+    """LLM-backed TMR extraction via the configured RigRun proxy.
+
+    Sends a structured-extraction prompt with JSON-mode response_format so the
+    LLM emits a strict TMR object. We then funnel through the same _validate +
+    _approval_chain pipeline as the rule-based parser so the downstream
+    artifacts (validation messages, chain) are identical regardless of engine.
+
+    Falls through to the rule-based parser on any failure (proxy down,
+    timeout, malformed JSON, missing required fields). Caller doesn't need
+    to handle exceptions — degraded result still returns a usable TMR.
+    """
+    import json as _json
+    from .llm import call_llm_chat
+
+    system = (
+        "You are a USMC movement-control extraction engine. Extract a Transportation "
+        "Movement Request (TMR) from the operator's natural-language text into a strict "
+        "JSON schema. Be conservative — emit null for fields you cannot confidently extract. "
+        "Locations should be canonical USMC installations (e.g. \"Camp Lejeune, NC\", "
+        "\"MCAS Cherry Point, NC\"). Equipment items use TAMCN-style identifiers "
+        "(JLTV, MTVR_CARGO, LVSR, M1A1_ABRAMS, MV22B_OSPREY, etc.). Dates ISO-8601 (YYYY-MM-DD). "
+        "Priority is one of ROUTINE / PRIORITY / IMMEDIATE / FLASH."
+    )
+    schema_hint = {
+        "origin": "string|null",
+        "destination": "string|null",
+        "equipment": [{"type": "string", "qty": "integer"}],
+        "scheduled_date": "YYYY-MM-DD|null",
+        "hazmat": "bool",
+        "priority": "ROUTINE|PRIORITY|IMMEDIATE|FLASH",
+    }
+    user = (
+        f"Operator text:\n\"{text}\"\n\n"
+        f"Emit ONLY valid JSON matching this shape (no commentary, no code fences):\n"
+        f"{_json.dumps(schema_hint)}"
+    )
+    try:
+        result = await call_llm_chat(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.0,
+            max_tokens=600,
+        )
+        raw = (result.get("content") or "").strip()
+        # Some upstreams wrap JSON in code fences despite response_format=json_object.
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+        data = _json.loads(raw)
+        # Coerce equipment list into the TMRRequest shape.
+        equipment_in = data.get("equipment") or []
+        equipment = []
+        for item in equipment_in:
+            if not isinstance(item, dict):
+                continue
+            etype = item.get("type") or item.get("equipment") or ""
+            qty = int(item.get("qty") or item.get("count") or 1)
+            if etype:
+                equipment.append({"type": etype.upper().replace(" ", "_"), "qty": qty})
+        priority = (data.get("priority") or "ROUTINE").upper()
+        if priority not in ("ROUTINE", "PRIORITY", "IMMEDIATE", "FLASH"):
+            priority = "ROUTINE"
+        scheduled = data.get("scheduled_date")
+        # Validate the date — let pydantic catch bad strings; null becomes a +5d default.
+        if not scheduled:
+            scheduled = (datetime.utcnow() + timedelta(days=5)).date().isoformat()
+        tmr = TMRRequest(
+            origin=data.get("origin") or "Camp Lejeune, NC",
+            destination=data.get("destination") or "Camp Geiger, NC",
+            equipment=equipment or [{"type": "MTVR_CARGO", "qty": 1}],
+            scheduled_date=scheduled,
+            hazmat=bool(data.get("hazmat", False)),
+            escort_required=bool(data.get("hazmat", False)),
+            priority=priority,
+            raw_text=text,
+        )
+        validation = _validate(tmr)
+        chain = _approval_chain(tmr, validation)
+        usage = result.get("usage") or {}
+        return {
+            "tmr": tmr.model_dump(),
+            "validation": validation.model_dump(),
+            "approval_chain": chain,
+            "engine": "Gemma4 via RigRun proxy",
+            "tokens_used": usage.get("total_tokens"),
+        }
+    except Exception as e:  # noqa: BLE001
+        # Graceful degradation — rule-based fallback with engine label noting why.
+        rule_result = parse_tmr_text(text)
+        rule_result["engine"] = f"rule-based (LLM fallback: {type(e).__name__})"
+        return rule_result

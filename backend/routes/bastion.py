@@ -512,14 +512,19 @@ async def clear_simulation(sim_id: str):
 # NL TMR — Easter egg in the BASTION NL bar
 # ---------------------------------------------------------------------------
 
-from .tmr import parse_tmr_text  # noqa: E402
+from .tmr import parse_tmr_text, parse_tmr_text_llm  # noqa: E402
+from .llm import call_llm_chat  # noqa: E402
 
 
 @router.post("/nl-query")
 async def nl_query(payload: dict):
     """Natural-language query entry point. Detects intent (TMR submission vs
-    general question) and routes appropriately. LLM path is stubbed until
-    Gemma4 comes back online; TMR parsing runs locally on the rule path."""
+    general question) and routes appropriately:
+      - TMR triggers → LLM-backed structured extraction (Gemma4 via RigRun
+        proxy), with rule-based fallback if the proxy is unreachable
+      - Everything else → LLM general-purpose answer with a defense-context
+        system prompt, also with rule-based fallback
+    """
     text = payload.get("text", "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
@@ -529,12 +534,44 @@ async def nl_query(payload: dict):
     if any(t in lower for t in tmr_triggers):
         return {
             "intent": "tmr_submission",
-            "result": parse_tmr_text(text),
+            "result": await parse_tmr_text_llm(text),
         }
-    return {
-        "intent": "general_query",
-        "result": {
-            "note": "Full NL query answers run through Gemma4 via classification-proxy :8095. Offline until training completes; try a TMR phrase (e.g. 'submit TMR from Lejeune to Geiger, 5 MTVRs, Wednesday').",
-            "suggestion": "TMR, readiness, cannibalization queries route to local handlers today.",
-        },
-    }
+
+    # General-purpose NL query path. Defense-context system prompt; the LLM
+    # returns a short authoritative answer, falls back to a stub if the
+    # proxy is unreachable.
+    try:
+        sys_prompt = (
+            "You are SPIRE, a USMC contested-logistics operating system. The operator "
+            "is a Marine using SPIRE during a 30-day pilot of the synthetic Camp Henderson "
+            "installation. Synthetic dataset: 10 units (CLB-6, 3/6 Marines, 2d LAR Bn, MALS-31, "
+            "MWSS-372, 2d LAAD Bn, 5/10 Marines, 7th ESB, 3d Maint Bn, CLB-1), 350 assets, "
+            "6,332 service requests over 365 days. Answer in 2-4 sentences max. Be authoritative; "
+            "no hedging. If the question requires data you don't have, say so plainly. Never "
+            "speculate about real-world classified data — this is a synthetic environment."
+        )
+        result = await call_llm_chat(
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.2,
+            max_tokens=400,
+        )
+        usage = result.get("usage") or {}
+        return {
+            "intent": "general_query",
+            "result": {
+                "answer": (result.get("content") or "").strip(),
+                "engine": "Gemma4 via RigRun proxy",
+                "tokens_used": usage.get("total_tokens"),
+            },
+        }
+    except Exception as e:  # noqa: BLE001
+        return {
+            "intent": "general_query",
+            "result": {
+                "answer": "Language-model gate unavailable right now. Try a structured query (e.g. 'submit TMR from Lejeune to Geiger, 5 MTVRs, Wednesday') or refresh in a minute.",
+                "engine": f"unavailable ({type(e).__name__})",
+            },
+        }

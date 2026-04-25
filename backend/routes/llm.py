@@ -71,9 +71,14 @@ async def call_llm_chat(*, messages: list, response_format: Optional[dict] = Non
 
     Raises HTTPException(503) if the proxy is unreachable — callers should
     gracefully degrade to Lite Mode.
+
+    Reads SPIRE_LLM_PROXY/SPIRE_LLM_MODEL from env at call time (not module
+    import) so secret rotation via Fly takes effect without restart.
     """
+    proxy_url = os.environ.get("SPIRE_LLM_PROXY", LLM_PROXY_URL)
+    model = os.environ.get("SPIRE_LLM_MODEL", LLM_MODEL)
     payload = {
-        "model": LLM_MODEL,
+        "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -88,7 +93,7 @@ async def call_llm_chat(*, messages: list, response_format: Optional[dict] = Non
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
             resp = await client.post(
-                f"{LLM_PROXY_URL}/v1/chat/completions",
+                f"{proxy_url}/v1/chat/completions",
                 json=payload,
                 headers=headers,
             )
