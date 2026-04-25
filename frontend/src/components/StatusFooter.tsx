@@ -88,7 +88,7 @@ export function StatusFooter() {
     { label: "LLM", value: `${llmModel} · ${llmOk ? "online" : "standby"}`, tone: llmOk ? "ok" : "warn" },
     { label: "SENTRY·CLASSIFIER", value: "val=1.0 · 413K params", tone: "ok" },
     { label: "PULSE·RISK", value: "val=0.9974 · 8.8K params", tone: "ok" },
-    { label: "CLASSIFICATION", value: "UNCLASSIFIED · synthetic", tone: "muted" },
+    { label: "CLASSIFICATION", value: "UNCLASSIFIED // SYNTHETIC DATA", tone: "muted" },
   ];
 
   const toneColor = (tone?: "ok" | "warn" | "muted") =>

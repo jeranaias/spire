@@ -169,7 +169,7 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
             className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.16em" }}
           >
-            UNCLAS · Synthetic
+            UNCLASSIFIED // SYNTHETIC
           </span>
         </div>
         <div className="mt-2">

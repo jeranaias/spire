@@ -219,7 +219,7 @@ export function BastionView() {
           >
             {cop.buildings_count} buildings · {cop.ecps.length} ECPs · {cop.response_forces_count} RF · FPCON BRAVO
             {cop.installation.fictional && (
-              <span className="ml-2 text-[var(--color-warning)]">· SYNTHETIC</span>
+              <span className="ml-2 text-[var(--color-warning)]">// SYNTHETIC DATA</span>
             )}
           </div>
         </div>
