@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -61,7 +61,15 @@ async def llm_status():
     }
 
 
-async def call_llm_chat(*, messages: list, response_format: Optional[dict] = None, temperature: float = 0.0, max_tokens: int = 512) -> dict:
+async def call_llm_chat(
+    *,
+    messages: list,
+    response_format: Optional[dict] = None,
+    temperature: float = 0.0,
+    max_tokens: int = 512,
+    tools: Optional[list] = None,
+    tool_choice: Optional[Any] = None,
+) -> dict:
     """Call the LLM chat completion endpoint via classification-proxy.
 
     Every call is:
@@ -74,10 +82,13 @@ async def call_llm_chat(*, messages: list, response_format: Optional[dict] = Non
 
     Reads SPIRE_LLM_PROXY/SPIRE_LLM_MODEL from env at call time (not module
     import) so secret rotation via Fly takes effect without restart.
+
+    `tools` + `tool_choice` enable OpenAI-style function calling for the
+    co-pilot planner. Pass tools=None for plain chat.
     """
     proxy_url = os.environ.get("SPIRE_LLM_PROXY", LLM_PROXY_URL)
     model = os.environ.get("SPIRE_LLM_MODEL", LLM_MODEL)
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
@@ -85,6 +96,10 @@ async def call_llm_chat(*, messages: list, response_format: Optional[dict] = Non
     }
     if response_format is not None:
         payload["response_format"] = response_format
+    if tools is not None:
+        payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
     headers = {
         "Content-Type": "application/json",
         "X-Caller-Clearance": "UNCLASSIFIED",

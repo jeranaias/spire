@@ -27,6 +27,7 @@ from .routes.pulse import router as pulse_router
 from .routes.sentry import router as sentry_router
 from .routes.bastion import router as bastion_router
 from .routes.llm import router as llm_router
+from .routes.copilot import router as copilot_router
 
 
 @asynccontextmanager
@@ -77,6 +78,7 @@ app.include_router(pulse_router,  prefix="/api/pulse",  tags=["pulse"])
 app.include_router(sentry_router, prefix="/api/sentry", tags=["sentry"])
 app.include_router(bastion_router, prefix="/api/bastion", tags=["bastion"])
 app.include_router(llm_router,    prefix="/api/llm",    tags=["llm"])
+app.include_router(copilot_router, prefix="/api/copilot", tags=["copilot"])
 
 
 # Serve the built frontend bundle at /. Assets land at /assets/*, index.html
