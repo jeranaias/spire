@@ -20,10 +20,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt -r dataset/requirements.txt pytest
-      - name: Dataset deterministic regen (seed 42)
+      - name: Dataset deterministic regen (seed 42, quick)
         run: |
           cd dataset
-          python -c "from main import generate_canonical; ds = generate_canonical(seed=42); print('units:', len(ds.units), 'assets:', len(ds.assets), 'srs:', len(ds.srs))"
+          python -c "from main import main as regen; regen(seed=42, quick=True)"
       - name: Run pytest
         run: pytest dataset/tests/ -v
 
