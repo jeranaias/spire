@@ -63,7 +63,7 @@ export function ForecastTab() {
   if (!data) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-3 font-mono text-[11px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.1em" }}>
+        <div className="flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.1em" }}>
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
           Running Monte Carlo forecast …
         </div>
@@ -88,7 +88,7 @@ export function ForecastTab() {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2
-            className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+            className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
             style={{ letterSpacing: "0.2em" }}
           >
             Readiness Forecast · Monte Carlo
@@ -100,7 +100,7 @@ export function ForecastTab() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span
-              className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+              className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.18em" }}
             >
               Horizon
@@ -115,12 +115,12 @@ export function ForecastTab() {
               onChange={setHorizon}
             />
           </div>
-          <label className="flex items-center gap-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+          <label className="flex items-center gap-2 font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
             Unit
             <select
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
-              className="appearance-none rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[11px] text-[var(--color-text)] hover:border-[var(--color-border-active)] focus:border-[var(--color-primary)] focus:outline-none"
+              className="appearance-none rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-sm text-[var(--color-text)] hover:border-[var(--color-border-active)] focus:border-[var(--color-primary)] focus:outline-none"
               style={{ letterSpacing: "0.06em" }}
             >
               <option value="FLEET">Fleet</option>
@@ -237,12 +237,12 @@ export function ForecastTab() {
           readout row and let the filled ribbon tell the distributional story. */}
       <div className="mt-3 grid grid-cols-3 gap-3">
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-          <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
             Projected · Horizon End
           </div>
-          <div className="mt-1 font-mono text-[20px] font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "-0.01em", lineHeight: 1 }}>
+          <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "-0.01em", lineHeight: 1 }}>
             {(data.projection.length > 0 ? data.projection[data.projection.length - 1].projected_mc_rate * 100 : 0).toFixed(1)}
-            <span className="ml-0.5 text-[12px] text-[var(--color-text-muted)]">%</span>
+            <span className="ml-0.5 text-base text-[var(--color-text-muted)]">%</span>
           </div>
         </div>
         <div
@@ -258,11 +258,11 @@ export function ForecastTab() {
               : "var(--color-surface)",
           }}
         >
-          <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
             P(cross {(data.threshold * 100).toFixed(0)}% threshold)
           </div>
           <div
-            className="mt-1 font-mono text-[20px] font-semibold tabular-nums"
+            className="mt-1 font-mono text-xl font-semibold tabular-nums"
             style={{
               color: endCross > 0.5
                 ? "var(--color-danger)"
@@ -274,19 +274,19 @@ export function ForecastTab() {
             }}
           >
             {(endCross * 100).toFixed(0)}
-            <span className="ml-0.5 text-[12px] text-[var(--color-text-muted)]">%</span>
+            <span className="ml-0.5 text-base text-[var(--color-text-muted)]">%</span>
           </div>
         </div>
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-          <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
             First Cross (mean)
           </div>
-          <div className="mt-1 font-mono text-[14px] font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+          <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
             {data.threshold_cross_date
               ? data.threshold_cross_date.slice(5)
               : "—"}
           </div>
-          <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
             {data.threshold_cross_date
               ? "mean projection crosses"
               : "no mean crossing in window"}
@@ -295,7 +295,7 @@ export function ForecastTab() {
       </div>
 
       {/* Tiny legend indicating the spaghetti paths are truly Monte Carlo */}
-      <div className="mt-2 flex items-center gap-4 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="mt-2 flex items-center gap-4 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
         <LegendDot color="var(--color-success)" label="historical actuals" />
         <LegendDot color="var(--color-primary)" label="mean projection (200 paths)" dashed />
         <LegendDot color="var(--color-primary)" label="p10 / p90 envelope" opacity={0.35} />

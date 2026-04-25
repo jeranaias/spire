@@ -41,7 +41,7 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
         style={{ background: accent, boxShadow: `0 0 6px ${accent}` }}
       />
       <span
-        className="flex-1 font-mono text-[11px] text-[var(--color-text)]"
+        className="flex-1 font-mono text-sm text-[var(--color-text)]"
         style={{ letterSpacing: "0.04em" }}
       >
         {toast.text}
@@ -52,7 +52,7 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
             toast.undo!.onUndo();
             onDismiss();
           }}
-          className="font-mono text-[10px] uppercase text-[var(--color-primary)] hover:underline"
+          className="font-mono text-xs uppercase text-[var(--color-primary)] hover:underline"
           style={{ letterSpacing: "0.14em" }}
         >
           {toast.undo.label}
@@ -63,7 +63,7 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
           href={toast.link.href}
           target="_blank"
           rel="noopener noreferrer"
-          className="font-mono text-[10px] uppercase text-[var(--color-primary)] hover:underline"
+          className="font-mono text-xs uppercase text-[var(--color-primary)] hover:underline"
           style={{ letterSpacing: "0.14em" }}
         >
           {toast.link.label} ↗
@@ -71,7 +71,7 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
       )}
       <button
         onClick={onDismiss}
-        className="font-mono text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        className="font-mono text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
         aria-label="Dismiss"
       >
         ✕

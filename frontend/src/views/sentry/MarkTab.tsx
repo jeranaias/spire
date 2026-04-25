@@ -79,7 +79,7 @@ export function MarkTab() {
             <button
               key={s.label}
               onClick={() => setText(s.text)}
-              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-[11px] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
             >
               {s.label}
             </button>
@@ -95,7 +95,7 @@ export function MarkTab() {
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <span
-            className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.18em" }}
           >
             Release Authority
@@ -108,7 +108,7 @@ export function MarkTab() {
           <button
             onClick={mark}
             disabled={loading || !text.trim()}
-            className="ml-auto rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-5 py-1.5 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
+            className="ml-auto rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-5 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
             style={{ letterSpacing: "0.18em" }}
           >
             {loading ? "Marking …" : "Recommend Marking"}
@@ -127,7 +127,7 @@ export function MarkTab() {
           <>
             <MarkingBanner result={result} />
             <div className="mb-4 flex items-center gap-3">
-              <div className="font-mono text-[11px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+              <div className="font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
                 Confidence <span className="tabular-nums text-[var(--color-text)]">{(result.confidence * 100).toFixed(0)}%</span>
                 <span className="mx-2 text-[var(--color-border-active)]">│</span>
                 Release: <span className="text-[var(--color-text)]">{result.release_authority_requested}</span>
@@ -158,7 +158,7 @@ export function MarkTab() {
                     setDownloading(false);
                   }
                 }}
-                className="ml-auto rounded-sm border border-[var(--color-border)] px-3 py-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
+                className="ml-auto rounded-sm border border-[var(--color-border)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
                 style={{ letterSpacing: "0.18em" }}
               >
                 {downloading ? "…" : "↓ Attestation"}
@@ -166,7 +166,7 @@ export function MarkTab() {
             </div>
 
             <section className="mb-4">
-              <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
                 Evidence ({result.evidence.length} rule match{result.evidence.length === 1 ? "" : "es"})
               </h4>
               {result.evidence.length === 0 && (
@@ -179,7 +179,7 @@ export function MarkTab() {
                   <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
                     <div className="flex items-baseline gap-2">
                       <span
-                        className="rounded-sm px-1.5 py-0.5 text-[10px] font-mono uppercase"
+                        className="rounded-sm px-1.5 py-0.5 text-xs font-mono uppercase"
                         style={{
                           background: "color-mix(in oklab, var(--color-warning-muted) 25%, var(--color-surface))",
                           color: "var(--color-warning)",
@@ -187,7 +187,7 @@ export function MarkTab() {
                       >
                         {e.flag}
                       </span>
-                      <span className="text-[10px] font-mono text-[var(--color-text-muted)]">rule: {e.rule}</span>
+                      <span className="text-xs font-mono text-[var(--color-text-muted)]">rule: {e.rule}</span>
                     </div>
                     <div className="mt-1 font-mono text-[var(--color-text)]">"{e.evidence}"</div>
                   </div>
@@ -196,10 +196,10 @@ export function MarkTab() {
             </section>
 
             <section>
-              <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
                 Audit trail
               </h4>
-              <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-[11px] text-[var(--color-text-secondary)]">
+              <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm text-[var(--color-text-secondary)]">
                 <div>Engine: {result.audit.engine}</div>
                 <div>Timestamp: <span className="font-mono">{result.audit.timestamp}</span></div>
                 <div className="mt-1 italic">
@@ -240,25 +240,25 @@ function MarkingBanner({ result }: { result: MarkResult }) {
       <div className="flex items-center justify-between px-4 py-3">
         <div>
           <div
-            className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.22em" }}
           >
             Recommended Marking
           </div>
           <div
-            className="mt-1 font-mono text-[22px] font-semibold uppercase"
+            className="mt-1 font-mono text-xl font-semibold uppercase"
             style={{ color, letterSpacing: "0.08em", lineHeight: 1 }}
           >
             {cls.replace("_", " ")}
             {result.caveats_recommended.length > 0 && (
-              <span className="ml-2 text-[18px] text-[var(--color-text-secondary)]">
+              <span className="ml-2 text-xl text-[var(--color-text-secondary)]">
                 // {result.caveats_recommended.join(" / ")}
               </span>
             )}
           </div>
         </div>
         <div
-          className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
           style={{ letterSpacing: "0.22em" }}
         >
           DoDM 5200.01

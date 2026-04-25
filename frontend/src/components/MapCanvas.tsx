@@ -549,7 +549,7 @@ export function MapCanvas({
               <div className="relative flex flex-col items-center" style={{ cursor: "pointer" }}>
                 <UnitMarkerSVG unit={u.unit} color={color} selected={selected} />
                 <div
-                  className="mt-1 rounded-sm bg-[color-mix(in_oklab,#0a0c13_80%,transparent)] px-1.5 py-[1px] font-mono text-[10px] tabular-nums"
+                  className="mt-1 rounded-sm bg-[color-mix(in_oklab,#0a0c13_80%,transparent)] px-1.5 py-[1px] font-mono text-xs tabular-nums"
                   style={{ color, letterSpacing: "0.04em" }}
                 >
                   {u.unit} · {Math.round(u.mc_rate * 100)}%
@@ -586,18 +586,18 @@ export function MapCanvas({
           >
             <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 200 }}>
               <div
-                className="font-mono text-[9px] uppercase"
+                className="font-mono text-xs uppercase"
                 style={{ letterSpacing: "0.16em", color: TYPE_COLOR[hoverBuilding.type]?.stroke ?? "#9ca3af" }}
               >
                 {hoverBuilding.id} · {hoverBuilding.type.replace("_", " ")}
               </div>
-              <div className="mt-0.5 text-[12px] font-semibold text-[var(--color-text)]">
+              <div className="mt-0.5 text-base font-semibold text-[var(--color-text)]">
                 {hoverBuilding.name}
               </div>
-              <div className="mt-1 font-mono text-[10px] text-[var(--color-text-muted)]">
+              <div className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
                 {hoverBuilding.grid}
               </div>
-              <div className="mt-1 font-mono text-[10px] text-[var(--color-text-secondary)]">
+              <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)]">
                 OCC {hoverBuilding.current_occupancy}/{hoverBuilding.occupancy_capacity}
                 {hoverBuilding.critical_infrastructure && (
                   <span className="ml-2 text-[var(--color-primary)]">CRIT INFRA</span>
@@ -607,7 +607,7 @@ export function MapCanvas({
                 )}
               </div>
               {hoverBuilding.notes && (
-                <div className="mt-1 text-[10px] italic text-[var(--color-text-muted)]">
+                <div className="mt-1 text-xs italic text-[var(--color-text-muted)]">
                   {hoverBuilding.notes}
                 </div>
               )}
@@ -626,26 +626,26 @@ export function MapCanvas({
             onClose={() => setEcpSelected(null)}
           >
             <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 220 }}>
-              <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+              <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
                 Entry Control Point
               </div>
               <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
                 {ecpSelected.name}
               </div>
-              <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[10px]">
+              <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-xs">
                 <div>
-                  <div className="text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>Status</div>
+                  <div className="text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>Status</div>
                   <div style={{ color: ecpSelected.status === "open" ? "var(--color-success)" : "var(--color-text-muted)" }}>
                     {ecpSelected.status.toUpperCase()}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>Lanes</div>
+                  <div className="text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>Lanes</div>
                   <div className="text-[var(--color-text)]">{ecpSelected.lanes_in}×IN · {ecpSelected.lanes_out}×OUT</div>
                 </div>
               </div>
               {ecpSelected.notes && (
-                <div className="mt-2 text-[10px] italic text-[var(--color-text-muted)]">
+                <div className="mt-2 text-xs italic text-[var(--color-text-muted)]">
                   {ecpSelected.notes}
                 </div>
               )}
@@ -664,16 +664,16 @@ export function MapCanvas({
             onClose={() => setRpSelected(null)}
           >
             <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 200 }}>
-              <div className="font-mono text-[9px] uppercase text-[#8b5cf6]" style={{ letterSpacing: "0.22em" }}>
+              <div className="font-mono text-xs uppercase text-[#8b5cf6]" style={{ letterSpacing: "0.22em" }}>
                 Rally Point
               </div>
               <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
                 {rpSelected.name}
               </div>
-              <div className="mt-2 font-mono text-[10px] text-[var(--color-text)]">
+              <div className="mt-2 font-mono text-xs text-[var(--color-text)]">
                 Capacity <span className="tabular-nums">{rpSelected.capacity}</span> PAX
               </div>
-              <div className="mt-1 font-mono text-[10px] text-[var(--color-text-muted)]">
+              <div className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
                 {rpSelected.grid}
               </div>
             </div>

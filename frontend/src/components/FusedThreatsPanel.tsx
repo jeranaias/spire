@@ -60,13 +60,13 @@ export function FusedThreatsPanel({
       <div className="border-b border-[var(--color-danger-muted)] px-3 py-1.5">
         <div className="flex items-baseline justify-between">
           <span
-            className="font-mono text-[9px] font-semibold uppercase text-[var(--color-danger)]"
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-danger)]"
             style={{ letterSpacing: "0.22em" }}
           >
             ◆ Fused Threats · GC-4
           </span>
           <span
-            className="font-mono text-[9px] tabular-nums text-[var(--color-text-muted)]"
+            className="font-mono text-xs tabular-nums text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.14em" }}
           >
             {threats.length} active
@@ -103,17 +103,17 @@ export function FusedThreatsPanel({
                   }}
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1 font-mono text-[9px]" style={{ letterSpacing: "0.12em" }}>
+                  <div className="flex items-center gap-1 font-mono text-xs" style={{ letterSpacing: "0.12em" }}>
                     <span className="font-semibold uppercase" style={{ color }}>{t.severity}</span>
                     <span className="text-[var(--color-text-muted)]">·</span>
                     <span className="text-[var(--color-text-muted)]">{(t.confidence * 100).toFixed(0)}% confidence</span>
                     <span className="ml-auto text-[var(--color-text-muted)]">{open ? "▾" : "▸"}</span>
                   </div>
-                  <div className="mt-0.5 font-mono text-[11px] font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+                  <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
                     {t.title}
                   </div>
                   {/* Correlation chain — visible at all times */}
-                  <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-[9px]" style={{ letterSpacing: "0.14em" }}>
+                  <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs" style={{ letterSpacing: "0.14em" }}>
                     {t.correlation_chain.map((c, i) => (
                       <span key={i} className="flex items-center gap-1">
                         {i > 0 && <span className="text-[var(--color-text-muted)]">→</span>}
@@ -135,18 +135,18 @@ export function FusedThreatsPanel({
 
               {open && (
                 <div className="bg-[var(--color-surface)] px-3 py-2">
-                  <div className="text-[11px] text-[var(--color-text-secondary)]">
+                  <div className="text-sm text-[var(--color-text-secondary)]">
                     {t.body}
                   </div>
                   {t.response_taskings.length > 0 && (
                     <div className="mt-2">
                       <div
-                        className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                        className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
                         style={{ letterSpacing: "0.18em" }}
                       >
                         Auto-generated taskings
                       </div>
-                      <ul className="mt-1 flex flex-col gap-0.5 font-mono text-[10px]" style={{ letterSpacing: "0.04em" }}>
+                      <ul className="mt-1 flex flex-col gap-0.5 font-mono text-xs" style={{ letterSpacing: "0.04em" }}>
                         {t.response_taskings.map((task, i) => (
                           <li key={i} className="flex items-start gap-1.5 text-[var(--color-text-secondary)]">
                             <span className="text-[var(--color-text-muted)]">›</span>
@@ -158,12 +158,12 @@ export function FusedThreatsPanel({
                   )}
                   {/* Full chain detail */}
                   <div
-                    className="mt-2 font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+                    className="mt-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
                     style={{ letterSpacing: "0.18em" }}
                   >
                     Correlation chain · {t.correlation_chain.length} contributing alerts
                   </div>
-                  <div className="mt-1 flex flex-col gap-0.5 font-mono text-[10px]">
+                  <div className="mt-1 flex flex-col gap-0.5 font-mono text-xs">
                     {t.correlation_chain.map((c, i) => (
                       <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1">
                         <span className="text-[var(--color-text)]">{c.source}</span>

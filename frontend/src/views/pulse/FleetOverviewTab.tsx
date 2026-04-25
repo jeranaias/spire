@@ -82,7 +82,7 @@ export function FleetOverviewTab() {
           <div
             className="mb-3 rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))] px-3 py-2 spire-body-muted"
           >
-            <span className="font-mono text-[10px] uppercase text-[var(--color-primary)]" style={{ letterSpacing: "0.18em" }}>
+            <span className="font-mono text-xs uppercase text-[var(--color-primary)]" style={{ letterSpacing: "0.18em" }}>
               Narrative
             </span>{" "}
             <span className="text-[var(--color-text)]">{narrative}</span>
@@ -92,7 +92,7 @@ export function FleetOverviewTab() {
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2
-              className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+              className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
               style={{ letterSpacing: "0.2em" }}
             >
               {view === "heatmap" ? "Fleet Readiness · Heatmap" : "Fleet Readiness · CONUS"}
@@ -111,7 +111,7 @@ export function FleetOverviewTab() {
               onChange={setView}
             />
             {view === "heatmap" && (
-              <label className="flex cursor-pointer items-center gap-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.16em" }}>
+              <label className="flex cursor-pointer items-center gap-2 font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.16em" }}>
                 <input
                   type="checkbox"
                   checked={hideEmptyColumns}
@@ -121,7 +121,7 @@ export function FleetOverviewTab() {
                 Hide Empty Columns
               </label>
             )}
-            <div className="flex items-center gap-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+            <div className="flex items-center gap-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
               <LegendDot color="var(--color-success)" label="≥90%" />
               <LegendDot color="var(--color-warning)" label="75-89%" />
               <LegendDot color="#fb923c" label="60-74%" />
@@ -145,13 +145,13 @@ export function FleetOverviewTab() {
       <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-bg)] p-3">
         <div className="mb-2 flex items-center justify-between">
           <h3
-            className="font-mono text-[10px] font-semibold uppercase text-[var(--color-text)]"
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-text)]"
             style={{ letterSpacing: "0.2em" }}
           >
             Alert Feed
           </h3>
           <span
-            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[var(--color-text-muted)]"
+            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs tabular-nums text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.08em" }}
           >
             {data.alerts.length}
@@ -181,7 +181,7 @@ export function FleetOverviewTab() {
             />
           ))}
           {data.alerts.length === 0 && (
-            <div className="rounded border border-dashed border-[var(--color-border)] p-6 text-center font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+            <div className="rounded border border-dashed border-[var(--color-border)] p-6 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
               NO ACTIVE ALERTS
             </div>
           )}
@@ -334,7 +334,7 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 export function LoadingOverlay({ message }: { message: string }) {
   return (
     <div className="flex h-full items-center justify-center p-12">
-      <div className="flex items-center gap-3 font-mono text-[11px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.1em" }}>
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
         {message}
       </div>

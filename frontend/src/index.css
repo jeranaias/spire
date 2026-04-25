@@ -110,6 +110,55 @@ html, body, #root {
 }
 
 /* ------------------------------------------------------------------ *
+ * Track-G3 — Density toggle.
+ *
+ * Default body is `dense` (no class). When TopBar dropdown swaps to
+ * `sparse`, we add `data-density="sparse"` on <html>. CSS bumps each
+ * type-scale token one tier and lets card padding open up via the
+ * paired tokens. Component-level breathing-room is opt-in: panels that
+ * want to breathe in sparse mode read --pad-card / --gap-card.
+ *
+ * No JS class manipulation in components — pure CSS variable rotation.
+ * ------------------------------------------------------------------ */
+:root {
+  /* Card layout tokens consumed by RecommendPanel, FusedThreatsPanel,
+   * MetricCard headers, etc. Sparse mode bumps these. */
+  --pad-card: 0.75rem;       /* 12px — current dense cards */
+  --pad-card-sm: 0.5rem;     /* 8px */
+  --gap-card: 0.5rem;        /* 8px between rows */
+  --tap-min: 0;              /* 0 when dense; 44px when sparse */
+}
+
+html[data-density="sparse"] {
+  /* Type scale — bumped one tier. 10/11/13/15/22/36 → 11/13/15/18/26/40. */
+  --text-xs:    0.6875rem;   /* 10 → 11 */
+  --text-sm:    0.8125rem;   /* 11 → 13 */
+  --text-base:  0.9375rem;   /* 13 → 15 */
+  --text-lg:    1.125rem;    /* 15 → 18 */
+  --text-xl:    1.625rem;    /* 22 → 26 */
+  --text-2xl:   2.5rem;      /* 36 → 40 */
+
+  /* Card breathing-room — pad and gap each go up one tier. */
+  --pad-card: 1.125rem;
+  --pad-card-sm: 0.75rem;
+  --gap-card: 0.75rem;
+
+  /* WCAG 2.5.5 Target Size minimum. Buttons that opt-in via min-height
+   * get raised to 44px in sparse mode for gloved/iPad use. */
+  --tap-min: 44px;
+}
+
+/* Optional opt-in helpers: components that want to breathe in sparse
+ * mode without a behaviour change in dense mode tag themselves with
+ * .spire-card or .spire-tap. */
+.spire-card {
+  padding: var(--pad-card);
+}
+.spire-tap {
+  min-height: var(--tap-min);
+}
+
+/* ------------------------------------------------------------------ *
  * Atmospheric body: ambient grid + radial glow near the logo corner
  * ------------------------------------------------------------------ */
 body {

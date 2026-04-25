@@ -67,7 +67,7 @@ export function RiskBar({ score, band, compact }: Props) {
       </span>
       {band && !compact && (
         <span
-          className="rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase"
+          className="rounded-sm border px-1.5 py-0.5 font-mono text-xs font-semibold uppercase"
           style={{
             letterSpacing: "0.16em",
             color,

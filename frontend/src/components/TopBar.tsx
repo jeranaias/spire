@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
-import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, type Role } from "../state/store";
+import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, type Density, type Role } from "../state/store";
 import { api } from "../api";
 import { NodeStatus } from "./NodeStatus";
 
@@ -36,13 +36,13 @@ export function TopBar() {
             <SpireMark />
             <div className="flex flex-col leading-none">
               <span
-                className="font-mono text-[15px] font-semibold tracking-[0.24em] text-[var(--color-text)]"
+                className="font-mono text-lg font-semibold tracking-[0.24em] text-[var(--color-text)]"
                 style={{ fontFeatureSettings: "'ss01'" }}
               >
                 SPIRE
               </span>
               <span
-                className="mt-[3px] font-mono text-[8px] uppercase text-[var(--color-text-muted)]"
+                className="mt-[3px] font-mono text-xs uppercase text-[var(--color-text-muted)]"
                 style={{ letterSpacing: "0.22em" }}
               >
                 Contested Logistics
@@ -56,7 +56,7 @@ export function TopBar() {
                 to={tab.to}
                 className={({ isActive }) =>
                   clsx(
-                    "group relative px-4 py-2 font-mono text-[11px] font-semibold uppercase transition-colors",
+                    "group relative px-4 py-2 font-mono text-sm font-semibold uppercase transition-colors",
                     isActive
                       ? "text-[var(--color-text)]"
                       : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
@@ -67,7 +67,7 @@ export function TopBar() {
                 {({ isActive }) => (
                   <>
                     <span
-                      className="mr-1.5 font-mono text-[9px] text-[var(--color-text-muted)]"
+                      className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)]"
                       style={{ letterSpacing: "0.1em" }}
                     >
                       {String(idx + 1).padStart(2, "0")}
@@ -177,13 +177,13 @@ function RoleSelector({ role, onChange }: { role: Role; onChange: (r: Role) => v
         className="hidden select-none flex-col items-end sm:flex"
       >
         <span
-          className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
           style={{ letterSpacing: "0.22em" }}
         >
           Operator
         </span>
         <span
-          className="font-mono text-[9px] text-[var(--color-primary)]"
+          className="font-mono text-xs text-[var(--color-primary)]"
           style={{ letterSpacing: "0.14em" }}
         >
           ◆ {ROLE_SCOPE_HINT[role]}
@@ -193,7 +193,7 @@ function RoleSelector({ role, onChange }: { role: Role; onChange: (r: Role) => v
         <select
           value={role}
           onChange={(e) => onChange(e.target.value as Role)}
-          className="appearance-none rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] py-1 pl-2.5 pr-7 font-mono text-[11px] font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none"
+          className="appearance-none rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] py-1 pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none"
           style={{ letterSpacing: "0.14em" }}
         >
           {(Object.keys(ROLE_LABELS) as Role[]).map((k) => (
@@ -216,7 +216,7 @@ function ModeBadge({ mode }: { mode: "full" | "lite" }) {
   const isFull = mode === "full";
   return (
     <div
-      className="flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-[10px] uppercase"
+      className="flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-xs uppercase"
       style={{
         letterSpacing: "0.14em",
         borderColor: isFull
@@ -266,7 +266,7 @@ function AlertBadge({ count }: { count: number }) {
                          "var(--color-danger)";
   return (
     <div
-      className="flex items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[10px] uppercase"
+      className="flex items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs uppercase"
       style={{ letterSpacing: "0.14em" }}
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ color }}>
@@ -318,7 +318,7 @@ function AirGapToggle() {
     <button
       onClick={toggle}
       className={clsx(
-        "flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-[10px] uppercase transition-colors",
+        "flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-xs uppercase transition-colors",
       )}
       style={{
         letterSpacing: "0.16em",

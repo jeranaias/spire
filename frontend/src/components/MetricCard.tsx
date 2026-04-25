@@ -73,7 +73,7 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
 
       {/* Label — mono, uppercase, tracked */}
       <div
-        className="font-mono text-[10px] font-medium uppercase"
+        className="font-mono text-xs font-medium uppercase"
         style={{ letterSpacing: "0.14em", color: "var(--color-text-muted)" }}
       >
         {label}
@@ -104,7 +104,7 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
 
       {/* Delta with graphic chevron */}
       {delta != null && (
-        <div className="mt-3 flex items-center gap-1.5 text-[11px] font-mono tabular-nums">
+        <div className="mt-3 flex items-center gap-1.5 text-sm font-mono tabular-nums">
           {delta > 0 ? (
             <ChevronUp className="text-[var(--color-success)]" />
           ) : delta < 0 ? (

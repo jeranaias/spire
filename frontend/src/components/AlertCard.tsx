@@ -60,7 +60,7 @@ export function AlertCard({ severity, source, title, body, timestamp, onClick, a
       )}
       onClick={onClick}
     >
-      <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
         <span className={clsx("h-2 w-2 rounded-full", dot)} />
         <span className="font-semibold">{severity}</span>
         {source && <span>· {source}</span>}
@@ -69,7 +69,7 @@ export function AlertCard({ severity, source, title, body, timestamp, onClick, a
       <div className="mb-1 text-sm font-medium text-[var(--color-text)]">{title}</div>
       <div className="text-xs leading-snug text-[var(--color-text-secondary)]">{body}</div>
       {actionLabel && (
-        <div className="mt-2 text-[11px] font-medium text-[var(--color-primary)] hover:underline">
+        <div className="mt-2 text-sm font-medium text-[var(--color-primary)] hover:underline">
           {actionLabel} →
         </div>
       )}

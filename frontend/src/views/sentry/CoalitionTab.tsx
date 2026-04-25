@@ -88,7 +88,7 @@ export function CoalitionTab() {
       <div className="mb-4 flex items-end justify-between gap-4">
         <div>
           <h2
-            className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+            className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
             style={{ letterSpacing: "0.2em" }}
           >
             Coalition Interoperability · Live Partner View
@@ -104,7 +104,7 @@ export function CoalitionTab() {
       </div>
 
       {loading && (
-        <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-6 font-mono text-[11px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+        <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-6 font-mono text-sm text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
           Scoping dataset for {selected} …
         </div>
@@ -125,13 +125,13 @@ export function CoalitionTab() {
           >
             <div className="flex items-baseline justify-between gap-3">
               <div>
-                <div className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+                <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
                   Active Coalition Profile
                 </div>
-                <div className="mt-1 font-mono text-[18px] font-semibold uppercase text-[var(--color-text)]" style={{ letterSpacing: "0.08em" }}>
+                <div className="mt-1 font-mono text-xl font-semibold uppercase text-[var(--color-text)]" style={{ letterSpacing: "0.08em" }}>
                   {view.display_name}
                 </div>
-                <div className="mt-1 font-mono text-[11px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+                <div className="mt-1 font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
                   Partners: {view.partners.join(" · ")}
                   {view.embargo_days_after_event > 0 && (
                     <span className="ml-3 text-[var(--color-warning)]">
@@ -143,13 +143,13 @@ export function CoalitionTab() {
               <button
                 onClick={generateRelease}
                 disabled={releasing}
-                className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-4 py-2 font-mono text-[11px] font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50"
+                className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-4 py-2 font-mono text-sm font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50"
                 style={{ letterSpacing: "0.18em" }}
               >
                 {releasing ? "Preparing …" : "Generate Release Package"}
               </button>
             </div>
-            <div className="mt-3 spire-body-muted text-[12px]">
+            <div className="mt-3 spire-body-muted text-base">
               {view.distribution_statement}
             </div>
             {view.caveats_applied.length > 0 && (
@@ -157,7 +157,7 @@ export function CoalitionTab() {
                 {view.caveats_applied.map((c) => (
                   <span
                     key={c}
-                    className="rounded-sm border border-[var(--color-primary)] px-2 py-[2px] font-mono text-[10px] uppercase text-[var(--color-primary)]"
+                    className="rounded-sm border border-[var(--color-primary)] px-2 py-[2px] font-mono text-xs uppercase text-[var(--color-primary)]"
                     style={{ letterSpacing: "0.16em" }}
                   >
                     {c}
@@ -181,21 +181,21 @@ export function CoalitionTab() {
               sampleNote={`(${view.scope.sample_srs_total_inspected} inspected)`}
             />
             <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+              <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
                 Field Redactions
               </div>
               <div className="mt-2 flex flex-wrap gap-1">
                 {view.field_redactions.map((f) => (
                   <span
                     key={f}
-                    className="rounded-sm border border-[var(--color-warning-muted)] px-1.5 py-[1px] font-mono text-[9px] uppercase text-[var(--color-warning)]"
+                    className="rounded-sm border border-[var(--color-warning-muted)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-warning)]"
                     style={{ letterSpacing: "0.16em" }}
                   >
                     {f}
                   </span>
                 ))}
                 {view.field_redactions.length === 0 && (
-                  <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+                  <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
                     none
                   </span>
                 )}
@@ -206,7 +206,7 @@ export function CoalitionTab() {
           {/* Two-column layout: allowed units + partner units left, sample records right */}
           <div className="mb-4 grid grid-cols-2 gap-4">
             <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <div className="font-mono text-[10px] uppercase text-[var(--color-primary)]" style={{ letterSpacing: "0.22em" }}>
+              <div className="font-mono text-xs uppercase text-[var(--color-primary)]" style={{ letterSpacing: "0.22em" }}>
                 Authorized Units ({view.allowed_units.length})
               </div>
               <div className="mt-2 grid grid-cols-2 gap-1">
@@ -215,14 +215,14 @@ export function CoalitionTab() {
                     key={u.uic}
                     className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono"
                   >
-                    <div className="text-[11px] font-semibold text-[var(--color-text)]">{u.unit}</div>
-                    <div className="text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                    <div className="text-sm font-semibold text-[var(--color-text)]">{u.unit}</div>
+                    <div className="text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
                       {u.parent} · {u.location}
                     </div>
                   </div>
                 ))}
                 {view.allowed_units.length === 0 && (
-                  <div className="col-span-2 rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+                  <div className="col-span-2 rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
                     NO UNITS IN SCOPE FOR THIS PROFILE
                   </div>
                 )}
@@ -230,14 +230,14 @@ export function CoalitionTab() {
 
               {view.partner_units.length > 0 && (
                 <>
-                  <div className="mt-4 border-t border-[var(--color-border)] pt-3 font-mono text-[10px] uppercase text-[var(--color-info)]" style={{ letterSpacing: "0.22em" }}>
+                  <div className="mt-4 border-t border-[var(--color-border)] pt-3 font-mono text-xs uppercase text-[var(--color-info)]" style={{ letterSpacing: "0.22em" }}>
                     Partner Units · Coordination
                   </div>
                   <div className="mt-2 flex flex-col gap-1.5">
                     {view.partner_units.map((p) => (
                       <div key={p.name} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono">
-                        <div className="text-[11px] font-semibold text-[var(--color-text)]">{p.name}</div>
-                        <div className="text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                        <div className="text-sm font-semibold text-[var(--color-text)]">{p.name}</div>
+                        <div className="text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
                           {p.type} {p.point_of_contact && `· LO ${p.point_of_contact}`}
                         </div>
                       </div>
@@ -248,33 +248,33 @@ export function CoalitionTab() {
             </div>
 
             <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <div className="font-mono text-[10px] uppercase text-[var(--color-primary)]" style={{ letterSpacing: "0.22em" }}>
+              <div className="font-mono text-xs uppercase text-[var(--color-primary)]" style={{ letterSpacing: "0.22em" }}>
                 Sample Records · Live Redacted Preview
               </div>
               <div className="mt-2 flex flex-col gap-2">
                 {view.sample_records.map((s, i) => (
                   <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono">
-                    <div className="flex items-center gap-2 text-[11px]">
+                    <div className="flex items-center gap-2 text-sm">
                       <span className="font-semibold text-[var(--color-text)]">{s.sr_number}</span>
                       <span className="text-[var(--color-text-muted)]" style={{ letterSpacing: "0.04em" }}>
                         {s.equipment_type} · {s.unit_name}
                       </span>
                       {(s.redactions?.length ?? 0) > 0 && (
-                        <span className="ml-auto font-mono text-[9px] text-[var(--color-warning)]" style={{ letterSpacing: "0.16em" }}>
+                        <span className="ml-auto font-mono text-xs text-[var(--color-warning)]" style={{ letterSpacing: "0.16em" }}>
                           {s.redactions!.length} REDACTED
                         </span>
                       )}
                     </div>
-                    <div className="mt-1 text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+                    <div className="mt-1 text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
                       Fault: {s.fault_component}
                     </div>
-                    <div className="mt-1 text-[10px] leading-relaxed text-[var(--color-text)]">
+                    <div className="mt-1 text-xs leading-relaxed text-[var(--color-text)]">
                       {s.remark_preview ? `"${s.remark_preview}…"` : <span className="text-[var(--color-text-muted)]">[no preview]</span>}
                     </div>
                   </div>
                 ))}
                 {view.sample_records.length === 0 && (
-                  <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+                  <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
                     NO RELEASABLE RECORDS UNDER THIS PROFILE
                   </div>
                 )}
@@ -282,7 +282,7 @@ export function CoalitionTab() {
             </div>
           </div>
 
-          <div className="font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+          <div className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
             View as-of {view.as_of} · Profile loaded from data/coalition_profiles.json
           </div>
         </>
@@ -304,30 +304,30 @@ function ScopeStat({
 }) {
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+      <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
         {label}
       </div>
       <div className="mt-2 flex items-baseline gap-3 font-mono">
         <div>
-          <span className="text-[18px] font-semibold tabular-nums text-[var(--color-success)]">
+          <span className="text-xl font-semibold tabular-nums text-[var(--color-success)]">
             {allowed}
           </span>
-          <span className="ml-1 text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+          <span className="ml-1 text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
             ALLOWED
           </span>
         </div>
         <div className="text-[var(--color-border-active)]">/</div>
         <div>
-          <span className="text-[18px] font-semibold tabular-nums text-[var(--color-danger)]">
+          <span className="text-xl font-semibold tabular-nums text-[var(--color-danger)]">
             {blocked}
           </span>
-          <span className="ml-1 text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+          <span className="ml-1 text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
             BLOCKED
           </span>
         </div>
       </div>
       {sampleNote && (
-        <div className="mt-1 font-mono text-[9px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+        <div className="mt-1 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
           {sampleNote}
         </div>
       )}

@@ -61,7 +61,7 @@ export function RiskBoardTab() {
         <div className="mb-3 flex items-end justify-between">
           <div>
             <h2
-              className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+              className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
               style={{ letterSpacing: "0.2em" }}
             >
               Risk Board · Top {filteredAssets.length}
@@ -76,7 +76,7 @@ export function RiskBoardTab() {
           {(unitFilter || equipFilter) && (
             <button
               onClick={clearFilter}
-              className="flex items-center gap-1.5 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] px-2.5 py-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))]"
+              className="flex items-center gap-1.5 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] px-2.5 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))]"
               style={{ letterSpacing: "0.16em" }}
             >
               Filter: {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
@@ -93,7 +93,7 @@ export function RiskBoardTab() {
             />
           ))}
           {filteredAssets.length === 0 && (
-            <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+            <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
               NO ASSETS MATCH CURRENT FILTER
             </div>
           )}
@@ -161,12 +161,12 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
     >
       <div className="flex-1">
         <div className="flex items-baseline gap-3">
-          <span className="font-mono text-[13px] font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
-          <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+          <span className="font-mono text-base font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
+          <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
             {asset.equipment_type} · {asset.unit_name} · SN {asset.serial_number}
           </span>
           <span
-            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.16em" }}
           >
             UNCLASSIFIED // SYNTHETIC
@@ -175,14 +175,14 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
         <div className="mt-2">
           <RiskBar score={asset.risk_score} band={asset.band} compact />
         </div>
-        <div className="mt-1 font-mono text-[11px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mt-1 font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
           Primary: {asset.primary_factor}
           {asset.predicted_failure && <span className="ml-3 text-[var(--color-warning)]">· {asset.predicted_failure}</span>}
         </div>
       </div>
       <div className="flex flex-col items-center gap-0.5 self-stretch justify-center">
         <div
-          className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
           style={{ letterSpacing: "0.18em" }}
         >
           30D Faults
@@ -201,13 +201,13 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
           </ResponsiveContainer>
         </div>
         <div
-          className="font-mono text-[9px] tabular-nums"
+          className="font-mono text-xs tabular-nums"
           style={{ color: trendUp ? sparkColor : "var(--color-text-muted)" }}
         >
           {trendUp ? "↑" : "↓"} {spark.reduce((a, b) => a + b.v, 0)} faults
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3 text-right font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+      <div className="grid grid-cols-3 gap-3 text-right font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
         <Stat label="Hours" value={asset.current_hours?.toFixed(0) ?? "—"} />
         <Stat label="Miles" value={asset.current_miles?.toLocaleString() ?? "—"} />
         <Stat label="Days Maint" value={asset.days_since_maintenance ?? "—"} />
@@ -235,7 +235,7 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <div>
       <div className="font-mono text-sm tabular-nums text-[var(--color-text)]">{value}</div>
-      <div className="text-[9px] uppercase tracking-wider">{label}</div>
+      <div className="text-xs uppercase tracking-wider">{label}</div>
     </div>
   );
 }
@@ -261,7 +261,7 @@ function AssetDeepDivePanel({
             <div className="text-xs text-[var(--color-text-muted)]">
               {a.equipment_type} · {a.unit_name}
             </div>
-            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            <div className="mt-1 text-sm text-[var(--color-text-muted)]">
               {a.nomenclature}
             </div>
           </div>
@@ -279,7 +279,7 @@ function AssetDeepDivePanel({
 
       <div className="flex flex-col gap-4 p-4">
         <section>
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Contributing factors
           </h4>
           <div className="flex flex-col gap-1.5">
@@ -301,7 +301,7 @@ function AssetDeepDivePanel({
         </section>
 
         <section>
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Equipment facts
           </h4>
           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -317,7 +317,7 @@ function AssetDeepDivePanel({
         </section>
 
         <section>
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Component faults (last 12 mo)
           </h4>
           <div className="flex flex-col gap-1">
@@ -339,12 +339,12 @@ function AssetDeepDivePanel({
         </section>
 
         <section>
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Maintenance timeline ({detail.timeline.length} events)
           </h4>
           <div className="flex flex-col gap-1.5">
             {detail.timeline.slice(-8).reverse().map((t: any) => (
-              <div key={t.sr_number} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-[11px]">
+              <div key={t.sr_number} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-[var(--color-text)]">{t.sr_number}</span>
                   <span className="text-[var(--color-text-muted)]">{t.open_date}</span>
@@ -359,21 +359,21 @@ function AssetDeepDivePanel({
 
         <section className="flex items-center gap-2 pt-2">
           <span
-            className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
             style={{ letterSpacing: "0.18em" }}
           >
             Feedback:
           </span>
           <button
             onClick={() => onFeedback(true)}
-            className="rounded-sm border border-[var(--color-success-muted)] px-3 py-1 font-mono text-[11px] font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success-muted)]"
+            className="rounded-sm border border-[var(--color-success-muted)] px-3 py-1 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success-muted)]"
             style={{ letterSpacing: "0.14em" }}
           >
             ✓ Correct
           </button>
           <button
             onClick={() => onFeedback(false)}
-            className="rounded-sm border border-[var(--color-danger-muted)] px-3 py-1 font-mono text-[11px] font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)]"
+            className="rounded-sm border border-[var(--color-danger-muted)] px-3 py-1 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)]"
             style={{ letterSpacing: "0.14em" }}
           >
             ✗ Incorrect
@@ -387,7 +387,7 @@ function AssetDeepDivePanel({
 function Fact({ label, value }: { label: string; value: any }) {
   return (
     <div>
-      <div className="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)]">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">{label}</div>
       <div className="font-mono text-[var(--color-text)]">{String(value ?? "—")}</div>
     </div>
   );

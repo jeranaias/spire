@@ -40,7 +40,7 @@ export function Heatmap({ units, equipmentTypes, onCellClick }: Props) {
             <tr key={u.uic} className="hover:bg-[var(--color-surface-hover)]">
               <td className="sticky left-0 z-10 border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
                 <div className="font-sans font-medium text-[var(--color-text)]">{u.unit}</div>
-                <div className="text-[10px] text-[var(--color-text-muted)]">
+                <div className="text-xs text-[var(--color-text-muted)]">
                   {u.location}
                 </div>
               </td>

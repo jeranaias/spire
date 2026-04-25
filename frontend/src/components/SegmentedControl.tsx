@@ -35,7 +35,7 @@ export function SegmentedControl<T extends string>({
             aria-checked={active}
             onClick={() => onChange(o.value)}
             className={clsx(
-              "px-3 py-1 font-mono text-[11px] font-semibold uppercase transition-colors",
+              "px-3 py-1 font-mono text-sm font-semibold uppercase transition-colors",
               i > 0 && "border-l border-[var(--color-border)]",
               active
                 ? "bg-[var(--color-primary)] text-white"

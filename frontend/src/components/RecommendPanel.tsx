@@ -85,7 +85,7 @@ export function RecommendPanel({ unit }: { unit?: string }) {
   }
   if (!data) {
     return (
-      <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4 font-mono text-[11px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4 font-mono text-sm text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
         Computing recommended actions …
       </div>
@@ -93,7 +93,7 @@ export function RecommendPanel({ unit }: { unit?: string }) {
   }
   if (data.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center font-mono text-[11px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.12em" }}>
+      <div className="rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center font-mono text-sm text-[var(--color-text-muted)]" style={{ letterSpacing: "0.12em" }}>
         NO HIGH-RISK ASSETS — no recommended actions
       </div>
     );
@@ -104,17 +104,17 @@ export function RecommendPanel({ unit }: { unit?: string }) {
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2.5">
         <div>
           <div
-            className="font-mono text-[10px] uppercase text-[var(--color-primary)]"
+            className="font-mono text-xs uppercase text-[var(--color-primary)]"
             style={{ letterSpacing: "0.22em" }}
           >
             Recommended Actions · GC-1 Auto Replenishment
           </div>
-          <div className="mt-0.5 spire-body-muted text-[12px]">
+          <div className="mt-0.5 spire-body-muted text-base">
             Top {data.length} at-risk assets. Each action ranked by impact-per-dollar-per-day.
           </div>
         </div>
         <div
-          className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
           style={{ letterSpacing: "0.18em" }}
         >
           {unit ? `Scope: ${unit}` : "Fleet-wide"}
@@ -148,25 +148,25 @@ function AssetActionGroup({
 }) {
   if (asset.actions.length === 0) {
     return (
-      <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-[11px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.04em" }}>
+      <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-sm text-[var(--color-text-muted)]" style={{ letterSpacing: "0.04em" }}>
         {asset.asset_id} — no actions available
       </div>
     );
   }
   return (
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-      <div className="mb-2 flex items-baseline gap-2 font-mono text-[11px]" style={{ letterSpacing: "0.06em" }}>
+      <div className="mb-2 flex items-baseline gap-2 font-mono text-sm" style={{ letterSpacing: "0.06em" }}>
         <span className="font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
         <span className="text-[var(--color-text-muted)]">{asset.equipment_type}</span>
         <span className="text-[var(--color-text-muted)]">· {asset.unit_name}</span>
         {asset.risk_score != null && (
-          <span className="ml-auto rounded-sm border border-[var(--color-danger-muted)] px-1.5 py-[1px] text-[9px] uppercase text-[var(--color-danger)]" style={{ letterSpacing: "0.18em" }}>
+          <span className="ml-auto rounded-sm border border-[var(--color-danger-muted)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-danger)]" style={{ letterSpacing: "0.18em" }}>
             Risk {asset.risk_score.toFixed(0)}
           </span>
         )}
       </div>
       {asset.primary_factor && (
-        <div className="mb-2 font-mono text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mb-2 font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
           Primary factor: {asset.primary_factor}
         </div>
       )}
@@ -190,7 +190,7 @@ function AssetActionGroup({
               }}
             >
               <span
-                className="rounded-sm border px-1.5 py-[1px] font-mono text-[9px] font-semibold uppercase"
+                className="rounded-sm border px-1.5 py-[1px] font-mono text-xs font-semibold uppercase"
                 style={{
                   color,
                   borderColor: `color-mix(in oklab, ${color} 40%, var(--color-border))`,
@@ -203,14 +203,14 @@ function AssetActionGroup({
                 {KIND_LABEL[action.kind]}
               </span>
               <div className="flex-1 min-w-0">
-                <div className="font-mono text-[11px] font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+                <div className="font-mono text-sm font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
                   {action.title}
                 </div>
-                <div className="truncate font-mono text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+                <div className="truncate font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
                   {action.description}
                 </div>
               </div>
-              <div className="flex items-center gap-3 font-mono text-[10px] tabular-nums text-[var(--color-text-muted)]" style={{ letterSpacing: "0.04em" }}>
+              <div className="flex items-center gap-3 font-mono text-xs tabular-nums text-[var(--color-text-muted)]" style={{ letterSpacing: "0.04em" }}>
                 <Stat label="MC%" value={`+${action.mc_delta_pct.toFixed(1)}`} tone="ok" />
                 <Stat label="Cost" value={`$${action.cost_usd.toLocaleString()}`} />
                 <Stat label="ETA" value={`${action.time_to_effect_hours}h`} />
@@ -219,7 +219,7 @@ function AssetActionGroup({
               <button
                 onClick={() => onApprove(asset, action)}
                 disabled={done || pending}
-                className="rounded-sm border px-3 py-1 font-mono text-[10px] font-semibold uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-sm border px-3 py-1 font-mono text-xs font-semibold uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
                   letterSpacing: "0.18em",
                   borderColor: done ? "var(--color-success)" : "var(--color-primary)",
@@ -243,7 +243,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "ok
   const color = tone === "ok" ? "var(--color-success)" : "var(--color-text)";
   return (
     <div className="flex flex-col items-end leading-tight" style={{ minWidth: "3.5rem" }}>
-      <span className="text-[8px] uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+      <span className="text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
         {label}
       </span>
       <span style={{ color }}>{value}</span>

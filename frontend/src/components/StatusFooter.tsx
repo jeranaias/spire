@@ -105,7 +105,7 @@ export function StatusFooter() {
     <footer className="relative h-8 shrink-0 overflow-hidden border-t border-[var(--color-border)] bg-[var(--color-surface)]">
       {/* Left-anchored session block — UP/clock + comms-state pulse */}
       <div
-        className="absolute left-0 top-0 z-10 flex h-full items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-[10px]"
+        className="absolute left-0 top-0 z-10 flex h-full items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs"
         style={{ letterSpacing: "0.08em" }}
       >
         <span
@@ -122,7 +122,7 @@ export function StatusFooter() {
 
       {/* Right-anchored version/mode block — hidden below md (768px) */}
       <div
-        className="absolute right-0 top-0 z-10 hidden h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-[10px] uppercase md:flex"
+        className="absolute right-0 top-0 z-10 hidden h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs uppercase md:flex"
         style={{ letterSpacing: "0.14em" }}
       >
         <span className="text-[var(--color-text-muted)]">{status?.mode || "local"}</span>
@@ -138,7 +138,7 @@ export function StatusFooter() {
         className="absolute inset-y-0 left-0 right-0 z-0 overflow-hidden pl-[14rem] pr-3 md:pl-[18rem] md:pr-[16rem]"
       >
         <div
-          className="ticker flex h-full items-center whitespace-nowrap font-mono text-[10px]"
+          className="ticker flex h-full items-center whitespace-nowrap font-mono text-xs"
           style={{ letterSpacing: "0.1em" }}
         >
           {track.map((item, i) => (
@@ -214,7 +214,7 @@ function CommsIndicator({
       </span>
       {airGap && queueDepth > 0 && (
         <span
-          className="ml-1 rounded-sm border px-1 font-mono text-[9px] tabular-nums"
+          className="ml-1 rounded-sm border px-1 font-mono text-xs tabular-nums"
           style={{
             color: "var(--color-warning)",
             borderColor: "color-mix(in oklab, var(--color-warning) 40%, var(--color-border))",
