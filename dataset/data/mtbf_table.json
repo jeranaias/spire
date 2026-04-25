@@ -1,0 +1,106 @@
+{
+  "_comment": "Mean-Time-Between-Failures + Mean-Time-To-Repair per equipment_type / component family. Backs GC-3 predictive failure scoring. Hours measured in operating hours; days measured in calendar days.",
+
+  "components": {
+    "JLTV": {
+      "engine":      {"mtbf_hours": 1800, "mttr_days": 7,  "criticality": "high",   "common_failure_modes": ["starter", "alternator", "fuel_injector"]},
+      "drivetrain":  {"mtbf_hours": 2400, "mttr_days": 9,  "criticality": "high",   "common_failure_modes": ["transmission", "transfer_case", "differential"]},
+      "brake":       {"mtbf_hours":  900, "mttr_days": 3,  "criticality": "medium", "common_failure_modes": ["pad_set", "rotor", "abs_module"]},
+      "electrical":  {"mtbf_hours": 1500, "mttr_days": 4,  "criticality": "medium", "common_failure_modes": ["battery", "harness", "ecm"]},
+      "hydraulic":   {"mtbf_hours": 2200, "mttr_days": 5,  "criticality": "low",    "common_failure_modes": ["pump", "hose"]}
+    },
+    "MTVR_CARGO": {
+      "engine":      {"mtbf_hours": 2200, "mttr_days": 9,  "criticality": "high",   "common_failure_modes": ["starter", "turbo", "fuel_injector"]},
+      "drivetrain":  {"mtbf_hours": 2900, "mttr_days": 12, "criticality": "high",   "common_failure_modes": ["transmission", "drive_axle"]},
+      "brake":       {"mtbf_hours": 1100, "mttr_days": 4,  "criticality": "medium", "common_failure_modes": ["pad_set", "rotor"]},
+      "electrical":  {"mtbf_hours": 1800, "mttr_days": 5,  "criticality": "medium", "common_failure_modes": ["battery", "harness"]}
+    },
+    "MTVR_WRECKER": {
+      "engine":      {"mtbf_hours": 2100, "mttr_days": 10, "criticality": "high"},
+      "drivetrain":  {"mtbf_hours": 2700, "mttr_days": 13, "criticality": "high"},
+      "boom_hydraulic": {"mtbf_hours": 1400, "mttr_days": 6, "criticality": "high", "common_failure_modes": ["pump", "cylinder", "valve"]}
+    },
+    "LVSR": {
+      "engine":      {"mtbf_hours": 2400, "mttr_days": 11, "criticality": "high"},
+      "drivetrain":  {"mtbf_hours": 3000, "mttr_days": 14, "criticality": "high"},
+      "brake":       {"mtbf_hours": 1300, "mttr_days": 5,  "criticality": "medium"}
+    },
+    "M1A1_ABRAMS": {
+      "powerpack":   {"mtbf_hours":  900, "mttr_days": 18, "criticality": "high",   "common_failure_modes": ["AGT-1500_turbine", "transmission"]},
+      "fcs":         {"mtbf_hours": 1200, "mttr_days": 9,  "criticality": "high",   "common_failure_modes": ["LRF", "ballistic_computer", "GPS"]},
+      "armament":    {"mtbf_hours": 1500, "mttr_days": 6,  "criticality": "medium", "common_failure_modes": ["breech", "feed_tray", "bore_evac"]},
+      "track":       {"mtbf_hours":  600, "mttr_days": 4,  "criticality": "medium", "common_failure_modes": ["track_pad", "road_wheel", "torsion_bar"]}
+    },
+    "M88A2_RECOVERY": {
+      "powerpack":   {"mtbf_hours": 1100, "mttr_days": 16, "criticality": "high"},
+      "boom_hydraulic": {"mtbf_hours": 950, "mttr_days": 8, "criticality": "high"}
+    },
+    "LAV_25": {
+      "engine":      {"mtbf_hours": 1900, "mttr_days": 8, "criticality": "high"},
+      "drivetrain":  {"mtbf_hours": 2500, "mttr_days": 11, "criticality": "high"},
+      "armament":    {"mtbf_hours": 1700, "mttr_days": 5, "criticality": "medium", "common_failure_modes": ["M242_chain_gun", "feed_drum"]},
+      "fire_control":{"mtbf_hours": 2200, "mttr_days": 7, "criticality": "high"}
+    },
+    "LAV_AT": {
+      "engine":      {"mtbf_hours": 1900, "mttr_days": 8, "criticality": "high"},
+      "drivetrain":  {"mtbf_hours": 2500, "mttr_days": 11, "criticality": "high"},
+      "atgm_launcher": {"mtbf_hours": 1100, "mttr_days": 9, "criticality": "high", "common_failure_modes": ["TOW_launcher", "guidance_unit"]}
+    },
+    "MV22B_OSPREY": {
+      "engine":      {"mtbf_hours":  650, "mttr_days": 14, "criticality": "high",   "common_failure_modes": ["AE_1107C", "compressor_blade"]},
+      "rotor_system":{"mtbf_hours":  500, "mttr_days": 18, "criticality": "high",   "common_failure_modes": ["proprotor_blade", "swashplate"]},
+      "avionics":    {"mtbf_hours": 1200, "mttr_days": 6,  "criticality": "high",   "common_failure_modes": ["FCC", "MFD", "HUMS"]}
+    },
+    "CH53E_STALLION": {
+      "engine":      {"mtbf_hours":  700, "mttr_days": 16, "criticality": "high",   "common_failure_modes": ["T64-GE", "fuel_control"]},
+      "rotor_system":{"mtbf_hours":  600, "mttr_days": 22, "criticality": "high"},
+      "avionics":    {"mtbf_hours": 1500, "mttr_days": 7,  "criticality": "high"}
+    },
+    "MRAP_RG31": {
+      "engine":      {"mtbf_hours": 2000, "mttr_days": 9, "criticality": "high"},
+      "drivetrain":  {"mtbf_hours": 2600, "mttr_days": 11, "criticality": "high"},
+      "armor_kit":   {"mtbf_hours": 5000, "mttr_days": 14, "criticality": "low"}
+    },
+    "HIMARS": {
+      "launcher":    {"mtbf_hours":  800, "mttr_days": 12, "criticality": "high",   "common_failure_modes": ["elevation_actuator", "FCS_link", "loader"]},
+      "engine":      {"mtbf_hours": 2200, "mttr_days": 9,  "criticality": "high"},
+      "drivetrain":  {"mtbf_hours": 2800, "mttr_days": 11, "criticality": "high"}
+    },
+    "AN_TPS80_GATOR": {
+      "antenna":     {"mtbf_hours":  900, "mttr_days": 7, "criticality": "high",   "common_failure_modes": ["aesa_module", "transmit_receive"]},
+      "processor":   {"mtbf_hours": 1500, "mttr_days": 5, "criticality": "high"}
+    },
+    "AN_TPQ36_FIREFINDER": {
+      "antenna":     {"mtbf_hours": 1100, "mttr_days": 7, "criticality": "high"},
+      "processor":   {"mtbf_hours": 1800, "mttr_days": 5, "criticality": "high"}
+    },
+    "TRAILER_M1095": {
+      "axle":        {"mtbf_hours": 4000, "mttr_days": 4, "criticality": "low"},
+      "brake":       {"mtbf_hours": 1500, "mttr_days": 3, "criticality": "medium"}
+    },
+    "MEP_803A": {
+      "alternator":  {"mtbf_hours": 1800, "mttr_days": 4, "criticality": "medium", "common_failure_modes": ["voltage_regulator", "rotor_winding"]},
+      "engine":      {"mtbf_hours": 2400, "mttr_days": 6, "criticality": "medium"}
+    },
+    "ROWPU": {
+      "ro_membrane": {"mtbf_hours":  900, "mttr_days": 5, "criticality": "high",   "common_failure_modes": ["membrane_fouling", "high_pressure_pump"]},
+      "filter":      {"mtbf_hours":  450, "mttr_days": 1, "criticality": "low"}
+    },
+    "TRAM": {
+      "engine":      {"mtbf_hours": 2100, "mttr_days": 7, "criticality": "medium"},
+      "hydraulic":   {"mtbf_hours": 1600, "mttr_days": 5, "criticality": "medium"}
+    },
+    "D7G_DOZER": {
+      "engine":      {"mtbf_hours": 2500, "mttr_days": 9, "criticality": "high"},
+      "track":       {"mtbf_hours":  700, "mttr_days": 4, "criticality": "medium"},
+      "blade_hydraulic": {"mtbf_hours": 1400, "mttr_days": 5, "criticality": "medium"}
+    }
+  },
+
+  "default": {
+    "engine":      {"mtbf_hours": 2000, "mttr_days": 8, "criticality": "high"},
+    "drivetrain":  {"mtbf_hours": 2600, "mttr_days": 10, "criticality": "high"},
+    "brake":       {"mtbf_hours": 1100, "mttr_days": 4, "criticality": "medium"},
+    "electrical":  {"mtbf_hours": 1700, "mttr_days": 5, "criticality": "medium"}
+  }
+}
