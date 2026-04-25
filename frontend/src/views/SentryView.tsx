@@ -5,6 +5,7 @@ import { ProcessingTab } from "./sentry/ProcessingTab";
 import { ReviewQueueTab } from "./sentry/ReviewQueueTab";
 import { ExportTab } from "./sentry/ExportTab";
 import { MarkTab } from "./sentry/MarkTab";
+import { CoalitionTab } from "./sentry/CoalitionTab";
 import { useSpireStore } from "../state/store";
 
 export interface SentryContext {
@@ -20,6 +21,7 @@ const tabs = [
   { to: "/sentry/review",     label: "Review Queue" },
   { to: "/sentry/mark",       label: "Mark Draft" },
   { to: "/sentry/export",     label: "Export" },
+  { to: "/sentry/coalition",  label: "Coalition" },
 ];
 
 export function SentryView() {
@@ -47,6 +49,7 @@ export function SentryView() {
           <Route path="review"          element={<ReviewQueueTab ctx={ctx} />} />
           <Route path="mark"            element={<MarkTab />} />
           <Route path="export"          element={<ExportTab ctx={ctx} />} />
+          <Route path="coalition"       element={<CoalitionTab />} />
         </Routes>
       </div>
     </div>
