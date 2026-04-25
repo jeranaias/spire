@@ -4,6 +4,8 @@
 Sanitization, Prediction, Intelligence, Readiness Engine.
 Local Intelligence · No Cloud · IL5-Fit · Built by Marines, on duty time.
 
+**Live demo**: <https://spire-mdm.fly.dev> (synthetic data, public during pilot)
+
 ---
 
 ## What this is
