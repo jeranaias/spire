@@ -73,13 +73,12 @@ function SentrySubnav() {
             }}
             className={({ isActive }) =>
               clsx(
-                "relative px-4 py-2 font-mono text-sm font-semibold uppercase transition-colors",
+                "relative px-4 py-2 font-mono text-sm font-semibold uppercase tracking-wider transition-colors",
                 isActive
                   ? "text-[var(--color-text)]"
                   : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
               )
             }
-            style={{ letterSpacing: "0.16em" }}
           >
             {({ isActive }) => (
               <>

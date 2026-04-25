@@ -1,47 +1,25 @@
 #!/usr/bin/env node
-// Design-token sweep — converts ad-hoc font sizes and inline letter-spacing
-// to Tailwind utilities backed by --text-* / --tracking-* tokens.
+// Design-token sweep — converts inline letter-spacing to Tailwind tracking-*
+// utilities backed by --tracking-* tokens.
 //
-// Per the PRE_MDM_EXECUTION_PLAN, sub-10px text is bumped one tier to clear
-// WCAG 2.2 AA at 4.5:1; mono data-display sizes are kept where intentional.
+// Approach: this is a JSX-aware transform that walks each file, finds every
+// occurrence of `letterSpacing: "X.Yem"` (solo or inside a multi-prop style
+// object), determines the JSX element that owns it, and then:
+//   1. Removes the letterSpacing key (and the entire style attribute if it
+//      becomes empty).
+//   2. Appends the tracking-* utility to that element's className attribute.
+//
+// We use a forward index walk + bracket counter to delineate JSX elements;
+// the regex-based approach in the prior version corrupted nested JSX because
+// it walked backward across element boundaries. This pass walks the source
+// once, builds an array of edits keyed by absolute offset, then applies them
+// all in a single right-to-left replace so offsets remain valid.
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
 const ROOT = "D:/projects/spire/frontend/src";
 
-// -------- font-size mapping --------
-// 8/9 → text-xs (one-tier bump out of WCAG-fail zone)
-// 10/11 → text-xs / text-sm
-// 12/13 → text-base
-// 14/15 → text-lg
-// 17/22 → text-xl
-// 26+ → text-2xl
-// 16 (one-off, between 15/17) → text-lg (closer to 15px tier)
-// 18/20 (between 15 and 22) → text-xl (the 22px tier covers 17..22 per the spec)
-const FONT_SIZE_MAP = {
-  8: "text-xs",
-  9: "text-xs",
-  10: "text-xs",
-  11: "text-sm",
-  12: "text-base",
-  13: "text-base",
-  14: "text-lg",
-  15: "text-lg",
-  16: "text-lg",
-  17: "text-xl",
-  18: "text-xl",
-  20: "text-xl",
-  22: "text-xl",
-};
-
-// -------- tracking mapping --------
-// per-spec; values not listed (e.g. 0.05em) are bucketed by nearest:
-//   ≤ -0.02 → tracking-tight
-//   -0.019..0.029 → tracking-normal (omit; we still emit utility for explicit cases <0)
-//   0.03..0.09 → tracking-wide
-//   0.10..0.16 → tracking-wider
-//   0.17..0.99 → tracking-widest
 function trackingFor(emValue) {
   const v = Number(emValue);
   if (Number.isNaN(v)) return null;
@@ -53,7 +31,6 @@ function trackingFor(emValue) {
   return null;
 }
 
-let fontReplacements = 0;
 let trackingReplacements = 0;
 const filesTouched = new Set();
 
@@ -61,253 +38,225 @@ async function walk(dir) {
   const out = [];
   for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      out.push(...(await walk(full)));
-    } else if (/\.(tsx|ts)$/.test(entry.name)) {
-      out.push(full);
-    }
+    if (entry.isDirectory()) out.push(...(await walk(full)));
+    else if (/\.tsx?$/.test(entry.name)) out.push(full);
   }
   return out;
 }
 
-function replaceFontSizes(src) {
-  // Only target text-[Npx] inside class/className strings. Pattern is
-  // unambiguous so we can do it globally.
-  return src.replace(/text-\[(\d+)px\]/g, (m, n) => {
-    const tier = FONT_SIZE_MAP[Number(n)];
-    if (!tier) return m;
-    fontReplacements++;
-    return tier;
-  });
+// Find the JSX element that owns a given offset (which sits inside a
+// style={{...}} attribute). Returns { tagOpen, tagClose } absolute offsets,
+// where tagOpen is the position of '<' and tagClose is the position of the
+// closing '>' of the OPENING TAG (not the element).
+function findEnclosingTag(src, offset) {
+  // Walk back from offset to find the '<' that opens our JSX element.
+  // Strategy: we know we sit inside a style={{...}} attribute. Walking back,
+  // we'll first exit the inner object brace, then exit the outer expression
+  // brace, and from there we're inside the JSX opening tag's attribute list,
+  // where '<' will be the next non-string, non-brace-balanced char.
+  // We use a brace counter that tracks NET balance: every '}' we see on the
+  // way back increments, every '{' decrements (and may go negative — that
+  // means we've stepped out of an enclosing brace into the tag-attribute
+  // region). Once net depth < 0, we're outside the style attribute and any
+  // '<' we encounter at this depth is our tag.
+  let depth = 0;
+  let i = offset;
+  while (i > 0) {
+    i--;
+    const c = src[i];
+    if (c === "}") depth++;
+    else if (c === "{") depth--;
+    else if (c === "<" && depth < 0) {
+      const next = src[i + 1];
+      if (next && /[A-Za-z]/.test(next)) {
+        // Found tag start. Walk forward from just after '<' to find the
+        // closing '>' of the opening tag, tracking brace nesting cleanly.
+        let j = i + 1;
+        let d2 = 0;
+        for (; j < src.length; j++) {
+          const cc = src[j];
+          if (cc === "{") d2++;
+          else if (cc === "}") d2--;
+          else if (cc === ">" && d2 === 0) {
+            return { tagOpen: i, tagClose: j };
+          }
+        }
+        return null;
+      }
+    }
+  }
+  return null;
 }
 
-// ------- inline letterSpacing replacement -------
-// Two passes: solo `style={{ letterSpacing: "X" }}` (drop entire style),
-// then mixed `style={{ ..., letterSpacing: "X", ... }}` (drop just the prop).
-// In both, append the right tracking-* utility to the className on the same JSX
-// element. We rely on JSX style being a single object literal on one line, which
-// is the consistent shape across the codebase (verified via grep).
-function replaceInlineLetterSpacing(src, file) {
-  // 1) Solo style: matches whole `style={{ letterSpacing: "X.Yem" }}`
-  //    and any preceding whitespace.
-  src = src.replace(
-    /(\s+)style=\{\{\s*letterSpacing:\s*"(-?[\d.]+)em"\s*\}\}/g,
-    (whole, ws, em) => {
-      const util = trackingFor(em);
-      trackingReplacements++;
-      if (!util) return ""; // tracking-normal → drop the style entirely, no class needed
-      return `__TRACK_INJECT__${util}__END__`;
-    },
-  );
+// Returns the smallest [start,end) span that fully encloses the
+// `letterSpacing: "X"` property and any leading/trailing comma+whitespace
+// such that removing the span leaves a syntactically clean object.
+function spanForLetterSpacingProp(src, propStart) {
+  // propStart points at the 'l' of letterSpacing.
+  // Walk forward to end of value (closing quote of the em string).
+  const m = /^letterSpacing:\s*"(-?[\d.]+)em"/.exec(src.slice(propStart));
+  if (!m) return null;
+  const em = m[1];
+  let valueEnd = propStart + m[0].length;
+  // Look for trailing comma + whitespace
+  let end = valueEnd;
+  // skip whitespace, then optional comma, then whitespace
+  while (end < src.length && /\s/.test(src[end])) end++;
+  if (src[end] === ",") {
+    end++;
+    while (end < src.length && /\s/.test(src[end])) end++;
+  }
+  // Look for leading whitespace + optional comma
+  let start = propStart;
+  // step back over any whitespace immediately before propStart
+  while (start > 0 && /[ \t]/.test(src[start - 1])) start--;
+  // If preceding non-whitespace is a comma, we're a non-leading prop;
+  // shrink end back to just-after-value (we'll consume only ourselves).
+  // Otherwise we're a leading prop and we consume our trailing comma too.
+  // Easier: don't try to be clever — just always use "propStart..end"
+  // which covers `letterSpacing: "Xem", ` plus any trailing whitespace.
+  // If we're the LAST prop in the object, this leaves a trailing comma on
+  // the previous prop, which is valid JS/TS.
+  // But it can also produce `, ,` if we're wedged between two commas, since
+  // a leading comma was left by another prop. That's invalid. So instead,
+  // when preceded by `, ` and followed by another property, drop the leading
+  // `, ` instead of the trailing one.
+  // Practical approach: examine the char just before propStart (after
+  // walking back leading whitespace).
+  let beforeIdx = propStart - 1;
+  while (beforeIdx >= 0 && /\s/.test(src[beforeIdx])) beforeIdx--;
+  const before = beforeIdx >= 0 ? src[beforeIdx] : null;
 
-  // 2) Mixed style: keep other props, drop letterSpacing.
-  //    Handles both leading and trailing positions inside the object.
-  //    Pattern: letterSpacing: "...", | , letterSpacing: "..."
-  src = src.replace(
-    /letterSpacing:\s*"(-?[\d.]+)em"\s*,\s*/g,
-    (whole, em) => {
-      const util = trackingFor(em);
-      trackingReplacements++;
-      return util ? `__TRACK_MIXED__${util}__END__` : "";
-    },
-  );
-  src = src.replace(
-    /,\s*letterSpacing:\s*"(-?[\d.]+)em"\s*/g,
-    (whole, em) => {
-      const util = trackingFor(em);
-      trackingReplacements++;
-      return util ? `__TRACK_MIXED__${util}__END__` : "";
-    },
-  );
-  // Bare-only-prop fallback (already handled by case 1, but if some syntax skipped)
-  src = src.replace(
-    /letterSpacing:\s*"(-?[\d.]+)em"\s*/g,
-    (whole, em) => {
-      const util = trackingFor(em);
-      trackingReplacements++;
-      return util ? `__TRACK_MIXED__${util}__END__` : "";
-    },
-  );
+  let afterIdx = valueEnd;
+  while (afterIdx < src.length && /\s/.test(src[afterIdx])) afterIdx++;
+  const after = afterIdx < src.length ? src[afterIdx] : null;
 
-  // Now we need to inject the tracking-* utility into the className on the
-  // same JSX element. The marker we emitted sits where the style attribute
-  // was; for solo we removed `style=` entirely, for mixed we left `style={{
-  // ...other }}` with our marker inside it. We'll handle them differently:
-  //
-  //   __TRACK_INJECT__cls__END__  → removed entire style; need to add cls to className on same element
-  //   __TRACK_MIXED__cls__END__   → marker still inside a style={{}}, need to add cls to className AND remove the marker
-
-  // Helper: given a JSX element span containing one of our markers, inject
-  // the class into className and strip the marker.
-  // We'll process line-by-line within JSX-element scope. A simpler robust
-  // approach: find each marker, walk backward to the nearest className= on the
-  // same element, and inject. JSX elements end at `>` or `/>`, but className
-  // and style usually live on the same element.
-
-  function injectClasses(source, markerRe) {
-    return source.replace(markerRe, (full, util, offset, fullStr) => {
-      // Find the JSX element bounds: scan backward to find the opening `<Foo`
-      // and forward to find the closing `>` of the same opening tag.
-      let i = offset;
-      // walk back to find '<' that opens a JSX element (not a comparison)
-      let openIdx = -1;
-      while (i > 0) {
-        i--;
-        if (fullStr[i] === ">") break; // we hit the previous element close, stop
-        if (fullStr[i] === "<") {
-          openIdx = i;
-          break;
-        }
-      }
-      // walk forward to find the matching '>'
-      let closeIdx = -1;
-      let depth = 0;
-      for (let j = offset; j < fullStr.length; j++) {
-        const c = fullStr[j];
-        if (c === "{") depth++;
-        else if (c === "}") depth--;
-        else if (c === ">" && depth === 0) {
-          closeIdx = j;
-          break;
-        }
-      }
-      if (openIdx < 0 || closeIdx < 0) return ""; // give up — strip marker
-      return ""; // placeholder; we replace in second pass
-    });
+  // Cases:
+  //   before='{' (or '({{'): this is the FIRST prop. Consume trailing `, `.
+  //     start = propStart, end = afterTrailingCommaWS (already computed above)
+  //   before=',': this is a SUBSEQUENT prop. Consume leading `, ` but NOT trailing.
+  //     start = beforeIdx (position of comma), end = valueEnd
+  //   after='}' and we're the only prop: consume nothing extra.
+  if (before === ",") {
+    start = beforeIdx;
+    end = valueEnd;
+  } else {
+    start = propStart;
+    // end already includes trailing comma+ws if present
   }
 
-  // Simpler approach: do the injection in-place per-marker via index walk.
-  function processMarkers(source) {
-    const MARKER_RE = /__TRACK_(INJECT|MIXED)__([a-z-]+)__END__/g;
-    let result = "";
-    let lastIdx = 0;
-    let m;
-    while ((m = MARKER_RE.exec(source)) !== null) {
-      const kind = m[1];
-      const util = m[2];
-      const markerStart = m.index;
-      const markerEnd = m.index + m[0].length;
+  return { start, end, em };
+}
 
-      // Append everything up to marker (we'll mutate this region for className)
-      // First, find the JSX element bounds for this marker.
-      let openIdx = -1;
-      for (let i = markerStart - 1; i >= 0; i--) {
-        const c = source[i];
-        if (c === "<") {
-          // Make sure it's a JSX tag start (followed by a letter or capital)
-          const next = source[i + 1];
-          if (next && /[A-Za-z]/.test(next)) {
-            openIdx = i;
-            break;
-          }
-        }
-      }
-      let closeIdx = -1;
-      {
-        let depth = 0;
-        for (let j = markerStart; j < source.length; j++) {
-          const c = source[j];
-          if (c === "{") depth++;
-          else if (c === "}") depth--;
-          else if (c === ">" && depth === 0) {
-            // make sure not a `/>` that we want to include
-            closeIdx = j;
-            break;
-          }
-        }
-      }
-      if (openIdx < 0 || closeIdx < 0) {
-        // give up: just strip marker
-        result += source.slice(lastIdx, markerStart);
-        lastIdx = markerEnd;
-        continue;
-      }
+// In the JSX opening tag span, inject ` ${util}` into the className value.
+// Returns [startReplace, endReplace, replacement] OR null if className is
+// missing (caller must handle).
+function classNameInjection(src, tagOpen, tagClose, util) {
+  const tag = src.slice(tagOpen, tagClose + 1);
+  // Try className="..."
+  let m = /className="([^"]*)"/.exec(tag);
+  if (m) {
+    const absStart = tagOpen + m.index;
+    const absEnd = absStart + m[0].length;
+    const newAttr = `className="${m[1]} ${util}"`;
+    return { start: absStart, end: absEnd, replacement: newAttr };
+  }
+  // className={`...`}
+  m = /className=\{`([^`]*)`\}/.exec(tag);
+  if (m) {
+    const absStart = tagOpen + m.index;
+    const absEnd = absStart + m[0].length;
+    const newAttr = `className={\`${m[1]} ${util}\`}`;
+    return { start: absStart, end: absEnd, replacement: newAttr };
+  }
+  // className={expr}
+  m = /className=\{([^}]+)\}/.exec(tag);
+  if (m) {
+    const absStart = tagOpen + m.index;
+    const absEnd = absStart + m[0].length;
+    const newAttr = `className={(${m[1]}) + " ${util}"}`;
+    return { start: absStart, end: absEnd, replacement: newAttr };
+  }
+  // className={clsx(...)} / multi-line — fall back to regex with newlines
+  m = /className=\{(clsx\([\s\S]*?\))\}/.exec(tag);
+  if (m) {
+    const absStart = tagOpen + m.index;
+    const absEnd = absStart + m[0].length;
+    const newAttr = `className={(${m[1]}) + " ${util}"}`;
+    return { start: absStart, end: absEnd, replacement: newAttr };
+  }
+  // No className — inject one right after the tag name.
+  m = /^<([A-Za-z][A-Za-z0-9]*)/.exec(tag);
+  if (m) {
+    const absStart = tagOpen;
+    const absEnd = tagOpen + m[0].length;
+    const newAttr = `<${m[1]} className="${util}"`;
+    return { start: absStart, end: absEnd, replacement: newAttr };
+  }
+  return null;
+}
 
-      // Build the new element body: take source[openIdx..closeIdx], inject class.
-      const elem = source.slice(openIdx, closeIdx + 1);
-      // Strip marker from elem
-      let elemStripped = elem.replace(m[0], "");
-      // Inject util into className. If className=" " exists, append.
-      // Handle className="..." and className={`...`} and className={cn(...)} — but
-      // safest path: append a new class to the literal string if found, otherwise
-      // wrap with an additional space-joined string.
-      let injected = false;
-      // className="..."
-      elemStripped = elemStripped.replace(
-        /(className=")([^"]*)(")/,
-        (whole, a, body, c) => {
-          injected = true;
-          return `${a}${body} ${util}${c}`;
-        },
-      );
-      if (!injected) {
-        // className={`...`}
-        elemStripped = elemStripped.replace(
-          /(className=\{`)([^`]*)(`\})/,
-          (whole, a, body, c) => {
-            injected = true;
-            return `${a}${body} ${util}${c}`;
-          },
-        );
-      }
-      if (!injected) {
-        // className={...} dynamic — append `+ " util"`
-        elemStripped = elemStripped.replace(
-          /className=\{([^}]+)\}/,
-          (whole, expr) => {
-            injected = true;
-            return `className={(${expr}) + " ${util}"}`;
-          },
-        );
-      }
-      if (!injected) {
-        // No className at all — add one right after the tag name.
-        elemStripped = elemStripped.replace(
-          /^<([A-Za-z][A-Za-z0-9]*)/,
-          (whole, tag) => `<${tag} className="${util}"`,
-        );
-        injected = true;
-      }
+function processFile(src) {
+  const edits = []; // {start, end, replacement}
+  const re = /letterSpacing:\s*"(-?[\d.]+)em"/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    const propStart = m.index;
+    const em = m[1];
+    const util = trackingFor(em);
+    trackingReplacements++;
 
-      // Also: if we left `style={{}}` empty after pulling letterSpacing, drop it.
-      elemStripped = elemStripped.replace(
-        /\s*style=\{\{\s*\}\}/g,
-        "",
-      );
+    const span = spanForLetterSpacingProp(src, propStart);
+    if (!span) continue;
 
-      result += source.slice(lastIdx, openIdx) + elemStripped;
-      lastIdx = closeIdx + 1;
+    // Find enclosing JSX tag.
+    const tag = findEnclosingTag(src, propStart);
+    if (!tag) continue;
+
+    // Edit 1: remove letterSpacing prop.
+    edits.push({ start: span.start, end: span.end, replacement: "" });
+
+    // Edit 2: if util is set, inject into className.
+    if (util) {
+      const inj = classNameInjection(src, tag.tagOpen, tag.tagClose, util);
+      if (inj) {
+        edits.push(inj);
+      }
     }
-    result += source.slice(lastIdx);
-    return result;
   }
 
-  return processMarkers(src);
+  if (edits.length === 0) return src;
+
+  // Apply edits right-to-left so earlier offsets remain valid.
+  edits.sort((a, b) => b.start - a.start);
+  let out = src;
+  for (const e of edits) {
+    out = out.slice(0, e.start) + e.replacement + out.slice(e.end);
+  }
+
+  // Cleanup: empty `style={{ }}` and `style={{}}` left behind.
+  out = out.replace(/\s*style=\{\{\s*\}\}/g, "");
+  // Also clean trailing-comma-only style objects: `style={{ ,}}`
+  out = out.replace(/style=\{\{\s*,\s*\}\}/g, "");
+  // And `style={{ ,foo: ... }}` (orphan leading comma)
+  out = out.replace(/style=\{\{\s*,\s*/g, "style={{ ");
+  // And `style={{ foo: ..., , }}` (trailing double comma) - rarer
+  out = out.replace(/,\s*,/g, ",");
+
+  return out;
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const mode = args[0] || "all"; // "fonts" | "tracking" | "all"
   const files = await walk(ROOT);
-
   for (const f of files) {
-    let src = await fs.readFile(f, "utf8");
-    const before = src;
-    if (mode === "fonts" || mode === "all") {
-      src = replaceFontSizes(src);
-    }
-    if (mode === "tracking" || mode === "all") {
-      src = replaceInlineLetterSpacing(src, f);
-    }
-    if (src !== before) {
+    const src = await fs.readFile(f, "utf8");
+    const out = processFile(src);
+    if (out !== src) {
       filesTouched.add(f);
-      await fs.writeFile(f, src, "utf8");
+      await fs.writeFile(f, out, "utf8");
     }
   }
-
   console.log(JSON.stringify({
-    mode,
-    fontReplacements,
     trackingReplacements,
     filesTouched: filesTouched.size,
   }, null, 2));

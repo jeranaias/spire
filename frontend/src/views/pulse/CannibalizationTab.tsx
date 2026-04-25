@@ -218,7 +218,7 @@ export function CannibalizationTab() {
               >
                 <div className="flex items-baseline justify-between">
                   <div className="font-mono text-base font-semibold text-[var(--color-text)]">{m.event_id}</div>
-                  <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                  <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
                     {m.event_date}
                     {isLocal && (
                       <span className="ml-2 rounded-sm border border-[var(--color-primary)] px-1 text-xs uppercase text-[var(--color-primary)]">
@@ -229,20 +229,20 @@ export function CannibalizationTab() {
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+                    <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
                       Recipient
                     </div>
                     <div className="font-mono text-[var(--color-text)]">{m.recipient.asset_id}</div>
-                    <div className="font-mono text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+                    <div className="font-mono text-[var(--color-text-secondary)] tracking-wide">
                       {m.recipient.unit}
                     </div>
                   </div>
                   <div>
-                    <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>
+                    <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
                       Donor
                     </div>
                     <div className="font-mono text-[var(--color-text)]">{m.donor.asset_id}</div>
-                    <div className="font-mono text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+                    <div className="font-mono text-[var(--color-text-secondary)] tracking-wide">
                       {m.donor.unit}
                     </div>
                   </div>
@@ -293,35 +293,34 @@ function ConfirmProposeModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div
-          className="mb-2 font-mono text-xs uppercase text-[var(--color-primary)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="mb-2 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
         >
           Propose Cannibalization Match
         </div>
-        <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)] tracking-wide">
           Confirm cross-level of {need.needed_part.nomenclature}
         </div>
         <div className="mb-3 grid grid-cols-2 gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
           <div>
-            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
               Recipient
             </div>
             <div className="mt-0.5 font-mono text-base font-semibold text-[var(--color-text)]">{need.asset_id}</div>
-            <div className="font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+            <div className="font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
               {need.unit} · {need.equipment_type}
             </div>
           </div>
           <div>
-            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
               Donor
             </div>
             <div className="mt-0.5 font-mono text-base font-semibold text-[var(--color-text)]">{donor.asset_id}</div>
-            <div className="font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+            <div className="font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
               {donor.unit} · {donor.equipment_type}
             </div>
           </div>
           <div className="col-span-2">
-            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
               NSN
             </div>
             <div className="mt-0.5 font-mono text-base text-[var(--color-text)]">
@@ -338,16 +337,14 @@ function ConfirmProposeModal({
         <div className="flex items-center justify-end gap-2">
           <button
             onClick={onCancel}
-            className="rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-            style={{ letterSpacing: "0.18em" }}
+            className="rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] tracking-widest"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={committing}
-            className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
-            style={{ letterSpacing: "0.18em" }}
+            className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50 tracking-widest"
           >
             {committing ? "Committing…" : "Commit Proposal"}
           </button>

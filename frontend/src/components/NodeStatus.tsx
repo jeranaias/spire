@@ -111,7 +111,7 @@ export function NodeStatus() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 rounded-sm border px-2 py-1 font-mono text-xs uppercase transition-colors tracking-wider"
+        className="inline-flex h-11 min-w-[44px] items-center gap-2 rounded-sm border px-2 font-mono text-xs uppercase transition-colors tracking-wider"
         style={{
           borderColor: hasConflicts ? "var(--color-danger)" : "var(--color-border)",
           background: hasConflicts ? "color-mix(in oklab, var(--color-danger-muted) 28%, transparent)" : "transparent",

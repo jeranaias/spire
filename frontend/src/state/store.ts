@@ -83,12 +83,17 @@ export const ROLE_LABELS: Record<Role, string> = {
 
 // Where the role dropdown lands each persona on switch. Mapped per the
 // adversarial review recommendation: ops roles land on BASTION; Maintenance
-// Chief on PULSE; Data Custodian on SENTRY.
+// Chief on PULSE Risk Board (cannib + risk first); Data Custodian on the
+// SENTRY Upload tab (the start of their pipeline).
+//
+// Track-G1 — Default panels per role. Lands operators on the surface
+// scoped to their job, not the front door of the product. The override
+// affordance (TopBar nav) keeps every other surface one click away.
 export const ROLE_DEFAULT_VIEW: Record<Role, string> = {
-  maintenance_chief: "/pulse",
+  maintenance_chief: "/pulse/risk",
   g4: "/bastion",
   mef_commander: "/bastion",
-  data_custodian: "/sentry",
+  data_custodian: "/sentry/upload",
   security_manager: "/bastion",
 };
 

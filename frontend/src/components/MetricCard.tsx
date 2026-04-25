@@ -73,8 +73,8 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
 
       {/* Label — mono, uppercase, tracked */}
       <div
-        className="font-mono text-xs font-medium uppercase"
-        style={{ letterSpacing: "0.14em", color: "var(--color-text-muted)" }}
+        className="font-mono text-xs font-medium uppercase tracking-wider"
+        style={{ color: "var(--color-text-muted)" }}
       >
         {label}
       </div>
@@ -82,17 +82,16 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
       {/* Value — hero mono, tight */}
       <div className="mt-2 flex items-baseline gap-0.5">
         <span
-          className="font-mono font-semibold tabular-nums text-[var(--color-text)]"
-          style={{ fontSize: "2.6rem", letterSpacing: "-0.035em", lineHeight: 1 }}
+          className="font-mono font-semibold tabular-nums text-[var(--color-text)] tracking-tight"
+          style={{ fontSize: "2.6rem", lineHeight: 1 }}
         >
           {value}
         </span>
         {unit && (
           <span
-            className="font-mono font-medium"
+            className="font-mono font-medium tracking-tight"
             style={{
               fontSize: "1.25rem",
-              letterSpacing: "-0.02em",
               color: "var(--color-text-secondary)",
               opacity: 0.55,
             }}
@@ -122,7 +121,7 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
             {unit}
           </span>
           <span className="text-[var(--color-text-muted)]">·</span>
-          <span className="uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <span className="uppercase text-[var(--color-text-muted)] tracking-wider">
             {deltaLabel}
           </span>
         </div>

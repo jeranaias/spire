@@ -44,11 +44,10 @@ export function ClassificationBand() {
 
   return (
     <div
-      className="flex h-7 shrink-0 items-center justify-between px-4 font-mono text-sm font-semibold uppercase"
+      className="flex h-7 shrink-0 items-center justify-between px-4 font-mono text-sm font-semibold uppercase tracking-widest"
       style={{
         background: cls.bg,
         color: cls.fg,
-        letterSpacing: "0.18em",
       }}
       aria-label="Classification and force-protection banner"
     >
@@ -56,12 +55,11 @@ export function ClassificationBand() {
         <span>UNCLASSIFIED // SYNTHETIC DATA // FOR DEMONSTRATION ONLY</span>
       </div>
       <div
-        className="flex items-center gap-2 rounded-sm border px-2.5 py-[1px] font-mono text-xs"
+        className="flex items-center gap-2 rounded-sm border px-2.5 py-[1px] font-mono text-xs tracking-widest"
         style={{
           borderColor: `color-mix(in oklab, ${tone.fg} 60%, transparent)`,
           background: `color-mix(in oklab, ${cls.bg} 70%, #000)`,
           color: tone.fg,
-          letterSpacing: "0.18em",
           animation: tone.flash ? "fpcon-flash 1.2s ease-in-out infinite" : undefined,
         }}
       >

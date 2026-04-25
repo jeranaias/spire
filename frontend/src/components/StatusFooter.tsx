@@ -105,8 +105,7 @@ export function StatusFooter() {
     <footer className="relative h-8 shrink-0 overflow-hidden border-t border-[var(--color-border)] bg-[var(--color-surface)]">
       {/* Left-anchored session block — UP/clock + comms-state pulse */}
       <div
-        className="absolute left-0 top-0 z-10 flex h-full items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs"
-        style={{ letterSpacing: "0.08em" }}
+        className="absolute left-0 top-0 z-10 flex h-full items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs tracking-wide"
       >
         <span
           className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
@@ -122,8 +121,7 @@ export function StatusFooter() {
 
       {/* Right-anchored version/mode block — hidden below md (768px) */}
       <div
-        className="absolute right-0 top-0 z-10 hidden h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs uppercase md:flex"
-        style={{ letterSpacing: "0.14em" }}
+        className="absolute right-0 top-0 z-10 hidden h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs uppercase md:flex tracking-wider"
       >
         <span className="text-[var(--color-text-muted)]">{status?.mode || "local"}</span>
         <span className="text-[var(--color-border-active)]">│</span>
@@ -138,14 +136,12 @@ export function StatusFooter() {
         className="absolute inset-y-0 left-0 right-0 z-0 overflow-hidden pl-[14rem] pr-3 md:pl-[18rem] md:pr-[16rem]"
       >
         <div
-          className="ticker flex h-full items-center whitespace-nowrap font-mono text-xs"
-          style={{ letterSpacing: "0.1em" }}
+          className="ticker flex h-full items-center whitespace-nowrap font-mono text-xs tracking-wider"
         >
           {track.map((item, i) => (
             <span key={i} className="flex items-center gap-2 px-4">
               <span
-                className="uppercase text-[var(--color-text-muted)]"
-                style={{ letterSpacing: "0.16em" }}
+                className="uppercase text-[var(--color-text-muted)] tracking-wider"
               >
                 {item.label}
               </span>
@@ -209,16 +205,15 @@ function CommsIndicator({
         }}
       />
       <span className="text-[var(--color-text-muted)]">COMMS</span>
-      <span className="font-semibold uppercase" style={{ color: c, letterSpacing: "0.16em" }}>
+      <span className="font-semibold uppercase tracking-wider" style={{ color: c }}>
         {airGap ? "AIRGAP" : effective}
       </span>
       {airGap && queueDepth > 0 && (
         <span
-          className="ml-1 rounded-sm border px-1 font-mono text-xs tabular-nums"
+          className="ml-1 rounded-sm border px-1 font-mono text-xs tabular-nums tracking-wider"
           style={{
             color: "var(--color-warning)",
             borderColor: "color-mix(in oklab, var(--color-warning) 40%, var(--color-border))",
-            letterSpacing: "0.1em",
           }}
         >
           Q:{queueDepth}

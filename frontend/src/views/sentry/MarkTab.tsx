@@ -125,7 +125,7 @@ export function MarkTab() {
           <>
             <MarkingBanner result={result} />
             <div className="mb-4 flex items-center gap-3">
-              <div className="font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+              <div className="font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
                 Confidence <span className="tabular-nums text-[var(--color-text)]">{(result.confidence * 100).toFixed(0)}%</span>
                 <span className="mx-2 text-[var(--color-border-active)]">│</span>
                 Release: <span className="text-[var(--color-text)]">{result.release_authority_requested}</span>
@@ -156,8 +156,7 @@ export function MarkTab() {
                     setDownloading(false);
                   }
                 }}
-                className="ml-auto rounded-sm border border-[var(--color-border)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
-                style={{ letterSpacing: "0.18em" }}
+                className="ml-auto rounded-sm border border-[var(--color-border)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] tracking-widest"
               >
                 {downloading ? "…" : "↓ Attestation"}
               </button>
@@ -238,14 +237,13 @@ function MarkingBanner({ result }: { result: MarkResult }) {
       <div className="flex items-center justify-between px-4 py-3">
         <div>
           <div
-            className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
             Recommended Marking
           </div>
           <div
-            className="mt-1 font-mono text-xl font-semibold uppercase"
-            style={{ color, letterSpacing: "0.08em", lineHeight: 1 }}
+            className="mt-1 font-mono text-xl font-semibold uppercase tracking-wide"
+            style={{ color, lineHeight: 1 }}
           >
             {cls.replace("_", " ")}
             {result.caveats_recommended.length > 0 && (
@@ -256,8 +254,7 @@ function MarkingBanner({ result }: { result: MarkResult }) {
           </div>
         </div>
         <div
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
         >
           DoDM 5200.01
         </div>

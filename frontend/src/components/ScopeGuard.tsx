@@ -28,15 +28,14 @@ export function ScopeGuard({ view, children }: Props) {
         }}
       >
         <div
-          className="mb-2 font-mono text-xs uppercase text-[var(--color-warning)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="mb-2 font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest"
         >
           Out of Scope · Access Restricted
         </div>
-        <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)] tracking-wide">
           {view.toUpperCase().replace("/", "")} is not in your authorization scope.
         </div>
-        <div className="mb-4 font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mb-4 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
           Current role: <span className="text-[var(--color-text)]">{ROLE_LABELS[role]}</span>.
           &nbsp;This view is restricted to:&nbsp;
           <span className="text-[var(--color-text)]">
@@ -44,14 +43,13 @@ export function ScopeGuard({ view, children }: Props) {
           </span>
           .
         </div>
-        <div className="mb-4 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.12em" }}>
+        <div className="mb-4 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
           In production, SPIRE honours role-based access control via CAC token
           and Keycloak role mapping. This overlay simulates that enforcement.
         </div>
         <button
           onClick={() => nav(home)}
-          className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
-          style={{ letterSpacing: "0.16em" }}
+          className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-wider"
         >
           Return to {home}
         </button>

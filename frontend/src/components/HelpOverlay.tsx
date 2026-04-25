@@ -62,12 +62,11 @@ export function HelpOverlay() {
         <div className="mb-3 flex items-baseline justify-between">
           <div>
             <div
-              className="font-mono text-xs uppercase text-[var(--color-primary)]"
-              style={{ letterSpacing: "0.22em" }}
+              className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
             >
               SPIRE · Help & Reference
             </div>
-            <div className="mt-1 font-mono text-lg font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+            <div className="mt-1 font-mono text-lg font-semibold text-[var(--color-text)] tracking-wide">
               Keyboard shortcuts + role scope
             </div>
           </div>
@@ -82,8 +81,7 @@ export function HelpOverlay() {
         <div className="grid grid-cols-2 gap-6">
           <section>
             <div
-              className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.22em" }}
+              className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Shortcuts
             </div>
@@ -94,14 +92,13 @@ export function HelpOverlay() {
                     {s.keys.map((k, j) => (
                       <kbd
                         key={j}
-                        className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-[1px] font-mono text-xs text-[var(--color-text)]"
-                        style={{ letterSpacing: "0.04em" }}
+                        className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-[1px] font-mono text-xs text-[var(--color-text)] tracking-wide"
                       >
                         {k}
                       </kbd>
                     ))}
                   </div>
-                  <span className="font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.02em" }}>
+                  <span className="font-mono text-sm text-[var(--color-text-secondary)]">
                     {s.label}
                   </span>
                 </li>
@@ -111,12 +108,11 @@ export function HelpOverlay() {
 
           <section>
             <div
-              className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.22em" }}
+              className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Your role · {ROLE_LABELS[role]}
             </div>
-            <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-sm" style={{ letterSpacing: "0.02em" }}>
+            <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-sm">
               <div className="mb-2 text-[var(--color-text-secondary)]">In scope:</div>
               <ul className="flex flex-col gap-0.5">
                 {Object.entries(VIEW_SCOPE).map(([view, roles]) => {
@@ -136,12 +132,11 @@ export function HelpOverlay() {
             </div>
 
             <div
-              className="mt-4 mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.22em" }}
+              className="mt-4 mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Capabilities delivered (v1.0.0-rc1)
             </div>
-            <ul className="flex flex-col gap-0.5 font-mono text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+            <ul className="flex flex-col gap-0.5 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
               <li>✓ GC-1 Autonomous replenishment · PULSE Forecast</li>
               <li>✓ GC-2 Distributed consensus · TopBar Node Status</li>
               <li>✓ GC-3 Predictive failure · PULSE Risk Board</li>
@@ -154,8 +149,7 @@ export function HelpOverlay() {
         </div>
 
         <div
-          className="mt-5 border-t border-[var(--color-border)] pt-3 font-mono text-xs text-[var(--color-text-muted)]"
-          style={{ letterSpacing: "0.16em" }}
+          className="mt-5 border-t border-[var(--color-border)] pt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
         >
           File issues with the floating button bottom-right (or Shift+F) ·
           See SPIRE_INSTALL.md + CONTRIBUTING.md in the repo root for setup

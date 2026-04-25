@@ -162,12 +162,11 @@ export function FusedThreatsPanel({
                   {t.response_taskings.length > 0 && (
                     <div className="mt-2">
                       <div
-                        className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-                        style={{ letterSpacing: "0.18em" }}
+                        className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
                       >
                         Auto-generated taskings
                       </div>
-                      <ul className="mt-1 flex flex-col gap-0.5 font-mono text-xs" style={{ letterSpacing: "0.04em" }}>
+                      <ul className="mt-1 flex flex-col gap-0.5 font-mono text-xs tracking-wide">
                         {t.response_taskings.map((task, i) => (
                           <li key={i} className="flex items-start gap-1.5 text-[var(--color-text-secondary)]">
                             <span className="text-[var(--color-text-muted)]">›</span>
@@ -179,8 +178,7 @@ export function FusedThreatsPanel({
                   )}
                   {/* Full chain detail */}
                   <div
-                    className="mt-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-                    style={{ letterSpacing: "0.18em" }}
+                    className="mt-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
                   >
                     Correlation chain · {t.correlation_chain.length} contributing alerts
                   </div>

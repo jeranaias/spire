@@ -189,7 +189,7 @@ function RoleSelector({ role, onChange }: { role: Role; onChange: (r: Role) => v
         <select
           value={role}
           onChange={(e) => onChange(e.target.value as Role)}
-          className="appearance-none rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] py-1 pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none tracking-wider"
+          className="h-11 min-w-[44px] appearance-none rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none tracking-wider"
         >
           {(Object.keys(ROLE_LABELS) as Role[]).map((k) => (
             <option key={k} value={k}>{ROLE_LABELS[k]}</option>
@@ -310,9 +310,7 @@ function AirGapToggle() {
   return (
     <button
       onClick={toggle}
-      className={(clsx(
-        "flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-xs uppercase transition-colors",
-      )) + " tracking-wider"}
+      className="inline-flex h-11 min-w-[44px] items-center gap-2 rounded-sm border px-2.5 font-mono text-xs uppercase transition-colors tracking-wider"
       style={{
         borderColor: airGap ? "var(--color-danger)" : "var(--color-border)",
         background: airGap

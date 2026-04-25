@@ -523,7 +523,7 @@ export function MapCanvas({
                 <text y="-2" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="9" fontWeight="700" fill={color}>
                   {ecp.id.replace("ECP-", "")}
                 </text>
-                <text y="8" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="6" fill={color} style={{ letterSpacing: "0.12em" }}>
+                <text className="tracking-wider" y="8" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="6" fill={color}>
                   ECP
                 </text>
               </svg>
@@ -549,8 +549,8 @@ export function MapCanvas({
               <div className="relative flex flex-col items-center" style={{ cursor: "pointer" }}>
                 <UnitMarkerSVG unit={u.unit} color={color} selected={selected} />
                 <div
-                  className="mt-1 rounded-sm bg-[color-mix(in_oklab,#0a0c13_80%,transparent)] px-1.5 py-[1px] font-mono text-xs tabular-nums"
-                  style={{ color, letterSpacing: "0.04em" }}
+                  className="mt-1 rounded-sm bg-[color-mix(in_oklab,#0a0c13_80%,transparent)] px-1.5 py-[1px] font-mono text-xs tabular-nums tracking-wide"
+                  style={{ color }}
                 >
                   {u.unit} · {Math.round(u.mc_rate * 100)}%
                 </div>
@@ -586,8 +586,8 @@ export function MapCanvas({
           >
             <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 200 }}>
               <div
-                className="font-mono text-xs uppercase"
-                style={{ letterSpacing: "0.16em", color: TYPE_COLOR[hoverBuilding.type]?.stroke ?? "#9ca3af" }}
+                className="font-mono text-xs uppercase tracking-wider"
+                style={{ color: TYPE_COLOR[hoverBuilding.type]?.stroke ?? "#9ca3af" }}
               >
                 {hoverBuilding.id} · {hoverBuilding.type.replace("_", " ")}
               </div>
@@ -626,7 +626,7 @@ export function MapCanvas({
             onClose={() => setEcpSelected(null)}
           >
             <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 220 }}>
-              <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+              <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
                 Entry Control Point
               </div>
               <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
@@ -634,13 +634,13 @@ export function MapCanvas({
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-xs">
                 <div>
-                  <div className="text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>Status</div>
+                  <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">Status</div>
                   <div style={{ color: ecpSelected.status === "open" ? "var(--color-success)" : "var(--color-text-muted)" }}>
                     {ecpSelected.status.toUpperCase()}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.18em" }}>Lanes</div>
+                  <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">Lanes</div>
                   <div className="text-[var(--color-text)]">{ecpSelected.lanes_in}×IN · {ecpSelected.lanes_out}×OUT</div>
                 </div>
               </div>
@@ -664,7 +664,7 @@ export function MapCanvas({
             onClose={() => setRpSelected(null)}
           >
             <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 200 }}>
-              <div className="font-mono text-xs uppercase text-[#8b5cf6]" style={{ letterSpacing: "0.22em" }}>
+              <div className="font-mono text-xs uppercase text-[#8b5cf6] tracking-widest">
                 Rally Point
               </div>
               <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
