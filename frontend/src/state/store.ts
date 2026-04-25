@@ -8,14 +8,46 @@ export type Role =
   | "security_manager";
 
 export type OperatingMode = "full" | "lite";
+export type ToastTone = "ok" | "info" | "warn" | "error";
+
+export interface Toast {
+  id: string;
+  tone: ToastTone;
+  text: string;
+  // Optional "undo" lane — when present, rendered as a button that resolves the action.
+  undo?: { label: string; onUndo: () => void };
+  ttlMs?: number;
+}
 
 export interface SpireState {
   role: Role;
   operatingMode: OperatingMode;
   alertCount: number;
+
+  // SENTRY batch context — hoisted out of SentryView local state so that
+  // switching operator role via the TopBar dropdown (which unmounts the
+  // view) no longer nukes the in-flight batch.
+  sentryBatchId: string | null;
+  sentryJobId: string | null;
+
+  // Cross-tab selection (Risk Board → Cannibalization, Heatmap → Risk Board, …).
+  selectedAssetId: string | null;
+
+  // FPCON indicator. BRAVO is the steady state; a ThermalHawk sim temporarily
+  // escalates to CHARLIE for the duration of the incident.
+  fpcon: "NORMAL" | "ALPHA" | "BRAVO" | "CHARLIE" | "DELTA";
+
+  // Toast queue.
+  toasts: Toast[];
+
   setRole: (r: Role) => void;
   setOperatingMode: (m: OperatingMode) => void;
   setAlertCount: (n: number) => void;
+  setSentryBatch: (batchId: string | null, jobId: string | null) => void;
+  setSelectedAssetId: (id: string | null) => void;
+  setFpcon: (level: SpireState["fpcon"]) => void;
+  pushToast: (t: Omit<Toast, "id">) => string;
+  dismissToast: (id: string) => void;
 }
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -26,19 +58,53 @@ export const ROLE_LABELS: Record<Role, string> = {
   security_manager: "Security Manager",
 };
 
+// Where the role dropdown lands each persona on switch. Mapped per the
+// adversarial review recommendation: ops roles land on BASTION; Maintenance
+// Chief on PULSE; Data Custodian on SENTRY.
 export const ROLE_DEFAULT_VIEW: Record<Role, string> = {
   maintenance_chief: "/pulse",
-  g4: "/pulse",
+  g4: "/bastion",
   mef_commander: "/bastion",
   data_custodian: "/sentry",
-  security_manager: "/sentry",
+  security_manager: "/bastion",
 };
 
+// Roles expected to have authority on each view. If a role visits a view
+// outside this set, the frontend renders an "Out-of-scope" overlay.
+export const VIEW_SCOPE: Record<string, Role[]> = {
+  "/sentry":  ["data_custodian", "security_manager"],
+  "/pulse":   ["maintenance_chief", "g4", "mef_commander"],
+  "/bastion": ["mef_commander", "g4", "security_manager", "maintenance_chief"],
+};
+
+function uid(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
 export const useSpireStore = create<SpireState>((set) => ({
-  role: "data_custodian",
+  role: "mef_commander",
   operatingMode: "full",
   alertCount: 0,
+  sentryBatchId: null,
+  sentryJobId: null,
+  selectedAssetId: null,
+  fpcon: "BRAVO",
+  toasts: [],
   setRole: (role) => set({ role }),
   setOperatingMode: (operatingMode) => set({ operatingMode }),
   setAlertCount: (alertCount) => set({ alertCount }),
+  setSentryBatch: (sentryBatchId, sentryJobId) => set({ sentryBatchId, sentryJobId }),
+  setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
+  setFpcon: (fpcon) => set({ fpcon }),
+  pushToast: (t) => {
+    const id = uid();
+    set((s) => ({ toasts: [...s.toasts, { ...t, id }] }));
+    const ttl = t.ttlMs ?? 3000;
+    window.setTimeout(() => {
+      set((s) => ({ toasts: s.toasts.filter((x) => x.id !== id) }));
+    }, ttl);
+    return id;
+  },
+  dismissToast: (id) =>
+    set((s) => ({ toasts: s.toasts.filter((x) => x.id !== id) })),
 }));
