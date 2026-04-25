@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
+import { withRetry } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
@@ -37,19 +38,57 @@ export function BastionView() {
   const [sim, setSim] = useState<ThermalHawkSim | null>(null);
   const [nlText, setNlText] = useState("");
   const [nlResult, setNlResult] = useState<any | null>(null);
+  const [nlSubmitting, setNlSubmitting] = useState(false);
+  const [copError, setCopError] = useState<string | null>(null);
+  // True only while the retry helper is on its 2nd+ attempt. Drives the
+  // "Waking up — one moment" copy on Safari cold-start when Fly's machine
+  // is spinning up and 5xx'ing the first request.
+  const [waking, setWaking] = useState(false);
+
+  const pushToast = useSpireStore((s) => s.pushToast);
 
   useEffect(() => {
     setCop(null);
-    api.bastion.cop().then(setCop);
+    setCopError(null);
+    setWaking(false);
+    let cancelled = false;
+    (async () => {
+      try {
+        const c = await withRetry(() => api.bastion.cop(), {
+          onAttempt: (attempt) => {
+            // Surface a friendlier state once we're past the first try.
+            if (!cancelled) setWaking(attempt > 1);
+          },
+        });
+        if (cancelled) return;
+        setCop(c);
+        setWaking(false);
+      } catch (e) {
+        if (cancelled) return;
+        setCopError(String(e));
+        setWaking(false);
+        pushToast({
+          tone: "error",
+          text: "Installation offline — could not reach BASTION schematic. Retrying on next role change.",
+          ttlMs: 6000,
+        });
+      }
+    })();
     refreshAlerts();
+    return () => {
+      cancelled = true;
+    };
   }, [role]);
 
   async function refreshAlerts() {
     try {
-      const r = await api.bastion.alerts(40);
+      const r = await withRetry(() => api.bastion.alerts(40));
       setAlerts(r.alerts);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // Toast once per session-ish: a steady poll that's failing should not
+      // pop a toast every 5 seconds. We log to console so it's visible in
+      // dev tools without spamming the operator.
+      console.warn("BASTION alert refresh failed:", e);
     }
   }
 
@@ -96,9 +135,21 @@ export function BastionView() {
   }
 
   async function handleNL() {
-    if (!nlText.trim()) return;
-    const r = await api.bastion.nlQuery(nlText);
-    setNlResult(r);
+    if (!nlText.trim() || nlSubmitting) return;
+    setNlSubmitting(true);
+    setNlResult(null);
+    try {
+      const r = await api.bastion.nlQuery(nlText);
+      setNlResult(r);
+    } catch (e) {
+      pushToast({
+        tone: "error",
+        text: `Natural-language query failed — ${String(e).slice(0, 90)}`,
+        ttlMs: 5000,
+      });
+    } finally {
+      setNlSubmitting(false);
+    }
   }
 
   function onUnitClick(unitName: string) {
@@ -124,10 +175,58 @@ export function BastionView() {
     return null;
   }, [selectedAlert]);
 
+  if (copError && !cop) {
+    return (
+      <div className="flex h-full items-center justify-center p-12">
+        <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
+          <div
+            className="font-mono text-[10px] uppercase text-[var(--color-danger)]"
+            style={{ letterSpacing: "0.22em" }}
+          >
+            Installation Offline
+          </div>
+          <div className="mt-2 spire-body text-sm">
+            BASTION schematic unreachable after 4 attempts. Backend may be cycling — wait a moment, then switch role to retry.
+          </div>
+          <div className="mt-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+            {copError}
+          </div>
+          <button
+            onClick={() => {
+              // Force a re-fetch by toggling the role useEffect. Simplest path:
+              // request the same role; the effect dependency triggers because
+              // we set state inside.
+              setCop(null);
+              setCopError(null);
+              setWaking(true);
+              withRetry(() => api.bastion.cop(), {
+                onAttempt: (attempt) => setWaking(attempt > 1),
+              })
+                .then((c) => {
+                  setCop(c);
+                  setWaking(false);
+                })
+                .catch((e) => {
+                  setCopError(String(e));
+                  setWaking(false);
+                });
+            }}
+            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+            style={{ letterSpacing: "0.18em" }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (!cop) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">
-        Loading installation schematic ...
+        <div className="flex items-center gap-3 font-mono text-[11px]" style={{ letterSpacing: "0.1em" }}>
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
+          {waking ? "Waking up — one moment" : "Loading installation schematic ..."}
+        </div>
       </div>
     );
   }
@@ -248,10 +347,11 @@ export function BastionView() {
               />
               <button
                 onClick={handleNL}
-                className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+                disabled={nlSubmitting || !nlText.trim()}
+                className="inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
                 style={{ letterSpacing: "0.14em" }}
               >
-                Submit
+                {nlSubmitting ? "Working …" : "Submit"}
               </button>
             </div>
             {nlResult && <NLResultPanel result={nlResult} onClose={() => setNlResult(null)} />}
