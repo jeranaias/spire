@@ -120,9 +120,9 @@ export function StatusFooter() {
         <CommsIndicator state={commsState} airGap={airGap} queueDepth={queueDepth} />
       </div>
 
-      {/* Right-anchored version/mode block */}
+      {/* Right-anchored version/mode block — hidden below md (768px) */}
       <div
-        className="absolute right-0 top-0 z-10 flex h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-[10px] uppercase"
+        className="absolute right-0 top-0 z-10 hidden h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-[10px] uppercase md:flex"
         style={{ letterSpacing: "0.14em" }}
       >
         <span className="text-[var(--color-text-muted)]">{status?.mode || "local"}</span>
@@ -130,15 +130,12 @@ export function StatusFooter() {
         <span className="text-[var(--color-primary)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
       </div>
 
-      {/* Scrolling telemetry ticker between the anchors */}
+      {/* Scrolling telemetry ticker between the anchors. Padding values are
+       * tuned so the ticker doesn't overlap the anchored blocks at any
+       * breakpoint: anchored blocks are wider on desktop, so the ticker
+       * gets bigger insets there. */}
       <div
-        className="absolute inset-y-0 z-0 overflow-hidden"
-        style={{
-          left: 0,
-          right: 0,
-          paddingLeft: "18rem",
-          paddingRight: "16rem",
-        }}
+        className="absolute inset-y-0 left-0 right-0 z-0 overflow-hidden pl-[14rem] pr-3 md:pl-[18rem] md:pr-[16rem]"
       >
         <div
           className="ticker flex h-full items-center whitespace-nowrap font-mono text-[10px]"
