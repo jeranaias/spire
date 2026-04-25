@@ -52,6 +52,14 @@ export const api = {
         { method: "POST", body: JSON.stringify({ op_kind, payload, actor }) },
         false,
       ),
+    adminTelemetry: () => jsonFetch<AdminTelemetry>("/system/admin/telemetry"),
+    adminOutcomes: (limit = 50, kind?: string) => {
+      const sp = new URLSearchParams();
+      sp.set("limit", String(limit));
+      if (kind) sp.set("decision_kind", kind);
+      return jsonFetch<{ outcomes: DecisionOutcome[]; total: number }>(`/system/admin/outcomes?${sp}`);
+    },
+    adminFeedback: () => jsonFetch<{ feedback: FeedbackRecord[]; total: number }>("/system/feedback"),
   },
   pulse: {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
@@ -227,6 +235,47 @@ export interface Cannibalization {
   open_needs: any[];
   completed_matches: any[];
   total_events: number;
+}
+
+export interface AdminEngineStat {
+  correct: number;
+  incorrect: number;
+  total: number;
+  accuracy: number;
+}
+
+export interface AdminTelemetry {
+  total_outcomes: number;
+  by_engine: Record<string, AdminEngineStat>;
+  by_decision_kind: Record<string, AdminEngineStat>;
+  rolling_accuracy: { bucket_end: string; n: number; accuracy: number }[];
+  overall_accuracy?: number;
+  retraining_recommended: boolean;
+  as_of: string;
+}
+
+export interface DecisionOutcome {
+  id: string;
+  decision_kind: string;
+  decision_id: string;
+  decided_by: string;
+  was_correct: boolean;
+  observed_at: string;
+  notes: string;
+  scoring_engine: string;
+  logged_at: string;
+}
+
+export interface FeedbackRecord {
+  id: string;
+  title: string;
+  body: string;
+  severity: string;
+  role: string;
+  view: string;
+  submitted_at: string;
+  github_issue_url?: string | null;
+  github_issue_number?: number;
 }
 
 export interface CommsStateResponse {
