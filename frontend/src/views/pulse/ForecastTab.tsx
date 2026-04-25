@@ -63,7 +63,7 @@ export function ForecastTab() {
   if (!data) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.1em" }}>
+        <div className="flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wider">
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
           Running Monte Carlo forecast …
         </div>
@@ -266,7 +266,6 @@ export function ForecastTab() {
                 : endCross > 0.2
                 ? "var(--color-warning)"
                 : "var(--color-success)",
-              letterSpacing: "-0.01em",
               lineHeight: 1,
             }}
           >
@@ -275,15 +274,15 @@ export function ForecastTab() {
           </div>
         </div>
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             First Cross (mean)
           </div>
-          <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+          <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-[var(--color-text)] tracking-wide">
             {data.threshold_cross_date
               ? data.threshold_cross_date.slice(5)
               : "—"}
           </div>
-          <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             {data.threshold_cross_date
               ? "mean projection crosses"
               : "no mean crossing in window"}
@@ -292,7 +291,7 @@ export function ForecastTab() {
       </div>
 
       {/* Tiny legend indicating the spaghetti paths are truly Monte Carlo */}
-      <div className="mt-2 flex items-center gap-4 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="mt-2 flex items-center gap-4 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
         <LegendDot color="var(--color-success)" label="historical actuals" />
         <LegendDot color="var(--color-primary)" label="mean projection (200 paths)" dashed />
         <LegendDot color="var(--color-primary)" label="p10 / p90 envelope" opacity={0.35} />

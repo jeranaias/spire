@@ -89,21 +89,19 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
       <div className="flex h-full items-center justify-center p-12">
         <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
           <div
-            className="font-mono text-xs uppercase text-[var(--color-danger)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="font-mono text-xs uppercase text-[var(--color-danger)] tracking-widest"
           >
             Processing Unavailable
           </div>
           <div className="mt-2 spire-body text-sm">
             SENTRY processing pipeline did not respond. Re-load the batch from Upload to retry.
           </div>
-          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             {error}
           </div>
           <button
             onClick={() => nav("/sentry/upload")}
-            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
-            style={{ letterSpacing: "0.18em" }}
+            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
           >
             ← Back to Upload
           </button>
@@ -114,7 +112,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   if (!queue || !job) {
     return (
       <div className="flex h-full items-center justify-center p-12 text-sm text-[var(--color-text-secondary)]">
-        <div className="flex items-center gap-3 font-mono text-sm" style={{ letterSpacing: "0.1em" }}>
+        <div className="flex items-center gap-3 font-mono text-sm tracking-wider">
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
           Initializing processing …
         </div>
@@ -195,8 +193,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           {done && (
             <button
               onClick={() => nav("/sentry/review")}
-              className="ml-3 rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
-              style={{ letterSpacing: "0.14em" }}
+              className="ml-3 rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-wider"
             >
               Review queue →
             </button>
@@ -261,7 +258,6 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           </div>
           <span
             className="w-14 text-right font-mono text-sm font-semibold tabular-nums text-[var(--color-text)]"
-            style={{ letterSpacing: "-0.01em" }}
           >
             {(pct * 100).toFixed(1)}%
           </span>

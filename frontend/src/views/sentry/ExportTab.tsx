@@ -288,7 +288,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <StatLabel>{label}</StatLabel>
-      <div className="font-mono text-lg font-semibold tabular-nums text-[var(--color-text)]" style={{ letterSpacing: "-0.01em" }}>
+      <div className="font-mono text-lg font-semibold tabular-nums text-[var(--color-text)]">
         {value}
       </div>
     </div>
@@ -298,8 +298,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 function StatLabel({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-      style={{ letterSpacing: "0.22em" }}
+      className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
     >
       {children}
     </div>

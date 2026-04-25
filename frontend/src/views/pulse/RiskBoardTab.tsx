@@ -8,12 +8,29 @@ import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
 import { PredictedFailurePanel } from "../../components/PredictedFailurePanel";
 
+// Track-G1 — role-shaped default scope. A Maintenance Chief landing on the
+// Risk Board cold should see CLB-6 only (their unit), not the whole MEF.
+// Other roles default to fleet-wide. The override affordance (the Filter
+// chip at top-right of the board) keeps "expand to fleet" one click away.
+const ROLE_DEFAULT_UNIT: Partial<Record<string, string>> = {
+  maintenance_chief: "CLB-6",
+};
+// Sentinel applied when the operator explicitly opts out of the role
+// default — kept across renders so it doesn't snap back on re-mount.
+const ALL_UNITS_SENTINEL = "__ALL__";
+
 export function RiskBoardTab() {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
   const [params, setParams] = useSearchParams();
-  const unitFilter = params.get("unit");
+  const explicitUnit = params.get("unit");
   const equipFilter = params.get("equipment");
+  // Role default applies only when no explicit param is set. Operator
+  // can always override either direction.
+  const roleDefault = ROLE_DEFAULT_UNIT[role] ?? null;
+  const usingRoleDefault = !explicitUnit && roleDefault != null;
+  const rawUnitFilter = explicitUnit ?? roleDefault;
+  const unitFilter = rawUnitFilter === ALL_UNITS_SENTINEL ? null : rawUnitFilter;
   const [board, setBoard] = useState<RiskBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -37,7 +54,14 @@ export function RiskBoardTab() {
   }, [board, unitFilter, equipFilter]);
 
   function clearFilter() {
-    setParams({});
+    // If the only filter active is the role default, swap to the show-all
+    // sentinel so the Maintenance Chief can override CLB-6 → fleet without
+    // the role default re-applying on the next render.
+    if (usingRoleDefault && !explicitUnit) {
+      setParams({ unit: ALL_UNITS_SENTINEL });
+    } else {
+      setParams({});
+    }
   }
 
   useEffect(() => {
@@ -61,8 +85,7 @@ export function RiskBoardTab() {
         <div className="mb-3 flex items-end justify-between">
           <div>
             <h2
-              className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
-              style={{ letterSpacing: "0.2em" }}
+              className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
             >
               Risk Board · Top {filteredAssets.length}
               {filteredAssets.length !== board.assets.length && (
@@ -76,10 +99,11 @@ export function RiskBoardTab() {
           {(unitFilter || equipFilter) && (
             <button
               onClick={clearFilter}
-              className="flex items-center gap-1.5 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] px-2.5 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))]"
-              style={{ letterSpacing: "0.16em" }}
+              className="flex items-center gap-1.5 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] px-2.5 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] tracking-wider"
+              title={usingRoleDefault ? "Default scope from your role. Click to expand to all units." : "Clear filter"}
             >
-              Filter: {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
+              {usingRoleDefault ? "Role scope: " : "Filter: "}
+              {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
             </button>
           )}
         </div>
@@ -93,7 +117,7 @@ export function RiskBoardTab() {
             />
           ))}
           {filteredAssets.length === 0 && (
-            <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+            <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
               NO ASSETS MATCH CURRENT FILTER
             </div>
           )}
@@ -162,12 +186,11 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
       <div className="flex-1">
         <div className="flex items-baseline gap-3">
           <span className="font-mono text-base font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
-          <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+          <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             {asset.equipment_type} · {asset.unit_name} · SN {asset.serial_number}
           </span>
           <span
-            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.16em" }}
+            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider"
           >
             UNCLASSIFIED // SYNTHETIC
           </span>
@@ -175,15 +198,14 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
         <div className="mt-2">
           <RiskBar score={asset.risk_score} band={asset.band} compact />
         </div>
-        <div className="mt-1 font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mt-1 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
           Primary: {asset.primary_factor}
           {asset.predicted_failure && <span className="ml-3 text-[var(--color-warning)]">· {asset.predicted_failure}</span>}
         </div>
       </div>
       <div className="flex flex-col items-center gap-0.5 self-stretch justify-center">
         <div
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-          style={{ letterSpacing: "0.18em" }}
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
         >
           30D Faults
         </div>
@@ -207,7 +229,7 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
           {trendUp ? "↑" : "↓"} {spark.reduce((a, b) => a + b.v, 0)} faults
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3 text-right font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+      <div className="grid grid-cols-3 gap-3 text-right font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
         <Stat label="Hours" value={asset.current_hours?.toFixed(0) ?? "—"} />
         <Stat label="Miles" value={asset.current_miles?.toLocaleString() ?? "—"} />
         <Stat label="Days Maint" value={asset.days_since_maintenance ?? "—"} />
@@ -359,22 +381,19 @@ function AssetDeepDivePanel({
 
         <section className="flex items-center gap-2 pt-2">
           <span
-            className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.18em" }}
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
             Feedback:
           </span>
           <button
             onClick={() => onFeedback(true)}
-            className="rounded-sm border border-[var(--color-success-muted)] px-3 py-1 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success-muted)]"
-            style={{ letterSpacing: "0.14em" }}
+            className="rounded-sm border border-[var(--color-success-muted)] px-3 py-1 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success-muted)] tracking-wider"
           >
             ✓ Correct
           </button>
           <button
             onClick={() => onFeedback(false)}
-            className="rounded-sm border border-[var(--color-danger-muted)] px-3 py-1 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)]"
-            style={{ letterSpacing: "0.14em" }}
+            className="rounded-sm border border-[var(--color-danger-muted)] px-3 py-1 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)] tracking-wider"
           >
             ✗ Incorrect
           </button>

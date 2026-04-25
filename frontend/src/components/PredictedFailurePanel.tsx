@@ -47,7 +47,7 @@ export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
   }
   if (!data) {
     return (
-      <div className="mb-4 flex items-center gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-sm text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="mb-4 flex items-center gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-sm text-[var(--color-text-muted)] tracking-wider">
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
         Computing predicted failures …
       </div>
@@ -65,18 +65,16 @@ export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
           aria-hidden
         />
         <span
-          className="font-mono text-xs font-semibold uppercase text-[var(--color-success)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="font-mono text-xs font-semibold uppercase text-[var(--color-success)] tracking-widest"
         >
           Predicted Failures · GC-3
         </span>
         <span
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-          style={{ letterSpacing: "0.18em" }}
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
         >
           No assets above threshold within {horizon}d horizon
         </span>
-        <span className="ml-auto font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+        <span className="ml-auto font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
           engine: {engine}
         </span>
       </div>
@@ -105,9 +103,8 @@ export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
             <button
               key={h}
               onClick={() => setHorizon(h)}
-              className="rounded-sm border px-2 py-[2px] font-mono text-xs font-semibold uppercase transition-colors"
+              className="rounded-sm border px-2 py-[2px] font-mono text-xs font-semibold uppercase transition-colors tracking-wider"
               style={{
-                letterSpacing: "0.14em",
                 borderColor: horizon === h ? "var(--color-primary)" : "var(--color-border)",
                 background: horizon === h ? "var(--color-primary)" : "transparent",
                 color: horizon === h ? "white" : "var(--color-text-secondary)",
@@ -134,7 +131,7 @@ export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
           />
         ))}
         {data.length > 6 && (
-          <div className="px-4 py-2 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+          <div className="px-4 py-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             + {data.length - 6} more flagged · scope to a unit to see them
           </div>
         )}
@@ -179,9 +176,8 @@ function PredictedRow({
       <div className="flex items-center gap-2 font-mono">
         <ProbBar prob={top.probability} />
         <span
-          className="rounded-sm border px-1.5 py-[1px] text-xs uppercase"
+          className="rounded-sm border px-1.5 py-[1px] text-xs uppercase tracking-wider"
           style={{
-            letterSpacing: "0.16em",
             borderColor: criticalityColor(top.criticality),
             color: criticalityColor(top.criticality),
             background: `color-mix(in oklab, ${criticalityColor(top.criticality)} 12%, transparent)`,
@@ -192,8 +188,7 @@ function PredictedRow({
       </div>
       <button
         onClick={onDraftRequisition}
-        className="rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_30%,transparent)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_50%,transparent)]"
-        style={{ letterSpacing: "0.16em" }}
+        className="rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_30%,transparent)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_50%,transparent)] tracking-wider"
       >
         Draft Action
       </button>
@@ -211,7 +206,7 @@ function ProbBar({ prob }: { prob: number }) {
           style={{ width: `${prob * 100}%`, background: color }}
         />
       </div>
-      <span className="font-mono text-xs tabular-nums" style={{ color, letterSpacing: "0.04em" }}>
+      <span className="font-mono text-xs tabular-nums tracking-wide" style={{ color }}>
         {(prob * 100).toFixed(0)}%
       </span>
     </div>

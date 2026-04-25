@@ -61,15 +61,14 @@ export function RiskBar({ score, band, compact }: Props) {
       </div>
       <span
         className="w-10 text-right font-mono text-sm font-semibold tabular-nums"
-        style={{ color, letterSpacing: "-0.01em" }}
+        style={{ color }}
       >
         {score.toFixed(0)}
       </span>
       {band && !compact && (
         <span
-          className="rounded-sm border px-1.5 py-0.5 font-mono text-xs font-semibold uppercase"
+          className="rounded-sm border px-1.5 py-0.5 font-mono text-xs font-semibold uppercase tracking-wider"
           style={{
-            letterSpacing: "0.16em",
             color,
             borderColor: `color-mix(in oklab, ${color} 40%, var(--color-border))`,
             backgroundColor: `color-mix(in oklab, ${color} 10%, transparent)`,

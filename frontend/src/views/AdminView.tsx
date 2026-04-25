@@ -103,15 +103,14 @@ export function AdminView() {
       <div className="flex h-full items-center justify-center p-12">
         <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
           <div
-            className="font-mono text-xs uppercase text-[var(--color-danger)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="font-mono text-xs uppercase text-[var(--color-danger)] tracking-widest"
           >
             Admin Telemetry Offline
           </div>
           <div className="mt-2 spire-body text-sm">
             Training-flywheel telemetry endpoint did not respond after 4 attempts. Backend may be cycling.
           </div>
-          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             {error}
           </div>
         </div>
@@ -120,7 +119,7 @@ export function AdminView() {
   }
   if (!tel) {
     return (
-      <div className="flex h-full items-center justify-center font-mono text-sm text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="flex h-full items-center justify-center font-mono text-sm text-[var(--color-text-secondary)] tracking-wider">
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)] mr-3" />
         {waking ? "Waking up — one moment" : "Loading admin telemetry …"}
       </div>
@@ -205,7 +204,7 @@ export function AdminView() {
           </div>
           <div className="flex flex-col gap-1.5">
             {Object.entries(tel.by_decision_kind).map(([k, b]) => (
-              <div key={k} className="flex items-center justify-between font-mono text-sm" style={{ letterSpacing: "0.04em" }}>
+              <div key={k} className="flex items-center justify-between font-mono text-sm tracking-wide">
                 <span className="text-[var(--color-text)]">{k.replace(/_/g, " ")}</span>
                 <div className="flex items-center gap-2 tabular-nums">
                   <span style={{ color: accColor(b.accuracy) }}>{(b.accuracy * 100).toFixed(0)}%</span>
@@ -244,23 +243,22 @@ export function AdminView() {
                   </td>
                   <td className="px-1 py-1 text-[var(--color-text)]">{o.decision_kind.replace(/_/g, " ")}</td>
                   <td className="px-1 py-1 text-[var(--color-text-secondary)]">{o.scoring_engine}</td>
-                  <td className="px-1 py-1 text-[var(--color-text-muted)]" style={{ letterSpacing: "0.06em" }}>
+                  <td className="px-1 py-1 text-[var(--color-text-muted)] tracking-wide">
                     {o.decided_by}
                   </td>
                   <td className="px-1 py-1 text-center">
                     <span
-                      className="rounded-sm border px-1 py-[1px]"
+                      className="rounded-sm border px-1 py-[1px] tracking-wider"
                       style={{
                         color: o.was_correct ? "var(--color-success)" : "var(--color-danger)",
                         borderColor: o.was_correct ? "var(--color-success-muted)" : "var(--color-danger-muted)",
                         background: o.was_correct ? "color-mix(in oklab, var(--color-success-muted) 25%, transparent)" : "color-mix(in oklab, var(--color-danger-muted) 25%, transparent)",
-                        letterSpacing: "0.16em",
                       }}
                     >
                       {o.was_correct ? "OK" : "✗"}
                     </span>
                   </td>
-                  <td className="px-1 py-1 text-[var(--color-text-muted)] italic" style={{ letterSpacing: "0.02em" }}>
+                  <td className="px-1 py-1 text-[var(--color-text-muted)] italic">
                     {o.notes || "—"}
                   </td>
                 </tr>
@@ -279,15 +277,15 @@ export function AdminView() {
         </div>
         <div className="max-h-60 overflow-y-auto flex flex-col gap-2">
           {feedback.length === 0 && (
-            <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+            <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
               NO FEEDBACK YET — first issue filed via the in-app drawer will land here
             </div>
           )}
           {feedback.slice().reverse().map((f) => (
             <div key={f.id} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono">
-              <div className="flex items-center gap-2 text-xs" style={{ letterSpacing: "0.08em" }}>
+              <div className="flex items-center gap-2 text-xs tracking-wide">
                 <span className="text-[var(--color-text-muted)]">{f.id}</span>
-                <span className="rounded-sm border border-[var(--color-border-active)] px-1 text-xs uppercase text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.16em" }}>
+                <span className="rounded-sm border border-[var(--color-border-active)] px-1 text-xs uppercase text-[var(--color-text-secondary)] tracking-wider">
                   {f.severity}
                 </span>
                 <span className="text-[var(--color-text-muted)]">{f.role}</span>
@@ -303,10 +301,10 @@ export function AdminView() {
                   </a>
                 )}
               </div>
-              <div className="mt-1 text-sm font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-text)] tracking-wide">
                 {f.title}
               </div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
+              <div className="mt-0.5 text-xs text-[var(--color-text-secondary)] tracking-wide">
                 {f.body.slice(0, 200)}{f.body.length > 200 ? "…" : ""}
               </div>
             </div>
@@ -325,10 +323,10 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "ok
     "var(--color-text)";
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+      <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
         {label}
       </div>
-      <div className="mt-1 font-mono text-xl font-semibold tabular-nums" style={{ color, letterSpacing: "-0.01em" }}>
+      <div className="mt-1 font-mono text-xl font-semibold tabular-nums" style={{ color }}>
         {value}
       </div>
     </div>
@@ -339,10 +337,10 @@ function EngineRow({ engine, stat }: { engine: string; stat: { accuracy: number;
   return (
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
       <div className="flex items-baseline justify-between font-mono">
-        <span className="text-base font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+        <span className="text-base font-semibold text-[var(--color-text)] tracking-wide">
           {engine}
         </span>
-        <span className="text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+        <span className="text-xs text-[var(--color-text-muted)] tracking-wider">
           {stat.total} outcomes · {stat.correct} correct · {stat.incorrect} incorrect
         </span>
       </div>
@@ -353,7 +351,7 @@ function EngineRow({ engine, stat }: { engine: string; stat: { accuracy: number;
             style={{ width: `${stat.accuracy * 100}%`, background: accColor(stat.accuracy) }}
           />
         </div>
-        <span className="font-mono text-sm tabular-nums" style={{ color: accColor(stat.accuracy), letterSpacing: "-0.01em" }}>
+        <span className="font-mono text-sm tabular-nums" style={{ color: accColor(stat.accuracy) }}>
           {(stat.accuracy * 100).toFixed(1)}%
         </span>
       </div>
@@ -364,7 +362,7 @@ function EngineRow({ engine, stat }: { engine: string; stat: { accuracy: number;
 function RollingChart({ points }: { points: { bucket_end: string; accuracy: number; n: number }[] }) {
   if (points.length === 0) {
     return (
-      <div className="rounded-sm border border-dashed border-[var(--color-border)] p-6 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.14em" }}>
+      <div className="rounded-sm border border-dashed border-[var(--color-border)] p-6 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
         NO ROLLING DATA YET
       </div>
     );

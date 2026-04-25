@@ -317,6 +317,14 @@ export function BastionView() {
         {/* Mission HUD — top-right */}
         <MissionHUD />
 
+        {/* Track-G1 — G-4 command summary card. Three columns of "what
+         * matters in the next 30 seconds": MC% per scoped unit, top alerts,
+         * top fused threats. Renders only for the G-4 role and only when no
+         * alert is selected (so it doesn't fight with the response panel). */}
+        {role === "g4" && !selectedAlert && (
+          <G4CommandSummary alerts={alerts} onAlertClick={(a) => setSelectedAlert(a)} />
+        )}
+
         {/* NL query bar — bottom-centered so it doesn't fight with the title */}
         <div className="absolute inset-x-0 bottom-3 z-[7] flex justify-center px-3">
           <div
@@ -741,8 +749,7 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
     <div className="mt-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text-secondary)]">
       <div className="flex items-baseline justify-between">
         <div
-          className="font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
-          style={{ letterSpacing: "0.18em" }}
+          className="font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
         >
           {result.intent}
         </div>
@@ -759,12 +766,204 @@ function KV({ label, value }: { label: string; value: any }) {
   return (
     <div>
       <div
-        className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-        style={{ letterSpacing: "0.16em" }}
+        className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider"
       >
         {label}
       </div>
       <div className="font-mono text-[var(--color-text)]">{String(value)}</div>
+    </div>
+  );
+}
+
+// Track-G1 — G-4 BASTION command summary card. Three compact columns:
+//   1. MC% for each unit in the G-4's scope (max 3 shown).
+//   2. Top 3 active alerts by severity.
+//   3. Top 3 fused threats (cross-sensor correlations).
+// Lives top-center on the schematic. Click any alert row to open the
+// existing ResponsePanel — same behaviour as clicking from the sidebar.
+// Hidden when an alert is selected so the response panel has the field
+// of view to itself.
+const G4_UNITS = ["CLB-6", "CLB-1", "3d Maint Bn"];
+
+function G4CommandSummary({
+  alerts,
+  onAlertClick,
+}: {
+  alerts: BastionAlert[];
+  onAlertClick: (a: BastionAlert) => void;
+}) {
+  const [mcRates, setMcRates] = useState<Record<string, number | null>>({});
+  const [fused, setFused] = useState<Array<{ id: string; severity: string; title: string }>>([]);
+
+  useEffect(() => {
+    let alive = true;
+    api.pulse
+      .fleetOverview()
+      .then((r) => {
+        if (!alive) return;
+        const out: Record<string, number | null> = {};
+        // Heatmap rates are per equipment-type. Average across non-null
+        // rates to get a single MC% per unit for the summary card.
+        for (const u of r.heatmap) {
+          const vals = Object.values(u.rates).filter((v): v is number => v != null);
+          out[u.unit] = vals.length
+            ? vals.reduce((a, b) => a + b, 0) / vals.length
+            : null;
+        }
+        setMcRates(out);
+      })
+      .catch(() => {
+        /* tolerate */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const fetch = async () => {
+      try {
+        const r = await api.bastion.fusedThreats();
+        if (alive) setFused((r.fused_threats || []).slice(0, 3));
+      } catch {
+        /* tolerate */
+      }
+    };
+    fetch();
+    const id = setInterval(fetch, 5000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  const topAlerts = useMemo(() => {
+    const sevRank: Record<string, number> = { CRITICAL: 5, HIGH: 4, MODERATE: 3, LOW: 2, INFO: 1 };
+    return [...alerts]
+      .sort(
+        (a, b) =>
+          (sevRank[b.severity] ?? 0) - (sevRank[a.severity] ?? 0) ||
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      )
+      .slice(0, 3);
+  }, [alerts]);
+
+  return (
+    <div
+      className="pointer-events-auto absolute left-1/2 top-3 z-[6] flex -translate-x-1/2 gap-2 rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 shadow-lg backdrop-blur"
+      role="region"
+      aria-label="G-4 command summary"
+    >
+      {/* Unit MC% column */}
+      <div className="min-w-[10rem] border-r border-[var(--color-border)] pr-3">
+        <div
+          className="font-mono uppercase text-[var(--color-text-muted)]"
+          style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
+        >
+          Unit MC% · 2d MLG
+        </div>
+        <div className="mt-1 flex flex-col gap-0.5">
+          {G4_UNITS.map((u) => {
+            const rate = mcRates[u];
+            const tone =
+              rate == null ? "var(--color-text-muted)"
+              : rate >= 0.75 ? "var(--color-success)"
+              : rate >= 0.65 ? "var(--color-warning)"
+              : "var(--color-danger)";
+            return (
+              <div key={u} className="flex items-baseline justify-between gap-3">
+                <span
+                  className="font-mono text-[var(--color-text)]"
+                  style={{ fontSize: "var(--text-sm)", letterSpacing: "var(--tracking-wide)" }}
+                >
+                  {u}
+                </span>
+                <span
+                  className="font-mono tabular-nums"
+                  style={{
+                    fontSize: "var(--text-sm)",
+                    color: tone,
+                    letterSpacing: "var(--tracking-wide)",
+                  }}
+                >
+                  {rate == null ? "—" : `${(rate * 100).toFixed(0)}%`}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Top alerts column */}
+      <div className="min-w-[12rem] border-r border-[var(--color-border)] pr-3">
+        <div
+          className="font-mono uppercase text-[var(--color-text-muted)]"
+          style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
+        >
+          Top Alerts · {topAlerts.length}
+        </div>
+        <div className="mt-1 flex flex-col gap-0.5">
+          {topAlerts.length === 0 && (
+            <div
+              className="font-mono italic text-[var(--color-text-muted)]"
+              style={{ fontSize: "var(--text-sm)" }}
+            >
+              All clear.
+            </div>
+          )}
+          {topAlerts.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => onAlertClick(a)}
+              className="flex items-baseline gap-2 rounded-sm px-1 py-[1px] text-left hover:bg-[var(--color-surface-hover)]"
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ background: SEVERITY_COLOR[a.severity] || SEVERITY_COLOR.INFO }}
+              />
+              <span
+                className="truncate font-mono text-[var(--color-text)]"
+                style={{ fontSize: "var(--text-sm)", maxWidth: "10rem" }}
+                title={a.title}
+              >
+                {a.title}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Fused threats column */}
+      <div className="min-w-[10rem]">
+        <div
+          className="font-mono uppercase text-[var(--color-danger)]"
+          style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
+        >
+          Fused Threats · {fused.length}
+        </div>
+        <div className="mt-1 flex flex-col gap-0.5">
+          {fused.length === 0 && (
+            <div
+              className="font-mono italic text-[var(--color-text-muted)]"
+              style={{ fontSize: "var(--text-sm)" }}
+            >
+              None active.
+            </div>
+          )}
+          {fused.map((t) => (
+            <div
+              key={t.id}
+              className="truncate font-mono text-[var(--color-text)]"
+              style={{ fontSize: "var(--text-sm)", maxWidth: "11rem" }}
+              title={t.title}
+            >
+              {t.title}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

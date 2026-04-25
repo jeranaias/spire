@@ -25,12 +25,11 @@ export function InsufficientPrivilege({ feature, requiredRoles, description }: P
         }}
       >
         <div
-          className="mb-2 font-mono text-xs uppercase text-[var(--color-warning)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="mb-2 font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest"
         >
           Insufficient Privilege
         </div>
-        <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+        <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)] tracking-wide">
           {feature} requires elevated privileges.
         </div>
         <div className="spire-body-muted mb-3">
@@ -42,14 +41,13 @@ export function InsufficientPrivilege({ feature, requiredRoles, description }: P
           .
         </div>
         {description && (
-          <div className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             {description}
           </div>
         )}
         <button
           disabled
-          className="mt-4 rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-[var(--color-text-muted)]"
-          style={{ letterSpacing: "0.16em" }}
+          className="mt-4 rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-[var(--color-text-muted)] tracking-wider"
         >
           Request Access (unavailable in demo)
         </button>

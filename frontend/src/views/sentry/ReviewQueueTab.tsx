@@ -654,7 +654,7 @@ function AggregationRiskPanel({
           </tbody>
         </table>
       </div>
-      <div className="mt-2 max-h-40 overflow-y-auto font-mono text-xs" style={{ letterSpacing: "0.04em" }}>
+      <div className="mt-2 max-h-40 overflow-y-auto font-mono text-xs tracking-wide">
         {risks.map((r, i) => (
           <div key={i} className="py-0.5">
             <span className="text-[var(--color-text)]">{r.unit}</span>
