@@ -229,26 +229,49 @@ def all_conflicts() -> list[dict]:
 # Demo helper — preload a conflict scenario without requiring a real second
 # node, so the CWO can walk through the resolution flow.
 def seed_demo_conflict() -> dict:
-    """Inject one local event + one fake peer event with concurrent clocks
-    on the same record. Returns the resulting conflict for inspection."""
-    rid = "DEMO-CANN-001"
-    ev_local = log_mutation(
-        op_kind="cannibalization_proposal",
-        record_id=rid,
-        payload={"recipient_sr": "SR-2025-1042", "donor_sr": "SR-2025-2150", "nsn": "2815-01-362-1492"},
-        actor="g4",
-    )
-    # Build a fake peer event with concurrent clock — peer's counter for
-    # peer_node is one ahead; local already incremented its own.
+    """Inject a deliberate conflict scenario directly into the pending list.
+
+    The earlier implementation went through absorb_peer_state with a hand-
+    crafted clock, but that path occasionally classified the seeded events
+    as not-concurrent (depending on _LOCAL_CLOCK's prior state) and returned
+    an empty pending list, which crashed the frontend's renderer. The
+    deterministic version writes a fully-formed conflict record straight
+    to _CONFLICTS so the demo path is reliable regardless of prior state.
+    """
+    rid = f"DEMO-CANN-{uuid.uuid4().hex[:6].upper()}"
+    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    local_clock = {node_id(): 1}
     peer_clock = {peer_node_id(): 1}
-    fake_peer = {
-        "event_id": "PEER-EV-DEMO",
-        "op_kind": "cannibalization_proposal",
+    conflict = {
+        "id": f"CONF-{uuid.uuid4().hex[:10]}",
         "record_id": rid,
-        "clock": peer_clock,
-        "actor": "maintenance_chief",
-        "at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        "payload": {"recipient_sr": "SR-2025-1042", "donor_sr": "SR-2025-2151", "nsn": "2815-01-362-1492"},
+        "op_kind": "cannibalization_proposal",
+        "local_event": {
+            "event_id": f"LOCAL-EV-{uuid.uuid4().hex[:8]}",
+            "actor": "g4",
+            "at": now,
+            "clock": local_clock,
+            "payload": {
+                "recipient_sr": "SR-2025-1042",
+                "donor_sr": "SR-2025-2150",
+                "nsn": "2815-01-362-1492",
+                "approver": "G-4 (2d MLG)",
+            },
+        },
+        "peer_event": {
+            "event_id": "PEER-EV-DEMO",
+            "actor": "maintenance_chief",
+            "at": now,
+            "clock": peer_clock,
+            "payload": {
+                "recipient_sr": "SR-2025-1042",
+                "donor_sr": "SR-2025-2151",
+                "nsn": "2815-01-362-1492",
+                "approver": "Maintenance Chief, CLB-6",
+            },
+        },
+        "detected_at": now,
+        "resolved_at": None,
     }
-    absorb_peer_state(peer_clock, [fake_peer])
-    return conflicts_pending()[-1] if conflicts_pending() else {}
+    _CONFLICTS.append(conflict)
+    return conflict
