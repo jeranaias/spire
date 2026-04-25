@@ -79,10 +79,13 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
         {label}
       </div>
 
-      {/* Value — hero mono, tight */}
+      {/* Value — hero numeral. Per Rafael R2 design panel: JetBrains Mono at
+       * -3.5% tracking on a 2.6rem hero is wrong; mono is the typeface for
+       * data, not for heroes. Hero gets IBM Plex Sans semibold with -0.02em
+       * tracking. The unit/delta below stay mono because they ARE data. */}
       <div className="mt-2 flex items-baseline gap-0.5">
         <span
-          className="font-mono font-semibold tabular-nums text-[var(--color-text)] tracking-tight"
+          className="font-sans font-semibold tabular-nums text-[var(--color-text)] tracking-tight"
           style={{ fontSize: "2.6rem", lineHeight: 1 }}
         >
           {value}
