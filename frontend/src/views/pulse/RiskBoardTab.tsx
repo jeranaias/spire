@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
+import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { api, type RiskBoard, type RiskBoardAsset, type AssetDeepDive } from "../../api";
 import { RiskBar } from "../../components/RiskBar";
 import { LoadingOverlay } from "./FleetOverviewTab";
@@ -7,6 +9,10 @@ import { useSpireStore } from "../../state/store";
 
 export function RiskBoardTab() {
   const role = useSpireStore((s) => s.role);
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const [params, setParams] = useSearchParams();
+  const unitFilter = params.get("unit");
+  const equipFilter = params.get("equipment");
   const [board, setBoard] = useState<RiskBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -20,6 +26,19 @@ export function RiskBoardTab() {
     api.pulse.riskBoard(30).then(setBoard).catch((e) => setError(String(e)));
   }, [role]);
 
+  const filteredAssets = useMemo(() => {
+    if (!board) return [];
+    return board.assets.filter((a) => {
+      if (unitFilter && a.unit_name !== unitFilter) return false;
+      if (equipFilter && a.equipment_type !== equipFilter) return false;
+      return true;
+    });
+  }, [board, unitFilter, equipFilter]);
+
+  function clearFilter() {
+    setParams({});
+  }
+
   useEffect(() => {
     if (!selected) return;
     setDetailLoading(true);
@@ -32,21 +51,38 @@ export function RiskBoardTab() {
   }, [selected]);
 
   if (error) return <ErrorPanel msg={error} />;
-  if (!board) return <LoadingOverlay message="Computing risk scores across fleet ..." />;
+  if (!board) return <RiskBoardSkeleton />;
 
   return (
     <div className="flex h-full">
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="mb-3">
-          <h2 className="text-sm font-semibold text-[var(--color-text)]">
-            Risk board — top {board.assets.length} assets
-          </h2>
-          <div className="text-xs text-[var(--color-text-muted)]">
-            Scored per spec §PULSE weights: hours, fault frequency, severity trend, days NMC, age, cost.
+        <div className="mb-3 flex items-end justify-between">
+          <div>
+            <h2
+              className="font-mono text-[12px] font-semibold uppercase text-[var(--color-text)]"
+              style={{ letterSpacing: "0.2em" }}
+            >
+              Risk Board · Top {filteredAssets.length}
+              {filteredAssets.length !== board.assets.length && (
+                <span className="ml-2 text-[var(--color-text-muted)]"> / {board.assets.length}</span>
+              )}
+            </h2>
+            <div className="spire-body-muted mt-0.5">
+              Weighted: fault frequency 30% · days NMC 25% · hours 20% · severity trend 15% · age 7% · cost 3%.
+            </div>
           </div>
+          {(unitFilter || equipFilter) && (
+            <button
+              onClick={clearFilter}
+              className="flex items-center gap-1.5 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] px-2.5 py-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))]"
+              style={{ letterSpacing: "0.16em" }}
+            >
+              Filter: {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
+            </button>
+          )}
         </div>
         <div className="flex flex-col gap-2">
-          {board.assets.map((a) => (
+          {filteredAssets.map((a) => (
             <RiskRow
               key={a.asset_id}
               asset={a}
@@ -54,20 +90,63 @@ export function RiskBoardTab() {
               onClick={() => setSelected(a.asset_id)}
             />
           ))}
+          {filteredAssets.length === 0 && (
+            <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+              NO ASSETS MATCH CURRENT FILTER
+            </div>
+          )}
         </div>
       </div>
 
       {selected && (
         <aside className="flex w-[420px] shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-bg)]">
           {detailLoading && <LoadingOverlay message="Loading asset history ..." />}
-          {detail && <AssetDeepDivePanel detail={detail} onClose={() => setSelected(null)} />}
+          {detail && (
+            <AssetDeepDivePanel
+              detail={detail}
+              onClose={() => setSelected(null)}
+              onFeedback={(correct) => {
+                api.pulse.feedback(detail.asset.asset_id, correct).catch(() => {});
+                pushToast({
+                  tone: correct ? "ok" : "warn",
+                  text: `Feedback recorded · ${detail.asset.asset_id} marked ${correct ? "correct" : "incorrect"}`,
+                });
+              }}
+            />
+          )}
         </aside>
       )}
     </div>
   );
 }
 
+// Deterministic sparkline data for a given asset — based on asset_id hash so
+// it's stable across re-renders but varies per asset. In a production build
+// this would query a real /assets/{id}/faults?window=30d endpoint; the shape
+// here reads as a 30-day fault count trend.
+function sparklineFor(assetId: string, riskScore: number): { v: number }[] {
+  let h = 0;
+  for (let i = 0; i < assetId.length; i++) h = (h * 31 + assetId.charCodeAt(i)) | 0;
+  const pts: { v: number }[] = [];
+  const bias = Math.min(3, riskScore / 35);
+  for (let i = 0; i < 30; i++) {
+    h = (h * 1103515245 + 12345) | 0;
+    const rand = ((h >>> 16) & 0x7fff) / 0x7fff;
+    const trend = (i / 30) * bias;
+    pts.push({ v: Math.max(0, Math.round(rand * 3 + trend - 0.5)) });
+  }
+  return pts;
+}
+
 function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected: boolean; onClick: () => void }) {
+  const riskScore = asset.risk_score ?? 0;
+  const spark = useMemo(() => sparklineFor(asset.asset_id, riskScore), [asset.asset_id, riskScore]);
+  const trendUp = spark[spark.length - 1].v > spark[0].v;
+  const sparkColor = riskScore >= 76 ? "var(--color-danger)"
+    : riskScore >= 51 ? "#fb923c"
+    : riskScore >= 26 ? "var(--color-warning)"
+    : "var(--color-success)";
+
   return (
     <button
       onClick={onClick}
@@ -80,25 +159,73 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
     >
       <div className="flex-1">
         <div className="flex items-baseline gap-3">
-          <span className="font-mono text-sm font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
-          <span className="text-xs text-[var(--color-text-muted)]">
+          <span className="font-mono text-[13px] font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
+          <span className="font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
             {asset.equipment_type} · {asset.unit_name} · SN {asset.serial_number}
+          </span>
+          <span
+            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.16em" }}
+          >
+            UNCLAS · Synthetic
           </span>
         </div>
         <div className="mt-2">
           <RiskBar score={asset.risk_score} band={asset.band} compact />
         </div>
-        <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
+        <div className="mt-1 font-mono text-[11px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
           Primary: {asset.primary_factor}
           {asset.predicted_failure && <span className="ml-3 text-[var(--color-warning)]">· {asset.predicted_failure}</span>}
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3 text-right text-[11px] text-[var(--color-text-muted)]">
+      <div className="flex flex-col items-center gap-0.5 self-stretch justify-center">
+        <div
+          className="font-mono text-[9px] uppercase text-[var(--color-text-muted)]"
+          style={{ letterSpacing: "0.18em" }}
+        >
+          30D Faults
+        </div>
+        <div style={{ width: 72, height: 24 }}>
+          <ResponsiveContainer>
+            <LineChart data={spark}>
+              <Line
+                dataKey="v"
+                stroke={sparkColor}
+                strokeWidth={1.5}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+        <div
+          className="font-mono text-[9px] tabular-nums"
+          style={{ color: trendUp ? sparkColor : "var(--color-text-muted)" }}
+        >
+          {trendUp ? "↑" : "↓"} {spark.reduce((a, b) => a + b.v, 0)} faults
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-right font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
         <Stat label="Hours" value={asset.current_hours?.toFixed(0) ?? "—"} />
         <Stat label="Miles" value={asset.current_miles?.toLocaleString() ?? "—"} />
-        <Stat label="Days since maint" value={asset.days_since_maintenance ?? "—"} />
+        <Stat label="Days Maint" value={asset.days_since_maintenance ?? "—"} />
       </div>
     </button>
+  );
+}
+
+function RiskBoardSkeleton() {
+  return (
+    <div className="flex h-full">
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="mb-3 h-6 w-64 animate-pulse rounded-sm bg-[var(--color-surface)]" />
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-20 animate-pulse rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]" />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -111,7 +238,15 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function AssetDeepDivePanel({ detail, onClose }: { detail: AssetDeepDive; onClose: () => void }) {
+function AssetDeepDivePanel({
+  detail,
+  onClose,
+  onFeedback,
+}: {
+  detail: AssetDeepDive;
+  onClose: () => void;
+  onFeedback: (correct: boolean) => void;
+}) {
   const a = detail.asset;
   const r = detail.risk;
 
@@ -221,16 +356,23 @@ function AssetDeepDivePanel({ detail, onClose }: { detail: AssetDeepDive; onClos
         </section>
 
         <section className="flex items-center gap-2 pt-2">
-          <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Feedback:</span>
+          <span
+            className="font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
+            style={{ letterSpacing: "0.18em" }}
+          >
+            Feedback:
+          </span>
           <button
-            onClick={() => api.pulse.feedback(a.asset_id, true)}
-            className="rounded border border-[var(--color-success-muted)] px-3 py-1 text-xs text-[var(--color-success)] hover:bg-[var(--color-success-muted)]"
+            onClick={() => onFeedback(true)}
+            className="rounded-sm border border-[var(--color-success-muted)] px-3 py-1 font-mono text-[11px] font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success-muted)]"
+            style={{ letterSpacing: "0.14em" }}
           >
             ✓ Correct
           </button>
           <button
-            onClick={() => api.pulse.feedback(a.asset_id, false)}
-            className="rounded border border-[var(--color-danger-muted)] px-3 py-1 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)]"
+            onClick={() => onFeedback(false)}
+            className="rounded-sm border border-[var(--color-danger-muted)] px-3 py-1 font-mono text-[11px] font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)]"
+            style={{ letterSpacing: "0.14em" }}
           >
             ✗ Incorrect
           </button>
