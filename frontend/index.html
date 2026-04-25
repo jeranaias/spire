@@ -5,19 +5,100 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SPIRE — Contested Logistics Operating System</title>
-    <meta name="description" content="Sanitization, Prediction, Intelligence, Readiness Engine" />
 
-    <!-- Display + mono stack per design review. IBM Plex Sans carries the
-         industrial/defense heritage; JetBrains Mono leads data surfaces. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
-    />
+    <!-- Canonical + SEO -->
+    <link rel="canonical" href="https://spire-mdm.fly.dev/" />
+    <meta name="description" content="SPIRE — Contested Logistics Operating System for the USMC. Local-first, no cloud, IL5-fit. Built by Marines." />
+    <meta name="theme-color" content="#0a0c13" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://spire-mdm.fly.dev/" />
+    <meta property="og:title" content="SPIRE — Contested Logistics Operating System" />
+    <meta property="og:description" content="SPIRE — Contested Logistics Operating System for the USMC. Local-first, no cloud, IL5-fit. Built by Marines." />
+    <meta property="og:image" content="https://spire-mdm.fly.dev/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://spire-mdm.fly.dev/" />
+    <meta name="twitter:title" content="SPIRE — Contested Logistics Operating System" />
+    <meta name="twitter:description" content="SPIRE — Contested Logistics Operating System for the USMC. Local-first, no cloud, IL5-fit. Built by Marines." />
+    <meta name="twitter:image" content="https://spire-mdm.fly.dev/og.png" />
+
+    <!-- Static hero — paints instantly on cold load (hotel WiFi, judge first
+         click). React removes #spire-static-hero on hydration. CAPCO U-banner
+         + wordmark + loading status, zero JS dependency, no cross-origin
+         requests. Fonts self-hosted via @fontsource imports in main.tsx. -->
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #0a0c13; color: #e5e7eb; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      #spire-static-hero {
+        position: fixed; inset: 0; z-index: 50;
+        display: flex; flex-direction: column;
+        background: #0a0c13;
+      }
+      #spire-static-hero .capco {
+        height: 28px; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0 16px;
+        background: #007A33; color: #FFFFFF;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 11px; font-weight: 600;
+        letter-spacing: 0.18em; text-transform: uppercase;
+      }
+      #spire-static-hero .capco .fpcon {
+        border: 1px solid rgba(255,255,255,0.5);
+        background: rgba(0,0,0,0.25);
+        padding: 1px 10px; border-radius: 2px;
+        font-size: 10px; letter-spacing: 0.18em;
+      }
+      #spire-static-hero .body {
+        flex: 1; display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 22px; padding: 24px;
+      }
+      #spire-static-hero .wordmark {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 28px; font-weight: 600;
+        letter-spacing: 0.32em; color: #e5e7eb;
+      }
+      #spire-static-hero .tagline {
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: #9ca3af;
+      }
+      #spire-static-hero .loading {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+        color: #6b7280;
+        display: flex; align-items: center; gap: 10px;
+      }
+      #spire-static-hero .loading .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #3b82f6;
+        animation: spire-pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes spire-pulse {
+        0%, 100% { opacity: 0.25; }
+        50% { opacity: 1; }
+      }
+    </style>
   </head>
   <body>
+    <div id="spire-static-hero">
+      <div class="capco">
+        <span>UNCLASSIFIED // SYNTHETIC DATA // FOR DEMONSTRATION ONLY</span>
+        <span class="fpcon">FPCON BRAVO</span>
+      </div>
+      <div class="body">
+        <div class="wordmark">SPIRE</div>
+        <div class="tagline">Contested Logistics Operating System</div>
+        <div class="loading"><span class="dot"></span><span>Loading</span></div>
+      </div>
+    </div>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" crossorigin src="/src/main.tsx"></script>
   </body>
 </html>
