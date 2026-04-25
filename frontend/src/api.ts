@@ -53,6 +53,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ correct, note }),
       }),
+    recommendActions: (params: { unit?: string; asset_id?: string; top?: number } = {}) => {
+      const sp = new URLSearchParams();
+      if (params.unit) sp.set("unit", params.unit);
+      if (params.asset_id) sp.set("asset_id", params.asset_id);
+      sp.set("top", String(params.top ?? 5));
+      return jsonFetch<RecommendActionsResponse>(`/pulse/recommend-actions?${sp}`);
+    },
   },
   sentry: {
     demoBatch: (limit = 500) => jsonFetch<SentryBatch>(`/sentry/demo-batch?limit=${limit}`),
@@ -190,6 +197,33 @@ export interface Cannibalization {
   open_needs: any[];
   completed_matches: any[];
   total_events: number;
+}
+
+export interface RecommendedAction {
+  kind: "cannibalize" | "expedite" | "cross_level" | "redistribute";
+  title: string;
+  description: string;
+  cost_usd: number;
+  time_to_effect_hours: number;
+  mc_delta_pct: number;
+  confidence: number;
+  score: number;
+  artifact: Record<string, unknown>;
+  approval_roles: string[];
+}
+
+export interface RecommendActionsAsset {
+  asset_id: string;
+  unit_name: string;
+  equipment_type: string;
+  risk_score?: number;
+  primary_factor?: string;
+  actions: RecommendedAction[];
+}
+
+export interface RecommendActionsResponse {
+  assets: RecommendActionsAsset[];
+  as_of: string;
 }
 
 export interface Forecast {
