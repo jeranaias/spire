@@ -131,8 +131,7 @@ export function AdminView() {
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-4">
         <h2
-          className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
-          style={{ letterSpacing: "0.2em" }}
+          className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
         >
           Admin · Training Flywheel · GC-6
         </h2>
@@ -160,14 +159,13 @@ export function AdminView() {
               : "var(--color-surface)",
           }}
         >
-          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)]" style={{ letterSpacing: "0.22em" }}>
+          <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             Retraining
           </div>
           <div
-            className="mt-1 font-mono text-lg font-semibold tabular-nums"
+            className="mt-1 font-mono text-lg font-semibold tabular-nums tracking-wide"
             style={{
               color: tel.retraining_recommended ? "var(--color-warning)" : "var(--color-success)",
-              letterSpacing: "0.04em",
             }}
           >
             {tel.retraining_recommended ? "Recommended" : "Not yet"}
@@ -178,8 +176,7 @@ export function AdminView() {
       {/* Engine performance */}
       <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div
-          className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
         >
           Engine Performance · per scoring engine
         </div>
@@ -194,8 +191,7 @@ export function AdminView() {
       <div className="mb-4 grid grid-cols-2 gap-3">
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div
-            className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
           >
             Rolling Accuracy · 5-record buckets
           </div>
@@ -203,8 +199,7 @@ export function AdminView() {
         </div>
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div
-            className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
           >
             By Decision Kind
           </div>
@@ -225,15 +220,14 @@ export function AdminView() {
       {/* Recent outcomes */}
       <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div
-          className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
         >
           Recent Decision Outcomes ({outcomes.length})
         </div>
         <div className="max-h-72 overflow-y-auto">
           <table className="w-full font-mono text-xs">
             <thead>
-              <tr className="text-[var(--color-text-muted)]" style={{ letterSpacing: "0.16em" }}>
+              <tr className="text-[var(--color-text-muted)] tracking-wider">
                 <th className="px-1 py-1 text-left uppercase">When</th>
                 <th className="px-1 py-1 text-left uppercase">Kind</th>
                 <th className="px-1 py-1 text-left uppercase">Engine</th>
@@ -279,8 +273,7 @@ export function AdminView() {
       {/* Pilot feedback */}
       <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div
-          className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)]"
-          style={{ letterSpacing: "0.22em" }}
+          className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
         >
           Pilot Feedback ({feedback.length})
         </div>

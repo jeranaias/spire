@@ -160,7 +160,7 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-xs" style={{ letterSpacing: "0.1em" }}>
+      <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-xs tracking-wider">
         <div className="flex items-center gap-6">
           <span className="tabular-nums text-[var(--color-text-muted)]">
             {totalRemaining} / {(queue?.auto_cleared.length ?? 0) + (queue?.flagged.length ?? 0) + (queue?.held.length ?? 0)} records
@@ -190,14 +190,13 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
                 ? "border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_25%,var(--color-surface))] text-[var(--color-warning)]"
                 : "border-[var(--color-warning)] text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_15%,transparent)]",
             )}
-            style={{ letterSpacing: "0.16em" }}
           >
             {queue.aggregation_risks.length} aggregation risk{queue.aggregation_risks.length === 1 ? "" : "s"}
           </button>
         )}
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden tracking-wider">
         <div className={clsx("flex flex-1 overflow-hidden", selectedRecord && "pr-0")}>
           <ReviewColumn
             title="Auto-cleared"
@@ -280,7 +279,7 @@ function ReviewColumn({
         className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2"
         style={{ background: `color-mix(in oklab, ${accent} 12%, var(--color-surface))` }}
       >
-        <div className="flex items-center gap-2 font-mono text-sm font-semibold uppercase" style={{ color: accent, letterSpacing: "0.16em" }}>
+        <div className="flex items-center gap-2 font-mono text-sm font-semibold uppercase tracking-wider" style={{ color: accent }}>
           <span className="h-2 w-2 rounded-full" style={{ background: accent, boxShadow: `0 0 5px ${accent}` }} />
           {title}
           <span className="font-mono text-sm tabular-nums text-[var(--color-text-muted)]">({records.length})</span>
@@ -289,8 +288,7 @@ function ReviewColumn({
           <button
             onClick={onBulk}
             disabled={bulkRunning}
-            className="rounded-sm border border-[var(--color-border-active)] px-2 py-[2px] font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] disabled:opacity-40"
-            style={{ letterSpacing: "0.16em" }}
+            className="rounded-sm border border-[var(--color-border-active)] px-2 py-[2px] font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] disabled:opacity-40 tracking-wider"
           >
             {bulkRunning ? "…" : bulkAction}
           </button>
@@ -308,7 +306,7 @@ function ReviewColumn({
           />
         ))}
         {records.length === 0 && (
-          <div className="p-4 text-center font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="p-4 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             EMPTY
           </div>
         )}
@@ -344,11 +342,10 @@ function ReviewCard({
     >
       {/* Banner-style classification stripe — DoDM 5200.01 convention */}
       <div
-        className="flex items-center gap-2 border-b border-[var(--color-border)] px-2 py-1 font-mono text-sm font-semibold uppercase"
+        className="flex items-center gap-2 border-b border-[var(--color-border)] px-2 py-1 font-mono text-sm font-semibold uppercase tracking-wider"
         style={{
           background: `color-mix(in oklab, ${detectedColor} 14%, var(--color-bg))`,
           color: detectedColor,
-          letterSpacing: "0.16em",
         }}
       >
         <span className="h-3 w-1 rounded-[1px]" style={{ background: detectedColor }} />
@@ -362,7 +359,7 @@ function ReviewCard({
         )}
       </div>
       <div className="px-2 py-2">
-        <div className="mb-1 flex items-center gap-2 font-mono text-xs" style={{ letterSpacing: "0.08em" }}>
+        <div className="mb-1 flex items-center gap-2 font-mono text-xs tracking-wide">
           <span className="text-[var(--color-text)]">{record.sr_number}</span>
           <span className="text-[var(--color-text-muted)]">· {record.equipment_type}</span>
           <span className="text-[var(--color-text-muted)]">· {record.unit_name}</span>
@@ -372,12 +369,11 @@ function ReviewCard({
           {(record.flags || []).map((f: string) => (
             <span
               key={f}
-              className="rounded-sm border px-1 py-[1px] font-mono font-semibold uppercase"
+              className="rounded-sm border px-1 py-[1px] font-mono font-semibold uppercase tracking-wider"
               style={{
                 color: FLAG_COLOR[f] || "var(--color-text-muted)",
                 borderColor: `color-mix(in oklab, ${FLAG_COLOR[f] || "#666"} 40%, var(--color-border))`,
                 background: `color-mix(in oklab, ${FLAG_COLOR[f] || "#666"} 12%, transparent)`,
-                letterSpacing: "0.14em",
               }}
             >
               {f}
@@ -444,12 +440,11 @@ function InspectorPane({
         <div className="flex items-start justify-between">
           <div>
             <div
-              className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.22em" }}
+              className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Record Inspector
             </div>
-            <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]" style={{ letterSpacing: "0.04em" }}>
+            <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)] tracking-wide">
               {record.sr_number}
             </div>
             <div className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
@@ -467,12 +462,11 @@ function InspectorPane({
       <div className="flex flex-col gap-4 p-4">
         {/* Classification banner */}
         <div
-          className="rounded-sm border-l-4 py-2 pl-3 pr-2 font-mono text-base font-semibold uppercase"
+          className="rounded-sm border-l-4 py-2 pl-3 pr-2 font-mono text-base font-semibold uppercase tracking-widest"
           style={{
             borderLeftColor: detectedColor,
             background: `color-mix(in oklab, ${detectedColor} 14%, var(--color-bg))`,
             color: detectedColor,
-            letterSpacing: "0.18em",
           }}
         >
           {detected} <span className="text-[var(--color-text-muted)]">← {record.source_classification}</span>
@@ -484,8 +478,7 @@ function InspectorPane({
         {/* Remark with colored highlights */}
         <section>
           <div
-            className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
             Remark · Highlighted
           </div>
@@ -513,8 +506,7 @@ function InspectorPane({
         {highlights.length > 0 && (
           <section>
             <div
-              className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.22em" }}
+              className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Evidence · Rules Fired
             </div>
@@ -526,11 +518,10 @@ function InspectorPane({
                 >
                   <div className="flex items-center gap-2">
                     <span
-                      className="rounded-sm border px-1 font-mono text-xs font-semibold uppercase"
+                      className="rounded-sm border px-1 font-mono text-xs font-semibold uppercase tracking-wider"
                       style={{
                         color: FLAG_COLOR[h.category] || "var(--color-text-muted)",
                         borderColor: `color-mix(in oklab, ${FLAG_COLOR[h.category] || "#666"} 40%, var(--color-border))`,
-                        letterSpacing: "0.14em",
                       }}
                     >
                       {h.category}
@@ -549,8 +540,7 @@ function InspectorPane({
         {/* Routing + confidence */}
         <section>
           <div
-            className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
             Routing
           </div>
@@ -569,15 +559,13 @@ function InspectorPane({
       <div className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-3">
         <button
           onClick={onApprove}
-          className="flex-1 rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white"
-          style={{ letterSpacing: "0.18em" }}
+          className="flex-1 rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white tracking-widest"
         >
           ✓ Approve (A)
         </button>
         <button
           onClick={onReject}
-          className="flex-1 rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white"
-          style={{ letterSpacing: "0.18em" }}
+          className="flex-1 rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white tracking-widest"
         >
           ✗ Reject (R)
         </button>
@@ -605,15 +593,13 @@ function AggregationRiskPanel({
     <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_12%,var(--color-surface))] p-3">
       <div className="mb-2 flex items-center justify-between">
         <div
-          className="font-mono text-sm font-semibold uppercase text-[var(--color-warning)]"
-          style={{ letterSpacing: "0.2em" }}
+          className="font-mono text-sm font-semibold uppercase text-[var(--color-warning)] tracking-widest"
         >
           Aggregation Risk Matrix · {risks.length} findings
         </div>
         <button
           onClick={onClose}
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          style={{ letterSpacing: "0.16em" }}
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-wider"
         >
           Hide ✕
         </button>
@@ -622,14 +608,14 @@ function AggregationRiskPanel({
         <table className="min-w-full border-collapse font-mono text-xs">
           <thead>
             <tr>
-              <th className="sticky left-0 z-10 bg-[var(--color-surface)] p-1 text-left text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+              <th className="sticky left-0 z-10 bg-[var(--color-surface)] p-1 text-left text-[var(--color-text-muted)] tracking-wider">
                 UNIT \ EQUIP
               </th>
               {equipTypes.map((e) => (
                 <th
                   key={e}
-                  className="p-1 text-left text-xs text-[var(--color-text-muted)]"
-                  style={{ letterSpacing: "0.14em", transform: "rotate(-25deg)", height: 60, verticalAlign: "bottom" }}
+                  className="p-1 text-left text-xs text-[var(--color-text-muted)] tracking-wider"
+                  style={{ transform: "rotate(-25deg)", height: 60, verticalAlign: "bottom" }}
                 >
                   {e}
                 </th>

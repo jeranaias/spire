@@ -163,34 +163,31 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
               }}
             />
             <h2
-              className="font-mono text-sm font-semibold uppercase text-[var(--color-text)]"
-              style={{ letterSpacing: "0.18em" }}
+              className="font-mono text-sm font-semibold uppercase text-[var(--color-text)] tracking-widest"
             >
               {done ? "Processing · Complete" : "Processing · Live"}
             </h2>
           </div>
-          <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+          <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             Batch {ctx.batchId} · Job {ctx.jobId}
           </span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-baseline gap-1 font-mono">
             <span
-              className="text-xl font-semibold tabular-nums text-[var(--color-text)]"
-              style={{ letterSpacing: "-0.02em", lineHeight: 1 }}
+              className="text-xl font-semibold tabular-nums text-[var(--color-text)] tracking-tight"
+              style={{ lineHeight: 1 }}
             >
               {processed.toLocaleString()}
             </span>
             <span className="text-[var(--color-text-muted)]">/</span>
             <span
-              className="tabular-nums text-[var(--color-text-secondary)]"
-              style={{ letterSpacing: "0.04em" }}
+              className="tabular-nums text-[var(--color-text-secondary)] tracking-wide"
             >
               {all.length.toLocaleString()}
             </span>
             <span
-              className="ml-1 text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.14em" }}
+              className="ml-1 text-xs uppercase text-[var(--color-text-muted)] tracking-wider"
             >
               records
             </span>

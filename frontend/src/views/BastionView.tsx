@@ -179,15 +179,14 @@ export function BastionView() {
       <div className="flex h-full items-center justify-center p-12">
         <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
           <div
-            className="font-mono text-xs uppercase text-[var(--color-danger)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="font-mono text-xs uppercase text-[var(--color-danger)] tracking-widest"
           >
             Installation Offline
           </div>
           <div className="mt-2 spire-body text-sm">
             BASTION schematic unreachable after 4 attempts. Backend may be cycling — wait a moment, then switch role to retry.
           </div>
-          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             {copError}
           </div>
           <button
@@ -210,8 +209,7 @@ export function BastionView() {
                   setWaking(false);
                 });
             }}
-            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
-            style={{ letterSpacing: "0.18em" }}
+            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
           >
             Retry
           </button>
@@ -222,7 +220,7 @@ export function BastionView() {
   if (!cop) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">
-        <div className="flex items-center gap-3 font-mono text-sm" style={{ letterSpacing: "0.1em" }}>
+        <div className="flex items-center gap-3 font-mono text-sm tracking-wider">
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
           {waking ? "Waking up — one moment" : "Loading installation schematic ..."}
         </div>
@@ -236,14 +234,12 @@ export function BastionView() {
       <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
         <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] p-3">
           <h3
-            className="font-mono text-xs font-semibold uppercase text-[var(--color-text)]"
-            style={{ letterSpacing: "0.18em" }}
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-text)] tracking-widest"
           >
             Alert Stream
           </h3>
           <span
-            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs tabular-nums text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.08em" }}
+            className="rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide"
           >
             {alerts.length}
           </span>
@@ -267,12 +263,11 @@ export function BastionView() {
         <div className="border-t border-[var(--color-border)] p-3">
           <button
             onClick={triggerThermalHawk}
-            className="w-full rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_40%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger)] hover:text-white"
-            style={{ letterSpacing: "0.16em" }}
+            className="w-full rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_40%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger)] hover:text-white tracking-wider"
           >
             ⚠ Simulate ThermalHawk
           </button>
-          <div className="mt-1.5 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <div className="mt-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             UAS event over CLB-6 motor pool. Auto-correlates with PULSE readiness.
           </div>
         </div>
@@ -300,20 +295,17 @@ export function BastionView() {
           className="pointer-events-none absolute left-3 top-3 z-[6] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
         >
           <div
-            className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.22em" }}
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
             Common Operating Picture
           </div>
           <div
-            className="mt-0.5 font-mono text-sm font-semibold uppercase text-[var(--color-text)]"
-            style={{ letterSpacing: "0.14em" }}
+            className="mt-0.5 font-mono text-sm font-semibold uppercase text-[var(--color-text)] tracking-wider"
           >
             {cop.installation.name}
           </div>
           <div
-            className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)]"
-            style={{ letterSpacing: "0.1em" }}
+            className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)] tracking-wider"
           >
             {cop.buildings_count} buildings · {cop.ecps.length} ECPs · {cop.response_forces_count} RF · FPCON BRAVO
             {cop.installation.fictional && (
@@ -332,8 +324,7 @@ export function BastionView() {
           >
             <div className="flex items-center gap-2">
               <span
-                className="pl-1.5 pr-0.5 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-                style={{ letterSpacing: "0.18em" }}
+                className="pl-1.5 pr-0.5 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
               >
                 ASK·BASTION
               </span>
@@ -347,8 +338,7 @@ export function BastionView() {
               <button
                 onClick={handleNL}
                 disabled={nlSubmitting || !nlText.trim()}
-                className="inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
-                style={{ letterSpacing: "0.14em" }}
+                className="inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50 tracking-wider"
               >
                 {nlSubmitting ? "Working …" : "Submit"}
               </button>
@@ -428,18 +418,17 @@ function AlertRow({
           }}
         />
       )}
-      <div className="flex items-center gap-1 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+      <div className="flex items-center gap-1 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
         <span className="font-semibold" style={{ color }}>{alert.severity}</span>
         <span>· {alert.source}</span>
         {groupCount && groupCount > 1 && (
           <span
-            className="rounded-sm border px-1 font-semibold tabular-nums"
+            className="rounded-sm border px-1 font-semibold tabular-nums tracking-wide"
             style={{
               color,
               borderColor: `color-mix(in oklab, ${color} 40%, var(--color-border))`,
               background: `color-mix(in oklab, ${color} 12%, transparent)`,
-              letterSpacing: "0.05em",
             }}
           >
             ×{groupCount}
@@ -473,20 +462,18 @@ function MissionHUD() {
       className="pointer-events-none absolute right-3 top-3 z-[6] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
     >
       <div
-        className="font-mono text-xs uppercase text-[var(--color-text-muted)]"
-        style={{ letterSpacing: "0.18em" }}
+        className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
       >
         Mission Clock
       </div>
       <div
-        className="mt-0.5 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)]"
-        style={{ letterSpacing: "0.05em", lineHeight: 1 }}
+        className="mt-0.5 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)] tracking-wide"
+        style={{ lineHeight: 1 }}
       >
         {zulu}
       </div>
       <div
-        className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)]"
-        style={{ letterSpacing: "0.14em" }}
+        className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)] tracking-wider"
       >
         {datestamp}
       </div>
@@ -548,8 +535,8 @@ function ResponsePanel({
         <div className="flex items-start justify-between">
           <div>
             <div
-              className="font-mono text-xs font-semibold uppercase"
-              style={{ letterSpacing: "0.18em", color: SEVERITY_COLOR[alert.severity] }}
+              className="font-mono text-xs font-semibold uppercase tracking-widest"
+              style={{ color: SEVERITY_COLOR[alert.severity] }}
             >
               {alert.severity} · {alert.source}
             </div>
@@ -575,8 +562,7 @@ function ResponsePanel({
         {alert.model_info && (
           <section className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
             <div
-              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.18em" }}
+              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Detection Model
             </div>
@@ -593,8 +579,7 @@ function ResponsePanel({
         {alert.correlated_with && alert.correlated_with.length > 0 && (
           <section>
             <div
-              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.18em" }}
+              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Auto-correlated with
             </div>
@@ -610,8 +595,7 @@ function ResponsePanel({
           <section>
             <div className="mb-2 text-xs font-semibold">{checklist.title}</div>
             <div
-              className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.18em" }}
+              className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Immediate (0-5 MIN)
             </div>
@@ -629,8 +613,7 @@ function ResponsePanel({
               ))}
             </ul>
             <div
-              className="mb-2 mt-3 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.18em" }}
+              className="mb-2 mt-3 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Follow-on (5-30 MIN)
             </div>
@@ -648,8 +631,7 @@ function ResponsePanel({
               ))}
             </ul>
             <div
-              className="mb-2 mt-3 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.18em" }}
+              className="mb-2 mt-3 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Notifications
             </div>
@@ -669,8 +651,7 @@ function ResponsePanel({
         {sim && (
           <section>
             <div
-              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
-              style={{ letterSpacing: "0.18em" }}
+              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
             >
               Response forces dispatched
             </div>
@@ -698,8 +679,7 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
       <div className="mt-2 rounded-sm border border-[var(--color-primary)] bg-[var(--color-surface)] p-3">
         <div className="mb-2 flex items-baseline justify-between">
           <div
-            className="font-mono text-xs font-semibold uppercase text-[var(--color-primary)]"
-            style={{ letterSpacing: "0.18em" }}
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-primary)] tracking-widest"
           >
             Parsed as TMR
           </div>
@@ -736,8 +716,7 @@ function NLResultPanel({ result, onClose }: { result: any; onClose: () => void }
           </div>
         )}
         <div
-          className="mt-2 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-          style={{ letterSpacing: "0.18em" }}
+          className="mt-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
         >
           Approval chain
         </div>

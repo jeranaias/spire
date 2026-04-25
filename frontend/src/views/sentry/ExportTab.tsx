@@ -57,8 +57,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-4">
         <h2
-          className="font-mono text-base font-semibold uppercase text-[var(--color-text)]"
-          style={{ letterSpacing: "0.2em" }}
+          className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
         >
           Export Sanitized Dataset
         </h2>
@@ -71,8 +70,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
       <div className="mb-6 grid grid-cols-2 gap-6">
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <h4
-            className="mb-3 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.2em" }}
+            className="mb-3 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
           >
             Release Authority
           </h4>
@@ -81,15 +79,14 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             options={AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
             onChange={setAuthority}
           />
-          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             {DISTRIBUTION_BLURB[authority]}
           </div>
         </div>
 
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <h4
-            className="mb-3 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
-            style={{ letterSpacing: "0.2em" }}
+            className="mb-3 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
           >
             Format + Options
           </h4>
@@ -107,7 +104,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             />
             <span className="spire-body">Include append-only audit log (SHA-256 chained)</span>
           </label>
-          <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+          <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             Recommended on — lets the receiving partner verify provenance without re-inspecting every record.
           </div>
         </div>
@@ -117,13 +114,12 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         <button
           onClick={doExport}
           disabled={loading || !ctx.batchId}
-          className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-6 py-2 font-mono text-base font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50"
-          style={{ letterSpacing: "0.2em" }}
+          className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-6 py-2 font-mono text-base font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50 tracking-widest"
         >
           {loading ? "Building bundle …" : "Export Sanitized Bundle"}
         </button>
         {!ctx.batchId && (
-          <span className="ml-3 font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+          <span className="ml-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             Requires a processed batch.
           </span>
         )}
@@ -133,12 +129,11 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         <div className="mt-6 rounded-md border border-[var(--color-success-muted)] bg-[color-mix(in_oklab,var(--color-success-muted)_15%,var(--color-surface))] p-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h4
-              className="font-mono text-base font-semibold uppercase text-[var(--color-success)]"
-              style={{ letterSpacing: "0.2em" }}
+              className="font-mono text-base font-semibold uppercase text-[var(--color-success)] tracking-widest"
             >
               Export Prepared
             </h4>
-            <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+            <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
               {result.created_at}
             </span>
           </div>
@@ -203,8 +198,7 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
   return (
     <div className="mt-4 border-t border-[var(--color-border)] pt-4">
       <div
-        className="mb-2 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)]"
-        style={{ letterSpacing: "0.2em" }}
+        className="mb-2 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
       >
         Before / After · {diffs.length} Sample Records
       </div>
@@ -221,18 +215,17 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                 className="flex w-full items-center gap-2 px-3 py-2 text-left"
               >
                 <span className="font-mono text-sm text-[var(--color-text)]">{d.sr_number}</span>
-                <span className="font-mono text-xs text-[var(--color-text-muted)]" style={{ letterSpacing: "0.08em" }}>
+                <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
                   {d.unit_name} · {d.equipment_type}
                 </span>
                 <div className="ml-auto flex items-center gap-1">
                   {d.flags.map((f) => (
                     <span
                       key={f}
-                      className="rounded-sm border px-1 py-[1px] font-mono text-xs font-semibold uppercase"
+                      className="rounded-sm border px-1 py-[1px] font-mono text-xs font-semibold uppercase tracking-wider"
                       style={{
                         color: FLAG_COLOR[f] || "var(--color-text-muted)",
                         borderColor: `color-mix(in oklab, ${FLAG_COLOR[f] || "#666"} 40%, var(--color-border))`,
-                        letterSpacing: "0.14em",
                       }}
                     >
                       {f}
@@ -245,8 +238,7 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                 <div className="grid grid-cols-2 gap-0 border-t border-[var(--color-border)]">
                   <div className="border-r border-[var(--color-border)] p-3">
                     <div
-                      className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)]"
-                      style={{ letterSpacing: "0.2em" }}
+                      className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
                     >
                       Original
                     </div>
@@ -256,8 +248,7 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                   </div>
                   <div className="p-3">
                     <div
-                      className="mb-1 font-mono text-xs uppercase text-[var(--color-success)]"
-                      style={{ letterSpacing: "0.2em" }}
+                      className="mb-1 font-mono text-xs uppercase text-[var(--color-success)] tracking-widest"
                     >
                       Sanitized · Export Bundle
                     </div>
