@@ -6,7 +6,7 @@ import { ClassificationBand } from "./components/ClassificationBand";
 import { ToastLane } from "./components/ToastLane";
 import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
-import { Aide } from "./components/Aide";
+import { Spiro } from "./components/Spiro";
 import { useSpireStore } from "./state/store";
 
 export default function App() {
@@ -32,7 +32,7 @@ export default function App() {
       <ToastLane />
       <FeedbackDrawer />
       <HelpOverlay />
-      <Aide />
+      <Spiro />
     </div>
   );
 }

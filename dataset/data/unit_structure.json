@@ -36,7 +36,7 @@
       "uic": "M33200",
       "name": "3d Maint Bn",
       "parent": "2d MLG",
-      "location": "Camp Henderson, NC",
+      "location": "Camp Lejeune, NC",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
@@ -89,9 +89,9 @@
     },
     {
       "uic": "M60230",
-      "name": "MWSS-372",
-      "parent": "MAG-39",
-      "location": "MCAS Yuma, AZ",
+      "name": "MWSS-271",
+      "parent": "MAG-26",
+      "location": "MCAS New River, NC",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
@@ -118,8 +118,8 @@
     },
     {
       "uic": "M15800",
-      "name": "5/10 Marines",
-      "parent": "10th Marines",
+      "name": "2/14 Marines",
+      "parent": "14th Marines",
       "location": "Camp Lejeune, NC",
       "optempo": "medium",
       "deployment_status": "garrison",
@@ -133,7 +133,7 @@
       "uic": "M22100",
       "name": "7th ESB",
       "parent": "2d MLG",
-      "location": "Camp Henderson, NC",
+      "location": "Camp Lejeune, NC",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
