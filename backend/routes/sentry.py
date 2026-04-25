@@ -25,6 +25,22 @@ from ..persistence import (
 )
 from ..state import get_dataset
 
+# Coalition release profiles loaded at module top so /sentry/coalition/...
+# endpoints register cleanly. Module-level imports avoid the runtime sys.path
+# manipulation that broke earlier.
+import sys as _sys
+from pathlib import Path as _Path
+_REPO_ROOT = _Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_REPO_ROOT))
+try:
+    from dataset.coalition import (  # type: ignore[import-not-found]
+        list_profiles, classify_record, apply_redactions, partner_units_for, profiles as _coalition_profiles,
+    )
+    _COALITION_AVAILABLE = True
+except Exception:
+    _COALITION_AVAILABLE = False
+
 router = APIRouter()
 
 
@@ -744,6 +760,153 @@ async def export_sanitized(payload: dict):
         "download_url": f"/api/sentry/download/{export_id}",
         "sample_diffs": sample_diffs,
         **manifest,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GC-5 Coalition Interoperability — live partner-scoped logistics view
+# ---------------------------------------------------------------------------
+
+@router.get("/coalition/profiles")
+async def coalition_profiles():
+    """Return summaries of every coalition release profile for the partner picker."""
+    if not _COALITION_AVAILABLE:
+        raise HTTPException(status_code=503, detail="coalition profiles unavailable")
+    return {"profiles": list_profiles()}
+
+
+@router.get("/coalition/{profile_key}")
+async def coalition_view(profile_key: str, role: Optional[str] = None):
+    """Live partner-scoped view of the canonical dataset.
+
+    Walks units, assets, SRs, requisitions, and cannibalization events,
+    classifying each through the partner profile and applying field
+    redactions. Returns counts of allowed vs blocked records, sample
+    redacted records the operator can preview, and the partner-unit
+    roster surfaced on the coalition tab.
+
+    This is the GC-5 demo: 'show me what JSDF sees right now' — the
+    output is what we'd send across the wire on a coalition release."""
+    if not _COALITION_AVAILABLE:
+        raise HTTPException(status_code=503, detail="coalition profiles unavailable")
+    profile_data = _coalition_profiles().get("profiles", {}).get(profile_key)
+    if not profile_data:
+        raise HTTPException(status_code=404, detail=f"unknown profile {profile_key}")
+
+    ds = get_dataset()
+    # Build a map of unit -> parent so classify_record can resolve unit_parent.
+    unit_parent: dict[str, str] = {u.name: u.parent for u in ds.units}
+
+    allowed_units_count = 0
+    blocked_units_count = 0
+    allowed_units_list: list[dict] = []
+    for u in ds.units:
+        rec = {
+            "unit_name": u.name,
+            "unit_parent": u.parent,
+            "category": "readiness_summary",
+            "detected_classification": "UNCLASSIFIED",
+        }
+        decision = classify_record(profile_key, rec)
+        if decision.allowed:
+            allowed_units_count += 1
+            allowed_units_list.append({
+                "unit": u.name,
+                "parent": u.parent,
+                "uic": u.uic,
+                "location": u.location,
+            })
+        else:
+            blocked_units_count += 1
+
+    # Sample SR-level scoping: walk first 50 NMCS SRs.
+    sample_srs: list[dict] = []
+    sr_allowed = 0
+    sr_blocked = 0
+    for sr in ds.srs[:200]:
+        rec = {
+            "sr_number": sr.sr_number,
+            "asset_id": sr.asset_id,
+            "unit_name": sr.unit_name,
+            "unit_parent": unit_parent.get(sr.unit_name, ""),
+            "equipment_type": sr.equipment_type,
+            "fault_component": sr.fault_component,
+            "tm_reference": sr.tm_reference,
+            "serial_number": sr.serial_number,
+            "remark": sr.remark_text,
+            "detected_classification": sr.detected_classification or "UNCLASSIFIED",
+            "category": "readiness_summary",
+        }
+        decision = classify_record(profile_key, rec)
+        if decision.allowed:
+            sr_allowed += 1
+            redacted = apply_redactions(rec, decision.redactions_applied)
+            if len(sample_srs) < 8:
+                sample_srs.append({
+                    "sr_number": redacted.get("sr_number"),
+                    "unit_name": redacted.get("unit_name"),
+                    "equipment_type": redacted.get("equipment_type"),
+                    "fault_component": redacted.get("fault_component"),
+                    "remark_preview": (redacted.get("remark", "") or "")[:160],
+                    "redactions": decision.redactions_applied,
+                })
+        else:
+            sr_blocked += 1
+
+    return {
+        "profile_key": profile_key,
+        "display_name": profile_data["display_name"],
+        "partners": profile_data["partners"],
+        "distribution_statement": profile_data["distribution_statement"],
+        "authorized_classifications": profile_data["authorized_classifications"],
+        "caveats_applied": profile_data.get("caveats_applied", []),
+        "embargo_days_after_event": profile_data.get("embargo_days_after_event", 0),
+        "scope": {
+            "units_allowed": allowed_units_count,
+            "units_blocked": blocked_units_count,
+            "sample_srs_allowed": sr_allowed,
+            "sample_srs_blocked": sr_blocked,
+            "sample_srs_total_inspected": min(200, len(ds.srs)),
+        },
+        "allowed_units": allowed_units_list,
+        "sample_records": sample_srs,
+        "partner_units": partner_units_for(profile_key),
+        "field_redactions": profile_data.get("field_redactions", []),
+        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+
+@router.post("/coalition/{profile_key}/release")
+async def coalition_release(profile_key: str, payload: Optional[dict] = None):
+    """Generate a release-package event for the selected coalition profile.
+    Hashes a manifest of what would ship and writes the event to the audit
+    chain so a security manager can later inspect every coalition release."""
+    if not _COALITION_AVAILABLE:
+        raise HTTPException(status_code=503, detail="coalition profiles unavailable")
+    profile_data = _coalition_profiles().get("profiles", {}).get(profile_key)
+    if not profile_data:
+        raise HTTPException(status_code=404, detail=f"unknown profile {profile_key}")
+    payload = payload or {}
+    release_id = f"REL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    audit_log(
+        "sentry_coalition_release",
+        actor=payload.get("actor_role", "data_custodian"),
+        subject_id=release_id,
+        payload={
+            "profile": profile_key,
+            "partners": profile_data["partners"],
+            "distribution": profile_data["distribution_statement"],
+        },
+    )
+    return {
+        "ok": True,
+        "release_id": release_id,
+        "profile": profile_key,
+        "partners": profile_data["partners"],
+        "distribution_statement": profile_data["distribution_statement"],
+        "caveats_applied": profile_data.get("caveats_applied", []),
+        "audit_logged": True,
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 

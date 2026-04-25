@@ -82,6 +82,15 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ release_authority: release, format, include_audit: true }),
       }),
+    coalitionProfiles: () =>
+      jsonFetch<{ profiles: CoalitionProfileSummary[] }>("/sentry/coalition/profiles"),
+    coalitionView: (profileKey: string) =>
+      jsonFetch<CoalitionView>(`/sentry/coalition/${encodeURIComponent(profileKey)}`),
+    coalitionRelease: (profileKey: string) =>
+      jsonFetch<CoalitionReleaseResult>(`/sentry/coalition/${encodeURIComponent(profileKey)}/release`, {
+        method: "POST",
+        body: JSON.stringify({ actor_role: "data_custodian" }),
+      }),
   },
   bastion: {
     cop: () => jsonFetch<BastionCOP>("/bastion/cop"),
@@ -197,6 +206,54 @@ export interface Cannibalization {
   open_needs: any[];
   completed_matches: any[];
   total_events: number;
+}
+
+export interface CoalitionProfileSummary {
+  key: string;
+  display_name: string;
+  partners: string[];
+  distribution: string;
+  embargo_days: number;
+}
+
+export interface CoalitionView {
+  profile_key: string;
+  display_name: string;
+  partners: string[];
+  distribution_statement: string;
+  authorized_classifications: string[];
+  caveats_applied: string[];
+  embargo_days_after_event: number;
+  scope: {
+    units_allowed: number;
+    units_blocked: number;
+    sample_srs_allowed: number;
+    sample_srs_blocked: number;
+    sample_srs_total_inspected: number;
+  };
+  allowed_units: { unit: string; parent: string; uic: string; location: string }[];
+  sample_records: {
+    sr_number?: string;
+    unit_name?: string;
+    equipment_type?: string;
+    fault_component?: string;
+    remark_preview?: string;
+    redactions?: string[];
+  }[];
+  partner_units: { name: string; type: string; point_of_contact?: string }[];
+  field_redactions: string[];
+  as_of: string;
+}
+
+export interface CoalitionReleaseResult {
+  ok: boolean;
+  release_id: string;
+  profile: string;
+  partners: string[];
+  distribution_statement: string;
+  caveats_applied: string[];
+  audit_logged: boolean;
+  created_at: string;
 }
 
 export interface RecommendedAction {
