@@ -275,6 +275,16 @@ body {
   100% { transform: translateY(0);   opacity: 1; }
 }
 
+/* Feedback drawer first-run coachmark + button pulse */
+@keyframes feedback-coach-in {
+  0%   { transform: translateY(8px) scale(0.96); opacity: 0; }
+  100% { transform: translateY(0)   scale(1);     opacity: 1; }
+}
+@keyframes feedback-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-primary) 65%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in oklab, var(--color-primary) 0%, transparent); }
+}
+
 /* FPCON DELTA flash — reserved for critical incidents */
 @keyframes fpcon-flash {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-danger) 60%, transparent); }

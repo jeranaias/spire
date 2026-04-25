@@ -16,6 +16,8 @@ export interface Toast {
   text: string;
   // Optional "undo" lane — when present, rendered as a button that resolves the action.
   undo?: { label: string; onUndo: () => void };
+  // Optional click-through link — rendered as an external-opening anchor.
+  link?: { label: string; href: string };
   ttlMs?: number;
 }
 

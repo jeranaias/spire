@@ -130,17 +130,16 @@ export function HelpOverlay() {
               className="mt-4 mb-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)]"
               style={{ letterSpacing: "0.22em" }}
             >
-              Game-changers in build
+              Game-changers shipped (v1.0.0-rc1)
             </div>
             <ul className="flex flex-col gap-0.5 font-mono text-[10px] text-[var(--color-text-secondary)]" style={{ letterSpacing: "0.04em" }}>
-              <li>✓ GC-1 Autonomous replenishment (PULSE Forecast)</li>
-              <li>✓ GC-5 Coalition mode (SENTRY Coalition)</li>
-              <li>✓ GC-7 Air-gap deployment (TopBar toggle)</li>
-              <li>✓ Real-map COP (BASTION)</li>
-              <li>… GC-3 Predictive failure (in-build, depends on J2 weights)</li>
-              <li>… GC-4 C-UAS sensor fusion</li>
-              <li>… GC-2 CRDT distributed consensus</li>
-              <li>… GC-6 Training data flywheel</li>
+              <li>✓ GC-1 Autonomous replenishment · PULSE Forecast</li>
+              <li>✓ GC-2 Distributed consensus · TopBar Node Status</li>
+              <li>✓ GC-3 Predictive failure · PULSE Risk Board</li>
+              <li>✓ GC-4 C-UAS sensor fusion · BASTION alert sidebar</li>
+              <li>✓ GC-5 Coalition release · SENTRY Coalition</li>
+              <li>✓ GC-6 Training flywheel · TopBar Admin (Sec Mgr)</li>
+              <li>✓ GC-7 Air-gap deployment · TopBar toggle</li>
             </ul>
           </section>
         </div>
