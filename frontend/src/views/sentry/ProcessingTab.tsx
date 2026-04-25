@@ -18,18 +18,27 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const [queue, setQueue] = useState<SentryReviewQueue | null>(null);
   const [displayIdx, setDisplayIdx] = useState(0);
   const [counts, setCounts] = useState({ tier1: 0, tier2: 0, pii: 0, geo: 0, comms: 0, classified: 0, controlled: 0 });
+  const [error, setError] = useState<string | null>(null);
   const tickRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!ctx.jobId || !ctx.batchId) return;
     let alive = true;
+    setError(null);
     (async () => {
-      const j = await api.sentry.jobStatus(ctx.jobId!);
-      if (!alive) return;
-      setJob(j);
-      const q = await api.sentry.reviewQueue(ctx.batchId!);
-      if (!alive) return;
-      setQueue(q);
+      try {
+        const j = await api.sentry.jobStatus(ctx.jobId!);
+        if (!alive) return;
+        setJob(j);
+        const q = await api.sentry.reviewQueue(ctx.batchId!);
+        if (!alive) return;
+        setQueue(q);
+      } catch (e) {
+        if (!alive) return;
+        // Surface the failure instead of leaving the spinner up forever.
+        // Backend down or the batch was wiped between Upload and Processing.
+        setError(String(e));
+      }
     })();
     return () => {
       alive = false;
@@ -75,10 +84,40 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
       </div>
     );
   }
+  if (error) {
+    return (
+      <div className="flex h-full items-center justify-center p-12">
+        <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
+          <div
+            className="font-mono text-[10px] uppercase text-[var(--color-danger)]"
+            style={{ letterSpacing: "0.22em" }}
+          >
+            Processing Unavailable
+          </div>
+          <div className="mt-2 spire-body text-sm">
+            SENTRY processing pipeline did not respond. Re-load the batch from Upload to retry.
+          </div>
+          <div className="mt-3 font-mono text-[10px] text-[var(--color-text-muted)]" style={{ letterSpacing: "0.1em" }}>
+            {error}
+          </div>
+          <button
+            onClick={() => nav("/sentry/upload")}
+            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-[11px] font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)]"
+            style={{ letterSpacing: "0.18em" }}
+          >
+            ← Back to Upload
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (!queue || !job) {
     return (
       <div className="flex h-full items-center justify-center p-12 text-sm text-[var(--color-text-secondary)]">
-        Initializing processing ...
+        <div className="flex items-center gap-3 font-mono text-[11px]" style={{ letterSpacing: "0.1em" }}>
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
+          Initializing processing …
+        </div>
       </div>
     );
   }
