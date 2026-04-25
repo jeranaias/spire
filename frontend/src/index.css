@@ -301,9 +301,9 @@ body {
   animation: reticle-in 200ms ease-out forwards;
 }
 
-/* Leaflet tile filter -- shifts CartoDB Dark Matter toward neutral/military grey */
-.leaflet-tile-pane .leaflet-layer {
-  filter: hue-rotate(-18deg) saturate(0.5) brightness(0.92);
+/* MapLibre tile filter -- shifts CartoDB Dark Matter toward neutral/military grey */
+.maplibregl-canvas {
+  filter: hue-rotate(-18deg) saturate(0.55) brightness(0.94);
 }
 
 /* Custom scrollbar for dark surfaces */

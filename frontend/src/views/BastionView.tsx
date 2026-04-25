@@ -19,12 +19,12 @@ const UNIT_BUILDING: Record<string, string> = {
   "CLB-6":        "CLB6-MP",
   "CLB-1":        "MLG-SSC",
   "3d Maint Bn":  "MLG-SSC",
-  "2d Tank Bn":   "TANK-MP",
+  "3/6 Marines":  "TANK-MP",
   "2d LAR Bn":    "LAR-MP",
   "MALS-31":      "HH-1",
   "MWSS-372":     "DL-HQ",
   "2d LAAD Bn":   "LAAD-TOC",
-  "5/11 Marines": "TOC-MAIN",
+  "5/10 Marines": "TOC-MAIN",
   "7th ESB":      "ESB-WS",
 };
 

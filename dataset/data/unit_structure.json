@@ -48,15 +48,15 @@
     },
     {
       "uic": "M40120",
-      "name": "2d Tank Bn",
+      "name": "3/6 Marines",
       "parent": "2d MarDiv",
       "location": "Camp Lejeune, NC",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
-        "M1A1_ABRAMS":    {"tamcn": "A2249", "count": 14, "fsc": "2350"},
-        "JLTV":           {"tamcn": "D1196", "count": 8,  "fsc": "2320"},
-        "M88A2_RECOVERY": {"tamcn": "A2243", "count": 4,  "fsc": "2350"}
+        "JLTV":           {"tamcn": "D1196", "count": 14, "fsc": "2320"},
+        "MTVR_CARGO":     {"tamcn": "D0082", "count": 8,  "fsc": "2320"},
+        "M2_HMG":         {"tamcn": "C7300", "count": 12, "fsc": "1005"}
       }
     },
     {
@@ -118,9 +118,9 @@
     },
     {
       "uic": "M15800",
-      "name": "5/11 Marines",
-      "parent": "11th Marines",
-      "location": "Camp Pendleton, CA",
+      "name": "5/10 Marines",
+      "parent": "10th Marines",
+      "location": "Camp Lejeune, NC",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {

@@ -90,7 +90,7 @@
     },
     {
       "id": "TANK-MP",
-      "name": "2d Tank Bn Motor Pool",
+      "name": "3/6 Marines Motor Pool",
       "type": "motor_pool",
       "grid": "18S UJ 27950 70480",
       "occupancy_capacity": 50,
