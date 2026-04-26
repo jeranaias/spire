@@ -13,6 +13,7 @@ const SHORTCUTS = [
   { keys: ["?"],          label: "Open this help" },
   { keys: ["Esc"],         label: "Close any modal" },
   { keys: ["/"],           label: "Focus alert search (BASTION)" },
+  { keys: ["Ctrl", "/"], label: "Toggle SPIRO copilot" },
   { keys: ["Shift", "F"], label: "Open feedback drawer" },
   // Vimium-style chord nav. Mirrors the App-level useGoToShortcuts hook;
   // routes the active role can't see fall back to that role's default
