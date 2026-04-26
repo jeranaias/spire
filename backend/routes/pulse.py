@@ -588,12 +588,18 @@ async def recommend_actions(
             and other.current_status in ("RFI", "Operational")
         ]
         if peer_serviceable:
-            donor_unit = peer_serviceable[0].unit_name
-            cost, hours = cross_level_cost(distance_mi=85, hazmat=False)
-            feasible = convoy_feasible(
-                f"{a.unit_name.split(',')[0] if ',' in a.unit_name else 'Camp Henderson, NC'}",
-                f"{donor_unit}",
-            )
+            donor = peer_serviceable[0]
+            donor_unit = donor.unit_name
+            # Walkthrough audit: distance_mi was hardcoded at 85 regardless
+            # of where the donor unit actually sits. CLB-1 (Camp Pendleton,
+            # CA) → recipient at Camp Henderson, NC is 2625 miles, not 85.
+            # Look up the actual route from convoy_feasibility (the
+            # rates JSON keys routes by 'Camp Henderson, NC → <dest>').
+            donor_loc = getattr(donor, "location", None) or "Camp Henderson, NC"
+            feasible = convoy_feasible("Camp Henderson, NC", donor_loc)
+            distance = (feasible or {}).get("distance_mi", 85)
+            hazmat = not (feasible or {}).get("hazmat_allowed", True) if feasible else False
+            cost, hours = cross_level_cost(distance_mi=distance, hazmat=hazmat)
             actions.append({
                 "kind": "cross_level",
                 "title": f"Cross-level a serviceable {a.equipment_type} from {donor_unit}",
@@ -655,8 +661,13 @@ async def recommend_actions(
                 })
 
             if peer_serviceable:
-                donor_unit = peer_serviceable[0].unit_name
-                cost, hours = cross_level_cost(distance_mi=85, hazmat=False)
+                donor = peer_serviceable[0]
+                donor_unit = donor.unit_name
+                # Walkthrough audit (2nd site): same hardcoded distance.
+                donor_loc = getattr(donor, "location", None) or "Camp Henderson, NC"
+                feasible_p = convoy_feasible("Camp Henderson, NC", donor_loc)
+                distance_p = (feasible_p or {}).get("distance_mi", 85)
+                cost, hours = cross_level_cost(distance_mi=distance_p, hazmat=False)
                 actions.append({
                     "kind": "cross_level_proactive",
                     "title": f"Cross-level prepositioning {a.equipment_type} from {donor_unit}",
