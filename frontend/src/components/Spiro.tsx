@@ -124,6 +124,75 @@ export function Spiro() {
     setError(null);
   }
 
+  // Per-role example prompts. Wrapped in click-to-populate chips below so
+  // a Marine doesn't have to retype them — the prior plain-<li> rendering
+  // looked clickable but did nothing on click.
+  const examplesForRole = (() => {
+    if (role === "maintenance_chief") {
+      return [
+        "find a cannib donor for M21670-MTVR_CARGO-006",
+        "what should I do about my fleet right now?",
+        "predict failures in the next 14 days",
+      ];
+    }
+    if (role === "g4") {
+      return [
+        "what should I do about my fleet right now?",
+        "predict failures in the next 14 days",
+        "show me the highest-risk units across all of MEF",
+      ];
+    }
+    if (role === "data_custodian") {
+      return [
+        "what does Japan see in the next coalition release?",
+        "what does Australia see in the next release?",
+        "what should I do about my fleet right now?",
+      ];
+    }
+    if (role === "security_manager") {
+      return [
+        "show me the highest-risk units across all of MEF",
+        "predict failures in the next 14 days",
+        "where do I start?",
+      ];
+    }
+    return [
+      "find a cannib donor for M21670-MTVR_CARGO-006",
+      "what should I do about my fleet right now?",
+      "what does Japan see?",
+      "predict failures in the next 14 days",
+      "where do I start?",
+    ];
+  })();
+
+  function fillExample(s: string) {
+    setText(s);
+    // Defer focus so React paints the value first; otherwise the cursor
+    // sometimes lands at position 0 before the value is committed.
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  // A SPIRO step "succeeded" but produced nothing — empty actions[],
+  // predictions[], candidates[], or count=0 — should NOT render as green ✓.
+  // The operator needs to see that the tool returned but found nothing,
+  // not assume everything went fine.
+  function isEmptyResult(r: any): boolean {
+    if (r == null) return true;
+    if (typeof r !== "object") return false;
+    if (typeof (r as any).count === "number" && (r as any).count === 0) return true;
+    for (const k of ["actions", "predictions", "candidates", "matches", "results", "items", "donors", "assets"]) {
+      const v = (r as any)[k];
+      if (Array.isArray(v) && v.length === 0) return true;
+    }
+    return false;
+  }
+  function stepStatus(sr: { had_error: boolean; result: any }): "ok" | "empty" | "error" {
+    if (sr.had_error) return "error";
+    if (sr.result && (sr.result as any).error) return "error";
+    if (isEmptyResult(sr.result)) return "empty";
+    return "ok";
+  }
+
   // Collapsed-pill view — small button on the right edge.
   if (!open) {
     return (
@@ -263,27 +332,77 @@ export function Spiro() {
           </div>
         )}
 
-        {result && (
+        {result && (() => {
+          // Roll up the per-step status so the header banner reads honestly
+          // when one step succeeds but another returns nothing useful.
+          const statuses = result.step_results.map((sr) => stepStatus(sr));
+          const errorCount = statuses.filter((s) => s === "error").length;
+          const emptyCount = statuses.filter((s) => s === "empty").length;
+          const okCount = statuses.filter((s) => s === "ok").length;
+          const overall: "ok" | "empty" | "error" =
+            errorCount > 0 ? "error" : emptyCount > 0 ? "empty" : "ok";
+          const headerColor =
+            overall === "error" ? "var(--color-danger)"
+            : overall === "empty" ? "var(--color-warning)"
+            : "var(--color-success)";
+          const headerMutedBg =
+            overall === "error" ? "var(--color-danger-muted)"
+            : overall === "empty" ? "var(--color-warning-muted)"
+            : "var(--color-success-muted)";
+          return (
           <div className="flex flex-col gap-2">
-            <div className="rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_15%,transparent)] p-2 font-mono text-xs">
-              {result.ok_count}/{result.step_results.length} steps ok
-              {result.error_count > 0 && (
-                <span className="ml-2 text-[var(--color-danger)]">{result.error_count} errors</span>
+            <div
+              className="rounded-sm border p-2 font-mono text-xs"
+              style={{
+                borderColor: headerColor,
+                background: `color-mix(in oklab, ${headerMutedBg} 15%, transparent)`,
+              }}
+            >
+              <span style={{ color: headerColor }}>
+                {okCount}/{result.step_results.length} steps with results
+              </span>
+              {emptyCount > 0 && (
+                <span className="ml-2 text-[var(--color-warning)]">
+                  {emptyCount} returned nothing
+                </span>
+              )}
+              {errorCount > 0 && (
+                <span className="ml-2 text-[var(--color-danger)]">{errorCount} errors</span>
               )}
             </div>
-            {result.step_results.map((sr, i) => (
-              <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-xs">
+            {result.step_results.map((sr, i) => {
+              const st = statuses[i];
+              const tone =
+                st === "error" ? "var(--color-danger)"
+                : st === "empty" ? "var(--color-warning)"
+                : "var(--color-success)";
+              const label = st === "error" ? "ERROR" : st === "empty" ? "EMPTY" : "OK";
+              const glyph = st === "error" ? "✗" : st === "empty" ? "⚠" : "✓";
+              return (
+              <div
+                key={i}
+                className="rounded-sm border bg-[var(--color-bg)] p-2 font-mono text-xs"
+                style={{
+                  borderColor: st === "ok"
+                    ? "var(--color-border)"
+                    : `color-mix(in oklab, ${tone} 40%, var(--color-border))`,
+                }}
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-[var(--color-text)]">{sr.tool}</span>
-                  <span className={sr.had_error ? "text-[var(--color-danger)]" : "text-[var(--color-success)]"}>
-                    {sr.had_error ? "ERROR" : "OK"}
-                  </span>
+                  <span style={{ color: tone }}>{glyph} {label}</span>
                 </div>
+                {st === "empty" && (
+                  <div className="mt-1 text-[10px] italic text-[var(--color-warning)] tracking-wide">
+                    Tool ran but produced no results — operator decision: try a different scope or accept "nothing found."
+                  </div>
+                )}
                 <pre className="mt-1.5 max-h-[12rem] overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--color-text-secondary)]">
                   {JSON.stringify(sr.result, null, 2).slice(0, 1200)}
                 </pre>
               </div>
-            ))}
+              );
+            })}
             <button
               onClick={reset}
               className="mt-2 rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-xs font-semibold uppercase text-white tracking-widest"
@@ -291,19 +410,27 @@ export function Spiro() {
               Ask another
             </button>
           </div>
-        )}
+          );
+        })()}
 
         {!plan && !result && !error && !loading && (
           <div className="font-mono text-[10px] leading-relaxed text-[var(--color-text-muted)] tracking-wide">
             <div className="mb-2 text-xs uppercase text-[var(--color-text-secondary)] tracking-widest">
-              Examples
+              Examples · click to use
             </div>
             <ul className="flex flex-col gap-1.5">
-              <li>"find a cannib donor for M21670-MTVR_CARGO-006"</li>
-              <li>"what should I do about my fleet right now?"</li>
-              <li>"what does Japan see?"</li>
-              <li>"predict failures in the next 14 days"</li>
-              <li>"where do I start?"</li>
+              {examplesForRole.map((ex) => (
+                <li key={ex}>
+                  <button
+                    type="button"
+                    onClick={() => fillExample(ex)}
+                    className="block w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-left font-mono text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-bg))] hover:text-[var(--color-text)]"
+                    title="Click to drop this example into the prompt"
+                  >
+                    "{ex}"
+                  </button>
+                </li>
+              ))}
             </ul>
           </div>
         )}
