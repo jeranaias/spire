@@ -482,16 +482,56 @@ export function MapCanvas({
   }, [buildings]);
 
   // Unit markers with home-building lat/lon resolution.
+  //
+  // De-overlap: when two units share the same home building (e.g. CLB-1 +
+  // 3d Maint Bn → MLG-SSC), assigning them both to the building's center
+  // stacks them as a single marker. Walkthrough caught the stacked pin
+  // visually. We fan duplicates out around their shared building on a
+  // small ring so each unit gets a distinct, clickable marker. The ring
+  // radius (~30 m at this latitude) keeps the markers visually inside the
+  // building footprint at zoom ≥ 14.
   const placedUnits = useMemo(() => {
-    return units.map((u) => {
+    // First pass: resolve each unit to its home (lat,lon) anchor.
+    const resolved = units.map((u) => {
       const homeId = UNIT_BUILDING[u.unit];
       const home = homeId ? buildingById.get(homeId) : undefined;
       return {
         u,
-        lat: home?.lat ?? centerLat,
-        lon: home?.lon ?? centerLon,
+        anchorLat: home?.lat ?? centerLat,
+        anchorLon: home?.lon ?? centerLon,
+        homeId: homeId ?? null,
       };
     });
+    // Second pass: group by home and offset duplicates around the anchor.
+    const groups = new Map<string, typeof resolved>();
+    for (const r of resolved) {
+      const k = r.homeId ?? `${r.anchorLat},${r.anchorLon}`;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(r);
+    }
+    const out: { u: typeof resolved[number]["u"]; lat: number; lon: number }[] = [];
+    // 30 m radius — small enough to read as "same building", large enough
+    // for distinct markers at z=14.
+    const R_DEG = 30 / 111000; // ~30 m latitude
+    for (const grp of groups.values()) {
+      if (grp.length === 1) {
+        const r = grp[0];
+        out.push({ u: r.u, lat: r.anchorLat, lon: r.anchorLon });
+        continue;
+      }
+      // Fan stacked units around their shared anchor on an evenly-spaced
+      // ring. cos-corrected longitude offset so the ring reads circular.
+      const lonScale = 1 / Math.cos((grp[0].anchorLat * Math.PI) / 180);
+      grp.forEach((r, i) => {
+        const theta = (2 * Math.PI * i) / grp.length;
+        out.push({
+          u: r.u,
+          lat: r.anchorLat + R_DEG * Math.sin(theta),
+          lon: r.anchorLon + R_DEG * lonScale * Math.cos(theta),
+        });
+      });
+    }
+    return out;
   }, [units, buildingById, centerLat, centerLon]);
 
   // Fly to a building when requested (alert click, sim trigger).
