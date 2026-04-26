@@ -67,7 +67,7 @@ export function PredictedFailurePanel({ unit, hideHeader = false }: { unit?: str
         <span
           className="font-mono text-xs font-semibold uppercase text-[var(--color-success)] tracking-widest"
         >
-          Predicted Failures · GC-3
+          Predicted Failures
         </span>
         <span
           className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
@@ -87,7 +87,7 @@ export function PredictedFailurePanel({ unit, hideHeader = false }: { unit?: str
         <div>
           {!hideHeader && (
             <div className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
-              Predicted Failures · GC-3
+              Predicted Failures
             </div>
           )}
           <div className={hideHeader ? "spire-body-muted text-base" : "mt-0.5 spire-body-muted text-base"}>

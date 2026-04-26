@@ -287,7 +287,7 @@ export function BastionView() {
                   className="font-mono uppercase text-[var(--color-danger)]"
                   style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
                 >
-                  ◆ Fused Threats · GC-4
+                  ◆ Fused Threats
                 </span>
               }
               collapsedSummary={

@@ -132,7 +132,7 @@ export function AdminView() {
         <h2
           className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
         >
-          Admin · Training Flywheel · GC-6
+          Admin · Training Flywheel
         </h2>
         <div className="mt-1 spire-body-muted">
           Every operator decision feeds the model improvement cycle. Outcomes scored against ground truth populate

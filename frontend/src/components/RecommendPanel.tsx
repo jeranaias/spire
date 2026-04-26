@@ -107,7 +107,7 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
             <div
               className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
             >
-              Recommended Actions · GC-1 Auto Replenishment
+              Recommended Actions · Auto Replenishment
             </div>
             <div className="mt-0.5 spire-body-muted text-base">
               Top {data.length} at-risk assets. Each action ranked by impact-per-dollar-per-day.
