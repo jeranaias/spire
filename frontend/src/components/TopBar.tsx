@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role } from "../state/store";
@@ -295,24 +296,28 @@ function AlertBadge({ count }: { count: number }) {
   );
 }
 
-// GC-7 Air-gap toggle. When engaged, the StatusFooter pulses red and any
+// Air-gap posture toggle. When engaged, the StatusFooter pulses red and any
 // mutation goes through the local queue endpoint. When released, the queue
 // flushes to the master and the toggle returns to green/connected. Restricted
 // to security_manager + mef_commander since toggling air-gap is a posture
-// decision, not a routine click.
+// decision, not a routine click. Walkthrough caught a one-click toggle as
+// risky — added a confirmation modal so the operator confirms intent.
 function AirGapToggle() {
   const role = useSpireStore((s) => s.role);
   const airGap = useSpireStore((s) => s.airGapActive);
   const setAirGap = useSpireStore((s) => s.setAirGap);
   const setQueueDepth = useSpireStore((s) => s.setQueueDepth);
   const pushToast = useSpireStore((s) => s.pushToast);
+  const queueDepth = useSpireStore((s) => s.queueDepth);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const allowed = role === "security_manager" || role === "mef_commander";
   if (!allowed) return null;
 
-  async function toggle() {
+  async function commit() {
+    setConfirmOpen(false);
     try {
-      const r = await api.system.setAirGap(!airGap, "operator-initiated");
+      const r = await api.system.setAirGap(!airGap, "operator-confirmed");
       setAirGap(r.air_gap_active);
       if (r.air_gap_active) {
         pushToast({ tone: "warn", text: "Air-gap engaged — local writes will be queued", ttlMs: 4000 });
@@ -330,29 +335,72 @@ function AirGapToggle() {
   }
 
   return (
-    <button
-      onClick={toggle}
-      className="inline-flex h-11 min-w-[44px] items-center gap-2 rounded-sm border px-2.5 font-mono text-xs uppercase transition-colors tracking-wider"
-      style={{
-        borderColor: airGap ? "var(--color-danger)" : "var(--color-border)",
-        background: airGap
-          ? "color-mix(in oklab, var(--color-danger-muted) 25%, transparent)"
-          : "transparent",
-        color: airGap ? "var(--color-danger)" : "var(--color-text-secondary)",
-      }}
-      title={airGap ? "Click to release air-gap and replay queued ops" : "Engage air-gap mode"}
-    >
-      <span className="relative flex h-2 w-2" aria-hidden>
-        {airGap && (
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-danger)] opacity-60" />
-        )}
-        <span
-          className="relative inline-flex h-2 w-2 rounded-full"
-          style={{ background: airGap ? "var(--color-danger)" : "var(--color-success)" }}
-        />
-      </span>
-      <span>{airGap ? "AIR-GAP ON" : "AIR-GAP"}</span>
-    </button>
+    <>
+      <button
+        onClick={() => setConfirmOpen(true)}
+        className="inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-sm border px-2.5 font-mono text-xs uppercase transition-colors tracking-wider"
+        style={{
+          borderColor: airGap ? "var(--color-danger)" : "var(--color-border)",
+          background: airGap
+            ? "color-mix(in oklab, var(--color-danger-muted) 25%, transparent)"
+            : "transparent",
+          color: airGap ? "var(--color-danger)" : "var(--color-text-secondary)",
+        }}
+        title={airGap ? "Air-gap engaged — click to release and replay queued ops" : "Click to engage air-gap mode (confirm required)"}
+      >
+        <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+          {airGap && (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-danger)] opacity-60" />
+          )}
+          <span
+            className="relative inline-flex h-2 w-2 rounded-full"
+            style={{ background: airGap ? "var(--color-danger)" : "var(--color-success)" }}
+          />
+        </span>
+        <span className="whitespace-nowrap">AIR-GAP{airGap ? " ON" : ""}</span>
+      </button>
+      {confirmOpen && (
+        <div
+          className="fixed inset-0 z-[8800] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setConfirmOpen(false)}
+          role="presentation"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="m-4 max-w-md rounded-md border border-[var(--color-warning)] bg-[var(--color-surface)] p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="airgap-confirm-title"
+          >
+            <div id="airgap-confirm-title" className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
+              {airGap ? "Release air-gap" : "Engage air-gap"}
+            </div>
+            <h2 className="mt-1 font-sans text-lg font-semibold text-[var(--color-text)]">
+              {airGap ? "Replay queued ops and reconnect?" : "Cut outbound writes and queue locally?"}
+            </h2>
+            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+              {airGap
+                ? `Releasing will replay ${queueDepth} queued operation${queueDepth === 1 ? "" : "s"} to the upstream node and resume normal sync. Conflicts surface in Node Status as vector-clock pairs.`
+                : "Engaging will route every mutation to the local queue. SPIRE keeps operating, but partner nodes won't see your writes until release. Use during simulated SATCOM loss or real comms-degraded posture."}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmOpen(false)}
+                className="rounded-sm border border-[var(--color-border-active)] px-4 py-2 font-mono text-xs uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] tracking-widest"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={commit}
+                className="rounded-sm border border-[var(--color-warning)] bg-[var(--color-warning)] px-4 py-2 font-mono text-xs font-semibold uppercase text-black hover:opacity-90 tracking-widest"
+              >
+                {airGap ? "Release" : "Engage"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
