@@ -109,23 +109,23 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-// Density localStorage helpers — keyed per role so the field-Marine on
-// CLB-6's iPad doesn't drag a sparse layout into the G-4 staff seat.
-function densityKey(role: Role): string {
-  return `spire.density.${role}`;
-}
-function loadDensity(role: Role): Density {
+// Density localStorage — single global key. Was per-role keyed, but the
+// resulting type-scale flip on every role swap read as "the font is changing
+// per role" rather than as a deliberate per-seat preference. One operator,
+// one density.
+const DENSITY_KEY = "spire.density";
+function loadDensity(): Density {
   try {
-    const raw = window.localStorage.getItem(densityKey(role));
+    const raw = window.localStorage.getItem(DENSITY_KEY);
     if (raw === "dense" || raw === "sparse") return raw;
   } catch {
     /* SSR / private mode tolerant */
   }
   return "dense";
 }
-function saveDensity(role: Role, d: Density): void {
+function saveDensity(d: Density): void {
   try {
-    window.localStorage.setItem(densityKey(role), d);
+    window.localStorage.setItem(DENSITY_KEY, d);
   } catch {
     /* tolerant */
   }
@@ -133,7 +133,7 @@ function saveDensity(role: Role, d: Density): void {
 
 const INITIAL_ROLE: Role = "mef_commander";
 
-export const useSpireStore = create<SpireState>((set, get) => ({
+export const useSpireStore = create<SpireState>((set) => ({
   role: INITIAL_ROLE,
   operatingMode: "full",
   alertCount: 0,
@@ -145,13 +145,8 @@ export const useSpireStore = create<SpireState>((set, get) => ({
   airGapActive: false,
   queueDepth: 0,
   toasts: [],
-  density: typeof window !== "undefined" ? loadDensity(INITIAL_ROLE) : "dense",
-  setRole: (role) =>
-    set({
-      role,
-      // Re-hydrate density from per-role localStorage on every role swap.
-      density: typeof window !== "undefined" ? loadDensity(role) : "dense",
-    }),
+  density: typeof window !== "undefined" ? loadDensity() : "dense",
+  setRole: (role) => set({ role }),
   setOperatingMode: (operatingMode) => set({ operatingMode }),
   setAlertCount: (alertCount) => set({ alertCount }),
   setSentryBatch: (sentryBatchId, sentryJobId) => set({ sentryBatchId, sentryJobId }),
@@ -161,7 +156,7 @@ export const useSpireStore = create<SpireState>((set, get) => ({
   setAirGap: (airGapActive) => set({ airGapActive }),
   setQueueDepth: (queueDepth) => set({ queueDepth }),
   setDensity: (density) => {
-    saveDensity(get().role, density);
+    saveDensity(density);
     set({ density });
   },
   pushToast: (t) => {
