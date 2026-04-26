@@ -271,13 +271,54 @@ def _summarize_intent(text: str, steps: list) -> str:
     return tools[0] or "answer"
 
 
+_TOOL_PROSE = {
+    "status_summary":             "Pull a status summary of the fleet",
+    "recommend_actions":          "Generate ranked replenishment actions",
+    "predict_failures":           "Run failure prediction over the horizon",
+    "find_asset":                 "Look up the asset",
+    "search_assets":              "Search the asset roster",
+    "find_cannibalization_match": "Find a cannibalization donor",
+    "get_coalition_view":         "Preview the coalition release view",
+    "parse_tmr":                  "Parse the TMR text",
+}
+
+
+def _strip_json_dump(text: str) -> str:
+    """Strip raw ```json ... ``` fences and tool_calls JSON from LLM text.
+    Some Gemma builds dump the tool_calls JSON straight into the assistant
+    content. The structured plan below the summary is the operator-facing
+    artefact; the raw JSON in the prose is just visual noise."""
+    if not text:
+        return ""
+    import re
+    # Remove ```json ... ``` fences (greedy flag to catch full block)
+    text = re.sub(r"```json[\s\S]*?```", "", text, flags=re.IGNORECASE)
+    # Remove inline summary_for_operator: tags and trailing JSON blobs
+    text = re.sub(r"summary_for_operator\s*:\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[\s*\{[\s\S]*?\}\s*\]", "", text)
+    return text.strip()
+
+
 def _plan_summary(content: str, steps: list) -> str:
-    """Build a short operator-readable summary of the plan."""
-    if content:
-        return content[:240]
+    """Build a short operator-readable summary of the plan.
+
+    Walkthrough audit: if the LLM dumped raw tool_calls JSON into its
+    response (some Gemma builds do), strip it out before showing to the
+    operator. If the cleaned content is empty, synthesize a step-list
+    sentence from the tool names so the plan card always reads cleanly.
+    """
+    cleaned = _strip_json_dump(content)
+    if cleaned and len(cleaned) > 12:
+        return cleaned[:240]
     if not steps:
         return "(empty plan)"
-    return f"Run {len(steps)} tool call{'s' if len(steps) != 1 else ''}: {', '.join(s.get('tool', '?') for s in steps)}"
+    parts = [_TOOL_PROSE.get(s.get("tool", ""), s.get("tool", "step")) for s in steps]
+    if len(parts) == 1:
+        return f"{parts[0]}."
+    if len(parts) == 2:
+        return f"{parts[0]}, then {parts[1]}."
+    return f"{parts[0]}, then {parts[1]}, then {len(parts) - 2} more."
+
 
 
 _UNIT_CANON = {
