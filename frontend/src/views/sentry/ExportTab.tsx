@@ -43,7 +43,9 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   async function doExport() {
     setLoading(true);
     try {
-      const r = await api.sentry.export(authority, format);
+      // Walkthrough #6 — pass batchId so the export covers the same batch
+      // the operator just processed.
+      const r = await api.sentry.export(authority, format, ctx.batchId);
       setResult(r as any);
       // Toast carries a click-through link so the operator never wonders
       // "where did the file go?" after a successful export. Reviewer caught
@@ -146,12 +148,37 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3">
+            {/* Walkthrough #6 — show input count next to exported count so
+                the operator sees exactly which records the bundle covers. */}
+            {result.records_input != null && (
+              <Stat label="Records In Batch" value={result.records_input.toLocaleString()} />
+            )}
             <Stat label="Records Exported" value={(result.records_exported ?? 0).toLocaleString()} />
             <Stat label="Rejected"          value={(result.records_rejected ?? 0).toLocaleString()} />
             <Stat label="Decisions Applied" value={`${result.decisions_applied ?? 0}`} />
             <Stat label="Redactions Applied" value={`${result.redactions_applied ?? 0}`} />
+            {/* Walkthrough #5 — Distribution Statement and REL TO are
+                independent fields. Render side-by-side. */}
+            <div>
+              <StatLabel>Distribution Authority</StatLabel>
+              <div className="font-mono text-sm text-[var(--color-text)]">
+                {result.distribution_authority ?? "—"}
+              </div>
+              <div className="text-xs text-[var(--color-text-secondary)]">
+                Controls who can access (DoDI 5230.24).
+              </div>
+            </div>
+            <div>
+              <StatLabel>REL TO Caveat</StatLabel>
+              <div className="font-mono text-sm text-[var(--color-text)]">
+                {result.rel_to_caveat || "(no foreign release)"}
+              </div>
+              <div className="text-xs text-[var(--color-text-secondary)]">
+                Controls which foreign nationals may receive.
+              </div>
+            </div>
             <div className="col-span-2">
-              <StatLabel>Distribution Statement</StatLabel>
+              <StatLabel>Distribution Statement (full)</StatLabel>
               <div className="spire-body-muted">{result.distribution_statement}</div>
             </div>
             <div className="col-span-2">
@@ -191,6 +218,16 @@ type DiffSample = {
   flags: string[];
   original: string;
   sanitized: string;
+  // Walkthrough #1 — backend returns explicit per-span before/after so
+  // the right pane renders the actual redacted output, not source-with-badge.
+  removed_spans?: {
+    start: number;
+    end: number;
+    before: string;
+    after: string;
+    category?: string;
+    rule?: string;
+  }[];
 };
 
 const FLAG_COLOR: Record<string, string> = {
@@ -251,7 +288,12 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                       Original
                     </div>
                     <div className="font-mono text-base leading-relaxed text-[var(--color-text)]">
-                      {d.original}
+                      {/* Walkthrough #1 — annotate the original with strike-
+                          through on the spans the redactor will remove. */}
+                      <OriginalWithMarkedSpans
+                        original={d.original}
+                        spans={d.removed_spans ?? []}
+                      />
                     </div>
                   </div>
                   <div className="p-3">
@@ -261,25 +303,10 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                       Sanitized · Export Bundle
                     </div>
                     <div className="font-mono text-base leading-relaxed text-[var(--color-text)]">
-                      {d.sanitized.split(/(\[[A-Z]+\s+REDACTED\])/g).map((chunk, i) => {
-                        const match = /^\[([A-Z]+)\s+REDACTED\]$/.exec(chunk);
-                        if (match) {
-                          const cat = match[1].toLowerCase();
-                          return (
-                            <span
-                              key={i}
-                              className="rounded-sm px-1 font-semibold"
-                              style={{
-                                background: `color-mix(in oklab, ${FLAG_COLOR[cat] || "#666"} 25%, transparent)`,
-                                color: FLAG_COLOR[cat] || "inherit",
-                              }}
-                            >
-                              {chunk}
-                            </span>
-                          );
-                        }
-                        return <span key={i}>{chunk}</span>;
-                      })}
+                      {/* Walkthrough #1 — render the ACTUAL sanitized string
+                          with replacement tokens highlighted. Never just the
+                          source-with-badge fallback. */}
+                      <SanitizedRendered sanitized={d.sanitized} />
                     </div>
                   </div>
                 </div>
@@ -289,6 +316,76 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
         })}
       </div>
     </div>
+  );
+}
+
+// Walkthrough #1 — left pane (original) with strike-through on the spans
+// the redactor will remove.
+function OriginalWithMarkedSpans({
+  original,
+  spans,
+}: {
+  original: string;
+  spans: NonNullable<DiffSample["removed_spans"]>;
+}) {
+  if (!spans || spans.length === 0) return <>{original}</>;
+  const sorted = [...spans].sort((a, b) => a.start - b.start);
+  const out: React.ReactNode[] = [];
+  let cursor = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const sp = sorted[i];
+    if (sp.start < cursor) continue;
+    if (sp.start > cursor) out.push(<span key={`p${i}`}>{original.slice(cursor, sp.start)}</span>);
+    out.push(
+      <span
+        key={`s${i}`}
+        className="rounded-sm px-0.5 line-through decoration-2"
+        style={{
+          background: "color-mix(in oklab, var(--color-danger) 16%, transparent)",
+          color: "var(--color-danger)",
+        }}
+        title={`Will be replaced with: ${sp.after}`}
+      >
+        {sp.before}
+      </span>,
+    );
+    cursor = sp.end;
+  }
+  if (cursor < original.length) out.push(<span key="tail">{original.slice(cursor)}</span>);
+  return <>{out}</>;
+}
+
+// Walkthrough #1 — sanitized pane: highlight every [REDACTED:...] token in
+// place so it reads as a deliberate replacement, not as inert source text.
+function SanitizedRendered({ sanitized }: { sanitized: string }) {
+  const re = /(\[REDACTED:[A-Z_]+\]|\[[A-Z]+\s+REDACTED\])/g;
+  const parts = sanitized.split(re);
+  return (
+    <>
+      {parts.map((chunk, i) => {
+        if (re.test(chunk)) {
+          re.lastIndex = 0;
+          let cat = "";
+          const m1 = /^\[REDACTED:([A-Z_]+)\]$/.exec(chunk);
+          const m2 = /^\[([A-Z]+)\s+REDACTED\]$/.exec(chunk);
+          if (m1) cat = m1[1].toLowerCase().split("_")[0];
+          else if (m2) cat = m2[1].toLowerCase();
+          return (
+            <span
+              key={i}
+              className="rounded-sm px-1 font-semibold"
+              style={{
+                background: `color-mix(in oklab, ${FLAG_COLOR[cat] || "var(--color-warning)"} 25%, transparent)`,
+                color: FLAG_COLOR[cat] || "var(--color-warning)",
+              }}
+            >
+              {chunk}
+            </span>
+          );
+        }
+        return <span key={i}>{chunk}</span>;
+      })}
+    </>
   );
 }
 
@@ -313,9 +410,14 @@ function StatLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Walkthrough #5 — Distribution Statements (A-F) and REL TO caveats are
+// independent. Earlier blurbs conflated them and were doctrinally wrong
+// ("Distribution A · public release" for U.S.-only is the OPPOSITE meaning;
+// Distribution E means DoD components only, not partner). Two-column posture
+// per DoDI 5230.24 v1.
 const DISTRIBUTION_BLURB: Record<Authority, string> = {
-  US_ONLY:  "Distribution A · public release · no foreign disclosure restrictions.",
-  FVEY:     "Distribution D · REL TO FVEY (USA, AUS, CAN, GBR, NZL).",
-  NATO:     "Distribution D · REL TO NATO. Further dissemination requires originator approval.",
-  SPECIFIC: "Distribution E · case-by-case partner release, originator-controlled.",
+  US_ONLY:  "Distribution C · authorized to U.S. Government agencies and their contractors. (No foreign release.)",
+  FVEY:     "Distribution C · authorized to U.S. Government agencies and their contractors · REL TO USA, AUS, CAN, GBR, NZL.",
+  NATO:     "Distribution C · authorized to U.S. Government agencies and their contractors · REL TO NATO.",
+  SPECIFIC: "Distribution C · authorized to U.S. Government agencies and their contractors · specific partner release, originator-controlled.",
 };
