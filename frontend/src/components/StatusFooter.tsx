@@ -166,6 +166,12 @@ export function StatusFooter() {
        * classification posture is no longer duplicated here. */}
       <div
         className="absolute inset-y-0 left-0 right-0 z-0 overflow-hidden pl-[14rem] pr-3 md:pl-[18rem] md:pr-[14rem] lg:pl-[28rem]"
+        // Walkthrough audit: screen readers were reading the duplicated
+        // ticker track twice (the second copy is purely visual padding for
+        // the marquee loop). aria-hidden on the wrapper mutes both copies
+        // for AT — the same data lives in /api/system/status for any
+        // operator who needs it accessibly.
+        aria-hidden="true"
       >
         <div
           className="ticker flex h-full items-center whitespace-nowrap font-mono text-xs tracking-wider"

@@ -967,8 +967,21 @@ function AlertStreamHeader({
           type="search"
           value={searchQuery}
           onChange={(e) => onSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            // Walkthrough audit: Esc inside the search clears + blurs.
+            // Previously Escape did nothing, leaving the operator to
+            // mouse to the input and select-all-delete.
+            if (e.key === "Escape") {
+              if (searchQuery) {
+                e.preventDefault();
+                onSearchQuery("");
+              } else {
+                (e.target as HTMLInputElement).blur();
+              }
+            }
+          }}
           placeholder="Search title, body, unit… ( / )"
-          aria-label="Filter alerts (press / to focus)"
+          aria-label="Filter alerts (press / to focus, Esc to clear)"
           className="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:outline-none"
         />
       </div>
