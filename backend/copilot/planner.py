@@ -139,11 +139,12 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
                 args = {}
             steps.append({"tool": fn.get("name"), "args": args, "id": tc.get("id")})
 
+        cleaned_content = _strip_json_dump(content)
         return {
             "plan_id": plan_id,
             "intent": _summarize_intent(text, steps),
-            "summary": content if not steps else _plan_summary(content, steps),
-            "answer": content if not steps else None,
+            "summary": cleaned_content if not steps else _plan_summary(cleaned_content, steps),
+            "answer": cleaned_content if not steps else None,
             "steps": steps,
             "engine": "Gemma4 via RigRun proxy",
             "tokens_used": usage.get("total_tokens"),
@@ -173,11 +174,17 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
                 usage = result.get("usage") or {}
                 # Run rule-based intent extraction in parallel for tool steps.
                 rb = _rule_based_plan(text, role, plan_id, error="")
+                cleaned = _strip_json_dump(content)
+                # If the cleaned LLM prose is too thin, synthesize a step
+                # sentence from the rule-based steps so the plan card is
+                # never empty or noisy.
+                if rb["steps"] and (not cleaned or len(cleaned) < 12):
+                    cleaned = _plan_summary("", rb["steps"])
                 return {
                     "plan_id": plan_id,
                     "intent": rb["intent"],
-                    "summary": content or rb["summary"],
-                    "answer": content or rb["answer"],
+                    "summary": cleaned or rb["summary"],
+                    "answer": cleaned or rb["answer"],
                     "steps": rb["steps"],
                     "engine": "Gemma4 via RigRun proxy (no-tools fallback)",
                     "tokens_used": usage.get("total_tokens"),
@@ -285,18 +292,30 @@ _TOOL_PROSE = {
 
 def _strip_json_dump(text: str) -> str:
     """Strip raw ```json ... ``` fences and tool_calls JSON from LLM text.
+
     Some Gemma builds dump the tool_calls JSON straight into the assistant
     content. The structured plan below the summary is the operator-facing
-    artefact; the raw JSON in the prose is just visual noise."""
+    artefact; the raw JSON in the prose is just visual noise.
+
+    If the LLM emitted an explicit `summary_for_operator: <prose>` line,
+    that prose is the *intended* operator summary — extract and return it.
+    Otherwise strip the noise from whatever else is in the text.
+    """
     if not text:
         return ""
     import re
-    # Remove ```json ... ``` fences (greedy flag to catch full block)
+    # Preferred: lift `summary_for_operator: <one line>` directly.
+    m = re.search(r"summary_for_operator\s*:\s*(.+?)(?:\n|$)", text, flags=re.IGNORECASE)
+    if m:
+        prose = m.group(1).strip().strip("`").strip()
+        if prose:
+            return prose
+    # Otherwise: scrub fences, bare JSON arrays, leftover tag.
     text = re.sub(r"```json[\s\S]*?```", "", text, flags=re.IGNORECASE)
-    # Remove inline summary_for_operator: tags and trailing JSON blobs
-    text = re.sub(r"summary_for_operator\s*:\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"```[\s\S]*?```", "", text)  # any other code fence
     text = re.sub(r"\[\s*\{[\s\S]*?\}\s*\]", "", text)
-    return text.strip()
+    text = re.sub(r"summary_for_operator\s*:?\s*", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\n{2,}", "\n", text).strip()
 
 
 def _plan_summary(content: str, steps: list) -> str:
