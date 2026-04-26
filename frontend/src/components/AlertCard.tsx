@@ -26,30 +26,36 @@ const SEVERITY_DOT: Record<string, string> = {
   INFO:     "bg-[var(--color-primary)]",
 };
 
-function formatTime(iso: string): string {
+function formatTime(iso: string): { text: string; synthetic: boolean } {
   try {
     const d = new Date(iso);
     const now = Date.now();
     const diffSec = Math.floor((now - d.getTime()) / 1000);
     // Dataset is synthetic; timestamps can live in the future relative to the
-    // real wall clock. In that case fall back to absolute day-month + HH:MM so
-    // the row still reads as a plausible event log rather than "0s ago".
+    // real wall clock. Surface a SYNTH chip on those rows so operators don't
+    // see "MAY 30" next to a Mission Clock reading "26 APR 26" and lose
+    // trust. Reviewer caught the date drift and asked for explicit labelling
+    // (alternative was rebasing synthetic, which we keep as future work).
     if (diffSec < 0) {
-      return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+      return {
+        text: d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }),
+        synthetic: true,
+      };
     }
-    if (diffSec < 60) return `${diffSec}s ago`;
-    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-    if (diffSec < 604800) return `${Math.floor(diffSec / 86400)}d ago`;
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    if (diffSec < 60)    return { text: `${diffSec}s ago`, synthetic: false };
+    if (diffSec < 3600)  return { text: `${Math.floor(diffSec / 60)}m ago`, synthetic: false };
+    if (diffSec < 86400) return { text: `${Math.floor(diffSec / 3600)}h ago`, synthetic: false };
+    if (diffSec < 604800) return { text: `${Math.floor(diffSec / 86400)}d ago`, synthetic: false };
+    return { text: d.toLocaleDateString([], { month: "short", day: "numeric" }), synthetic: false };
   } catch {
-    return iso;
+    return { text: iso, synthetic: false };
   }
 }
 
 export function AlertCard({ severity, source, title, body, timestamp, onClick, actionLabel }: Props) {
   const style = SEVERITY_STYLE[severity] || SEVERITY_STYLE.INFO;
   const dot = SEVERITY_DOT[severity] || SEVERITY_DOT.INFO;
+  const ts = formatTime(timestamp);
 
   return (
     <div
@@ -64,7 +70,17 @@ export function AlertCard({ severity, source, title, body, timestamp, onClick, a
         <span className={clsx("h-2 w-2 rounded-full", dot)} />
         <span className="font-semibold">{severity}</span>
         {source && <span>· {source}</span>}
-        <span className="ml-auto font-mono tabular-nums">{formatTime(timestamp)}</span>
+        <span className="ml-auto flex items-center gap-1.5">
+          {ts.synthetic && (
+            <span
+              className="rounded-sm border border-[var(--color-warning-muted)] px-1 py-[1px] font-mono text-[10px] uppercase text-[var(--color-warning)] tracking-widest"
+              title="Synthetic dataset · timestamp ahead of live wall clock"
+            >
+              SYNTH
+            </span>
+          )}
+          <span className="font-mono tabular-nums">{ts.text}</span>
+        </span>
       </div>
       <div className="mb-1 text-sm font-medium text-[var(--color-text)]">{title}</div>
       <div className="text-xs leading-snug text-[var(--color-text-secondary)]">{body}</div>
