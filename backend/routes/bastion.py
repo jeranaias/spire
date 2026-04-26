@@ -595,12 +595,12 @@ def _build_grounding_context(role: str | None) -> str:
     allowed = allowed_units(ds, role)
     in_scope = ds.assets if allowed is None else [a for a in ds.assets if a.unit_name in allowed]
 
-    deadlined = [a for a in in_scope if getattr(a, "is_deadlined", False)][:8]
+    deadlined = [a for a in in_scope if ((getattr(a, "current_status", "") or "").startswith("NMC"))][:8]
     by_unit: dict[str, dict[str, int]] = {}
     for a in in_scope:
         u = by_unit.setdefault(a.unit_name, {"total": 0, "deadlined": 0})
         u["total"] += 1
-        if getattr(a, "is_deadlined", False):
+        if ((getattr(a, "current_status", "") or "").startswith("NMC")):
             u["deadlined"] += 1
 
     lines = []
