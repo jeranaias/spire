@@ -749,7 +749,12 @@ export function MapCanvas({
         initialViewState={{
           longitude: centerLon,
           latitude: centerLat,
-          zoom: 14.7,
+          // Walkthrough audit: zoom 14.7 was too tight on first paint —
+          // before fitToAllUnits runs, the operator would see a small
+          // building-cluster view with 4-7 units already off-screen.
+          // 13 gives the whole installation footprint at first paint and
+          // the subsequent fitToAllUnits zoom only refines.
+          zoom: 13,
           bearing: 0,
           pitch: 0,
         }}
