@@ -160,6 +160,14 @@ const DEFAULT_ROLE: Role = "mef_commander";
 // If the param is invalid or absent, fall back to the default. Whichever
 // path we take, we strip `role` from the live URL so a refresh inherits
 // only the route, never a phantom role.
+// Walkthrough audit: the role used to reset to the default on every
+// page reload. An operator picking 'Security Mgr', refreshing, and
+// being kicked back to MEF Commander is a real frustration. Persist
+// last-selected role in localStorage so refresh keeps the seat.
+// URL `?role=X` still wins (single-link override for demos), and
+// nothing about scope-enforcement changes — the backend always honors
+// X-User-Role per request.
+const ROLE_KEY = "spire.role";
 function readInitialRole(): Role {
   if (typeof window === "undefined") return DEFAULT_ROLE;
   try {
@@ -171,8 +179,11 @@ function readInitialRole(): Role {
       url.searchParams.delete("role");
       const cleaned = url.pathname + (url.search ? url.search : "") + url.hash;
       window.history.replaceState({}, "", cleaned);
+      try { window.localStorage.setItem(ROLE_KEY, raw); } catch { /* tolerant */ }
       return raw as Role;
     }
+    const stored = window.localStorage.getItem(ROLE_KEY);
+    if (stored && (stored in ROLE_LABELS)) return stored as Role;
   } catch {
     /* tolerant */
   }
@@ -196,7 +207,10 @@ export const useSpireStore = create<SpireState>((set) => ({
   queueDepth: 0,
   toasts: [],
   density: typeof window !== "undefined" ? loadDensity() : "dense",
-  setRole: (role) => set({ role }),
+  setRole: (role) => {
+    try { window.localStorage.setItem(ROLE_KEY, role); } catch { /* tolerant */ }
+    set({ role });
+  },
   setOperatingMode: (operatingMode) => set({ operatingMode }),
   setAlertCount: (alertCount) => set({ alertCount }),
   setAlertSeverityCounts: (alertSeverityCounts) => set({ alertSeverityCounts }),
