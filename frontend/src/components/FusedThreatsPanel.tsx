@@ -10,6 +10,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, type FusedThreat } from "../api";
+import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
 
 const SEV_COLOR: Record<string, string> = {
@@ -36,21 +37,18 @@ export function FusedThreatsPanel({
       setThreats(initialThreats);
       return;
     }
-    let alive = true;
-    const fetch = async () => {
-      try {
-        const r = await api.bastion.fusedThreats();
-        if (alive) setThreats(r.fused_threats || []);
-      } catch {
-        /* tolerate */
-      }
-    };
-    fetch();
-    const id = setInterval(fetch, 5000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+    // Walkthrough audit: 5s setInterval hammered /fused-threats with no
+    // backoff, contributing to 502 storms during Fly deploy churn.
+    // Switch to pollWithBackoff: 5s base, drops to 60s when nothing
+    // changes, retries with backoff on errors.
+    const ctrl = pollWithBackoff(() => api.bastion.fusedThreats(), {
+      baseMs: 5000,
+      maxMs: 60000,
+      fingerprint: (r) =>
+        (r.fused_threats || []).map((t) => `${t.id}:${t.severity}`).join(","),
+      onResult: (r) => setThreats(r.fused_threats || []),
+    });
+    return () => ctrl.stop();
   }, [initialThreats, role]);
 
   if (threats.length === 0) {
