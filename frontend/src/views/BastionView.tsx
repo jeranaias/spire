@@ -1000,10 +1000,16 @@ function MissionHUD() {
   }, []);
 
   const z = (n: number, w = 2) => String(n).padStart(w, "0");
-  const zulu = `${z(now.getUTCHours())}${z(now.getUTCMinutes())}${z(now.getUTCSeconds())}Z`;
-  const datestamp = `${z(now.getUTCDate())} ${now
+  // Walkthrough audit: prior format split DTG across two lines
+  // ('162123Z' + '26 APR 26'), which buries the day. Marines read
+  // DTG canonically as DDHHMMZ MMM YY ('262123Z APR 26'). Display the
+  // canonical day-prefixed form on the primary line; keep MMM YY on the
+  // secondary line so the year stays glanceable.
+  const dtg = `${z(now.getUTCDate())}${z(now.getUTCHours())}${z(now.getUTCMinutes())}Z`;
+  const seconds = z(now.getUTCSeconds());
+  const datestamp = `${now
     .toLocaleString("en-US", { month: "short", timeZone: "UTC" })
-    .toUpperCase()} ${now.getUTCFullYear().toString().slice(2)}`;
+    .toUpperCase()} ${now.getUTCFullYear().toString().slice(2)} · ${seconds}s`;
 
   return (
     <div
@@ -1018,7 +1024,7 @@ function MissionHUD() {
         className="mt-0.5 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)] tracking-wide"
         style={{ lineHeight: 1 }}
       >
-        {zulu}
+        {dtg}
       </div>
       <div
         className="mt-0.5 font-mono text-xs text-[var(--color-text-secondary)] tracking-wider"
