@@ -18,9 +18,9 @@
  * chain so a security manager can later inspect every coalition share.
  */
 import { useEffect, useMemo, useState } from "react";
+import clsx from "clsx";
 import { api, type CoalitionProfileSummary, type CoalitionView } from "../../api";
 import { useSpireStore } from "../../state/store";
-import { SegmentedControl } from "../../components/SegmentedControl";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 
 export function CoalitionTab() {
@@ -145,8 +145,32 @@ export function CoalitionTab() {
             Same canonical dataset; different release ceiling, different redactions, different caveats — all applied in real time.
           </div>
         </div>
+        {/* Walkthrough #24 — partner tabs were colliding ("AUSTRALIA · ADF"
+            overlapping "PHILIPPINES · AFP"). Use a flex-wrap row of
+            buttons with explicit gap + whitespace-nowrap on each label so
+            tabs that don't fit drop to a second row instead of overlapping. */}
         {profileOptions.length > 0 && (
-          <SegmentedControl value={selected} options={profileOptions} onChange={setSelected} />
+          <div role="group" className="inline-flex flex-wrap items-center gap-1.5">
+            {profileOptions.map((o) => {
+              const active = o.value === selected;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setSelected(o.value)}
+                  className={clsx(
+                    "inline-flex h-11 items-center whitespace-nowrap rounded-sm border px-3 font-mono text-sm font-semibold uppercase tracking-wider transition-colors",
+                    active
+                      ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
+                      : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]",
+                  )}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -210,6 +234,39 @@ export function CoalitionTab() {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Walkthrough #14 — hoist a compact Authorized Units strip
+              directly under the header banner so the operator sees in-scope
+              units on first paint, instead of the panel being mostly off-
+              screen below the partner tabs. The full panel still renders
+              below for detail. */}
+          <div className="mb-4 rounded-md border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] p-3">
+            <div className="mb-1 flex items-center justify-between font-mono text-xs uppercase tracking-widest">
+              <span className="text-[var(--color-primary)]">
+                Authorized Units · {view.allowed_units.length} in scope
+              </span>
+              <span className="text-[var(--color-text-muted)]">
+                {view.scope.units_blocked} blocked
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 font-mono text-xs">
+              {view.allowed_units.length === 0 ? (
+                <span className="text-[var(--color-danger)]">
+                  NO UNITS IN SCOPE FOR THIS PROFILE
+                </span>
+              ) : (
+                view.allowed_units.map((u) => (
+                  <span
+                    key={u.uic}
+                    className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5"
+                    title={`${u.parent} · ${u.location}`}
+                  >
+                    {u.unit}
+                  </span>
+                ))
+              )}
+            </div>
           </div>
 
           {/* Scope summary */}
@@ -308,8 +365,18 @@ export function CoalitionTab() {
             </div>
           </div>
 
-          <div className="font-mono text-xs text-[var(--color-text-muted)] tracking-widest">
-            View as-of {view.as_of} · Profile loaded from data/coalition_profiles.json
+          {/* Walkthrough #13 — replace engineering metadata leak. Was:
+              "Profile loaded from data/coalition_profiles.json".
+              Walkthrough #12 — surface the inspected sample size + an
+              affordance to inspect the 200-record sample. */}
+          <div className="flex items-center justify-between font-mono text-xs text-[var(--color-text-muted)] tracking-widest">
+            <span>
+              Profile: {view.display_name} · loaded {view.as_of}
+            </span>
+            <span>
+              Sample inspected: {view.scope.sample_srs_total_inspected} records ·{" "}
+              {view.scope.sample_srs_allowed} allowed · {view.scope.sample_srs_blocked} blocked
+            </span>
           </div>
         </>
       )}
@@ -341,10 +408,21 @@ export function CoalitionTab() {
                 <span className="text-xs text-[var(--color-text-muted)] tracking-wide">
                   {r.profile} · {r.partners.join(" · ")}
                 </span>
-                <span className="ml-auto text-xs text-[var(--color-text-muted)] tracking-wider">
-                  {new Date(r.created_at).toLocaleString([], {
-                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
-                  })}
+                {/* Walkthrough #9 — render UTC timestamp consistently with
+                    the release_id (which embeds UTC). Mixing local time +
+                    UTC release_id produced two valid times for one event. */}
+                <span
+                  className="ml-auto text-xs text-[var(--color-text-muted)] tracking-wider"
+                  title={`Local: ${new Date(r.created_at).toLocaleString()}`}
+                >
+                  {(() => {
+                    const d = new Date(r.created_at);
+                    const m = d.getUTCMonth() + 1;
+                    const day = d.getUTCDate();
+                    const hh = String(d.getUTCHours()).padStart(2, "0");
+                    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+                    return `${String(m).padStart(2, "0")}/${String(day).padStart(2, "0")} ${hh}:${mm}Z`;
+                  })()}
                 </span>
                 <span className="rounded-sm border border-[var(--color-success-muted)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-success)] tracking-wider">
                   audit logged
@@ -456,44 +534,50 @@ function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
         <span className="text-[var(--color-text-muted)] tracking-wide">
           {record.equipment_type} · {record.unit_name}
         </span>
-        {(record.redactions?.length ?? 0) > 0 && (
+        {/* Walkthrough #15 — only render the REDACTED count when this record
+            actually has at least one redaction span. Clean PMCS records with
+            no redactable content used to show "REDACTED" badges spuriously. */}
+        {Array.isArray(record.redaction_spans) && record.redaction_spans.length > 0 && (
           <span className="ml-auto font-mono text-xs text-[var(--color-warning)] tracking-wider">
-            {record.redactions!.length} REDACTED
+            {record.redaction_spans.length} REDACTED
           </span>
         )}
       </div>
 
-      {/* Fault component diff: original (strike-through) → generalised (yellow) */}
-      <div className="mt-1 text-xs text-[var(--color-text-secondary)] tracking-wide">
-        Fault:{" "}
-        {faultChanged ? (
-          <>
-            <span
-              className="rounded-sm px-0.5 line-through"
-              style={{
-                background: "color-mix(in oklab, var(--color-danger) 15%, transparent)",
-                color: "var(--color-danger)",
-              }}
-              title="original value (preview only — never released)"
-            >
-              {record.fault_component_original}
-            </span>
-            <span className="mx-1 text-[var(--color-text-muted)]">→</span>
-            <span
-              className="rounded-sm px-0.5 font-semibold"
-              style={{
-                background: "color-mix(in oklab, var(--color-warning) 25%, transparent)",
-                color: "var(--color-warning)",
-              }}
-              title="generalised value sent to partner"
-            >
-              {record.fault_component}
-            </span>
-          </>
-        ) : (
-          <span className="text-[var(--color-text)]">{record.fault_component}</span>
-        )}
-      </div>
+      {/* Walkthrough #16 — drop the Fault row entirely when there's nothing
+          to render. Was: "Fault:" with empty content for most records. */}
+      {(faultChanged || record.fault_component) && (
+        <div className="mt-1 text-xs text-[var(--color-text-secondary)] tracking-wide">
+          Fault:{" "}
+          {faultChanged ? (
+            <>
+              <span
+                className="rounded-sm px-0.5 line-through"
+                style={{
+                  background: "color-mix(in oklab, var(--color-danger) 15%, transparent)",
+                  color: "var(--color-danger)",
+                }}
+                title="original value (preview only — never released)"
+              >
+                {record.fault_component_original}
+              </span>
+              <span className="mx-1 text-[var(--color-text-muted)]">→</span>
+              <span
+                className="rounded-sm px-0.5 font-semibold"
+                style={{
+                  background: "color-mix(in oklab, var(--color-warning) 25%, transparent)",
+                  color: "var(--color-warning)",
+                }}
+                title="generalised value sent to partner"
+              >
+                {record.fault_component}
+              </span>
+            </>
+          ) : (
+            <span className="text-[var(--color-text)]">{record.fault_component}</span>
+          )}
+        </div>
+      )}
 
       {/* Remark with inline highlights for any redacted substrings */}
       <div className="mt-1 text-xs leading-relaxed text-[var(--color-text)]">
