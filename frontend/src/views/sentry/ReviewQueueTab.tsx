@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { api, type SentryReviewQueue } from "../../api";
 import type { SentryContext } from "../SentryView";
 import { useSpireStore } from "../../state/store";
+import type { Role } from "../../state/store";
 
 type Column = "auto_cleared" | "flagged" | "held";
 type Action = "approve" | "reject";
@@ -30,12 +31,37 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
   const [selected, setSelected] = useState<{ col: Column; idx: number } | null>(null);
   const [showAggregation, setShowAggregation] = useState(false);
   const [bulkRunning, setBulkRunning] = useState(false);
+  // Surfacing the load failure was missing — backend would 400 on a stale
+  // role param mismatch and the view would sit on "Loading review queue ..."
+  // forever. Tracked separately from `queue` so the retry button has its own
+  // affordance + the loading state is unambiguous.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const role = useSpireStore((s) => s.role) as Role;
   const pushToast = useSpireStore((s) => s.pushToast);
 
   useEffect(() => {
     if (!ctx.batchId) return;
-    api.sentry.reviewQueue(ctx.batchId).then(setQueue);
-  }, [ctx.batchId]);
+    let cancelled = false;
+    setQueue(null);
+    setLoadError(null);
+    api.sentry
+      .reviewQueue(ctx.batchId)
+      .then((q) => {
+        if (cancelled) return;
+        setQueue(q);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setLoadError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Refetch on role swap so the URL/store are always in sync; previously a
+    // role change after first load left the queue stale and any in-flight
+    // request rejected by the backend's role-scoping filter.
+  }, [ctx.batchId, role, retryCount]);
 
   const filteredQueue = useMemo(() => {
     if (!queue) return null;
@@ -144,6 +170,32 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
 
   if (!ctx.batchId) {
     return <Empty msg="No processed batch. Load + process one first." />;
+  }
+  if (loadError) {
+    return (
+      <div className="flex h-full items-center justify-center p-12">
+        <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
+          <div
+            className="font-mono text-xs uppercase text-[var(--color-danger)] tracking-widest"
+          >
+            Review queue failed to load
+          </div>
+          <div className="mt-2 spire-body text-sm">
+            Backend rejected the queue request. This is usually a stale role scope —
+            switch role and back, or click retry.
+          </div>
+          <div className="mt-3 break-words font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            {loadError}
+          </div>
+          <button
+            onClick={() => setRetryCount((n) => n + 1)}
+            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
   }
   if (!filteredQueue) {
     return <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">Loading review queue ...</div>;
