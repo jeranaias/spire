@@ -196,7 +196,7 @@ export function NodeStatus() {
                 <div
                   className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
                 >
-                  Distributed Sync · GC-2
+                  Distributed Sync
                 </div>
                 <div className="mt-0.5 font-mono text-lg font-semibold text-[var(--color-text)] tracking-wide">
                   {state.node_id} ↔ {state.peer_node_id}

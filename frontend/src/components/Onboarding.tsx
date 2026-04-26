@@ -4,7 +4,7 @@
  * Triggered when localStorage.spire.onboarding.v1 is unset.
  *
  * Three slides (skip-able at any point, persisted to localStorage):
- *   1. What SPIRE is — 5-of-9 use cases, defense-grade pitch in 4 lines
+ *   1. What SPIRE is — what an operator does with it, in 4 lines
  *   2. Your role + what you do here — role-shaped landing surface
  *   3. The three things you should know — `?` for help, Shift+F for
  *      feedback, ask SPIRO anytime via Ctrl+/
@@ -133,20 +133,20 @@ export function Onboarding() {
               </h2>
             </div>
             <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-              SPIRE is a USMC operating system for contested logistics — built by Marines, on duty time.
-              One synthetic dataset, three operational regimes (garrison · pre-deployment · active incident),
-              five operator roles, and seven game-changers all running on a single laptop. No cloud. IL5-fit.
+              SPIRE is a single screen for the things that take a Marine a dozen tabs and three phone calls today.
+              See unit readiness, find a cannib donor, draft a TMR, mark CUI, watch the gate cameras. One laptop.
+              Works without internet. Built by Marines, on duty time.
             </p>
             <div className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] p-3">
               <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
-                Five MDM 2026 use cases solved in one system
+                What you can do here
               </div>
               <ul className="mt-2 space-y-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
-                <li>· #2 Inventory control — PULSE Risk Board + Cannibalization</li>
-                <li>· #5 Parts demand forecasting — GC-1 Monte Carlo + GC-3 predicted failure</li>
-                <li>· #6 CUI auto-tagging — SENTRY Tier-1 pattern + Tier-2 LLM gate</li>
-                <li>· #7 Installation COP — BASTION + GC-4 multi-sensor fusion</li>
-                <li>· #9 TMR automation — natural-language parser via Gemma 4</li>
+                <li>· See your unit's readiness, by asset, in real time</li>
+                <li>· Forecast where readiness is heading 7-30 days out</li>
+                <li>· Find a cannibalization donor, draft the TMR, send it</li>
+                <li>· Mark a record CUI / NOFORN / coalition-releasable</li>
+                <li>· Watch base sensors (gate, perimeter, drone) on one map</li>
               </ul>
             </div>
           </>

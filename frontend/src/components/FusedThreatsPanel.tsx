@@ -67,7 +67,7 @@ export function FusedThreatsPanel({
         <span
           className="font-mono text-xs font-semibold uppercase text-[var(--color-success)] tracking-widest"
         >
-          Fused Threats · GC-4
+          Fused Threats
         </span>
         <span
           className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
@@ -85,7 +85,7 @@ export function FusedThreatsPanel({
           <span
             className="font-mono text-xs font-semibold uppercase text-[var(--color-danger)] tracking-widest"
           >
-            ◆ Fused Threats · GC-4
+            ◆ Fused Threats
           </span>
           <span
             className="font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wider"

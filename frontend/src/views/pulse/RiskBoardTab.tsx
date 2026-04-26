@@ -96,7 +96,7 @@ export function RiskBoardTab() {
                 className="font-mono uppercase text-[var(--color-warning)]"
                 style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
               >
-                Predicted Failures · GC-3
+                Predicted Failures
               </span>
             }
             collapsedSummary={
