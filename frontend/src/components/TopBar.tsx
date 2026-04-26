@@ -42,18 +42,18 @@ export function TopBar() {
         }}
       />
       <div className="flex h-full min-w-0 items-center justify-between gap-3 px-4">
-        <div className="flex min-w-0 items-center gap-6">
+        <div className="flex min-w-0 items-center gap-4">
           <div className="flex shrink-0 items-center gap-2.5">
             <SpireMark />
             <div className="flex flex-col leading-none">
               <span
-                className="font-mono text-lg font-semibold tracking-[0.24em] text-[var(--color-text)]"
+                className="font-mono text-lg font-semibold tracking-[0.2em] text-[var(--color-text)]"
                 style={{ fontFeatureSettings: "'ss01'" }}
               >
                 SPIRE
               </span>
               <span
-                className="mt-[3px] font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
+                className="mt-[3px] hidden font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest lg:block"
               >
                 Contested Logistics
               </span>
@@ -76,7 +76,7 @@ export function TopBar() {
                       key={tab.to}
                       aria-disabled="true"
                       title={`Out of scope · authorized: ${allowedRoles.map((r) => ROLE_LABELS[r]).join(", ")}`}
-                      className="group relative cursor-not-allowed select-none px-4 py-2 font-mono text-sm font-semibold uppercase tracking-widest text-[var(--color-text-muted)] opacity-50"
+                      className="group relative cursor-not-allowed select-none px-3 py-2 font-mono text-sm font-semibold uppercase tracking-widest text-[var(--color-text-muted)] opacity-50"
                     >
                       <span
                         className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
@@ -96,7 +96,7 @@ export function TopBar() {
                     to={tab.to}
                     className={({ isActive }) =>
                       clsx(
-                        "group relative px-4 py-2 font-mono text-sm font-semibold uppercase transition-colors tracking-widest",
+                        "group relative px-3 py-2 font-mono text-sm font-semibold uppercase transition-colors tracking-widest",
                         isActive
                           ? "text-[var(--color-text)]"
                           : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
@@ -131,7 +131,7 @@ export function TopBar() {
           </nav>
         </div>
 
-        <div className="flex min-w-0 shrink items-center gap-3 overflow-hidden">
+        <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
           <NodeStatus />
           <AirGapToggle />
           <DensityToggle />
@@ -200,55 +200,30 @@ function SpireMark() {
   );
 }
 
-// Role-scope intel — brief scope summary shown next to the role chip.
-// Helps the "I know what I'm authorized for" feel rather than "it's a form".
-const ROLE_SCOPE_HINT: Record<Role, string> = {
-  maintenance_chief: "1 unit · CLB-6",
-  g4:                "3 units · 2d MLG",
-  mef_commander:     "Full MEF",
-  data_custodian:    "SENTRY pipeline",
-  security_manager:  "FPCON · ECP · ASP",
-};
-
 function RoleSelector({ role, onChange }: { role: Role; onChange: (r: Role) => void }) {
   return (
-    <div className="flex items-center gap-2">
-      <div
-        className="hidden select-none flex-col items-end sm:flex"
+    <div className="relative shrink-0">
+      <select
+        value={role}
+        onChange={(e) => onChange(e.target.value as Role)}
+        title="Operator role — sets scope and default landing view"
+        // Wider min so "MEF Commander" doesn't truncate at 6 chars and
+        // "Maintenance Chief (CLB-6)" stops collapsing into ellipsis.
+        // Cap with max-w + truncate so the pill stays a single line on
+        // narrow viewports without spilling into the alert badge.
+        className="h-11 min-w-[11rem] max-w-[15rem] appearance-none truncate rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none tracking-wider"
       >
-        <span
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
-        >
-          Operator
-        </span>
-        <span
-          className="font-mono text-xs text-[var(--color-primary)] tracking-wider"
-        >
-          ◆ {ROLE_SCOPE_HINT[role]}
-        </span>
-      </div>
-      <div className="relative">
-        <select
-          value={role}
-          onChange={(e) => onChange(e.target.value as Role)}
-          // Wider min so "MEF Commander" doesn't truncate at 6 chars and
-          // "Maintenance Chief (CLB-6)" stops collapsing into ellipsis.
-          // Cap with max-w + truncate so the pill stays a single line on
-          // narrow viewports without spilling into the alert badge.
-          className="h-11 min-w-[12rem] max-w-[16rem] appearance-none truncate rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none tracking-wider"
-        >
-          {(Object.keys(ROLE_LABELS) as Role[]).map((k) => (
-            <option key={k} value={k}>{ROLE_LABELS[k]}</option>
-          ))}
-        </select>
-        <svg
-          className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--color-primary)]"
-          viewBox="0 0 12 12"
-          fill="currentColor"
-        >
-          <path d="M2 4l4 4 4-4H2z" />
-        </svg>
-      </div>
+        {(Object.keys(ROLE_LABELS) as Role[]).map((k) => (
+          <option key={k} value={k}>{ROLE_LABELS[k]}</option>
+        ))}
+      </select>
+      <svg
+        className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--color-primary)]"
+        viewBox="0 0 12 12"
+        fill="currentColor"
+      >
+        <path d="M2 4l4 4 4-4H2z" />
+      </svg>
     </div>
   );
 }
@@ -257,7 +232,7 @@ function ModeBadge({ mode }: { mode: "full" | "lite" }) {
   const isFull = mode === "full";
   return (
     <div
-      className="flex items-center gap-2 rounded-sm border px-2.5 py-1 font-mono text-xs uppercase tracking-wider"
+      className="hidden shrink-0 items-center gap-1.5 rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider md:flex"
       style={{
         borderColor: isFull
           ? "color-mix(in oklab, var(--color-success) 35%, var(--color-border))"
@@ -266,6 +241,7 @@ function ModeBadge({ mode }: { mode: "full" | "lite" }) {
           ? "color-mix(in oklab, var(--color-success-muted) 15%, transparent)"
           : "color-mix(in oklab, var(--color-warning-muted) 15%, transparent)",
       }}
+      title={isFull ? "Local backend online" : "Reduced-feature lite mode"}
     >
       <span
         className="relative flex h-2 w-2"
@@ -289,7 +265,7 @@ function ModeBadge({ mode }: { mode: "full" | "lite" }) {
           color: isFull ? "var(--color-success)" : "var(--color-warning)",
         }}
       >
-        {isFull ? "Local · Online" : "Lite Mode"}
+        {isFull ? "LOCAL" : "LITE"}
       </span>
     </div>
   );
@@ -306,7 +282,8 @@ function AlertBadge({ count }: { count: number }) {
                          "var(--color-danger)";
   return (
     <div
-      className="flex items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs uppercase tracking-wider"
+      className="flex shrink-0 items-center gap-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs uppercase tracking-wider"
+      title={`${count} active alert${count === 1 ? "" : "s"}`}
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{ color }}>
         <path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" />
@@ -314,7 +291,6 @@ function AlertBadge({ count }: { count: number }) {
       <span className="tabular-nums" style={{ color }}>
         {String(count).padStart(2, "0")}
       </span>
-      <span className="text-[var(--color-text-muted)]">alerts</span>
     </div>
   );
 }
