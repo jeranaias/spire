@@ -33,6 +33,15 @@ export interface SpireState {
   role: Role;
   operatingMode: OperatingMode;
   alertCount: number;
+  // Severity breakdown for the TopBar badge tooltip and any other consumer
+  // that wants to render `30 open alerts (HIGH: 3, MODERATE: 12, INFO: 15)`.
+  // Always backend-truth — set by whoever last polled `/bastion/alerts`.
+  alertSeverityCounts: Record<string, number>;
+  // Drill-from-alert handoff. The alert column writes the unit / building
+  // it wants the map to focus on; MapCanvas reads via the BastionView
+  // wiring (selectedUnit + flyToBuilding). The store version exists so a
+  // future cross-view drill can survive role / view changes.
+  selectedUnitId: string | null;
 
   // SENTRY batch context — hoisted out of SentryView local state so that
   // switching operator role via the TopBar dropdown (which unmounts the
@@ -62,6 +71,8 @@ export interface SpireState {
   setRole: (r: Role) => void;
   setOperatingMode: (m: OperatingMode) => void;
   setAlertCount: (n: number) => void;
+  setAlertSeverityCounts: (counts: Record<string, number>) => void;
+  setSelectedUnitId: (id: string | null) => void;
   setSentryBatch: (batchId: string | null, jobId: string | null) => void;
   setSelectedAssetId: (id: string | null) => void;
   setFpcon: (level: SpireState["fpcon"]) => void;
@@ -131,12 +142,48 @@ function saveDensity(d: Density): void {
   }
 }
 
-const INITIAL_ROLE: Role = "mef_commander";
+const DEFAULT_ROLE: Role = "mef_commander";
+
+// Deep-link initial role.
+//
+// Decision: a `?role=…` query param on the *initial* page load is honored,
+// then the param is wiped from the URL so the Zustand store is the sole
+// source of truth from that point forward. Subsequent role swaps (dropdown)
+// must NEVER repopulate the URL — the TopBar's nav() with `replace:true`
+// to ROLE_DEFAULT_VIEW already strips any stale query string. This keeps
+// shareable deep-links working (`?role=g4#/bastion`) without letting URL
+// state diverge from store state for the rest of the session.
+//
+// If the param is invalid or absent, fall back to the default. Whichever
+// path we take, we strip `role` from the live URL so a refresh inherits
+// only the route, never a phantom role.
+function readInitialRole(): Role {
+  if (typeof window === "undefined") return DEFAULT_ROLE;
+  try {
+    const url = new URL(window.location.href);
+    const raw = url.searchParams.get("role");
+    if (raw && (raw in ROLE_LABELS)) {
+      // Strip the param from the visible URL so it doesn't get echoed
+      // by future navs / share-link readers / hard reloads.
+      url.searchParams.delete("role");
+      const cleaned = url.pathname + (url.search ? url.search : "") + url.hash;
+      window.history.replaceState({}, "", cleaned);
+      return raw as Role;
+    }
+  } catch {
+    /* tolerant */
+  }
+  return DEFAULT_ROLE;
+}
+
+const INITIAL_ROLE: Role = readInitialRole();
 
 export const useSpireStore = create<SpireState>((set) => ({
   role: INITIAL_ROLE,
   operatingMode: "full",
   alertCount: 0,
+  alertSeverityCounts: {},
+  selectedUnitId: null,
   sentryBatchId: null,
   sentryJobId: null,
   selectedAssetId: null,
@@ -149,6 +196,8 @@ export const useSpireStore = create<SpireState>((set) => ({
   setRole: (role) => set({ role }),
   setOperatingMode: (operatingMode) => set({ operatingMode }),
   setAlertCount: (alertCount) => set({ alertCount }),
+  setAlertSeverityCounts: (alertSeverityCounts) => set({ alertSeverityCounts }),
+  setSelectedUnitId: (selectedUnitId) => set({ selectedUnitId }),
   setSentryBatch: (sentryBatchId, sentryJobId) => set({ sentryBatchId, sentryJobId }),
   setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
   setFpcon: (fpcon) => set({ fpcon }),

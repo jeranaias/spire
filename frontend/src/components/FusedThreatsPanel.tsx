@@ -133,7 +133,12 @@ export function FusedThreatsPanel({
                   <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)] tracking-wide">
                     {t.title}
                   </div>
-                  {/* Correlation chain — visible at all times */}
+                  {/* Correlation chain — visible at all times.
+                   *
+                   * Uses `c.label` when present (e.g. ECP-A, ECP-B from
+                   * Multi-Gate fusion) so the operator sees distinct gate
+                   * IDs rather than three identical "PACS" pills.
+                   * Falls back to source for sensor-typed chains. */}
                   <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs tracking-wider">
                     {t.correlation_chain.map((c, i) => (
                       <span key={i} className="flex items-center gap-1">
@@ -146,7 +151,7 @@ export function FusedThreatsPanel({
                             background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
                           }}
                         >
-                          {c.source}
+                          {c.label || c.source}
                         </span>
                       </span>
                     ))}

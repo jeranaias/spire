@@ -167,20 +167,29 @@ def fuse_alerts(alerts: list[dict], window_minutes: int = 30) -> list[FusedThrea
 
     # Rule 3: Multi-gate PACS pattern (2+ different ECPs)
     if len(pacs_events) >= 2:
-        ecp_ids = set()
-        ordered: list[dict] = []
+        ecp_ids: set[str] = set()
+        ordered: list[tuple[dict, str]] = []
         for p in pacs_events:
             t = p.get("title", "")
             for ecp in ("ECP-1", "ECP-2", "ECP-3", "ECP-4"):
                 if ecp in t:
                     if ecp not in ecp_ids:
                         ecp_ids.add(ecp)
-                        ordered.append(p)
+                        ordered.append((p, ecp))
                     break
         if len(ecp_ids) >= 2:
+            # Attach the extracted ECP id to the chain so the front-end can
+            # render `ECP-A → ECP-B → ECP-C` instead of three identical
+            # "PACS" pills (reviewer caught the duplication).
             chain = [
-                {"source": "PACS", "id": p.get("id"), "title": p.get("title"), "timestamp": p.get("timestamp")}
-                for p in ordered[:4]
+                {
+                    "source": "PACS",
+                    "id": p.get("id"),
+                    "title": p.get("title"),
+                    "timestamp": p.get("timestamp"),
+                    "label": ecp_id,
+                }
+                for p, ecp_id in ordered[:4]
             ]
             fused.append(FusedThreat(
                 fused_id=_make_id("FUS-MGATE", chain),
