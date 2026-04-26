@@ -157,25 +157,26 @@ html, body, #root {
   --tap-min: 0;              /* 0 when dense; 44px when sparse */
 }
 
-html[data-density="sparse"] {
-  /* Type scale — TWO tiers up from dense. Reviewer caught the one-tier bump
-   * as visually invisible at iPad viewing distance.
-   * 10/11/13/15/22/36 → 12/15/17/20/30/48. */
+/* Density token rotation is scoped to <main> — main content gets the bigger
+ * type and pads in SPARSE; the chrome (TopBar / status strip / footer)
+ * keeps fixed sizing so SPARSE never reflows the header.
+ *
+ * Walkthrough caught: applying SPARSE at the html root caused MLG-NODE-0
+ * to overlap PULSE/BASTION/NO PEER simultaneously because the chrome
+ * containers grew with the rotated tokens. Chrome reads at fixed sizes
+ * regardless of density; SPARSE's promise — bigger tap targets, more
+ * breathing room — only matters in main content anyway.
+ */
+html[data-density="sparse"] main {
   --text-xs:    0.75rem;     /* 10 → 12 */
   --text-sm:    0.9375rem;   /* 11 → 15 */
   --text-base:  1.0625rem;   /* 13 → 17 */
   --text-lg:    1.25rem;     /* 15 → 20 */
   --text-xl:    1.875rem;    /* 22 → 30 */
   --text-2xl:   3rem;        /* 36 → 48 */
-
-  /* Card breathing-room — pad doubles (12 → 24px) and gap goes up two tiers. */
-  --pad-card: 1.5rem;        /* 12 → 24px */
-  --pad-card-sm: 1rem;       /* 8 → 16px */
-  --gap-card: 1rem;          /* 8 → 16px */
-
-  /* WCAG 2.5.5 Target Size minimum. Buttons that opt-in via min-height
-   * get raised to 48px in sparse mode for gloved/iPad use (up from 44px
-   * to match the doubled tap-target feel of the rest of the layout). */
+  --pad-card: 1.5rem;
+  --pad-card-sm: 1rem;
+  --gap-card: 1rem;
   --tap-min: 48px;
 }
 
