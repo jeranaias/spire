@@ -15,6 +15,11 @@ const tabs = [
 export function PulseView() {
   return (
     <div className="flex h-full flex-col">
+      {/* Single h1 per view so screen readers announce a hierarchy.
+       * Visually hidden — the existing PulseSubnav serves the visual
+       * heading role; this just gives assistive tech something to anchor
+       * the document outline to. */}
+      <h1 className="sr-only">PULSE · Readiness &amp; Forecast</h1>
       <PulseSubnav />
       <div className="flex-1 overflow-hidden">
         <Routes>

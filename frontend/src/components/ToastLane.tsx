@@ -13,15 +13,25 @@ export function ToastLane() {
 
   if (toasts.length === 0) return null;
 
+  // Two stacked live regions so screen readers announce errors with
+  // assertive priority while ok/info/warn announce politely. Sharing one
+  // region with mixed priorities truncates the announcement queue —
+  // separating them is the WAI-ARIA-recommended pattern.
+  const errors = toasts.filter((t) => t.tone === "error");
+  const others = toasts.filter((t) => t.tone !== "error");
+
   return (
-    <div
-      className="pointer-events-none fixed bottom-16 right-4 z-[9000] flex max-w-sm flex-col gap-2"
-      role="status"
-      aria-live="polite"
-    >
-      {toasts.map((t) => (
-        <ToastRow key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
-      ))}
+    <div className="pointer-events-none fixed bottom-16 right-4 z-[9000] flex max-w-sm flex-col gap-2">
+      <div role="alert" aria-live="assertive" aria-atomic="false" className="flex flex-col gap-2">
+        {errors.map((t) => (
+          <ToastRow key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+        ))}
+      </div>
+      <div role="status" aria-live="polite" aria-atomic="false" className="flex flex-col gap-2">
+        {others.map((t) => (
+          <ToastRow key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+        ))}
+      </div>
     </div>
   );
 }
