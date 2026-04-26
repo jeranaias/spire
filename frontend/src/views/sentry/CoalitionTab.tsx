@@ -297,25 +297,7 @@ export function CoalitionTab() {
               </div>
               <div className="mt-2 flex flex-col gap-2">
                 {view.sample_records.map((s, i) => (
-                  <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="font-semibold text-[var(--color-text)]">{s.sr_number}</span>
-                      <span className="text-[var(--color-text-muted)] tracking-wide">
-                        {s.equipment_type} · {s.unit_name}
-                      </span>
-                      {(s.redactions?.length ?? 0) > 0 && (
-                        <span className="ml-auto font-mono text-xs text-[var(--color-warning)] tracking-wider">
-                          {s.redactions!.length} REDACTED
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-1 text-xs text-[var(--color-text-secondary)] tracking-wide">
-                      Fault: {s.fault_component}
-                    </div>
-                    <div className="mt-1 text-xs leading-relaxed text-[var(--color-text)]">
-                      {s.remark_preview ? `"${s.remark_preview}…"` : <span className="text-[var(--color-text-muted)]">[no preview]</span>}
-                    </div>
-                  </div>
+                  <CoalitionSampleRecord key={i} record={s} />
                 ))}
                 {view.sample_records.length === 0 && (
                   <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
@@ -420,5 +402,216 @@ function ScopeStat({
         </div>
       )}
     </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Per-record live-redacted preview with inline highlights. Mirrors the
+// SENTRY ProcessingTab pattern: yellow span = generalised value, red span =
+// stripped/replaced PII or controlled identifier. The original (pre-redaction)
+// values are included in the preview-only payload so the operator can see the
+// diff; nothing here ships in an actual release manifest.
+// ---------------------------------------------------------------------------
+
+const REDACTION_COLORS: Record<string, string> = {
+  EDIPI: "var(--color-danger)",
+  POC_PHONE: "var(--color-danger)",
+  serial_number: "var(--color-danger)",
+  tm_reference: "var(--color-warning)",
+  fault_component: "var(--color-warning)",
+  billet_nickname: "var(--color-warning)",
+  supply_path: "var(--color-info)",
+};
+
+type SampleRecord = {
+  sr_number?: string;
+  unit_name?: string;
+  equipment_type?: string;
+  fault_component?: string;
+  fault_component_original?: string;
+  remark_preview?: string;
+  remark_original?: string;
+  redactions?: string[];
+  redaction_spans?: { field: string; before: string; after: string; kind: string }[];
+};
+
+function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
+  const spans = record.redaction_spans ?? [];
+  const remarkSpan = spans.find((s) => s.field === "remark");
+  const remarkBefore = remarkSpan?.before ?? record.remark_original ?? record.remark_preview ?? "";
+  const remarkAfter = remarkSpan?.after ?? record.remark_preview ?? "";
+  const faultChanged =
+    record.fault_component_original &&
+    record.fault_component_original !== record.fault_component;
+
+  const otherSpans = spans.filter(
+    (s) => s.field !== "remark" && s.field !== "fault_component",
+  );
+
+  return (
+    <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="font-semibold text-[var(--color-text)]">{record.sr_number}</span>
+        <span className="text-[var(--color-text-muted)] tracking-wide">
+          {record.equipment_type} · {record.unit_name}
+        </span>
+        {(record.redactions?.length ?? 0) > 0 && (
+          <span className="ml-auto font-mono text-xs text-[var(--color-warning)] tracking-wider">
+            {record.redactions!.length} REDACTED
+          </span>
+        )}
+      </div>
+
+      {/* Fault component diff: original (strike-through) → generalised (yellow) */}
+      <div className="mt-1 text-xs text-[var(--color-text-secondary)] tracking-wide">
+        Fault:{" "}
+        {faultChanged ? (
+          <>
+            <span
+              className="rounded-sm px-0.5 line-through"
+              style={{
+                background: "color-mix(in oklab, var(--color-danger) 15%, transparent)",
+                color: "var(--color-danger)",
+              }}
+              title="original value (preview only — never released)"
+            >
+              {record.fault_component_original}
+            </span>
+            <span className="mx-1 text-[var(--color-text-muted)]">→</span>
+            <span
+              className="rounded-sm px-0.5 font-semibold"
+              style={{
+                background: "color-mix(in oklab, var(--color-warning) 25%, transparent)",
+                color: "var(--color-warning)",
+              }}
+              title="generalised value sent to partner"
+            >
+              {record.fault_component}
+            </span>
+          </>
+        ) : (
+          <span className="text-[var(--color-text)]">{record.fault_component}</span>
+        )}
+      </div>
+
+      {/* Remark with inline highlights for any redacted substrings */}
+      <div className="mt-1 text-xs leading-relaxed text-[var(--color-text)]">
+        {remarkAfter ? (
+          <RemarkDiff before={remarkBefore} after={remarkAfter} />
+        ) : (
+          <span className="text-[var(--color-text-muted)]">[no preview]</span>
+        )}
+      </div>
+
+      {/* Per-field redaction chips for non-remark, non-fault redactions */}
+      {otherSpans.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {otherSpans.map((s, i) => (
+            <span
+              key={i}
+              className="rounded-sm border px-1.5 py-[1px] text-[10px] uppercase tracking-wider"
+              style={{
+                color: REDACTION_COLORS[s.kind] ?? "var(--color-warning)",
+                borderColor: `color-mix(in oklab, ${REDACTION_COLORS[s.kind] ?? "var(--color-warning)"} 50%, transparent)`,
+                background: `color-mix(in oklab, ${REDACTION_COLORS[s.kind] ?? "var(--color-warning)"} 10%, transparent)`,
+              }}
+              title={`Original: ${s.before} → After: ${s.after}`}
+            >
+              {s.kind} ✕ redacted
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Render a remark with inline highlights on any substring that the partner
+// view does NOT contain (i.e. what was stripped or replaced). We do this by
+// walking the "after" string and projecting the "before" segments alongside
+// the redaction tokens we see in the after string ([PHONE REDACTED], etc).
+function RemarkDiff({ before, after }: { before: string; after: string }) {
+  // If the strings are identical, nothing to highlight — render plain.
+  if (before === after || !before) {
+    return <span>{after ? `"${after}…"` : ""}</span>;
+  }
+  // Strategy: look for each redaction token in `after`; the corresponding
+  // segment in `before` is the original. Render the remark by interleaving
+  // the unchanged context with strike-through originals + yellow tokens.
+  const tokens = ["[PHONE REDACTED]", "[REDACTED]", "[SERIAL REDACTED]", "[TM REFERENCE REDACTED]"];
+  const segments: { text: string; kind?: "redacted" | "original" }[] = [];
+
+  // Walk both strings in parallel, anchored on the redaction tokens in `after`.
+  let aIdx = 0;
+  let bIdx = 0;
+  while (aIdx < after.length) {
+    const nextToken = tokens
+      .map((t) => ({ t, pos: after.indexOf(t, aIdx) }))
+      .filter((x) => x.pos >= 0)
+      .sort((a, b) => a.pos - b.pos)[0];
+    if (!nextToken) {
+      // No more tokens — emit the rest of `after` as unchanged.
+      segments.push({ text: after.slice(aIdx) });
+      break;
+    }
+    // Prefix unchanged context.
+    if (nextToken.pos > aIdx) {
+      const chunk = after.slice(aIdx, nextToken.pos);
+      segments.push({ text: chunk });
+      bIdx += chunk.length;
+    }
+    // Locate the corresponding original-substring in `before`. We assume the
+    // unchanged prefix matches up to bIdx, then the original spans until the
+    // next matching context character — approximated by reading until the
+    // next character that matches the post-token suffix in `after`.
+    const afterAfterToken = after.slice(nextToken.pos + nextToken.t.length);
+    const suffixAnchor = afterAfterToken.slice(0, 8); // first 8 chars to anchor
+    let originalEnd = before.length;
+    if (suffixAnchor) {
+      const found = before.indexOf(suffixAnchor, bIdx);
+      if (found >= 0) originalEnd = found;
+    }
+    const originalSegment = before.slice(bIdx, originalEnd);
+    segments.push({ text: originalSegment, kind: "original" });
+    segments.push({ text: nextToken.t, kind: "redacted" });
+    bIdx = originalEnd;
+    aIdx = nextToken.pos + nextToken.t.length;
+  }
+
+  return (
+    <span>
+      "
+      {segments.map((s, i) =>
+        s.kind === "original" ? (
+          <span
+            key={i}
+            className="rounded-sm px-0.5 line-through"
+            style={{
+              background: "color-mix(in oklab, var(--color-danger) 18%, transparent)",
+              color: "var(--color-danger)",
+            }}
+            title="original value (preview only — never released)"
+          >
+            {s.text}
+          </span>
+        ) : s.kind === "redacted" ? (
+          <span
+            key={i}
+            className="rounded-sm px-0.5 font-semibold"
+            style={{
+              background: "color-mix(in oklab, var(--color-warning) 28%, transparent)",
+              color: "var(--color-warning)",
+            }}
+            title="value stripped before partner release"
+          >
+            {s.text}
+          </span>
+        ) : (
+          <span key={i}>{s.text}</span>
+        ),
+      )}
+      …"
+    </span>
   );
 }

@@ -77,47 +77,138 @@ def classify_record(profile_key: str, record: dict) -> ReleaseDecision:
 
 def apply_redactions(record: dict, redactions: list[str]) -> dict:
     """Return a new record dict with the requested fields redacted/generalized."""
+    out, _spans = apply_redactions_with_spans(record, redactions)
+    return out
+
+
+def apply_redactions_with_spans(
+    record: dict, redactions: list[str]
+) -> tuple[dict, list[dict]]:
+    """Like apply_redactions, but also returns a per-field diff list so the
+    Coalition preview can render inline `<mark>` highlights showing the
+    operator exactly what was generalised or stripped from the partner-visible
+    record. Spans format: ``[{field, before, after, kind}]``.
+
+    Note: ``before`` strings here are surfaced ONLY in the live-preview path;
+    the audited release manifest never carries them across the wire.
+    """
     out = dict(record)
+    spans: list[dict] = []
+
+    def _add(field_name: str, before, after, kind: str):
+        # Skip no-op spans (e.g. POC_PHONE on a remark with no phone digits).
+        if before == after:
+            return
+        spans.append({
+            "field": field_name,
+            "before": before,
+            "after": after,
+            "kind": kind,
+        })
+
+    # Pass 1: EDIPI replacement (must run before POC_PHONE so the phone regex
+    # doesn't sweep up 10-digit EDIPI strings inside remark text).
+    if "EDIPI" in redactions:
+        if "edipi" in out:
+            before = out["edipi"]
+            out["edipi"] = "[REDACTED]"
+            _add("edipi", before, out["edipi"], "EDIPI")
+        # Also strip "EDIPI <10 digits>" out of any string fields so the
+        # remark preview doesn't carry a Marine's lookup key.
+        for key in ("poc", "poc_phone", "remark"):
+            if key in out and isinstance(out[key], str):
+                before = out[key]
+                after = re.sub(r"EDIPI\s*\d{10}", "EDIPI [REDACTED]", before)
+                if after != before:
+                    out[key] = after
+                    _add(key, before, after, "EDIPI")
+
     for field in redactions:
         rule = profiles()["redaction_rules"].get(field)
         if rule is None:
             continue
-        if field == "EDIPI" and "edipi" in out:
-            out["edipi"] = "[REDACTED]"
+        if field == "EDIPI":
+            continue  # Already handled in Pass 1.
         elif field == "POC_PHONE":
             for key in ("poc", "poc_phone", "remark"):
                 if key in out and isinstance(out[key], str):
-                    out[key] = re.sub(r"\d{3}[-.]?\d{3}[-.]?\d{4}", "[PHONE REDACTED]", out[key])
+                    before = out[key]
+                    after = re.sub(r"\d{3}[-.]?\d{3}[-.]?\d{4}", "[PHONE REDACTED]", before)
+                    out[key] = after
+                    _add(key, before, after, "POC_PHONE")
         elif field == "billet_nickname":
             for key in ("poc", "remark"):
                 if key in out and isinstance(out[key], str):
-                    out[key] = re.sub(r"\s*\([^)]*\)", "", out[key])
+                    before = out[key]
+                    after = re.sub(r"\s*\([^)]*\)", "", before)
+                    out[key] = after
+                    _add(key, before, after, "billet_nickname")
         elif field == "serial_number" and "serial_number" in out:
+            before = out["serial_number"]
             out["serial_number"] = "[SERIAL REDACTED]"
+            _add("serial_number", before, out["serial_number"], "serial_number")
         elif field == "tm_reference" and "tm_reference" in out:
+            before = out["tm_reference"]
             out["tm_reference"] = "[TM REFERENCE REDACTED]"
+            _add("tm_reference", before, out["tm_reference"], "tm_reference")
         elif field == "fault_component" and "fault_component" in out:
-            out["fault_component"] = _generalize_component(out["fault_component"])
+            before = out["fault_component"]
+            after = _generalize_component(before)
+            out["fault_component"] = after
+            _add("fault_component", before, after, "fault_component")
         elif field == "supply_path" and "supply_path" in out:
+            before = out["supply_path"]
             out["supply_path"] = "MILSTRIP"
-    return out
+            _add("supply_path", before, out["supply_path"], "supply_path")
+    return out, spans
 
 
 _COMPONENT_FAMILIES = {
-    "drivetrain": ["output shaft", "input shaft", "differential", "driveshaft", "transmission"],
-    "engine":     ["starter", "alternator", "injector", "turbo", "cylinder head", "piston", "valve"],
-    "brake":      ["caliper", "rotor", "pad set", "master cylinder", "abs module"],
-    "electrical": ["battery", "harness", "ecm", "relay", "solenoid"],
-    "hydraulic":  ["pump", "reservoir", "hose", "cylinder"],
-    "armament":   ["sight", "barrel", "bolt", "feed tray"],
+    "drivetrain":   ["output shaft", "input shaft", "differential", "driveshaft", "transmission",
+                     "transfer case", "axle"],
+    "engine":       ["starter", "alternator", "injector", "turbo", "cylinder head", "piston", "valve",
+                     "engine", "block", "manifold", "cam", "crank"],
+    "brake":        ["caliper", "pad set", "master cylinder", "abs module", "brake"],
+    "electrical":   ["battery", "harness", "ecm", "relay", "solenoid", "wiring", "ground strap",
+                     "alternator harness", "fuse panel"],
+    "hydraulic":    ["pump", "reservoir", "hose", "cylinder", "hydraulic"],
+    "armament":     ["sight", "barrel", "bolt", "feed tray", "bolt carrier", "trigger group"],
+    "cooling":      ["radiator", "coolant", "water pump", "thermostat", "fan clutch", "intercooler",
+                     "heater core", "coolant hose", "cooling"],
+    "tire":         ["tire", "wheel", "rim", "stem", "valve core", "lug", "wheel hub"],
+    "corrosion":    ["rust", "pitting", "corrosion", "scale", "oxidation", "coating loss"],
+    "rotor":        ["rotor head", "rotor", "swashplate", "tail rotor", "blade grip", "main blade", "pitch link"],
+    "launcher":     ["launch tube", "elevation actuator", "azimuth motor", "launcher"],
+    "fire_control": ["fire control", "fire_control", "ballistic computer", "laser rangefinder", "thermal channel",
+                     "gunner sight", "commander sight", "stabilizer"],
 }
+
+# Match priority: try the more specific families before the broad ones so e.g.
+# 'rotor head' falls into 'rotor' instead of being caught by another family
+# that happens to share a substring. Iteration order is insertion order in
+# Python 3.7+, so we explicitly enumerate the priority sequence here.
+_FAMILY_PRIORITY = [
+    "rotor",       # before brake (which also has 'rotor' in some pads)
+    "fire_control",
+    "launcher",
+    "drivetrain",
+    "engine",
+    "cooling",
+    "electrical",
+    "hydraulic",
+    "armament",
+    "brake",
+    "tire",
+    "corrosion",
+]
 
 
 def _generalize_component(c: str) -> str:
     lc = c.lower()
-    for family, parts in _COMPONENT_FAMILIES.items():
-        if any(p in lc for p in parts):
-            return family
+    for family in _FAMILY_PRIORITY:
+        for p in _COMPONENT_FAMILIES.get(family, []):
+            if p in lc:
+                return family
     return "subsystem"
 
 

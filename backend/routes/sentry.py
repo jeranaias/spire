@@ -35,7 +35,8 @@ if str(_REPO_ROOT) not in _sys.path:
     _sys.path.insert(0, str(_REPO_ROOT))
 try:
     from dataset.coalition import (  # type: ignore[import-not-found]
-        list_profiles, classify_record, apply_redactions, partner_units_for, profiles as _coalition_profiles,
+        list_profiles, classify_record, apply_redactions, apply_redactions_with_spans,
+        partner_units_for, profiles as _coalition_profiles,
     )
     _COALITION_AVAILABLE = True
 except Exception:
@@ -840,15 +841,22 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
         decision = classify_record(profile_key, rec)
         if decision.allowed:
             sr_allowed += 1
-            redacted = apply_redactions(rec, decision.redactions_applied)
+            redacted, spans = apply_redactions_with_spans(rec, decision.redactions_applied)
             if len(sample_srs) < 8:
+                # Surface both the redacted preview and the original (preview-only)
+                # so the frontend can render an inline diff. The original NEVER
+                # ships in a release manifest — it's only here to make the
+                # operator-visible preview honest about what's being stripped.
                 sample_srs.append({
                     "sr_number": redacted.get("sr_number"),
                     "unit_name": redacted.get("unit_name"),
                     "equipment_type": redacted.get("equipment_type"),
                     "fault_component": redacted.get("fault_component"),
-                    "remark_preview": (redacted.get("remark", "") or "")[:160],
+                    "fault_component_original": rec.get("fault_component"),
+                    "remark_preview": (redacted.get("remark", "") or "")[:240],
+                    "remark_original": (rec.get("remark", "") or "")[:240],
                     "redactions": decision.redactions_applied,
+                    "redaction_spans": spans,
                 })
         else:
             sr_blocked += 1
