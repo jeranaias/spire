@@ -115,13 +115,10 @@ export function FeedbackDrawer() {
   // in inputs because the condition requires Shift.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const inField =
-        e.target instanceof HTMLInputElement
-        || e.target instanceof HTMLTextAreaElement
-        || (e.target instanceof HTMLElement && e.target.isContentEditable);
-
       // Shift+F always opens. e.key normalizes to "F" with shift on most
       // browsers, "f" with shift on a few — accept both for safety.
+      // Note: we don't gate on inField here because Shift+F is unlikely
+      // to collide with mid-sentence typing.
       if (e.shiftKey && (e.key === "F" || e.key === "f")) {
         e.preventDefault();
         setOpen((v) => !v);
