@@ -7,6 +7,7 @@ import { ToastLane } from "./components/ToastLane";
 import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
+import { Onboarding } from "./components/Onboarding";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useSpireStore } from "./state/store";
 
@@ -40,6 +41,7 @@ export default function App() {
       <FeedbackDrawer />
       <HelpOverlay />
       <Spiro />
+      <Onboarding />
     </div>
   );
 }
