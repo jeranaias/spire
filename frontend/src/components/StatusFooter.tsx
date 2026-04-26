@@ -69,9 +69,10 @@ export function StatusFooter() {
   const fingerprint = (status?.dataset.fingerprint ?? "").slice(0, 12).toUpperCase();
 
   // Ticker segments — these scroll continuously in a marquee.
-  // Values update every 15s; the animation re-renders softly.
+  // AUDIT·SHA256 and CLASSIFICATION are persistent posture indicators and
+  // should NOT cycle (reviewer caught them sliding off before the operator
+  // could read them). Both are pinned in the footer chrome below.
   const tickerItems: { label: string; value: string; tone?: "ok" | "warn" | "muted" }[] = [
-    { label: "AUDIT·SHA256", value: fingerprint || "pending", tone: "muted" },
     { label: "NETWORK", value: "0 egress", tone: "ok" },
     { label: "ENCRYPTION", value: "AES-256-GCM", tone: "ok" },
     { label: "DATASET", value: `${assets.toLocaleString()} assets · ${srs.toLocaleString()} SR`, tone: "muted" },
@@ -79,7 +80,6 @@ export function StatusFooter() {
     { label: "LLM", value: `${llmModel} · ${llmOk ? "online" : "standby"}`, tone: llmOk ? "ok" : "warn" },
     { label: "SENTRY·CLASSIFIER", value: "val=1.0 · 413K params", tone: "ok" },
     { label: "PULSE·RISK", value: "val=0.9974 · 8.8K params", tone: "ok" },
-    { label: "CLASSIFICATION", value: "UNCLASSIFIED // SYNTHETIC DATA", tone: "muted" },
   ];
 
   const toneColor = (tone?: "ok" | "warn" | "muted") =>
@@ -94,7 +94,9 @@ export function StatusFooter() {
 
   return (
     <footer className="relative h-8 shrink-0 overflow-hidden border-t border-[var(--color-border)] bg-[var(--color-surface)]">
-      {/* Left-anchored session block — UP/clock + comms-state pulse */}
+      {/* Left-anchored session block — UP/clock + comms-state pulse + audit hash.
+       * Audit hash pins here so it's always visible (reviewer caught it
+       * sliding off in the marquee before operators could read it). */}
       <div
         className="absolute left-0 top-0 z-10 flex h-full items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs tracking-wide"
       >
@@ -108,12 +110,29 @@ export function StatusFooter() {
         <span className="tabular-nums text-[var(--color-text-secondary)]">{localTime}</span>
         <span className="mx-1 text-[var(--color-border-active)]">│</span>
         <CommsIndicator state={commsState} airGap={airGap} queueDepth={queueDepth} />
+        <span className="mx-1 hidden text-[var(--color-border-active)] lg:inline">│</span>
+        <span className="hidden uppercase text-[var(--color-text-muted)] tracking-wider lg:inline">AUDIT</span>
+        <span
+          className="hidden tabular-nums text-[var(--color-text-secondary)] lg:inline"
+          title="Append-only audit chain SHA-256 fingerprint"
+        >
+          {fingerprint || "pending"}
+        </span>
       </div>
 
-      {/* Right-anchored version/mode block — hidden below md (768px) */}
+      {/* Right-anchored version/mode block + pinned classification posture.
+       * Hidden below md (768px). Classification pins here so the operator
+       * always sees the marking regardless of the ticker position. */}
       <div
         className="absolute right-0 top-0 z-10 hidden h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs uppercase md:flex tracking-wider"
       >
+        <span
+          className="rounded-sm border border-[var(--color-border-active)] px-1.5 py-[1px] text-[var(--color-text-muted)] tracking-widest"
+          title="Operating classification posture"
+        >
+          UNCLASSIFIED // SYNTHETIC
+        </span>
+        <span className="text-[var(--color-border-active)]">│</span>
         <span className="text-[var(--color-text-muted)]">{status?.mode || "local"}</span>
         <span className="text-[var(--color-border-active)]">│</span>
         <span className="text-[var(--color-primary)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
@@ -121,10 +140,11 @@ export function StatusFooter() {
 
       {/* Scrolling telemetry ticker between the anchors. Padding values are
        * tuned so the ticker doesn't overlap the anchored blocks at any
-       * breakpoint: anchored blocks are wider on desktop, so the ticker
-       * gets bigger insets there. */}
+       * breakpoint. The left anchor grew on lg breakpoints to accommodate
+       * the pinned audit hash; the right anchor grew on md to accommodate
+       * the pinned classification posture. */}
       <div
-        className="absolute inset-y-0 left-0 right-0 z-0 overflow-hidden pl-[14rem] pr-3 md:pl-[18rem] md:pr-[16rem]"
+        className="absolute inset-y-0 left-0 right-0 z-0 overflow-hidden pl-[14rem] pr-3 md:pl-[18rem] md:pr-[20rem] lg:pl-[28rem]"
       >
         <div
           className="ticker flex h-full items-center whitespace-nowrap font-mono text-xs tracking-wider"
@@ -147,14 +167,14 @@ export function StatusFooter() {
 
       {/* Fade edges so ticker text disappears cleanly into the anchored blocks */}
       <div
-        className="pointer-events-none absolute left-[18rem] top-0 z-[5] h-full w-10"
+        className="pointer-events-none absolute left-[18rem] top-0 z-[5] hidden h-full w-10 md:block lg:left-[28rem]"
         style={{
           background:
             "linear-gradient(90deg, var(--color-surface) 0%, transparent 100%)",
         }}
       />
       <div
-        className="pointer-events-none absolute right-[16rem] top-0 z-[5] h-full w-10"
+        className="pointer-events-none absolute right-[20rem] top-0 z-[5] hidden h-full w-10 md:block"
         style={{
           background:
             "linear-gradient(270deg, var(--color-surface) 0%, transparent 100%)",
