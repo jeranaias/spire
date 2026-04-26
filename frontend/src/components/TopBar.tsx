@@ -30,9 +30,9 @@ export function TopBar() {
             "linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--color-primary) 40%, transparent) 12%, color-mix(in oklab, var(--color-primary) 40%, transparent) 88%, transparent 100%)",
         }}
       />
-      <div className="flex h-full items-center justify-between px-4">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2.5">
+      <div className="flex h-full min-w-0 items-center justify-between gap-3 px-4">
+        <div className="flex min-w-0 items-center gap-6">
+          <div className="flex shrink-0 items-center gap-2.5">
             <SpireMark />
             <div className="flex flex-col leading-none">
               <span
@@ -48,7 +48,7 @@ export function TopBar() {
               </span>
             </div>
           </div>
-          <nav className="flex items-center gap-0">
+          <nav className="flex shrink-0 items-center gap-0">
             {tabs.filter((t) => t.restrict == null || t.restrict === role).map((tab, idx) => (
               <NavLink
                 key={tab.to}
@@ -89,7 +89,7 @@ export function TopBar() {
           </nav>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex min-w-0 shrink items-center gap-3 overflow-hidden">
           <NodeStatus />
           <AirGapToggle />
           <DensityToggle />
@@ -189,7 +189,11 @@ function RoleSelector({ role, onChange }: { role: Role; onChange: (r: Role) => v
         <select
           value={role}
           onChange={(e) => onChange(e.target.value as Role)}
-          className="h-11 min-w-[44px] appearance-none rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none tracking-wider"
+          // Wider min so "MEF Commander" doesn't truncate at 6 chars and
+          // "Maintenance Chief (CLB-6)" stops collapsing into ellipsis.
+          // Cap with max-w + truncate so the pill stays a single line on
+          // narrow viewports without spilling into the alert badge.
+          className="h-11 min-w-[12rem] max-w-[16rem] appearance-none truncate rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] pl-2.5 pr-7 font-mono text-sm font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] focus:outline-none tracking-wider"
         >
           {(Object.keys(ROLE_LABELS) as Role[]).map((k) => (
             <option key={k} value={k}>{ROLE_LABELS[k]}</option>
@@ -344,15 +348,18 @@ function DensityToggle() {
   const density = useSpireStore((s) => s.density);
   const setDensity = useSpireStore((s) => s.setDensity);
   const next: Density = density === "dense" ? "sparse" : "dense";
+  // Label = CURRENT state, not the next one. Reviewer caught the prior
+  // build appearing to show the destination state ("DENSE" while currently
+  // sparse, click to swap). Visible text always reflects the live store
+  // value; the click action is described in the tooltip.
+  const currentLabel = density === "dense" ? "DENSE" : "SPARSE";
+  const nextLabel = next === "dense" ? "DENSE" : "SPARSE";
   return (
     <button
       type="button"
       onClick={() => setDensity(next)}
-      title={
-        density === "dense"
-          ? "Currently DENSE (staff). Click to switch to SPARSE — larger tap targets, fewer columns, for iPad / motor-pool use."
-          : "Currently SPARSE (field). Click to switch to DENSE — staff layout, more columns, more info per square inch."
-      }
+      aria-label={`Information density: currently ${currentLabel}. Click to switch to ${nextLabel}.`}
+      title={`Currently ${currentLabel}. Click to switch to ${nextLabel}.`}
       className="flex items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1 font-mono uppercase text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
       style={{
         fontSize: "var(--text-xs)",
@@ -362,7 +369,7 @@ function DensityToggle() {
       <span aria-hidden className="text-[var(--color-text-muted)]">
         {density === "dense" ? "▦" : "▤"}
       </span>
-      <span>{density === "dense" ? "Dense" : "Sparse"}</span>
+      <span>{currentLabel}</span>
     </button>
   );
 }
