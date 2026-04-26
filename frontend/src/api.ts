@@ -234,6 +234,11 @@ export interface SystemStatus {
 export interface DatasetInfo {
   dataset_last_day: string | null;
   dataset_first_day: string | null;
+  // Walkthrough audit: installation_name + parent_command surface
+  // through here so StatusStrip / mission summary copy reads from data
+  // instead of hardcoding 'Camp Henderson · 2d MLG'.
+  installation_name?: string | null;
+  parent_command?: string | null;
   snapshot_days: number;
   fingerprint: string;
   build_id: string;

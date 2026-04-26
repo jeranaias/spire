@@ -144,7 +144,7 @@ export function StatusStrip() {
             tone={mcTone}
             onClick={() => nav("/pulse/overview")}
             ariaLabel={`Overall mission capable rate ${mcDisplay}. Click to open Pulse fleet overview.`}
-            title="Mission-capable rate across 2d MLG · click to open PULSE Fleet Overview"
+            title={`Mission-capable rate across ${datasetInfo?.parent_command ?? "2d MLG"} · click to open PULSE Fleet Overview`}
           />
           {/* Walkthrough #JOB-E (review #51 PULSE) — discoverable "?" that
            * pops the methodology card. Operators don't need it most of the
@@ -221,7 +221,7 @@ export function StatusStrip() {
             aria-expanded={missionOpen}
             aria-controls="status-strip-mission-detail"
             className="flex min-w-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-xs text-[var(--color-text)] transition-colors hover:border-[var(--color-border-active)] tracking-wide"
-            title="Camp Henderson mission summary · click to expand CCIR + status"
+            title={`${datasetInfo?.installation_name ?? "Camp Henderson"} mission summary · click to expand CCIR + status`}
           >
             {/* Walkthrough audit: trailing space inside the bold span so
              * screen readers + .innerText don't concatenate "PROTECTIONCamp"
@@ -231,7 +231,9 @@ export function StatusStrip() {
               <span className="font-semibold uppercase tracking-widest text-[var(--color-text-secondary)]">
                 BASE DEFENSE / FORCE PROTECTION{" "}
               </span>
-              <span className="ml-2 text-[var(--color-text-muted)]">Camp Henderson · 2d MLG</span>
+              <span className="ml-2 text-[var(--color-text-muted)]">
+                {datasetInfo?.installation_name ?? "Camp Henderson"} · {datasetInfo?.parent_command ?? "2d MLG"}
+              </span>
             </span>
             <span aria-hidden className="text-[var(--color-text-muted)]">
               {missionOpen ? "▴" : "▾"}
