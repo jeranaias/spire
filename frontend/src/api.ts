@@ -202,6 +202,28 @@ export interface SystemStatus {
   };
   llm: { reachable: boolean; model: string; max_context: number };
   features: Record<string, boolean>;
+  // Walkthrough audit: footer chips used to hardcode '0 egress',
+  // 'AES-256-GCM', 'val=1.0 · 413K params', etc. The backend exposes
+  // each value already; the frontend just needed the schema to consume
+  // them. These fields are optional (older builds/deploys may omit).
+  security?: {
+    audit_chain_intact: boolean;
+    audit_entries: number;
+    audit_head_hash: string;
+    encrypted_at_rest: boolean;
+  };
+  network_egress?: {
+    armed: boolean;
+    unapproved_attempts: number;
+    recent: unknown[];
+  };
+  models?: {
+    sentry_loaded: boolean;
+    sentry_path: string | null;
+    pulse_loaded: boolean;
+    pulse_path: string | null;
+    errors: string[];
+  };
 }
 
 // Walkthrough #JOB-B (review #52 / #30) — single source of truth for the
