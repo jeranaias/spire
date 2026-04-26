@@ -149,6 +149,26 @@ export function StatusFooter() {
         <span className="mx-1 text-[var(--color-border-active)]">│</span>
         <CommsIndicator state={commsState} airGap={airGap} queueDepth={queueDepth} />
         <span className="mx-1 hidden text-[var(--color-border-active)] lg:inline">│</span>
+        {/* Walkthrough audit: AUDIT chip showed only the chain
+         * fingerprint, never the chain integrity status. The backend
+         * already exposes audit_chain_intact; surface it as a
+         * green/red dot so an operator can see a broken chain at a
+         * glance instead of needing to inspect the system status. */}
+        <span
+          className="hidden h-1.5 w-1.5 rounded-full lg:inline-block"
+          style={{
+            background: status?.security?.audit_chain_intact === false
+              ? "var(--color-danger)"
+              : "var(--color-success)",
+            boxShadow: `0 0 4px ${status?.security?.audit_chain_intact === false ? "var(--color-danger)" : "var(--color-success)"}`,
+          }}
+          title={
+            status?.security?.audit_chain_intact === false
+              ? "AUDIT CHAIN BROKEN — hash chain failed integrity check"
+              : "Audit chain intact"
+          }
+          aria-hidden
+        />
         <span className="hidden uppercase text-[var(--color-text-muted)] tracking-wider lg:inline">AUDIT</span>
         <AuditHash full={fingerprintFull} short={fingerprint} />
       </div>
