@@ -358,6 +358,44 @@ export function MapCanvas({
   const [hoverBuilding, setHoverBuilding] = useState<Building | null>(null);
   const [ecpSelected, setEcpSelected] = useState<ECP | null>(null);
   const [rpSelected, setRpSelected] = useState<RallyPoint | null>(null);
+  const [unitSelected, setUnitSelected] = useState<{ u: BastionCOPUnit; lat: number; lon: number } | null>(null);
+
+  // Smart anchor picker — chooses bottom / top / left / right based on where
+  // the marker lands in the viewport so left-edge ECPs don't render their
+  // popup off-screen. Reviewer caught the bottom-anchored Popup clipping
+  // when the marker was near the left edge of the map.
+  type Anchor = "top" | "bottom" | "left" | "right" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  function pickAnchor(lat: number, lon: number, fallback: Anchor = "bottom"): Anchor {
+    const map = mapRef.current;
+    if (!map) return fallback;
+    try {
+      const pt = map.project([lon, lat]);
+      const c = map.getContainer();
+      const w = c.clientWidth;
+      const h = c.clientHeight;
+      // Margins inside which a marker is "near the edge" — popup width is
+      // roughly 240px so we keep 220px of clearance on each side.
+      const horizMargin = 220;
+      const vertMargin = 200;
+      const nearLeft = pt.x < horizMargin;
+      const nearRight = pt.x > w - horizMargin;
+      const nearTop = pt.y < vertMargin;
+      const nearBottom = pt.y > h - vertMargin;
+      // Anchor is the side of the popup attached to the marker — i.e. the
+      // popup grows AWAY from that side. So if marker is near the left, we
+      // anchor "left" so the popup grows to the right.
+      if (nearBottom && nearLeft) return "bottom-left";
+      if (nearBottom && nearRight) return "bottom-right";
+      if (nearTop && nearLeft) return "top-left";
+      if (nearTop && nearRight) return "top-right";
+      if (nearLeft) return "left";
+      if (nearRight) return "right";
+      if (nearBottom) return "bottom";
+      return fallback;
+    } catch {
+      return fallback;
+    }
+  }
 
   // Building centroid lookup for fly-to + sim targeting.
   const buildingById = useMemo(() => {
@@ -648,6 +686,11 @@ export function MapCanvas({
               anchor="bottom"
               onClick={(ev) => {
                 ev.originalEvent.stopPropagation();
+                // Open the unit detail popup AND notify the parent — keeps
+                // the existing dashed selection-ring behaviour while making
+                // the click consistent with ECPs / rally points (which show
+                // a popup on click). Reviewer caught units feeling dead.
+                setUnitSelected({ u, lat, lon });
                 onUnitClick?.(u.unit);
               }}
             >
@@ -746,12 +789,13 @@ export function MapCanvas({
           <Popup
             longitude={ecpSelected.lon}
             latitude={ecpSelected.lat}
-            anchor="bottom"
+            anchor={pickAnchor(ecpSelected.lat, ecpSelected.lon, "bottom")}
             offset={18}
+            maxWidth="260px"
             closeOnClick={false}
             onClose={() => setEcpSelected(null)}
           >
-            <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 220 }}>
+            <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 220, maxWidth: 240 }}>
               <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
                 Entry Control Point
               </div>
@@ -784,8 +828,9 @@ export function MapCanvas({
           <Popup
             longitude={rpSelected.lon}
             latitude={rpSelected.lat}
-            anchor="bottom"
+            anchor={pickAnchor(rpSelected.lat, rpSelected.lon, "bottom")}
             offset={14}
+            maxWidth="260px"
             closeOnClick={false}
             onClose={() => setRpSelected(null)}
           >
@@ -802,6 +847,71 @@ export function MapCanvas({
               <div className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
                 {rpSelected.grid}
               </div>
+            </div>
+          </Popup>
+        )}
+
+        {/* Unit popup — opens on click of a unit marker. Mirrors the ECP /
+         * rally-point pattern; reviewer caught the unit click drawing only
+         * a dashed selection ring with no detail popup. */}
+        {unitSelected && (
+          <Popup
+            longitude={unitSelected.lon}
+            latitude={unitSelected.lat}
+            anchor={pickAnchor(unitSelected.lat, unitSelected.lon, "bottom")}
+            offset={28}
+            maxWidth="280px"
+            closeOnClick={false}
+            onClose={() => setUnitSelected(null)}
+          >
+            <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 220, maxWidth: 260 }}>
+              <div
+                className="font-mono text-xs uppercase tracking-widest"
+                style={{ color: mcColor(unitSelected.u.mc_rate) }}
+              >
+                Unit · MC {Math.round(unitSelected.u.mc_rate * 100)}%
+              </div>
+              <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
+                {unitSelected.u.unit}
+              </div>
+              <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]">
+                {unitSelected.u.parent} · {unitSelected.u.location}
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-xs">
+                <div>
+                  <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">Assets</div>
+                  <div className="tabular-nums text-[var(--color-text)]">{unitSelected.u.total_equipment}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">MC</div>
+                  <div className="tabular-nums text-[var(--color-success)]">{unitSelected.u.mc_count}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">NMC</div>
+                  <div className="tabular-nums text-[var(--color-danger)]">
+                    {unitSelected.u.nmcm_count + unitSelected.u.nmcs_count}
+                  </div>
+                </div>
+              </div>
+              {Object.keys(unitSelected.u.equipment_breakdown || {}).length > 0 && (
+                <div className="mt-2">
+                  <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
+                    Equipment types
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap gap-1">
+                    {Object.entries(unitSelected.u.equipment_breakdown)
+                      .slice(0, 6)
+                      .map(([type, count]) => (
+                        <span
+                          key={type}
+                          className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 py-[1px] font-mono text-xs text-[var(--color-text-secondary)]"
+                        >
+                          {type} <span className="tabular-nums text-[var(--color-text)]">{count}</span>
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           </Popup>
         )}

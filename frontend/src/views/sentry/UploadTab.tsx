@@ -29,13 +29,19 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
     // Auto-seed with canonical dataset on first mount for demo flow.
     // Toggleable via `VITE_AUTO_SEED=false` or `?seed=off` so the production
     // narrative (drop-zone first, manual ingest) can be shown on command.
+    //
+    // Reviewer caught the canonical batch getting wiped on role switch. The
+    // real bug is upstream (something else clearing sentryBatchId), but we
+    // belt-and-suspenders here by:
+    //   1. Treating ANY truthy ctx.batchId as authoritative — never re-seed.
+    //   2. Honouring `?seed=off` whether it lives in the URL search OR the
+    //      hash route (HashRouter puts it after `#/sentry/upload`).
+    if (ctx.batchId) return;
     const autoSeedEnv = import.meta.env.VITE_AUTO_SEED;
-    const hashSearch = typeof window !== "undefined" ? window.location.hash : "";
-    const seedOff = hashSearch.includes("seed=off") || autoSeedEnv === "false";
-    if (ctx.batchId) {
-      // Batch already in-flight via the Zustand store — don't re-seed.
-      return;
-    }
+    const url = typeof window !== "undefined" ? window.location : null;
+    const seedOff =
+      autoSeedEnv === "false" ||
+      (!!url && (url.search.includes("seed=off") || url.hash.includes("seed=off")));
     if (!batch && !loading && !seedOff) loadCanonical();
   }, [ctx.batchId]);
 

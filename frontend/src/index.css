@@ -130,22 +130,25 @@ html, body, #root {
 }
 
 html[data-density="sparse"] {
-  /* Type scale — bumped one tier. 10/11/13/15/22/36 → 11/13/15/18/26/40. */
-  --text-xs:    0.6875rem;   /* 10 → 11 */
-  --text-sm:    0.8125rem;   /* 11 → 13 */
-  --text-base:  0.9375rem;   /* 13 → 15 */
-  --text-lg:    1.125rem;    /* 15 → 18 */
-  --text-xl:    1.625rem;    /* 22 → 26 */
-  --text-2xl:   2.5rem;      /* 36 → 40 */
+  /* Type scale — TWO tiers up from dense. Reviewer caught the one-tier bump
+   * as visually invisible at iPad viewing distance.
+   * 10/11/13/15/22/36 → 12/15/17/20/30/48. */
+  --text-xs:    0.75rem;     /* 10 → 12 */
+  --text-sm:    0.9375rem;   /* 11 → 15 */
+  --text-base:  1.0625rem;   /* 13 → 17 */
+  --text-lg:    1.25rem;     /* 15 → 20 */
+  --text-xl:    1.875rem;    /* 22 → 30 */
+  --text-2xl:   3rem;        /* 36 → 48 */
 
-  /* Card breathing-room — pad and gap each go up one tier. */
-  --pad-card: 1.125rem;
-  --pad-card-sm: 0.75rem;
-  --gap-card: 0.75rem;
+  /* Card breathing-room — pad doubles (12 → 24px) and gap goes up two tiers. */
+  --pad-card: 1.5rem;        /* 12 → 24px */
+  --pad-card-sm: 1rem;       /* 8 → 16px */
+  --gap-card: 1rem;          /* 8 → 16px */
 
   /* WCAG 2.5.5 Target Size minimum. Buttons that opt-in via min-height
-   * get raised to 44px in sparse mode for gloved/iPad use. */
-  --tap-min: 44px;
+   * get raised to 48px in sparse mode for gloved/iPad use (up from 44px
+   * to match the doubled tap-target feel of the rest of the layout). */
+  --tap-min: 48px;
 }
 
 /* Optional opt-in helpers: components that want to breathe in sparse

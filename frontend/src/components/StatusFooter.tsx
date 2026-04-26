@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type SystemStatus } from "../api";
+import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
 
 function formatUptime(startedAt: number): string {
@@ -26,46 +27,36 @@ export function StatusFooter() {
     return () => clearInterval(id);
   }, []);
 
+  // System status — base 15s, backs off to 60s if nothing changes. The
+  // marquee labels rarely flip; aggressive polling here was the largest
+  // share of the steady-state GET pressure caught in the deep-review.
   useEffect(() => {
-    let alive = true;
-    const fetch = async () => {
-      try {
-        const s = await api.system.status();
-        if (alive) setStatus(s);
-      } catch {
-        /* tolerate */
-      }
-    };
-    fetch();
-    const id = setInterval(fetch, 15000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+    const ctrl = pollWithBackoff(() => api.system.status(), {
+      baseMs: 15000,
+      maxMs: 60000,
+      onResult: (s) => setStatus(s),
+    });
+    return () => ctrl.stop();
   }, []);
 
-  // Poll comms-state every 4s — drives the StatusFooter pulse colour and
-  // keeps the air-gap toggle + queue depth in sync if changes happen
-  // outside the TopBar (e.g. another operator on a sister node).
+  // Poll comms-state every 4s base — backs off to 60s when state is steady.
+  // Drives the StatusFooter pulse colour and keeps the air-gap toggle + queue
+  // depth in sync if changes happen outside the TopBar.
   useEffect(() => {
-    let alive = true;
-    const fetch = async () => {
-      try {
-        const c = await api.system.commsState();
-        if (!alive) return;
+    const ctrl = pollWithBackoff(() => api.system.commsState(), {
+      baseMs: 4000,
+      maxMs: 60000,
+      // Fingerprint on the three fields we actually render — ignore any
+      // server-side timestamp jitter so the back-off can take hold.
+      fingerprint: (c) =>
+        `${c.current_state}|${c.air_gap_active ? 1 : 0}|${c.queued_ops_count}`,
+      onResult: (c) => {
         setCommsState(c.current_state);
         setAirGap(c.air_gap_active);
         setQueueDepth(c.queued_ops_count);
-      } catch {
-        /* tolerate; the StatusFooter shows the last known state */
-      }
-    };
-    fetch();
-    const id = setInterval(fetch, 4000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+      },
+    });
+    return () => ctrl.stop();
   }, [setCommsState, setAirGap, setQueueDepth]);
 
   const localTime = now.toLocaleTimeString([], { hour12: false });

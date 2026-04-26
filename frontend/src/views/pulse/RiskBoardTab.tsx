@@ -81,7 +81,7 @@ export function RiskBoardTab() {
 
   return (
     <div className="flex h-full">
-      <div className="flex-1 overflow-y-auto p-4">
+      <div data-pulse-risk-scroll className="flex-1 overflow-y-auto p-4">
         {/* Track-G2 — G-4 sees too many panels at once on landing. Collapse
          * Predicted Failures by default for G-4 (they have BASTION as their
          * primary surface; PULSE is a drill-down). Maintenance Chief and
