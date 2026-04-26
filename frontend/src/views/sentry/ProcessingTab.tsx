@@ -176,13 +176,13 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
               className="text-xl font-semibold tabular-nums text-[var(--color-text)] tracking-tight"
               style={{ lineHeight: 1 }}
             >
-              {processed.toLocaleString()}
+              {processed.toLocaleString("en-US")}
             </span>
             <span className="text-[var(--color-text-muted)]">/</span>
             <span
               className="tabular-nums text-[var(--color-text-secondary)] tracking-wide"
             >
-              {all.length.toLocaleString()}
+              {all.length.toLocaleString("en-US")}
             </span>
             <span
               className="ml-1 text-xs uppercase text-[var(--color-text-muted)] tracking-wider"

@@ -211,7 +211,7 @@ function AssetActionGroup({
               </div>
               <div className="flex items-center gap-3 font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide">
                 <Stat label="MC%" value={`+${action.mc_delta_pct.toFixed(1)}`} tone="ok" />
-                <Stat label="Cost" value={`$${action.cost_usd.toLocaleString()}`} />
+                <Stat label="Cost" value={`$${action.cost_usd.toLocaleString("en-US")}`} />
                 <Stat label="ETA" value={`${action.time_to_effect_hours}h`} />
                 <Stat label="Conf" value={`${(action.confidence * 100).toFixed(0)}%`} />
               </div>

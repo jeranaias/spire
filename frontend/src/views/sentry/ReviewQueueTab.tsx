@@ -384,7 +384,7 @@ function BulkConfirmModal({
           Confirm Bulk {action === "approve" ? "Approval" : "Rejection"}
         </div>
         <div className="mt-2 spire-body text-sm">
-          {action === "approve" ? "Approve" : "Reject"} all <strong>{count.toLocaleString()}</strong>{" "}
+          {action === "approve" ? "Approve" : "Reject"} all <strong>{count.toLocaleString("en-US")}</strong>{" "}
           {colLabel} records?
         </div>
         <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
@@ -409,7 +409,7 @@ function BulkConfirmModal({
                 : "border border-[var(--color-danger)] bg-[var(--color-danger)] hover:brightness-110",
             )}
           >
-            Confirm {verb} {count.toLocaleString()}
+            Confirm {verb} {count.toLocaleString("en-US")}
           </button>
         </div>
       </div>

@@ -52,7 +52,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
       // the celebratory toast having no destination.
       pushToast({
         tone: "ok",
-        text: `✓ Export ${r.export_id} · ${(r.records_exported ?? 0).toLocaleString()} records · ${((r.bytes ?? 0) / 1024).toFixed(1)} KB`,
+        text: `✓ Export ${r.export_id} · ${(r.records_exported ?? 0).toLocaleString("en-US")} records · ${((r.bytes ?? 0) / 1024).toFixed(1)} KB`,
         link: r.download_url ? { label: "Download", href: r.download_url } : undefined,
         ttlMs: 6000,
       });
@@ -151,10 +151,10 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             {/* Walkthrough #6 — show input count next to exported count so
                 the operator sees exactly which records the bundle covers. */}
             {result.records_input != null && (
-              <Stat label="Records In Batch" value={result.records_input.toLocaleString()} />
+              <Stat label="Records In Batch" value={result.records_input.toLocaleString("en-US")} />
             )}
-            <Stat label="Records Exported" value={(result.records_exported ?? 0).toLocaleString()} />
-            <Stat label="Rejected"          value={(result.records_rejected ?? 0).toLocaleString()} />
+            <Stat label="Records Exported" value={(result.records_exported ?? 0).toLocaleString("en-US")} />
+            <Stat label="Rejected"          value={(result.records_rejected ?? 0).toLocaleString("en-US")} />
             <Stat label="Decisions Applied" value={`${result.decisions_applied ?? 0}`} />
             <Stat label="Redactions Applied" value={`${result.redactions_applied ?? 0}`} />
             {/* Walkthrough #5 — Distribution Statement and REL TO are

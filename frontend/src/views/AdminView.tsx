@@ -145,13 +145,13 @@ export function AdminView() {
 
       {/* Hero stats row */}
       <div className="mb-4 grid grid-cols-4 gap-3">
-        <Stat label="Total outcomes" value={tel.total_outcomes.toLocaleString()} />
+        <Stat label="Total outcomes" value={tel.total_outcomes.toLocaleString("en-US")} />
         <Stat
           label="Overall accuracy"
           value={tel.overall_accuracy != null ? `${(tel.overall_accuracy * 100).toFixed(1)}%` : "—"}
           tone={tel.overall_accuracy != null && tel.overall_accuracy >= 0.85 ? "ok" : tel.overall_accuracy && tel.overall_accuracy >= 0.75 ? "warn" : "danger"}
         />
-        <Stat label="Pilot feedback (filed)" value={feedback.length.toLocaleString()} />
+        <Stat label="Pilot feedback (filed)" value={feedback.length.toLocaleString("en-US")} />
         <div
           className="rounded-md border p-4"
           style={{

@@ -1157,7 +1157,7 @@ function ResponsePanel({
             </div>
             <div className="font-mono text-[var(--color-text)]">{alert.model_info.model}</div>
             <div className="text-[var(--color-text-secondary)]">
-              {alert.model_info.parameters.toLocaleString()} parameters · {alert.model_info.architecture}
+              {alert.model_info.parameters.toLocaleString("en-US")} parameters · {alert.model_info.architecture}
             </div>
             <div className="mt-1 break-words text-xs text-[var(--color-text-muted)]">
               {alert.model_info.training} · target: {alert.model_info.deployment_target}

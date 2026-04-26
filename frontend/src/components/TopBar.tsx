@@ -140,12 +140,19 @@ export function TopBar() {
           </nav>
         </div>
 
+        {/* Walkthrough audit: at 1037px viewport the role selector and
+         * NodeStatus chip used to overlap the BASTION tab text. The
+         * right group now hides the lower-priority chrome below xl so
+         * the role selector + alert badge always have room. The hidden
+         * controls remain available — DensityToggle is on the help
+         * overlay, AirGap mode flips via Security Manager wall, ModeBadge
+         * mirrors the StatusFooter mode chip. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
           <NodeStatus />
-          <AirGapToggle />
-          <DensityToggle />
+          <span className="hidden xl:contents"><AirGapToggle /></span>
+          <span className="hidden xl:contents"><DensityToggle /></span>
           <RoleSelector role={role} onChange={onRoleChange} />
-          <ModeBadge mode={operatingMode} />
+          <span className="hidden xl:contents"><ModeBadge mode={operatingMode} /></span>
           <AlertBadge count={alertCount} />
         </div>
       </div>
