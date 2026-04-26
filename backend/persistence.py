@@ -348,4 +348,29 @@ def secure_wipe(actor: str = "security_manager") -> dict:
 # ---------------------------------------------------------------------------
 
 init_db()
-log("system_boot", actor="system", payload={"version": "0.1.0"})
+
+# Walkthrough audit: every backend boot logged a system_boot entry, and
+# Fly.io rolls machines on every deploy + autosuspend, so the operator
+# audit chain was dominated by boot noise (46/50 entries were boots).
+# Only log a boot if the previous entry isn't ALSO a recent boot — once
+# per cold start, not once per warm restart.
+def _maybe_log_boot() -> None:
+    try:
+        with conn() as c:
+            row = c.execute(
+                "SELECT kind, ts FROM audit_chain ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if row and row["kind"] == "system_boot":
+            try:
+                last = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
+                age = (datetime.now(last.tzinfo) - last).total_seconds()
+                if age < 600:  # 10 min — same machine flapping
+                    return
+            except Exception:
+                pass
+        log("system_boot", actor="system", payload={"version": "0.1.0"})
+    except Exception:
+        # Best-effort; if the boot log fails we still serve.
+        pass
+
+_maybe_log_boot()
