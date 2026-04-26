@@ -62,6 +62,7 @@ export function BastionView() {
   const role = useSpireStore((s) => s.role);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAlertSeverityCounts = useSpireStore((s) => s.setAlertSeverityCounts);
+  const alertSeverityCounts = useSpireStore((s) => s.alertSeverityCounts);
   const setSelectedUnitIdGlobal = useSpireStore((s) => s.setSelectedUnitId);
   const [cop, setCop] = useState<BastionCOP | null>(null);
   const [alerts, setAlerts] = useState<BastionAlert[]>([]);
@@ -447,6 +448,7 @@ export function BastionView() {
           onSevFilter={setSevFilter}
           searchQuery={searchQuery}
           onSearchQuery={setSearchQuery}
+          severityCounts={alertSeverityCounts}
         />
         <div className="flex-1 overflow-y-auto p-2">
           {/* Track-G2 — Fused threats live at the top of the alert sidebar.
@@ -908,10 +910,12 @@ function AlertStreamHeader({
   onSevFilter,
   searchQuery,
   onSearchQuery,
+  severityCounts,
 }: {
   activeCount: number;
   ackedCount: number;
   sevFilter: SeverityFilter;
+  severityCounts?: Record<string, number>;
   onSevFilter: (s: SeverityFilter) => void;
   searchQuery: string;
   onSearchQuery: (s: string) => void;
@@ -941,6 +945,14 @@ function AlertStreamHeader({
             opt === "MODERATE" ? "var(--color-warning)" :
             opt === "INFO"     ? "var(--color-primary)" :
                                  "var(--color-text)";
+          // Walkthrough audit: clicking 'CRITICAL' or 'INFO' on a
+          // dataset that has zero of that severity wastes a click. Show
+          // the count beside each label so the operator can see
+          // up-front which severities have rows. ALL shows total
+          // open count.
+          const total = (severityCounts?.CRITICAL ?? 0) + (severityCounts?.HIGH ?? 0)
+            + (severityCounts?.MODERATE ?? 0) + (severityCounts?.LOW ?? 0) + (severityCounts?.INFO ?? 0);
+          const count = opt === "ALL" ? total : (severityCounts?.[opt] ?? 0);
           return (
             <button
               key={opt}
@@ -951,14 +963,16 @@ function AlertStreamHeader({
                 active
                   ? "bg-[var(--color-bg)] text-[var(--color-text)]"
                   : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]",
+                count === 0 && opt !== "ALL" ? "opacity-50" : "",
               )}
               style={{
                 borderColor: active ? tone : "transparent",
                 color: active ? tone : undefined,
               }}
               aria-pressed={active}
+              aria-label={`${opt} · ${count}`}
             >
-              {opt}
+              {opt} <span className="ml-1 tabular-nums opacity-70">{count}</span>
             </button>
           );
         })}
