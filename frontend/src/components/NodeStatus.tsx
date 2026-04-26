@@ -184,15 +184,12 @@ export function NodeStatus() {
             style={{ background: color }}
           />
         </span>
-        {/* Walkthrough audit: at viewports ≤ 1100px the full
-         * 'MLG-NODE-0 · NO PEER' label was wide enough to push the
-         * right-side group into the BASTION tab. Hide the long label on
-         * narrow widths; the colored dot + count + full tooltip carry
-         * the meaning. The full label returns at lg+ (1024px) — visible
-         * only when there's room. */}
-        <span className="hidden font-semibold xl:inline" style={{ color }}>{state.node_id}</span>
-        <span className="hidden text-[var(--color-text-muted)] xl:inline">·</span>
-        <span className="hidden xl:inline" style={{ color }}>{label}</span>
+        {/* The full label is now safe — TopBar hides the entire
+         * NodeStatus button below xl, so when the chip is mounted the
+         * label always has room. */}
+        <span className="font-semibold" style={{ color }}>{state.node_id}</span>
+        <span className="text-[var(--color-text-muted)]">·</span>
+        <span style={{ color }}>{label}</span>
         {hasConflicts && (
           <span
             className="rounded-sm border border-[var(--color-danger)] px-1 text-xs tabular-nums tracking-wide"
