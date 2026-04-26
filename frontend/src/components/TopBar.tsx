@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
-import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, type Density, type Role } from "../state/store";
+import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role } from "../state/store";
 import { api } from "../api";
 import { NodeStatus } from "./NodeStatus";
 
@@ -10,6 +10,13 @@ const tabs = [
   { to: "/bastion", label: "BASTION", restrict: null as Role | null },
   { to: "/admin",   label: "ADMIN",   restrict: "security_manager" as Role },
 ];
+
+// Friendly per-tab list of authorized roles for the out-of-scope tooltip.
+function authorizedRolesFor(path: string, role: Role): { allowed: boolean; allowedRoles: Role[] } {
+  const scope = VIEW_SCOPE[path];
+  if (!scope) return { allowed: true, allowedRoles: [] };
+  return { allowed: scope.includes(role), allowedRoles: scope };
+}
 
 export function TopBar() {
   const { role, setRole, operatingMode, alertCount } = useSpireStore();
@@ -53,43 +60,74 @@ export function TopBar() {
             </div>
           </div>
           <nav className="flex shrink-0 items-center gap-0">
-            {tabs.filter((t) => t.restrict == null || t.restrict === role).map((tab, idx) => (
-              <NavLink
-                key={tab.to}
-                to={tab.to}
-                className={({ isActive }) =>
-                  clsx(
-                    "group relative px-4 py-2 font-mono text-sm font-semibold uppercase transition-colors tracking-widest",
-                    isActive
-                      ? "text-[var(--color-text)]"
-                      : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
+            {tabs
+              // ADMIN remains hidden when the role isn't security_manager
+              // (it's a privileged surface, not a teaser). Other tabs render
+              // even out of scope so operators can see what exists, but they
+              // get the disabled treatment + tooltip.
+              .filter((t) => t.restrict == null || t.restrict === role)
+              .map((tab, idx) => {
+                const { allowed, allowedRoles } = authorizedRolesFor(tab.to, role);
+                if (!allowed) {
+                  // Out-of-scope: render as a non-NavLink span so it can't be
+                  // clicked into the InsufficientPrivilege wall.
+                  return (
                     <span
-                      className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
+                      key={tab.to}
+                      aria-disabled="true"
+                      title={`Out of scope · authorized: ${allowedRoles.map((r) => ROLE_LABELS[r]).join(", ")}`}
+                      className="group relative cursor-not-allowed select-none px-4 py-2 font-mono text-sm font-semibold uppercase tracking-widest text-[var(--color-text-muted)] opacity-50"
                     >
-                      {String(idx + 1).padStart(2, "0")}
+                      <span
+                        className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
+                      >
+                        {String(idx + 1).padStart(2, "0")}
+                      </span>
+                      {tab.label}
+                      <span className="ml-1 text-[10px] text-[var(--color-text-muted)] tracking-widest">
+                        ·LOCK
+                      </span>
                     </span>
-                    {tab.label}
-                    {isActive && (
+                  );
+                }
+                return (
+                  <NavLink
+                    key={tab.to}
+                    to={tab.to}
+                    className={({ isActive }) =>
+                      clsx(
+                        "group relative px-4 py-2 font-mono text-sm font-semibold uppercase transition-colors tracking-widest",
+                        isActive
+                          ? "text-[var(--color-text)]"
+                          : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
+                      )
+                    }
+                  >
+                    {({ isActive }) => (
                       <>
                         <span
-                          className="absolute inset-x-2 -bottom-[1px] h-[2px]"
-                          style={{
-                            background: "var(--color-primary)",
-                            boxShadow: "0 0 8px var(--color-primary)",
-                          }}
-                        />
-                        <span className="absolute left-1 top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-[var(--color-primary)]" />
+                          className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
+                        >
+                          {String(idx + 1).padStart(2, "0")}
+                        </span>
+                        {tab.label}
+                        {isActive && (
+                          <>
+                            <span
+                              className="absolute inset-x-2 -bottom-[1px] h-[2px]"
+                              style={{
+                                background: "var(--color-primary)",
+                                boxShadow: "0 0 8px var(--color-primary)",
+                              }}
+                            />
+                            <span className="absolute left-1 top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-[var(--color-primary)]" />
+                          </>
+                        )}
                       </>
                     )}
-                  </>
-                )}
-              </NavLink>
-            ))}
+                  </NavLink>
+                );
+              })}
           </nav>
         </div>
 
