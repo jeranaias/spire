@@ -144,6 +144,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ actor_role: _getRole() }),
       }),
+    // Walkthrough #31 — per-subject audit-chain viewer.
+    auditFor: (subjectId: string, limit = 50) =>
+      jsonFetch<{ subject_id: string; entries: any[]; count: number }>(
+        `/sentry/audit/${encodeURIComponent(subjectId)}?limit=${limit}`,
+      ),
   },
   bastion: {
     cop: () => jsonFetch<BastionCOP>("/bastion/cop"),
