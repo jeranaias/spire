@@ -229,7 +229,7 @@ export function StatusStrip() {
              * boundary). */}
             <span className="truncate">
               <span className="font-semibold uppercase tracking-widest text-[var(--color-text-secondary)]">
-                BASE DEFENSE / FORCE PROTECTION{" "}
+                {datasetInfo?.mission_essential_task ?? "BASE DEFENSE / FORCE PROTECTION"}{" "}
               </span>
               <span className="ml-2 text-[var(--color-text-muted)]">
                 {datasetInfo?.installation_name ?? "Camp Henderson"} · {datasetInfo?.parent_command ?? "2d MLG"}
@@ -247,7 +247,7 @@ export function StatusStrip() {
           id="status-strip-mission-detail"
           className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2"
         >
-          <MissionContextDetail />
+          <MissionContextDetail datasetInfo={datasetInfo} />
         </div>
       )}
     </div>
@@ -300,26 +300,30 @@ function Chip({
   );
 }
 
-// CCIR + objective + status — the missing situational anchor. Static for
-// the demo; in production this lives in a backend mission-context endpoint
-// keyed by installation. Wording is the operationally honest version of
-// what a 2d MLG defender at Camp Henderson would have on their morning
-// brief slide.
-function MissionContextDetail() {
+// CCIR + objective + status — the missing situational anchor. Reads
+// objective + ccir templates from /api/system/dataset-info, which sources
+// them from installation_data.json. {parent} and {installation} are
+// substituted server-side so the displayed text is honest and editable
+// in data, not in code.
+function MissionContextDetail({ datasetInfo }: { datasetInfo: DatasetInfo | null }) {
+  const objective = datasetInfo?.mission_objective
+    ?? "Sustain readiness; defend the installation; preserve QRF responsiveness.";
+  const ccir = datasetInfo?.ccir ?? [];
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-      <Field
-        label="Objective"
-        body="Sustain readiness across 2d MLG; defend Camp Henderson; preserve QRF responsiveness."
-      />
+      <Field label="Objective" body={objective} />
       <Field
         label="CCIR"
         body={
-          <ul className="m-0 list-none p-0 leading-snug">
-            <li>· ≥ 70% MC across 2d MLG</li>
-            <li>· ≥ 1 immediate-response QRF</li>
-            <li>· ≥ 99% PACS uptime</li>
-          </ul>
+          ccir.length === 0 ? (
+            <span className="text-[var(--color-text-muted)]">— pending —</span>
+          ) : (
+            <ul className="m-0 list-none p-0 leading-snug">
+              {ccir.map((c, i) => (
+                <li key={i}>· {c}</li>
+              ))}
+            </ul>
+          )
         }
       />
       <Field

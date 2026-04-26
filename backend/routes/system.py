@@ -231,8 +231,14 @@ async def dataset_info():
     try:
         inst = _load_installation().get("installation", {})
         installation_name = inst.get("name")
+        mission_essential_task = inst.get("mission_essential_task")
+        mission_objective_template = inst.get("mission_objective")
+        ccir_templates = inst.get("ccir") or []
     except Exception:
         installation_name = None
+        mission_essential_task = None
+        mission_objective_template = None
+        ccir_templates = []
     parents = Counter(u.parent for u in ds.units if u.parent)
     parent_command = parents.most_common(1)[0][0] if parents else None
     return {
@@ -246,6 +252,22 @@ async def dataset_info():
         "seed": ds.seed,
         "installation_name": installation_name,
         "parent_command": parent_command,
+        "mission_essential_task": mission_essential_task,
+        "mission_objective": (
+            mission_objective_template.format(
+                parent=parent_command or "MLG",
+                installation=installation_name or "the installation",
+            )
+            if mission_objective_template
+            else None
+        ),
+        "ccir": [
+            t.format(
+                parent=parent_command or "MLG",
+                installation=installation_name or "the installation",
+            )
+            for t in ccir_templates
+        ],
     }
 
 
