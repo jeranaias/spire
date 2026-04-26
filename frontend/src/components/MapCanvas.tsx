@@ -24,6 +24,25 @@ import type { Building, ECP, RallyPoint, BastionCOPUnit } from "../api";
 
 const MAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
+// Vendored fallback style used when the CartoDB CDN intermittently fails
+// (reviewer caught the AJAX 0 race). Single solid background — buildings,
+// units, and overlays still render on top, so the schematic remains
+// usable even when no basemap is reachable. This is only reached if the
+// remote style.json fails twice in a row.
+const FALLBACK_STYLE: any = {
+  version: 8,
+  sources: {},
+  layers: [
+    {
+      id: "fallback-bg",
+      type: "background",
+      paint: { "background-color": "#0a0c13" },
+    },
+  ],
+  glyphs:
+    "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+};
+
 // --- Unit → home building mapping (kept in sync with InstallationSchematic
 // during the transition). Eventually lives on the unit record itself.
 const UNIT_BUILDING: Record<string, string> = {
@@ -359,6 +378,11 @@ export function MapCanvas({
   const [ecpSelected, setEcpSelected] = useState<ECP | null>(null);
   const [rpSelected, setRpSelected] = useState<RallyPoint | null>(null);
   const [unitSelected, setUnitSelected] = useState<{ u: BastionCOPUnit; lat: number; lon: number } | null>(null);
+  // Map-style fallback — flips to the vendored solid-background style if the
+  // CartoDB CDN style.json fails (AJAX error 0). Operators still see units,
+  // buildings, ECPs, rally points; just no vector basemap underneath.
+  const [mapStyle, setMapStyle] = useState<string | typeof FALLBACK_STYLE>(MAP_STYLE);
+  const styleRetryRef = useRef(0);
 
   // Smart anchor picker — chooses bottom / top / left / right based on where
   // the marker lands in the viewport so left-edge ECPs don't render their
@@ -455,6 +479,44 @@ export function MapCanvas({
     mapRef.current.flyTo({ center: [b.lon, b.lat], zoom: 16.5, duration: 900 });
   }, [flyToBuilding, buildingById]);
 
+  // Reviewer caught the map collapsing to a corner with units piled on each
+  // other after role swap / modal close / sim trigger. Root cause: the parent
+  // flex container momentarily reports height=0 during the role-change
+  // transition (BastionView clears `cop` to null, which yanks the map
+  // subtree) and MapLibre caches that 0-height. When the container re-mounts
+  // at full size, MapLibre never auto-resizes. A ResizeObserver on the
+  // container forces a `map.resize()` on every layout change so the canvas
+  // tracks the wrapper. Belt-and-suspenders: also resize on window resize
+  // and on a 100ms tick after first paint.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const container: HTMLElement | null = (map.getContainer && map.getContainer()) as HTMLElement | null;
+    if (!container) return;
+    let raf = 0;
+    const doResize = () => {
+      try {
+        map.resize();
+      } catch {
+        /* tolerant — map may have unmounted */
+      }
+    };
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(doResize);
+    });
+    ro.observe(container);
+    window.addEventListener("resize", doResize);
+    // Kick once on mount in case the container was 0px when MapLibre booted.
+    const initial = window.setTimeout(doResize, 100);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", doResize);
+      window.clearTimeout(initial);
+      ro.disconnect();
+    };
+  }, []);
+
   // Fly to the sim target when the sim fires.
   useEffect(() => {
     if (!simActive || !simTargetBuilding || !mapRef.current) return;
@@ -483,7 +545,22 @@ export function MapCanvas({
     <div className="relative h-full w-full overflow-hidden bg-[var(--color-bg)]">
       <MapGL
         ref={mapRef}
-        mapStyle={MAP_STYLE}
+        mapStyle={mapStyle}
+        // CartoDB CDN sometimes fails (AJAX 0) on cold start — retry once
+        // after 500ms then fall back to the vendored solid-background style
+        // so the schematic stays usable. Without this, the whole map is blank
+        // on the intermittent failure.
+        onError={(e: any) => {
+          const msg = String(e?.error?.message || e?.message || "");
+          if (/style|fetch|0/i.test(msg) && styleRetryRef.current < 1) {
+            styleRetryRef.current += 1;
+            window.setTimeout(() => {
+              setMapStyle(MAP_STYLE);
+            }, 500);
+          } else if (styleRetryRef.current >= 1 && mapStyle === MAP_STYLE) {
+            setMapStyle(FALLBACK_STYLE);
+          }
+        }}
         initialViewState={{
           longitude: centerLon,
           latitude: centerLat,
@@ -877,7 +954,11 @@ export function MapCanvas({
               <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]">
                 {unitSelected.u.parent} · {unitSelected.u.location}
               </div>
-              <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-xs">
+              {/* MC + PMC + NMC must sum to total_equipment. Reviewer caught
+               * MWSS-271 reading ASSETS 31 · MC 25 · NMC 3 (28 ≠ 31) — the
+               * PMC bucket was hidden, so 3 partial-mission-capable assets
+               * were uncounted. */}
+              <div className="mt-2 grid grid-cols-4 gap-2 font-mono text-xs">
                 <div>
                   <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">Assets</div>
                   <div className="tabular-nums text-[var(--color-text)]">{unitSelected.u.total_equipment}</div>
@@ -887,12 +968,33 @@ export function MapCanvas({
                   <div className="tabular-nums text-[var(--color-success)]">{unitSelected.u.mc_count}</div>
                 </div>
                 <div>
+                  <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">PMC</div>
+                  <div className="tabular-nums text-[var(--color-warning)]">{unitSelected.u.pmc_count}</div>
+                </div>
+                <div>
                   <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">NMC</div>
                   <div className="tabular-nums text-[var(--color-danger)]">
                     {unitSelected.u.nmcm_count + unitSelected.u.nmcs_count}
                   </div>
                 </div>
               </div>
+              {(() => {
+                const sum =
+                  unitSelected.u.mc_count
+                  + unitSelected.u.pmc_count
+                  + unitSelected.u.nmcm_count
+                  + unitSelected.u.nmcs_count;
+                if (sum === unitSelected.u.total_equipment) return null;
+                // Defensive: surface the discrepancy honestly rather than
+                // silently mis-totalling. If the API ever ships data where
+                // the buckets don't sum, the operator sees it.
+                return (
+                  <div className="mt-1 font-mono text-xs italic text-[var(--color-warning)] tracking-wide">
+                    Note: MC + PMC + NMC = {sum} ≠ ASSETS {unitSelected.u.total_equipment}
+                    {" "}({unitSelected.u.total_equipment - sum} unreported)
+                  </div>
+                );
+              })()}
               {Object.keys(unitSelected.u.equipment_breakdown || {}).length > 0 && (
                 <div className="mt-2">
                   <div className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
