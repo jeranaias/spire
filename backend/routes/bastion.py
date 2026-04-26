@@ -509,6 +509,50 @@ async def clear_simulation(sim_id: str):
 
 
 # ---------------------------------------------------------------------------
+# TMR list — surfaces the canonical synthetic TMR dataset for the BASTION TMR
+# panel. Distinct from the NL TMR parser at /nl-query, which still consumes
+# free-text operator input and routes to the rule-based / LLM extractor.
+# ---------------------------------------------------------------------------
+
+@router.get("/tmrs")
+async def list_tmrs(limit: int = 50, status: Optional[str] = None,
+                    role: Optional[str] = None):
+    """Return the synthetic TMR records generated alongside the rest of the
+    canonical dataset. Filtered by `status` if supplied (Draft/Submitted/
+    Approved/Closed). Role-scoped via the standard allowed_units gate so a
+    Maintenance Chief only sees their unit's submissions."""
+    ds = get_dataset()
+    tmrs = list(getattr(ds, "tmrs", []) or [])
+    allowed = allowed_units(ds, role)
+    if allowed is not None:
+        tmrs = [t for t in tmrs if t.requesting_unit in allowed]
+    if status:
+        tmrs = [t for t in tmrs if t.status.lower() == status.lower()]
+
+    # Most recent first, capped at `limit`.
+    tmrs.sort(key=lambda t: t.submitted_date, reverse=True)
+    out = []
+    for t in tmrs[:limit]:
+        out.append({
+            "tmr_number": t.tmr_number,
+            "submitted_date": t.submitted_date.isoformat(),
+            "scheduled_date": t.scheduled_date.isoformat(),
+            "origin": t.origin,
+            "destination": t.destination,
+            "requesting_unit": t.requesting_unit,
+            "equipment": t.equipment,
+            "hazmat": t.hazmat,
+            "escort_required": t.escort_required,
+            "route": t.route,
+            "priority": t.priority,
+            "status": t.status,
+            "purpose": t.purpose,
+            "point_of_contact": t.point_of_contact,
+        })
+    return {"tmrs": out, "total": len(tmrs)}
+
+
+# ---------------------------------------------------------------------------
 # NL TMR — Easter egg in the BASTION NL bar
 # ---------------------------------------------------------------------------
 

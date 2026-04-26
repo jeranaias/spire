@@ -28,7 +28,7 @@ from consistency import (
 from export import export_all, OUT_DIR
 from fleet import generate_fleet
 from incidents import generate_incidents
-from lifecycle import run_simulation
+from lifecycle import run_simulation, generate_tmrs
 from personnel import generate_personnel
 
 
@@ -79,9 +79,14 @@ def main(seed: int = RANDOM_SEED, quick: bool = False) -> dict:
     print(f"    {len(cans)} cannibalization events (min target {5})")
 
     stop = _stopwatch("Generating incidents")
-    incidents = generate_incidents(seed, OUTPUT_TARGETS["incident_count"])
+    incidents = generate_incidents(seed, OUTPUT_TARGETS["incident_count"], roster=roster, units=units)
     stop()
     print(f"    {len(incidents)} installation incidents")
+
+    stop = _stopwatch("Generating TMRs")
+    tmrs = generate_tmrs(units, seed)
+    stop()
+    print(f"    {len(tmrs)} transportation movement requests")
 
     stop = _stopwatch("Running consistency checks")
     violations = run_all_checks(srs, assets, snaps, cans)
@@ -106,6 +111,7 @@ def main(seed: int = RANDOM_SEED, quick: bool = False) -> dict:
         "part_requisitions": len(reqs),
         "cannibalization_events": len(cans),
         "incidents": len(incidents),
+        "tmrs": len(tmrs),
         "consistency_errors": errs,
         "consistency_warnings": warns,
         "data_quality_defects_injected": dq,

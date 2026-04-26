@@ -84,6 +84,31 @@ class ServiceRequest:
 
 
 @dataclass
+class TMR:
+    """Synthetic Transportation Movement Request — what a unit submits to the
+    installation movement-control office to move equipment between bases or
+    forward to a field-exercise area. Generated to correlate with the calendar
+    so reviewers see realistic surge patterns around exercise windows.
+
+    Lightly schema-aligned with the rule-based parser in routes/tmr.py so the
+    same downstream validators / approval-chain logic could consume them."""
+    tmr_number: str
+    submitted_date: date
+    scheduled_date: date
+    origin: str
+    destination: str
+    requesting_unit: str
+    equipment: list  # list of {type, quantity}
+    hazmat: bool
+    escort_required: bool
+    route: str
+    priority: str  # ROUTINE / PRIORITY / URGENT
+    status: str    # Draft / Submitted / Approved / Closed
+    purpose: str
+    point_of_contact: str
+
+
+@dataclass
 class DailySnapshot:
     snapshot_date: date
     asset_id: str
@@ -188,6 +213,18 @@ def _new_sr_number(asset, d: date) -> str:
 
 
 def _open_pmcs_sr(asset, d: date, rng: random.Random) -> ServiceRequest:
+    tm_ref = "Operator TM / PMCS Checklist"
+    raw = rng.choice(_PMCS_REMARKS)
+    # Template tokens (e.g. {tm_ref}) only appear in the deferred-deficiency
+    # variants. Plain-text remarks pass through unchanged because str.format
+    # is a no-op in the absence of braces.
+    if "{" in raw:
+        try:
+            remark = raw.format(tm_ref=tm_ref)
+        except (KeyError, IndexError):
+            remark = raw
+    else:
+        remark = raw
     sr = ServiceRequest(
         sr_number=_new_sr_number(asset, d),
         asset_id=asset.asset_id,
@@ -203,8 +240,8 @@ def _open_pmcs_sr(asset, d: date, rng: random.Random) -> ServiceRequest:
         priority="10",
         defect_code_primary="SCHD",
         defect_code_secondary="PMCS",
-        tm_reference="Operator TM / PMCS Checklist",
-        remark_text=rng.choice(_PMCS_REMARKS),
+        tm_reference=tm_ref,
+        remark_text=remark,
         source_classification="UNCLASSIFIED",
         detected_classification="UNCLASSIFIED",
         labor_hours_est=2,
@@ -215,13 +252,37 @@ def _open_pmcs_sr(asset, d: date, rng: random.Random) -> ServiceRequest:
     return sr
 
 
-# Five remark variants so a year of PMCS doesn't look copy-pasted.
+# 20+ PMCS remark variants -- mix of clean B-check passes plus deferred-deficiency
+# write-ups so SENTRY has texture for "deferred maintenance trending up" stories.
+# Deferred entries follow the shop convention "found X, within tolerance per {tm_ref},
+# monitoring NLT next PMCS" so consistency.py won't trip them as readiness flags.
 _PMCS_REMARKS = [
+    # Clean B-check passes (10)
     "Scheduled B-check PMCS. Lubed, cleaned, fluid levels inspected, lamps and safety items verified. No deficiencies noted.",
     "B-check PMCS complete per op TM. All fluid levels nominal, no leaks, lamps functional. Tires checked, pressures adjusted. Veh RTS.",
     "Monthly B-check. Engine bay clean, belts + hoses good, no fluid loss since last PMCS. Safety items ok. PMCS signed off.",
     "Op PMCS per schedule. Found no deficiencies beyond normal wear. Topped off all fluids to mark, recorded hours.",
     "B-check PMCS done. Replaced wiper fluid, topped coolant, tightened battery terminal. No new defects identified.",
+    "B-check complete. Walkaround clean, undercarriage clean, exhaust clean. Topped DEF, recorded odometer/hourmeter. RTS.",
+    "Monthly PMCS executed by shop. All BII verified IAW DA Form 2404. NMC items: none. PMC items: none. Veh full MC.",
+    "B-check by 0431 team. Air filter clean, sediment bowl clean, glow-plug check ok. Veh signed back to operator.",
+    "Op-level PMCS, all subsystems pass. Brake pedal travel within limits. Steering linkages tight. Lights all functional.",
+    "B-check + lube. Greased zerks per chart, swapped wipers (preventive), nothing elevated. Closed at end of day.",
+    # Deferred-deficiency variants -- "found X, within tolerance, monitoring" (10+)
+    "PMCS B-check. Found weep at trans pan, within tolerance per {tm_ref}, monitoring NLT next PMCS.",
+    "Monthly B-check. Slow seep at front diff seal, drip rate within TM limit, marked for monitor at next interval.",
+    "B-check complete. Slight battery cable corrosion noted on neg post, cleaned and dielectric grease applied. Monitor next PMCS.",
+    "PMCS done. Brake pad wear at 35% remaining (LF/RF), within tolerance per {tm_ref}; deferred replacement to next B-check window.",
+    "B-check. Heat-shield mounting bolt loose, re-torqued to spec. No further wear evident; tagged for monitoring.",
+    "Op PMCS. Wiper blade streak observed in arc, residual function acceptable, replacement scheduled NLT next service.",
+    "Monthly B-check. Coolant level at min cold mark, topped to full; minor weep at upper hose clamp, within tol, monitoring.",
+    "B-check complete. Tire tread at 5/32 LR within deadline limit per {tm_ref}; flagged for replacement at next PMCS interval.",
+    "PMCS executed. Steering box drip <1 drop/min, within TM tolerance; marked DR for monitoring rather than corrective action.",
+    "B-check. Found minor cracking on serpentine belt face, no chunking, within TM acceptance criteria; deferred to next interval.",
+    "Op PMCS. Glow-plug indicator slow to extinguish (~2s over spec), still functional; deferred for harness diagnostic next service.",
+    "Monthly B-check by shop. Loose grommet at firewall pass-through, re-seated, monitoring for further movement.",
+    "B-check complete. Air-cleaner restriction indicator at 80% of red zone, within tolerance, replacement scheduled at next PMCS.",
+    "PMCS B-check. Slight fuel-line dampness at quick-disconnect, no measurable drip, within TM limit, monitoring NLT next service.",
 ]
 
 
@@ -523,6 +584,217 @@ def run_simulation(units, assets, roster, seed: int):
             ))
 
     return all_srs, snapshots, all_reqs
+
+
+# ---------------------------------------------------------------------------
+# TMR (Transportation Movement Request) generator
+# ---------------------------------------------------------------------------
+
+# Canonical USMC installations the dataset's units actually live around. Pulled
+# from routes/tmr.py:KNOWN_LOCATIONS so origins/destinations match what the
+# parser recognises. Origins are weighted toward the home installations of the
+# units in the synthetic fleet.
+_TMR_INSTALLATIONS = [
+    "Camp Lejeune, NC",
+    "Camp Pendleton, CA",
+    "Camp Geiger, NC",
+    "MCAS Cherry Point, NC",
+    "MCAS Beaufort, SC",
+    "MCAS Yuma, AZ",
+    "MCLB Albany, GA",
+    "MCLB Barstow, CA",
+    "MCAGCC 29 Palms, CA",
+    "Camp Henderson (synthetic)",
+]
+
+_TMR_EQUIP_POOLS = {
+    "wheeled_logistics": ["JLTV", "MTVR_CARGO", "LVSR", "TRAILER_M1095"],
+    "armor":             ["M1A1_ABRAMS", "M88A2_RECOVERY", "LAV_25"],
+    "aviation_support":  ["MEP_803A", "ROWPU", "TRAILER_M1095"],
+    "fires":             ["HIMARS", "MTVR_CARGO", "TRAILER_M1095"],
+    "radar":             ["AN_TPS80_GATOR", "AN_TPQ36_FIREFINDER", "MEP_803A"],
+}
+
+_TMR_PURPOSES = [
+    "Pre-exercise equipment positioning",
+    "Post-exercise retrograde",
+    "Combined Arms Exercise (CAX) lift",
+    "Depot-level evacuation to MCLB",
+    "Inter-MEF cross-deck for combined exercise",
+    "Field-training rotation",
+    "Range support package movement",
+    "Operational Readiness Inspection lift",
+]
+
+_TMR_ROUTES = [
+    "I-95 S → US-17 W → installation main gate",
+    "I-40 W → US-70 E → installation ECP-1",
+    "I-10 E → AZ-95 N → installation ECP-2",
+    "I-15 N → CA-247 → MCAGCC main",
+    "I-95 N → US-17 N → MCB main gate",
+    "Convoy serial split — admin lead via I-95, tactical via SR-50",
+]
+
+
+def _generate_tmrs(units, calendars, seed: int) -> List[TMR]:
+    """Emit ~30 TMRs across the 365-day window, correlated with field-exercise
+    dates from the unit calendars. ~70% of TMRs land in a window 3-7 days
+    before/after a unit's exercise event so the BASTION TMR feed shows the
+    realistic 'surge before exercise, retrograde after' pattern.
+    """
+    rng = random.Random(seed + 11)
+    tmrs: List[TMR] = []
+
+    # Build a (unit, exercise_start, exercise_end) list from the calendars.
+    exercises: list[tuple] = []
+    for u in units:
+        cal = calendars.get(u.name, {})
+        if not cal:
+            continue
+        # Collapse contiguous field_exercise days into windows.
+        days = sorted(d for d, status in cal.items() if status == "field_exercise")
+        if not days:
+            continue
+        run_start = days[0]
+        prev = days[0]
+        for d in days[1:]:
+            if (d - prev).days > 1:
+                exercises.append((u, run_start, prev))
+                run_start = d
+            prev = d
+        exercises.append((u, run_start, prev))
+
+    target_total = 30
+    seq = 1
+
+    # ~70% exercise-correlated TMRs.
+    correlated_target = int(target_total * 0.7)
+    if exercises:
+        for _ in range(correlated_target):
+            unit, fx_start, fx_end = rng.choice(exercises)
+            # Pre-exercise lift OR post-exercise retrograde.
+            is_pre = rng.random() < 0.6
+            if is_pre:
+                offset = rng.randint(3, 7)
+                scheduled = fx_start - timedelta(days=offset)
+                purpose = rng.choice([
+                    "Pre-exercise equipment positioning",
+                    "Field-training rotation",
+                    "Range support package movement",
+                ])
+                origin = unit.location if unit.location in _TMR_INSTALLATIONS else _TMR_INSTALLATIONS[0]
+                destination = "Camp Henderson (synthetic)"
+            else:
+                offset = rng.randint(2, 6)
+                scheduled = fx_end + timedelta(days=offset)
+                purpose = "Post-exercise retrograde"
+                origin = "Camp Henderson (synthetic)"
+                destination = unit.location if unit.location in _TMR_INSTALLATIONS else _TMR_INSTALLATIONS[0]
+            submitted = scheduled - timedelta(days=rng.randint(3, 14))
+            tmrs.append(_make_tmr(seq, unit, origin, destination, submitted, scheduled, purpose, rng))
+            seq += 1
+
+    # Remaining ~30% routine non-correlated TMRs (depot evac, inter-MEF, etc.)
+    # We deliberately steer the last few into the most-recent 21-day window so
+    # the panel always shows a healthy mix of Approved / Submitted / Draft TMRs
+    # alongside the historical Closed log.
+    today_idx = SIMULATION_DAYS - 1
+    while len(tmrs) < target_total:
+        unit = rng.choice(units)
+        slots_remaining = target_total - len(tmrs)
+        if slots_remaining <= 4:
+            # Recent + future bias: scheduled within the last 21d window or
+            # near-future so status comes back as Submitted/Approved/Draft.
+            day_offset = rng.randint(today_idx - 14, today_idx + 14)
+            scheduled = SIMULATION_START_DATE + timedelta(days=day_offset)
+        else:
+            scheduled = SIMULATION_START_DATE + timedelta(days=rng.randint(20, SIMULATION_DAYS - 10))
+        submitted = scheduled - timedelta(days=rng.randint(5, 21))
+        # Bias toward depot evacuation routes.
+        if rng.random() < 0.5:
+            origin = unit.location if unit.location in _TMR_INSTALLATIONS else "Camp Lejeune, NC"
+            destination = rng.choice(["MCLB Albany, GA", "MCLB Barstow, CA"])
+            purpose = "Depot-level evacuation to MCLB"
+        else:
+            origin = unit.location if unit.location in _TMR_INSTALLATIONS else "Camp Lejeune, NC"
+            destination = rng.choice([loc for loc in _TMR_INSTALLATIONS if loc != origin])
+            purpose = rng.choice([
+                "Inter-MEF cross-deck for combined exercise",
+                "Operational Readiness Inspection lift",
+                "Combined Arms Exercise (CAX) lift",
+            ])
+        tmrs.append(_make_tmr(seq, unit, origin, destination, submitted, scheduled, purpose, rng))
+        seq += 1
+
+    tmrs.sort(key=lambda t: t.submitted_date)
+    return tmrs
+
+
+def _make_tmr(seq: int, unit, origin: str, destination: str, submitted: date,
+              scheduled: date, purpose: str, rng: random.Random) -> TMR:
+    # Equipment pool by unit profile.
+    if "Tank" in unit.name or "LAR" in unit.name:
+        pool = _TMR_EQUIP_POOLS["armor"]
+    elif "Marines" in unit.name or "11" in unit.name:
+        pool = _TMR_EQUIP_POOLS["fires"]
+    elif "MALS" in unit.name or "MWSS" in unit.name:
+        pool = _TMR_EQUIP_POOLS["aviation_support"]
+    elif "LAAD" in unit.name:
+        pool = _TMR_EQUIP_POOLS["radar"]
+    else:
+        pool = _TMR_EQUIP_POOLS["wheeled_logistics"]
+
+    n_types = rng.randint(1, 3)
+    chosen = rng.sample(pool, min(n_types, len(pool)))
+    equipment = [{"type": t, "quantity": rng.randint(1, 6)} for t in chosen]
+
+    hazmat = any(e["type"] in ("HIMARS", "M1A1_ABRAMS", "MEP_803A") for e in equipment) or rng.random() < 0.20
+    priority = rng.choices(["ROUTINE", "PRIORITY", "URGENT"], weights=[0.75, 0.20, 0.05])[0]
+
+    # Status biased by submitted-vs-scheduled timing relative to "today" — the
+    # last simulated day. We bucket against scheduled_date so the panel always
+    # shows a healthy mix of in-flight TMRs (Draft/Submitted/Approved) on top of
+    # completed history. The 14-day band is the "recent" window.
+    today = SIMULATION_START_DATE + timedelta(days=SIMULATION_DAYS - 1)
+    if scheduled > today:
+        status = rng.choices(["Draft", "Submitted", "Approved"], weights=[0.2, 0.4, 0.4])[0]
+    elif scheduled >= today - timedelta(days=14):
+        status = rng.choices(["Approved", "Closed"], weights=[0.4, 0.6])[0]
+    else:
+        status = "Closed"
+
+    poc = f"S-4 dispatch · {unit.name} · ext {rng.randint(4000, 4999)}"
+    route = rng.choice(_TMR_ROUTES)
+    yday = (submitted - date(submitted.year, 1, 1)).days + 1
+    tmr_number = f"TMR-{submitted.year % 100:02d}{yday:03d}-{seq:04d}"
+    return TMR(
+        tmr_number=tmr_number,
+        submitted_date=submitted,
+        scheduled_date=scheduled,
+        origin=origin,
+        destination=destination,
+        requesting_unit=unit.name,
+        equipment=equipment,
+        hazmat=hazmat,
+        escort_required=hazmat,
+        route=route,
+        priority=priority,
+        status=status,
+        purpose=purpose,
+        point_of_contact=poc,
+    )
+
+
+def generate_tmrs(units, seed: int, calendars: Optional[dict] = None) -> List[TMR]:
+    """Public entry point used by main.py + backend state.py.
+
+    If `calendars` isn't supplied (testing scenarios), build one from the unit
+    list so exercise-correlation still works.
+    """
+    rng = random.Random(seed + 2)
+    if calendars is None:
+        calendars = _build_unit_calendars(units, rng)
+    return _generate_tmrs(units, calendars, seed)
 
 
 if __name__ == "__main__":

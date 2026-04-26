@@ -88,6 +88,72 @@ def make_controlled_serial(equipment_type: str, rng: random.Random) -> str:
 # Injection
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Non-PII CUI patterns
+# ---------------------------------------------------------------------------
+# Operational narratives that are CUI-class but don't contain a regex-friendly
+# fingerprint (no EDIPI, no phone, no obvious PII). These force SENTRY's Tier-2
+# LLM to do the classification work — Tier-1 regex won't catch them.
+#
+# Each callable takes (asset, rng) and returns a short narrative string suitable
+# for splicing into a remark via " | <narrative>" so the rest of the remark
+# remains coherent. Templates use no PII, no MGRS, no obvious PII patterns.
+
+_OPS_ASSESSMENT_TEMPLATES = [
+    "Section operational assessment: {pct}% MC across {fleet_label}; recommend {days}-day surge to recover NLT next inspection.",
+    "Rolling 30-day MC trend on {fleet_label} below platoon-leader minimum; concept-of-employment review queued at battalion level.",
+    "Battalion-level read: {fleet_label} unable to meet {pct}% combat-power requirement for next exercise window without parts expedite.",
+    "Sustainment posture summary: {fleet_label} forecast to dip to {pct}% MC by D+{days} absent intervention; mitigation tracker open.",
+]
+
+_TASK_ORG_TEMPLATES = [
+    "Task org reference: detached element supporting forward CP, return to garrison contingent on follow-on TPFDD.",
+    "Element cross-attached to sister battalion for combined rehearsal; main body remains parent-organic for retrograde.",
+    "Per current task org, this section is OPCON to higher for the duration of the rehearsal phase; admin remains parent.",
+    "Task org annex C update pending: this platform listed as DS to maneuver element vice GS to logistics combat element.",
+]
+
+_CONOPS_TEMPLATES = [
+    "Concept of employment: this platform anchors point-defense overwatch during egress; loss of capability degrades scheme by one phase.",
+    "CONOPS reference: platform is the commander's main effort enabler for phase III; criticality rated MISSION ESSENTIAL.",
+    "Per current scheme of maneuver, this asset enables the supporting attack timeline; downtime > 72h forces course-of-action change.",
+    "Operational concept summary: deadline >7d on this end-item triggers branch plan execution per the latest staff estimate.",
+]
+
+_TREND_TEMPLATES = [
+    "MC% trend on this end-item declining over rolling 60d window; root-cause appears to be parts lead-time, not operator handling.",
+    "Cohort trend: similar end-items across the battalion show converging fault signature; recommend fleet-level engineering review.",
+    "Trend note: same fault family repeated 3x this quarter on this hull number; commander asked for a deeper read at next IPR.",
+    "Sustainment trend brief: this fault category trending up across unit; risk-to-mission category elevated at last commander's update.",
+]
+
+_FLEET_LABELS = [
+    "wheeled fleet",
+    "armor section",
+    "fires section",
+    "C2 platforms",
+    "EW/comms suite",
+    "support platforms",
+]
+
+
+def _make_non_pii_cui(asset, rng: random.Random) -> str:
+    """Return a non-PII operational-assessment narrative — CUI-class content
+    with no regex-friendly fingerprint. Mixes 4 template families."""
+    pool = rng.choice([
+        _OPS_ASSESSMENT_TEMPLATES,
+        _TASK_ORG_TEMPLATES,
+        _CONOPS_TEMPLATES,
+        _TREND_TEMPLATES,
+    ])
+    template = rng.choice(pool)
+    return template.format(
+        pct=rng.choice([55, 62, 67, 71, 78, 84]),
+        fleet_label=rng.choice(_FLEET_LABELS),
+        days=rng.choice([7, 14, 21, 30, 45]),
+    )
+
+
 def inject_sensitive_data(
     base_remark: str,
     asset,
@@ -152,6 +218,16 @@ def inject_sensitive_data(
         text = f"{text} {make_controlled_serial(asset.equipment_type, rng)} per DA Form 2062."
         flags.append("controlled")
 
+    # ---- Non-PII CUI narratives ----
+    # Operational-assessment / task-org / CONOPS / trend narratives that are
+    # CUI-class but have no regex fingerprint. About 8% of records carry one
+    # so the Tier-2 LLM gate gets exercised by the SENTRY pipeline rather
+    # than every CUI record being a regex Tier-1 hit.
+    if rng.random() < 0.08:
+        narrative = _make_non_pii_cui(asset, rng)
+        text = f"{text} | {narrative}"
+        flags.append("non_pii_cui")
+
     # ---- Ground-truth classification derived from flags ----
     classification = derive_classification(flags, fault_event)
 
@@ -165,13 +241,14 @@ def derive_classification(flags: List[str], fault_event) -> str:
       COMSEC / EW params               -> SECRET (subset of comms here)
       fire-control / weapon internals  -> CONFIDENTIAL minimum
       grid, comms, PII, controlled     -> CUI
+      non-PII narrative CUI patterns   -> CUI (Tier-2 LLM target)
       none                             -> UNCLASSIFIED
     """
     if "classified" in flags:
         return "SECRET"
     if fault_event.component in ("fire_control", "weapon_system") and "classified" not in flags:
         return "CONFIDENTIAL"
-    if any(f in flags for f in ("geo", "comms", "pii", "controlled")):
+    if any(f in flags for f in ("geo", "comms", "pii", "controlled", "non_pii_cui")):
         return "CUI"
     return "UNCLASSIFIED"
 
