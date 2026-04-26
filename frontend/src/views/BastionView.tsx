@@ -547,12 +547,10 @@ export function BastionView() {
             <span className="whitespace-nowrap">
               {cop.response_forces_count} RF
             </span>
-            <span className="whitespace-nowrap">FPCON BRAVO</span>
-            {cop.installation.fictional && (
-              <span className="whitespace-nowrap text-[var(--color-warning)]">
-                // SYNTHETIC DATA
-              </span>
-            )}
+            {/* Walkthrough audit: dropped the FPCON pill + // SYNTHETIC DATA
+             * stamp from the COP card. FPCON lives in the StatusStrip and
+             * classification banner already (3 mentions on one screen
+             * read as visual noise); SYNTHETIC repeats the top banner. */}
           </div>
         </div>
 

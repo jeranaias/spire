@@ -17,9 +17,9 @@
  *  - Mission context is expandable on click; collapses to a one-line
  *    objective summary by default to keep the strip a single row.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, type DatasetInfo } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
 
@@ -42,6 +42,12 @@ export function StatusStrip() {
   const [overallMc, setOverallMc] = useState<number | null>(null);
   const [highCount, setHighCount] = useState<number>(0);
   const [missionOpen, setMissionOpen] = useState<boolean>(false);
+  // Walkthrough #JOB-E (review #51 PULSE) — small "?" popover next to the
+  // Overall MC chip explains "Strict MC = readiness_code == MC. PMC is
+  // partial, NOT MC." Operators were asking which definition each surface
+  // used; this is the single source of truth pinned to the chrome.
+  const [mcHelpOpen, setMcHelpOpen] = useState<boolean>(false);
+  const [datasetInfo, setDatasetInfo] = useState<DatasetInfo | null>(null);
 
   // Pull fleet MC + alert mix on a 30s/120s back-off cadence. Strip values
   // change slowly during steady-state operations; aggressive polling here
@@ -82,6 +88,23 @@ export function StatusStrip() {
     return () => ctrl.stop();
   }, [setAlertCount]);
 
+  // Walkthrough #JOB-E — fetch dataset info once for the help popover.
+  // Cheap, low-traffic; no need for backoff polling here.
+  useEffect(() => {
+    let alive = true;
+    api.system
+      .datasetInfo()
+      .then((d) => {
+        if (alive) setDatasetInfo(d);
+      })
+      .catch(() => {
+        /* tolerant — popover renders without the timestamp */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // MC% tone — reused thresholds from PULSE.
   const mcTone =
     overallMc == null ? "var(--color-text-muted)"
@@ -114,14 +137,25 @@ export function StatusStrip() {
       className="relative shrink-0 border-b border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))]"
     >
       <div className="flex flex-wrap items-center gap-2 px-4 py-1.5">
-        <Chip
-          label="Overall MC"
-          value={mcDisplay}
-          tone={mcTone}
-          onClick={() => nav("/pulse/overview")}
-          ariaLabel={`Overall mission capable rate ${mcDisplay}. Click to open Pulse fleet overview.`}
-          title="Mission-capable rate across 2d MLG · click to open PULSE Fleet Overview"
-        />
+        <div className="relative flex items-center">
+          <Chip
+            label="Overall MC"
+            value={mcDisplay}
+            tone={mcTone}
+            onClick={() => nav("/pulse/overview")}
+            ariaLabel={`Overall mission capable rate ${mcDisplay}. Click to open Pulse fleet overview.`}
+            title="Mission-capable rate across 2d MLG · click to open PULSE Fleet Overview"
+          />
+          {/* Walkthrough #JOB-E (review #51 PULSE) — discoverable "?" that
+           * pops the methodology card. Operators don't need it most of the
+           * time but want it answered without a doc-hunt when they do. */}
+          <McMethodologyHelp
+            open={mcHelpOpen}
+            onToggle={() => setMcHelpOpen((v) => !v)}
+            onClose={() => setMcHelpOpen(false)}
+            datasetLastDay={datasetInfo?.dataset_last_day ?? null}
+          />
+        </div>
         <Chip
           label="FPCON"
           value={fpcon}
@@ -189,9 +223,13 @@ export function StatusStrip() {
             className="flex min-w-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-xs text-[var(--color-text)] transition-colors hover:border-[var(--color-border-active)] tracking-wide"
             title="Camp Henderson mission summary · click to expand CCIR + status"
           >
+            {/* Walkthrough audit: trailing space inside the bold span so
+             * screen readers + .innerText don't concatenate "PROTECTIONCamp"
+             * (the previous ml-2 gave only visual separation, no character
+             * boundary). */}
             <span className="truncate">
               <span className="font-semibold uppercase tracking-widest text-[var(--color-text-secondary)]">
-                BASE DEFENSE / FORCE PROTECTION
+                BASE DEFENSE / FORCE PROTECTION{" "}
               </span>
               <span className="ml-2 text-[var(--color-text-muted)]">Camp Henderson · 2d MLG</span>
             </span>
@@ -307,6 +345,107 @@ function Field({ label, body }: { label: string; body: React.ReactNode }) {
       <div className="mt-1 font-mono text-xs text-[var(--color-text)] tracking-wide">
         {body}
       </div>
+    </div>
+  );
+}
+
+// Walkthrough #JOB-E (review #51 PULSE) — "How MC% is calculated" inline
+// help. Operators repeatedly asked which definition each surface uses;
+// this is the single canonical answer pinned next to the Overall MC chip.
+//
+// Strict MC = readiness_code == "MC". PMC is partial-mission-capable and
+// is NOT counted as MC. Same number across PULSE Fleet Overview, BASTION
+// COP cards, and the Overall MC chip — all read /api/bastion/cop's
+// end-of-day snapshot.
+function McMethodologyHelp({
+  open,
+  onToggle,
+  onClose,
+  datasetLastDay,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  datasetLastDay: string | null;
+}) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  // Click-outside + Escape close — operator-friendly dismissal that
+  // doesn't trap focus or leave the popover stuck open during view nav.
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose]);
+
+  // Format dataset.last_day as "26 APR 26" to match PULSE's "as of"
+  // line + BASTION's mission clock face. Plain ISO would clash visually.
+  const lastDayDisplay = (() => {
+    if (!datasetLastDay) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(datasetLastDay);
+    if (!m) return datasetLastDay;
+    const [, y, mo, d] = m;
+    const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+    const monIdx = parseInt(mo, 10) - 1;
+    if (monIdx < 0 || monIdx > 11) return datasetLastDay;
+    return `${d} ${months[monIdx]} ${y.slice(2)}`;
+  })();
+
+  return (
+    <div ref={wrapRef} className="relative ml-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label="How is MC% calculated?"
+        title="How is MC% calculated?"
+        className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] font-mono text-[10px] font-semibold text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
+      >
+        ?
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          aria-label="How MC% is calculated"
+          className="absolute left-0 top-7 z-[40] w-80 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs shadow-2xl"
+        >
+          <div
+            className="mb-1 font-mono uppercase text-[var(--color-text-muted)]"
+            style={{ fontSize: "10px", letterSpacing: "var(--tracking-widest)" }}
+          >
+            How MC% is calculated
+          </div>
+          <div className="space-y-2 text-[var(--color-text)] tracking-wide">
+            <div>
+              <span className="font-semibold">Strict MC</span> = readiness_code == "MC".
+              PMC (partial mission-capable) is <span className="font-semibold">not</span> counted as MC.
+            </div>
+            <div className="text-[var(--color-text-secondary)]">
+              Source: end-of-day snapshot at <span className="font-mono">/api/bastion/cop</span>.
+              Same number across PULSE Fleet Overview, BASTION COP cards, and this chip.
+            </div>
+            {lastDayDisplay && (
+              <div className="text-[var(--color-text-muted)]">
+                Last updated:{" "}
+                <span className="font-mono tabular-nums text-[var(--color-text-secondary)]">
+                  {lastDayDisplay}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
