@@ -177,6 +177,11 @@ def fuse_alerts(alerts: list[dict], window_minutes: int = 30) -> list[FusedThrea
                         ecp_ids.add(ecp)
                         ordered.append((p, ecp))
                     break
+        # Walkthrough audit: chain rendered as 'ECP-4 → ECP-3 → ECP-2',
+        # which is neither chronological nor numerical — operators read
+        # '→' as a temporal sequence. Sort the chain by event timestamp
+        # so the arrows reflect 'first, then, then'.
+        ordered.sort(key=lambda pe: pe[0].get("timestamp", ""))
         if len(ecp_ids) >= 2:
             # Attach the extracted ECP id to the chain so the front-end can
             # render `ECP-A → ECP-B → ECP-C` instead of three identical
