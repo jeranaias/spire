@@ -282,7 +282,7 @@ export function CannibalizationTab() {
                 <div>
                   <div className="font-mono text-base font-semibold text-[var(--color-text)]">{n.asset_id}</div>
                   <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-                    {n.equipment_type} · {n.unit} · open {n.days_open}d · fault: {n.fault_component}
+                    {n.equipment_type.replace(/_/g, " ")} · {n.unit} · open {n.days_open}d · fault: {n.fault_component}
                     {n.fault_class && (
                       <span className="ml-1 rounded-sm border border-[var(--color-border)] px-1 text-[10px] uppercase">
                         class: {n.fault_class}
@@ -345,7 +345,7 @@ export function CannibalizationTab() {
                 </span>
               </div>
               <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-                {d.equipment_type} · {d.unit} · open {d.days_open}d
+                {d.equipment_type.replace(/_/g, " ")} · {d.unit} · open {d.days_open}d
               </div>
               <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
                 Fault: {d.fault_component} {d.fault_class && <span className="text-[var(--color-text-muted)]">({d.fault_class})</span>}
@@ -561,7 +561,7 @@ function ConfirmProposeModal({
             </div>
             <div className="mt-0.5 font-mono text-base font-semibold text-[var(--color-text)]">{need.asset_id}</div>
             <div className="font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
-              {need.unit} · {need.equipment_type}
+              {need.unit} · {need.equipment_type.replace(/_/g, " ")}
             </div>
           </div>
           <div>
@@ -570,7 +570,7 @@ function ConfirmProposeModal({
             </div>
             <div className="mt-0.5 font-mono text-base font-semibold text-[var(--color-text)]">{donor.asset_id}</div>
             <div className="font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
-              {donor.unit} · {donor.equipment_type}
+              {donor.unit} · {donor.equipment_type.replace(/_/g, " ")}
             </div>
           </div>
           <div className="col-span-2">

@@ -380,7 +380,7 @@ function DraftActionModal({
           </button>
         </div>
         <div className="mb-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
-          {asset.equipment_type} · {asset.unit_name} · {asset.primary_factor}
+          {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · {asset.primary_factor}
         </div>
         {!data && !error && (
           <div className="flex items-center gap-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
@@ -505,7 +505,7 @@ function RiskRow({
         <div className="flex items-baseline gap-3">
           <span className="font-mono text-base font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
           <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-            {asset.equipment_type} · {asset.unit_name} · SN {asset.serial_number}
+            {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · SN {asset.serial_number}
           </span>
           <span
             className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider"
@@ -614,7 +614,7 @@ function AssetDeepDivePanel({
           <div>
             <div className="font-mono text-sm font-semibold">{a.asset_id}</div>
             <div className="text-xs text-[var(--color-text-muted)]">
-              {a.equipment_type} · {a.unit_name}
+              {a.equipment_type.replace(/_/g, " ")} · {a.unit_name}
             </div>
             <div className="mt-1 text-sm text-[var(--color-text-muted)]">
               {a.nomenclature}

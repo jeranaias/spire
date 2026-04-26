@@ -559,7 +559,7 @@ function ReviewCard({
       <div className="px-2 py-2">
         <div className="mb-1 flex items-center gap-2 font-mono text-xs tracking-wide">
           <span className="text-[var(--color-text)]">{record.sr_number}</span>
-          <span className="text-[var(--color-text-muted)]">· {record.equipment_type}</span>
+          <span className="text-[var(--color-text-muted)]">· {record.equipment_type.replace(/_/g, " ")}</span>
           <span className="text-[var(--color-text-muted)]">· {record.unit_name}</span>
         </div>
         <div className="line-clamp-2 text-sm text-[var(--color-text-secondary)]">{record.remark}</div>

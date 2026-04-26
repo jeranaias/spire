@@ -321,7 +321,7 @@ function RawRecord({ record, isMostRecent }: { record: any; isMostRecent: boolea
         <span>·</span>
         <span>{record.unit_name}</span>
         <span>·</span>
-        <span>{record.equipment_type}</span>
+        <span>{record.equipment_type.replace(/_/g, " ")}</span>
         <span className="ml-auto font-mono">{record.source_classification}</span>
       </div>
       <div className="text-[var(--color-text)]">
