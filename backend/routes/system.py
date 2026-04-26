@@ -79,7 +79,10 @@ async def _probe_llm_brief() -> dict:
     cloud_aliases = {"cloud", "openrouter", "anthropic", "haiku", "sonnet", "opus", "gpt", "gpt-4", "gpt-4o", "claude"}
     try:
         import httpx  # local import keeps cold-start lean
-        async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=4.0, follow_redirects=False) as client:
+            # Tier 1 — /v1/models for metadata. Some vLLM builds don't expose
+            # this even when chat completions work, so a 404 here doesn't
+            # mean the LLM is down.
             resp = await client.get(f"{proxy}/v1/models")
             if resp.status_code == 200:
                 info["reachable"] = True
@@ -93,8 +96,35 @@ async def _probe_llm_brief() -> dict:
                         info["cloud_aliases_filtered"] = cloud_seen
                 except Exception:
                     pass
-            else:
-                info["error"] = f"HTTP {resp.status_code}"
+                return info
+            # Tier 2 — fall back to a 1-token chat probe. The proxy might 404
+            # /v1/models but still serve /v1/chat/completions; that's the
+            # capability the operator actually depends on. Use the configured
+            # api_alias as the model. We accept ANY 2xx as proof of life;
+            # success/failure of generation is irrelevant here.
+            try:
+                ping = await client.post(
+                    f"{proxy}/v1/chat/completions",
+                    json={
+                        "model": api_alias,
+                        "messages": [{"role": "user", "content": "ok"}],
+                        "max_tokens": 1,
+                        "temperature": 0,
+                    },
+                )
+                if 200 <= ping.status_code < 300:
+                    info["reachable"] = True
+                    info["available_models"] = [api_alias]
+                    return info
+                info["error"] = (
+                    f"HTTP {resp.status_code} on /v1/models, "
+                    f"HTTP {ping.status_code} on /v1/chat/completions"
+                )
+            except Exception as e2:  # noqa: BLE001
+                info["error"] = (
+                    f"HTTP {resp.status_code} on /v1/models, "
+                    f"chat-probe {type(e2).__name__}"
+                )
     except Exception as e:  # noqa: BLE001
         info["error"] = str(e)[:160]
     return info
