@@ -143,7 +143,18 @@ export function StatusFooter() {
         <span className="text-[var(--color-brand)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
       </div>
 
-      {/* Scrolling telemetry ticker between the anchors. Padding values are
+      {/* Walkthrough #JOB-C (review #36 PULSE / #25 SENTRY) — every token
+       * gets `whitespace-nowrap` on BOTH the wrapper and the inner label/
+       * value spans so the marquee never breaks a token mid-character.
+       *
+       * Pre-fix: dry-run caught "Gemma 4", "3K para", "8.8K p", "ssets ·",
+       * "andby", "INTI", "EN", "CM", "-256-GC" — all consequences of the
+       * outer span allowing internal whitespace to wrap when the marquee
+       * pushed a token across the fade-edge gradient. The container itself
+       * had whitespace-nowrap but the inner spans inherited via display:flex
+       * which subtly re-enabled wrapping inside the value text.
+       *
+       * Scrolling telemetry ticker between the anchors. Padding values are
        * tuned so the ticker doesn't overlap the anchored blocks at any
        * breakpoint. The left anchor grew on lg breakpoints to accommodate
        * the pinned audit hash; the right anchor shrank now that the
@@ -155,22 +166,32 @@ export function StatusFooter() {
           className="ticker flex h-full items-center whitespace-nowrap font-mono text-xs tracking-wider"
         >
           {track.map((item, i) => (
-            <span key={i} className="flex items-center gap-2 px-4">
+            <span
+              key={i}
+              className="flex shrink-0 items-center gap-2 whitespace-nowrap px-4"
+            >
               <span
-                className="uppercase text-[var(--color-text-muted)] tracking-wider"
+                className="whitespace-nowrap uppercase text-[var(--color-text-muted)] tracking-wider"
               >
                 {item.label}
               </span>
-              <span className="tabular-nums" style={{ color: toneColor(item.tone) }}>
+              <span
+                className="whitespace-nowrap tabular-nums"
+                style={{ color: toneColor(item.tone) }}
+              >
                 {item.value}
               </span>
-              <span className="pl-4 text-[var(--color-border-active)]">◦</span>
+              <span className="whitespace-nowrap pl-4 text-[var(--color-border-active)]">◦</span>
             </span>
           ))}
         </div>
       </div>
 
-      {/* Fade edges so ticker text disappears cleanly into the anchored blocks */}
+      {/* Fade edges so ticker text disappears cleanly into the anchored blocks.
+       * Walkthrough #JOB-C — fades match the underlying surface and DO NOT
+       * clip the token; tokens may slide under the gradient and emerge on
+       * the other side intact. The truncations operators saw were a
+       * by-product of value spans wrapping, not the gradient. */}
       <div
         className="pointer-events-none absolute left-[18rem] top-0 z-[5] hidden h-full w-10 md:block lg:left-[28rem]"
         style={{
