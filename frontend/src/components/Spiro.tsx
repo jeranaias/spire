@@ -220,7 +220,7 @@ export function Spiro() {
             ◆ SPIRO · SPIRE Officer · Gemma 4
           </div>
           <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">
-            Tell SPIRO what you want. He plans; you approve before anything runs.
+            Tell SPIRO what you want. SPIRO plans; you approve before anything runs.
           </div>
         </div>
         <button
