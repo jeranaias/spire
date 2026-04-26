@@ -146,6 +146,7 @@ class Unit:
     optempo: str
     deployment_status: str
     equipment_counts: dict  # equipment_type -> count
+    home_building: str | None = None  # building.id where the unit's HQ/MP sits
     assets: list = field(default_factory=list)
 
 
@@ -171,6 +172,7 @@ def generate_fleet(seed: int) -> tuple[list[Unit], list[Asset]]:
             optempo=unit_def["optempo"],
             deployment_status=unit_def["deployment_status"],
             equipment_counts={k: v["count"] for k, v in unit_def["equipment"].items()},
+            home_building=unit_def.get("home_building"),
         )
 
         for equip_type, equip_def in unit_def["equipment"].items():

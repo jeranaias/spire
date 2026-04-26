@@ -45,18 +45,13 @@ const FALLBACK_STYLE: any = {
 
 // --- Unit → home building mapping (kept in sync with InstallationSchematic
 // during the transition). Eventually lives on the unit record itself.
-const UNIT_BUILDING: Record<string, string> = {
-  "CLB-6":        "CLB6-MP",
-  "CLB-1":        "MLG-SSC",
-  "3d Maint Bn":  "MLG-SSC",
-  "3/6 Marines":  "TANK-MP",
-  "2d LAR Bn":    "LAR-MP",
-  "MALS-31":      "HH-1",
-  "MWSS-271":     "DL-HQ",
-  "2d LAAD Bn":   "LAAD-TOC",
-  "2/14 Marines": "TOC-MAIN",
-  "7th ESB":      "ESB-WS",
-};
+// Walkthrough audit: a hardcoded UNIT_BUILDING dict used to live here,
+// duplicating data that belongs in the dataset. The mapping is now
+// authoritative in `dataset/data/unit_structure.json` (each unit's
+// `home_building` field), threaded through `Unit.home_building` →
+// `/api/bastion/cop`'s unit payload → `BastionCOPUnit.home_building`.
+// Frontend uses that field directly so adding/renaming a unit doesn't
+// require touching this file.
 
 // --- Building type styling — sized (metres), stroked by type.
 const TYPE_COLOR: Record<string, { fill: string; stroke: string; label: string }> = {
@@ -492,14 +487,16 @@ export function MapCanvas({
   // building footprint at zoom ≥ 14.
   const placedUnits = useMemo(() => {
     // First pass: resolve each unit to its home (lat,lon) anchor.
+    // `u.home_building` comes from the dataset (unit_structure.json) and
+    // is the canonical source of truth for unit -> building placement.
     const resolved = units.map((u) => {
-      const homeId = UNIT_BUILDING[u.unit];
+      const homeId = u.home_building ?? null;
       const home = homeId ? buildingById.get(homeId) : undefined;
       return {
         u,
         anchorLat: home?.lat ?? centerLat,
         anchorLon: home?.lon ?? centerLon,
-        homeId: homeId ?? null,
+        homeId,
       };
     });
     // Second pass: group by home and offset duplicates around the anchor.
@@ -642,8 +639,7 @@ export function MapCanvas({
     if (!map) return;
     const points: Array<[number, number]> = [];
     for (const u of units) {
-      const homeId = UNIT_BUILDING[u.unit];
-      const home = homeId ? buildingById.get(homeId) : undefined;
+      const home = u.home_building ? buildingById.get(u.home_building) : undefined;
       const lat = home?.lat ?? null;
       const lon = home?.lon ?? null;
       if (lat != null && lon != null) points.push([lon, lat]);
@@ -1277,8 +1273,7 @@ export function MapCanvas({
           if (!map) return;
           const points: Array<[number, number]> = [];
           for (const u of units) {
-            const homeId = UNIT_BUILDING[u.unit];
-            const home = homeId ? buildingById.get(homeId) : undefined;
+            const home = u.home_building ? buildingById.get(u.home_building) : undefined;
             if (home && home.lat != null && home.lon != null) points.push([home.lon, home.lat]);
           }
           for (const e of ecps) {

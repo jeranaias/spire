@@ -8,13 +8,38 @@
       "optempo": "high",
       "deployment_status": "garrison",
       "equipment": {
-        "JLTV":          {"tamcn": "D1196", "count": 28, "fsc": "2320"},
-        "MTVR_CARGO":    {"tamcn": "D0082", "count": 15, "fsc": "2320"},
-        "MTVR_WRECKER":  {"tamcn": "D0088", "count": 3,  "fsc": "2320"},
-        "LVSR":          {"tamcn": "D0092", "count": 8,  "fsc": "2320"},
-        "TRAILER_M1095": {"tamcn": "D0218", "count": 12, "fsc": "2330"},
-        "MEP_803A":      {"tamcn": "B2601", "count": 4,  "fsc": "6115"}
-      }
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 28,
+          "fsc": "2320"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 15,
+          "fsc": "2320"
+        },
+        "MTVR_WRECKER": {
+          "tamcn": "D0088",
+          "count": 3,
+          "fsc": "2320"
+        },
+        "LVSR": {
+          "tamcn": "D0092",
+          "count": 8,
+          "fsc": "2320"
+        },
+        "TRAILER_M1095": {
+          "tamcn": "D0218",
+          "count": 12,
+          "fsc": "2330"
+        },
+        "MEP_803A": {
+          "tamcn": "B2601",
+          "count": 4,
+          "fsc": "6115"
+        }
+      },
+      "home_building": "CLB6-MP"
     },
     {
       "uic": "M21450",
@@ -24,13 +49,38 @@
       "optempo": "high",
       "deployment_status": "garrison",
       "equipment": {
-        "JLTV":          {"tamcn": "D1196", "count": 25, "fsc": "2320"},
-        "MTVR_CARGO":    {"tamcn": "D0082", "count": 18, "fsc": "2320"},
-        "MTVR_WRECKER":  {"tamcn": "D0088", "count": 2,  "fsc": "2320"},
-        "LVSR":          {"tamcn": "D0092", "count": 6,  "fsc": "2320"},
-        "TRAILER_M1095": {"tamcn": "D0218", "count": 10, "fsc": "2330"},
-        "MEP_803A":      {"tamcn": "B2601", "count": 3,  "fsc": "6115"}
-      }
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 25,
+          "fsc": "2320"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 18,
+          "fsc": "2320"
+        },
+        "MTVR_WRECKER": {
+          "tamcn": "D0088",
+          "count": 2,
+          "fsc": "2320"
+        },
+        "LVSR": {
+          "tamcn": "D0092",
+          "count": 6,
+          "fsc": "2320"
+        },
+        "TRAILER_M1095": {
+          "tamcn": "D0218",
+          "count": 10,
+          "fsc": "2330"
+        },
+        "MEP_803A": {
+          "tamcn": "B2601",
+          "count": 3,
+          "fsc": "6115"
+        }
+      },
+      "home_building": "MLG-SSC"
     },
     {
       "uic": "M33200",
@@ -40,11 +90,28 @@
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
-        "JLTV":       {"tamcn": "D1196", "count": 12, "fsc": "2320"},
-        "MTVR_CARGO": {"tamcn": "D0082", "count": 10, "fsc": "2320"},
-        "MRAP_RG31":  {"tamcn": "D1127", "count": 6,  "fsc": "2355"},
-        "MEP_803A":   {"tamcn": "B2601", "count": 5,  "fsc": "6115"}
-      }
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 12,
+          "fsc": "2320"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 10,
+          "fsc": "2320"
+        },
+        "MRAP_RG31": {
+          "tamcn": "D1127",
+          "count": 6,
+          "fsc": "2355"
+        },
+        "MEP_803A": {
+          "tamcn": "B2601",
+          "count": 5,
+          "fsc": "6115"
+        }
+      },
+      "home_building": "MLG-SSC"
     },
     {
       "uic": "M40120",
@@ -54,10 +121,23 @@
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
-        "JLTV":           {"tamcn": "D1196", "count": 14, "fsc": "2320"},
-        "MTVR_CARGO":     {"tamcn": "D0082", "count": 8,  "fsc": "2320"},
-        "MRAP_RG31":      {"tamcn": "D1127", "count": 6,  "fsc": "2355"}
-      }
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 14,
+          "fsc": "2320"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 8,
+          "fsc": "2320"
+        },
+        "MRAP_RG31": {
+          "tamcn": "D1127",
+          "count": 6,
+          "fsc": "2355"
+        }
+      },
+      "home_building": "TANK-MP"
     },
     {
       "uic": "M26300",
@@ -67,10 +147,23 @@
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
-        "LAV_25": {"tamcn": "A0076", "count": 16, "fsc": "2350"},
-        "LAV_AT": {"tamcn": "A0078", "count": 8,  "fsc": "2350"},
-        "JLTV":   {"tamcn": "D1196", "count": 6,  "fsc": "2320"}
-      }
+        "LAV_25": {
+          "tamcn": "A0076",
+          "count": 16,
+          "fsc": "2350"
+        },
+        "LAV_AT": {
+          "tamcn": "A0078",
+          "count": 8,
+          "fsc": "2350"
+        },
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 6,
+          "fsc": "2320"
+        }
+      },
+      "home_building": "LAR-MP"
     },
     {
       "uic": "M55670",
@@ -80,12 +173,33 @@
       "optempo": "high",
       "deployment_status": "garrison",
       "equipment": {
-        "MV22B_OSPREY":   {"tamcn": "A4822", "count": 4, "fsc": "1520"},
-        "CH53E_STALLION": {"tamcn": "A4612", "count": 3, "fsc": "1520"},
-        "MTVR_CARGO":     {"tamcn": "D0082", "count": 6, "fsc": "2320"},
-        "JLTV":           {"tamcn": "D1196", "count": 4, "fsc": "2320"},
-        "MEP_803A":       {"tamcn": "B2601", "count": 6, "fsc": "6115"}
-      }
+        "MV22B_OSPREY": {
+          "tamcn": "A4822",
+          "count": 4,
+          "fsc": "1520"
+        },
+        "CH53E_STALLION": {
+          "tamcn": "A4612",
+          "count": 3,
+          "fsc": "1520"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 6,
+          "fsc": "2320"
+        },
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 4,
+          "fsc": "2320"
+        },
+        "MEP_803A": {
+          "tamcn": "B2601",
+          "count": 6,
+          "fsc": "6115"
+        }
+      },
+      "home_building": "HH-1"
     },
     {
       "uic": "M60230",
@@ -95,12 +209,33 @@
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
-        "JLTV":       {"tamcn": "D1196", "count": 10, "fsc": "2320"},
-        "MTVR_CARGO": {"tamcn": "D0082", "count": 8,  "fsc": "2320"},
-        "TRAM":       {"tamcn": "B0854", "count": 3,  "fsc": "3805"},
-        "MEP_803A":   {"tamcn": "B2601", "count": 8,  "fsc": "6115"},
-        "ROWPU":      {"tamcn": "B2984", "count": 2,  "fsc": "4610"}
-      }
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 10,
+          "fsc": "2320"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 8,
+          "fsc": "2320"
+        },
+        "TRAM": {
+          "tamcn": "B0854",
+          "count": 3,
+          "fsc": "3805"
+        },
+        "MEP_803A": {
+          "tamcn": "B2601",
+          "count": 8,
+          "fsc": "6115"
+        },
+        "ROWPU": {
+          "tamcn": "B2984",
+          "count": 2,
+          "fsc": "4610"
+        }
+      },
+      "home_building": "DL-HQ"
     },
     {
       "uic": "M30550",
@@ -110,11 +245,28 @@
       "optempo": "low",
       "deployment_status": "garrison",
       "equipment": {
-        "AN_TPS80_GATOR":      {"tamcn": "E1839", "count": 2, "fsc": "5840"},
-        "AN_TPQ36_FIREFINDER": {"tamcn": "E0960", "count": 2, "fsc": "5840"},
-        "JLTV":                {"tamcn": "D1196", "count": 6, "fsc": "2320"},
-        "MTVR_CARGO":          {"tamcn": "D0082", "count": 4, "fsc": "2320"}
-      }
+        "AN_TPS80_GATOR": {
+          "tamcn": "E1839",
+          "count": 2,
+          "fsc": "5840"
+        },
+        "AN_TPQ36_FIREFINDER": {
+          "tamcn": "E0960",
+          "count": 2,
+          "fsc": "5840"
+        },
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 6,
+          "fsc": "2320"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 4,
+          "fsc": "2320"
+        }
+      },
+      "home_building": "LAAD-TOC"
     },
     {
       "uic": "M15800",
@@ -124,10 +276,23 @@
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
-        "HIMARS":     {"tamcn": "E1897", "count": 9,  "fsc": "1055"},
-        "MTVR_CARGO": {"tamcn": "D0082", "count": 12, "fsc": "2320"},
-        "JLTV":       {"tamcn": "D1196", "count": 8,  "fsc": "2320"}
-      }
+        "HIMARS": {
+          "tamcn": "E1897",
+          "count": 9,
+          "fsc": "1055"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 12,
+          "fsc": "2320"
+        },
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 8,
+          "fsc": "2320"
+        }
+      },
+      "home_building": "TOC-MAIN"
     },
     {
       "uic": "M22100",
@@ -137,12 +302,33 @@
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
-        "JLTV":       {"tamcn": "D1196", "count": 10, "fsc": "2320"},
-        "MTVR_CARGO": {"tamcn": "D0082", "count": 8,  "fsc": "2320"},
-        "D7G_DOZER":  {"tamcn": "B0340", "count": 4,  "fsc": "2410"},
-        "TRAM":       {"tamcn": "B0854", "count": 3,  "fsc": "3805"},
-        "MEP_803A":   {"tamcn": "B2601", "count": 5,  "fsc": "6115"}
-      }
+        "JLTV": {
+          "tamcn": "D1196",
+          "count": 10,
+          "fsc": "2320"
+        },
+        "MTVR_CARGO": {
+          "tamcn": "D0082",
+          "count": 8,
+          "fsc": "2320"
+        },
+        "D7G_DOZER": {
+          "tamcn": "B0340",
+          "count": 4,
+          "fsc": "2410"
+        },
+        "TRAM": {
+          "tamcn": "B0854",
+          "count": 3,
+          "fsc": "3805"
+        },
+        "MEP_803A": {
+          "tamcn": "B2601",
+          "count": 5,
+          "fsc": "6115"
+        }
+      },
+      "home_building": "ESB-WS"
     }
   ]
 }

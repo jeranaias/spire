@@ -136,6 +136,7 @@ async def cop(role: Optional[str] = None):
             "uic": u.uic,
             "parent": u.parent,
             "location": u.location,
+            "home_building": u.home_building,  # canonical mapping unit -> building.id (data, not hardcoded UI)
             "lat": lat,
             "lon": lon,
             "total_equipment": total,
