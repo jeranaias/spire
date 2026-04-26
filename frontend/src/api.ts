@@ -602,6 +602,7 @@ export interface BastionCOPUnit {
   uic: string;
   parent: string;
   location: string;
+  home_building: string | null;  // building.id where this unit's HQ/MP sits
   lat: number;
   lon: number;
   total_equipment: number;
