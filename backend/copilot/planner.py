@@ -315,7 +315,12 @@ def _strip_json_dump(text: str) -> str:
     text = re.sub(r"```[\s\S]*?```", "", text)  # any other code fence
     text = re.sub(r"\[\s*\{[\s\S]*?\}\s*\]", "", text)
     text = re.sub(r"summary_for_operator\s*:?\s*", "", text, flags=re.IGNORECASE)
-    return re.sub(r"\n{2,}", "\n", text).strip()
+    # Strip literal tool-call notation the LLM sometimes emits as prose,
+    # e.g. `call:find_asset(asset_id='...')` or `tool_call: status_summary()`.
+    text = re.sub(r"\b(?:call|tool_call|tool)\s*:\s*\w+\s*\([^)]*\)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\n{2,}", "\n", text)
+    text = re.sub(r" {2,}", " ", text)
+    return text.strip()
 
 
 def _plan_summary(content: str, steps: list) -> str:
