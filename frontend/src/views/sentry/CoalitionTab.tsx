@@ -413,7 +413,7 @@ export function CoalitionTab() {
                     UTC release_id produced two valid times for one event. */}
                 <span
                   className="ml-auto text-xs text-[var(--color-text-muted)] tracking-wider"
-                  title={`Local: ${new Date(r.created_at).toLocaleString()}`}
+                  title={`Local: ${new Date(r.created_at).toLocaleString("en-US")}`}
                 >
                   {(() => {
                     const d = new Date(r.created_at);

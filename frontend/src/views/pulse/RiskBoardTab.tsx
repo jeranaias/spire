@@ -403,7 +403,7 @@ function DraftActionModal({
                     {act.kind?.toUpperCase()}
                   </div>
                   <div className="font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide">
-                    +{act.mc_delta_pct?.toFixed(1)}% MC · ${act.cost_usd?.toLocaleString()} · {act.time_to_effect_hours}h
+                    +{act.mc_delta_pct?.toFixed(1)}% MC · ${act.cost_usd?.toLocaleString("en-US")} · {act.time_to_effect_hours}h
                   </div>
                 </div>
                 <div className="mt-1 font-mono text-sm text-[var(--color-text)] tracking-wide">
@@ -549,7 +549,7 @@ function RiskRow({
       </div>
       <div className="grid grid-cols-3 gap-3 text-right font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
         <Stat label="Hours" value={asset.current_hours?.toFixed(0) ?? "—"} />
-        <Stat label="Miles" value={asset.current_miles?.toLocaleString() ?? "—"} />
+        <Stat label="Miles" value={asset.current_miles?.toLocaleString("en-US") ?? "—"} />
         <Stat label="Days Maint" value={asset.days_since_maintenance ?? "—"} />
       </div>
       {/* Walkthrough #20, #37 — Draft Action button. Top row gets filled

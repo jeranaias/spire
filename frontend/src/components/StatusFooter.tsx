@@ -65,7 +65,7 @@ export function StatusFooter() {
     return () => ctrl.stop();
   }, [setCommsState, setAirGap, setQueueDepth]);
 
-  const localTime = now.toLocaleTimeString([], { hour12: false });
+  const localTime = now.toLocaleTimeString("en-US", { hour12: false });
   const uptime = formatUptime(startedAt);
   const assets = status?.dataset.assets ?? 0;
   const srs = status?.dataset.srs ?? 0;
@@ -85,7 +85,7 @@ export function StatusFooter() {
   const tickerItems: { label: string; value: string; tone?: "ok" | "warn" | "muted" }[] = [
     { label: "NETWORK", value: "0 egress", tone: "ok" },
     { label: "ENCRYPTION", value: "AES-256-GCM", tone: "ok" },
-    { label: "DATASET", value: `${assets.toLocaleString()} assets · ${srs.toLocaleString()} SR`, tone: "muted" },
+    { label: "DATASET", value: `${assets.toLocaleString("en-US")} assets · ${srs.toLocaleString("en-US")} SR`, tone: "muted" },
     { label: "INTEGRITY", value: errs === 0 ? "0 errors" : `${errs} errors`, tone: errs === 0 ? "ok" : "warn" },
     { label: "LLM", value: `${llmModel} · ${llmOk ? "online" : "standby"}`, tone: llmOk ? "ok" : "warn" },
     { label: "SENTRY·CLASSIFIER", value: "val=1.0 · 413K params", tone: "ok" },

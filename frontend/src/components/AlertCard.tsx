@@ -37,8 +37,11 @@ function formatTime(iso: string): { text: string; synthetic: boolean } {
     // trust. Reviewer caught the date drift and asked for explicit labelling
     // (alternative was rebasing synthetic, which we keep as future work).
     if (diffSec < 0) {
+      // Walkthrough audit: locale was [] (browser default), which on
+      // an Arabic-locale workstation rendered '٢٧ أبريل' next to the
+      // English UI. SPIRE is a US military product — pin to en-US.
       return {
-        text: d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }),
+        text: d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }),
         synthetic: true,
       };
     }
@@ -46,7 +49,7 @@ function formatTime(iso: string): { text: string; synthetic: boolean } {
     if (diffSec < 3600)  return { text: `${Math.floor(diffSec / 60)}m ago`, synthetic: false };
     if (diffSec < 86400) return { text: `${Math.floor(diffSec / 3600)}h ago`, synthetic: false };
     if (diffSec < 604800) return { text: `${Math.floor(diffSec / 86400)}d ago`, synthetic: false };
-    return { text: d.toLocaleDateString([], { month: "short", day: "numeric" }), synthetic: false };
+    return { text: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), synthetic: false };
   } catch {
     return { text: iso, synthetic: false };
   }
