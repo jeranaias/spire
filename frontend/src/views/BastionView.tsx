@@ -44,7 +44,7 @@ function formatZulu(iso: string, mode: "short" | "full" = "short"): string {
   }
 }
 
-type SeverityFilter = "ALL" | "HIGH" | "MODERATE" | "INFO";
+type SeverityFilter = "ALL" | "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "INFO";
 
 // Maps a unit name to the building id its markers live on. Kept in sync
 // with InstallationSchematic's UNIT_BUILDING table.
@@ -787,6 +787,7 @@ function AlertRow({
               borderColor: `color-mix(in oklab, ${color} 40%, var(--color-border))`,
               background: `color-mix(in oklab, ${color} 12%, transparent)`,
             }}
+            title={`This alert fired ${groupCount} times — same source/title collapsed into one row`}
           >
             ×{groupCount}
           </span>
@@ -870,7 +871,10 @@ function AlertRow({
 // Filter strip + search above the alert stream. Severity filter is a four-
 // chip segmented control; search matches title + body + unit. Reviewer
 // asked for both as a way to triage 30+ rows without scrolling.
-const SEV_FILTER_OPTIONS: SeverityFilter[] = ["ALL", "HIGH", "MODERATE", "INFO"];
+// Walkthrough audit: filter strip was missing CRITICAL + LOW even though
+// alerts of those severities exist (e.g. WEATHER LOW, fused-threat CRITICAL
+// during a sim). Operators couldn't isolate them. Full ladder now exposed.
+const SEV_FILTER_OPTIONS: SeverityFilter[] = ["ALL", "CRITICAL", "HIGH", "MODERATE", "LOW", "INFO"];
 
 function AlertStreamHeader({
   activeCount,
