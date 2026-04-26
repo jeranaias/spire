@@ -25,7 +25,7 @@ from config import (  # noqa: E402
 )
 from fleet import generate_fleet  # noqa: E402
 from personnel import generate_personnel  # noqa: E402
-from lifecycle import run_simulation  # noqa: E402
+from lifecycle import run_simulation, generate_tmrs  # noqa: E402
 from consistency import (  # noqa: E402
     inject_cannibalizations,
     inject_data_quality_defects,
@@ -47,6 +47,7 @@ class CanonicalDataset:
     reqs: list = field(default_factory=list)
     cannib_events: list = field(default_factory=list)
     incidents: list = field(default_factory=list)
+    tmrs: list = field(default_factory=list)
     dq_defects: dict = field(default_factory=dict)
     violations: list = field(default_factory=list)
     generated_at: str = ""
@@ -87,7 +88,8 @@ def load_dataset(*, seed: int = RANDOM_SEED) -> CanonicalDataset:
     srs, snapshots, reqs = run_simulation(units, assets, roster, seed)
     dq = inject_data_quality_defects(srs, snapshots, seed)
     cannib = inject_cannibalizations(srs, assets, seed)
-    incidents = generate_incidents(seed)
+    incidents = generate_incidents(seed, roster=roster, units=units)
+    tmrs = generate_tmrs(units, seed)
     violations = run_all_checks(srs, assets, snapshots, cannib)
 
     _DATASET = CanonicalDataset(
@@ -99,6 +101,7 @@ def load_dataset(*, seed: int = RANDOM_SEED) -> CanonicalDataset:
         reqs=reqs,
         cannib_events=cannib,
         incidents=incidents,
+        tmrs=tmrs,
         dq_defects=dq,
         violations=violations,
         generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",

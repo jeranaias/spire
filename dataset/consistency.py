@@ -17,7 +17,7 @@ import random
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 from config import (
     CONDITION_PRIORITY_MAP,
@@ -27,6 +27,7 @@ from config import (
     SIMULATION_START_DATE,
     SIMULATION_DAYS,
 )
+from lifecycle import ServiceRequest
 
 SIMULATION_END_DATE = SIMULATION_START_DATE + timedelta(days=SIMULATION_DAYS - 1)
 
@@ -110,6 +111,11 @@ class CannibalizationEvent:
     recipient_unit: str
     donor_unit: str
     readiness_impact_note: str
+    # Scripted demo flag — set True for the canonical "predicted failure → matched
+    # donor → mission saved" event the demo script narrates around. Frontend can
+    # highlight this row distinctly so the operator sees the story.
+    scripted_demo: bool = False
+    scripted_exercise_label: str = ""
 
 
 # Pool of impact-note patterns. Each pattern has two placeholder slots:
@@ -154,6 +160,162 @@ def _compose_impact_note(donor, needed_part, days_deadlined: int, rng: random.Ra
     return template.format(fc=fc, part=part)
 
 
+def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[CannibalizationEvent]:
+    """Inject the canonical demo cannibalization event on day 350-355 of the
+    simulation window so the demo always has a single 'predicted failure →
+    matched donor → mission saved' story to narrate.
+
+    Recipient: a CLB-1 JLTV with TURBOCHARGER ASSY (lead time 21d backordered).
+    Donor:     a MALS-31 JLTV evacuated to MCLB Albany 90+ days.
+    Open recipient SR exactly 7 days before event_date so the proposal lands
+    inside the scripted-exercise rehearsal window. Returns None if the fleet
+    doesn't contain a CLB-1 JLTV + a MALS-31 JLTV (defensive — current fleet
+    has both)."""
+    from supply import PartRequisition
+    rng = random.Random(seed + 9001)
+
+    recipient_asset = next(
+        (a for a in assets if a.unit_name == "CLB-1" and a.equipment_type == "JLTV"),
+        None,
+    )
+    donor_asset = next(
+        (a for a in assets if a.unit_name == "MALS-31" and a.equipment_type == "JLTV"),
+        None,
+    )
+    if recipient_asset is None or donor_asset is None:
+        return None
+
+    event_date = SIMULATION_START_DATE + timedelta(days=352)  # May 19, 2026
+    open_date = event_date - timedelta(days=7)               # May 12, 2026
+
+    # Build the recipient SR — backordered TURBOCHARGER ASSY, NMCS posture.
+    recipient_sr = ServiceRequest(
+        sr_number=f"{recipient_asset.unit_uic}-{open_date.year % 10}{(open_date - date(open_date.year, 1, 1)).days + 1:03d}-9001",
+        asset_id=recipient_asset.asset_id,
+        unit_uic=recipient_asset.unit_uic,
+        unit_name=recipient_asset.unit_name,
+        equipment_type=recipient_asset.equipment_type,
+        tamcn=recipient_asset.tamcn,
+        nsn=recipient_asset.nsn,
+        serial_number=recipient_asset.serial_number,
+        open_date=open_date,
+        condition="Deadlined",
+        priority="02",
+        defect_code_primary="NMAJ",
+        defect_code_secondary="ENGN",
+        fault_id="DEMO-TURBO-FAIL",
+        fault_component="turbo",
+        tm_reference="TM 9-2320-457-13&P",
+        maintenance_level="Organizational",
+        remark_text=(
+            "Demo fixture: PULSE predicted turbocharger failure 5d prior; failure "
+            "confirmed on operator road test — boost pressure drop, oil in intake. "
+            "Ordered NSN 2950-01-547-3318 TURBOCHARGER ASSY (lead time 21d, "
+            "backordered). NMCS pending parts."
+        ),
+        source_classification="UNCLASSIFIED",
+        detected_classification="UNCLASSIFIED",
+        labor_hours_est=8,
+        parts_cost_est=4200.00,
+        parts_cost_actual=4200.00,
+        labor_hours_actual=8.0,
+        job_status="SHT PART",
+    )
+    # Backordered requisition that will be satisfied via cannibalization.
+    req = PartRequisition(
+        document_number=f"M{recipient_asset.unit_uic[-4:]}-DEMO-9001",
+        sr_number=recipient_sr.sr_number,
+        asset_id=recipient_asset.asset_id,
+        nsn="2950-01-547-3318",
+        nomenclature="TURBOCHARGER ASSY",
+        qty_ordered=1,
+        unit_cost=4200.00,
+        priority="02",
+        supply_path="backordered",
+        ordered_date=open_date,
+        current_status="BP",
+        projected_delivery_date=open_date + timedelta(days=21),
+    )
+    recipient_sr.requisitions = [req]
+
+    # Build the donor SR — evacuated to MCLB Albany 90+ days ago.
+    donor_open = event_date - timedelta(days=95)
+    donor_sr = ServiceRequest(
+        sr_number=f"{donor_asset.unit_uic}-{donor_open.year % 10}{(donor_open - date(donor_open.year, 1, 1)).days + 1:03d}-9002",
+        asset_id=donor_asset.asset_id,
+        unit_uic=donor_asset.unit_uic,
+        unit_name=donor_asset.unit_name,
+        equipment_type=donor_asset.equipment_type,
+        tamcn=donor_asset.tamcn,
+        nsn=donor_asset.nsn,
+        serial_number=donor_asset.serial_number,
+        open_date=donor_open,
+        condition="Deadlined",
+        priority="03",
+        defect_code_primary="NMAJ",
+        defect_code_secondary="TRSM",
+        fault_id="DEMO-EVAC-MAJOR",
+        fault_component="transmission",
+        tm_reference="TM 9-2320-457-23",
+        maintenance_level="Depot",
+        remark_text=(
+            "Demo fixture: vehicle evacuated to MCLB Albany on long-cycle depot "
+            "teardown for transmission rebuild. Engine bay still RFI; turbocharger "
+            "assy serviceable per receipt inspection. Donor candidate for cross-"
+            "level if a receiver SR opens before depot return."
+        ),
+        source_classification="UNCLASSIFIED",
+        detected_classification="UNCLASSIFIED",
+        labor_hours_est=120,
+        parts_cost_est=18500.00,
+        parts_cost_actual=18500.00,
+        labor_hours_actual=80.0,
+        job_status="EVACUATED",
+        evacuated_to="MCLB Albany",
+    )
+
+    srs.append(recipient_sr)
+    srs.append(donor_sr)
+
+    days_deadlined = (event_date - donor_open).days
+    event = CannibalizationEvent(
+        event_id="CAN-DEMO-001",
+        event_date=event_date,
+        recipient_asset_id=recipient_asset.asset_id,
+        recipient_sr_number=recipient_sr.sr_number,
+        donor_asset_id=donor_asset.asset_id,
+        donor_sr_number=donor_sr.sr_number,
+        nsn=req.nsn,
+        nomenclature=req.nomenclature,
+        recipient_unit=recipient_asset.unit_name,
+        donor_unit=donor_asset.unit_name,
+        readiness_impact_note=(
+            "Donor evacuated to MCLB Albany 95 days; depot ETA 30+ days out. "
+            "Turbocharger harvested at zero readiness cost to donor. Recipient "
+            "returned to MC inside scripted-exercise rehearsal window — mission saved."
+        ),
+        scripted_demo=True,
+        scripted_exercise_label="EX BAYONET FOCUS 26-2 (rehearsal window)",
+    )
+
+    # Apply mutations consistent with the regular cannib path.
+    req.received_date = event_date
+    req.current_status = "CANN"
+    recipient_sr.job_status = "COMPLETED"
+    recipient_sr.close_date = event_date + timedelta(days=2)
+    recipient_sr.remark_text = (
+        f"{recipient_sr.remark_text} [{event_date.isoformat()}] "
+        f"{req.nomenclature} obtained via cannibalization from "
+        f"{donor_asset.asset_id} (donor SR {donor_sr.sr_number})."
+    )
+    donor_sr.remark_text = (
+        f"{donor_sr.remark_text} [{event_date.isoformat()}] "
+        f"{req.nomenclature} removed for cannibalization to "
+        f"{recipient_asset.asset_id} (recipient SR {recipient_sr.sr_number})."
+    )
+    return event
+
+
 def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent]:
     """
     Pair NMCS recipients with long-deadline donors from the SAME equipment
@@ -163,6 +325,14 @@ def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent
     """
     rng = random.Random(seed + 4)
     events: List[CannibalizationEvent] = []
+
+    # Always inject the canonical demo fixture first so the count-cap that
+    # bounds the regular events doesn't starve it. Tagged scripted_demo=True
+    # so the frontend can highlight the canonical "predicted → matched →
+    # mission saved" story.
+    demo = _inject_scripted_demo_cannib(srs, assets, seed)
+    if demo is not None:
+        events.append(demo)
 
     def _pending_req(req):
         return req.received_date is None or req.received_date > SIMULATION_END_DATE

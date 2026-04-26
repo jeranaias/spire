@@ -244,11 +244,57 @@ def _fill_narrative(template: str, *, building: dict, itype: str, meta: dict, rn
     return out
 
 
-def generate_incidents(seed: int, count: int = OUTPUT_TARGETS["incident_count"]) -> List[Incident]:
+def _build_watch_officer_pool(roster, units) -> dict:
+    """Build a per-unit pool of watch-officer candidates from the canonical
+    personnel roster. We pull officers (CWO2/3) and SNCOs (SSgt/GySgt/MSgt)
+    so the SDO/OOD billet line reads like a real duty roster, not a fixed
+    cycle of 4 names. Falls back to any roster entry if a unit has no
+    officer/SNCO seats (shouldn't happen with the default 200-Marine roster
+    but we degrade gracefully)."""
+    by_unit: dict = {}
+    duty_ranks = {"CWO2", "CWO3", "MSgt", "GySgt", "SSgt"}
+    for unit in units:
+        in_unit = [m for m in roster if m.unit_name == unit.name]
+        eligible = [m for m in in_unit if m.rank in duty_ranks]
+        if not eligible:
+            eligible = in_unit or list(roster)
+        by_unit[unit.name] = eligible
+    return by_unit
+
+
+def _format_watch_officer(marine, rng: random.Random) -> str:
+    """Render an SDO/OOD line. CWO billets are SDO; SNCOs rotate SDO/OOD."""
+    billet = "SDO" if marine.rank.startswith("CWO") else rng.choice(["SDO", "OOD"])
+    return f"{marine.rank} {marine.last_name} {marine.first_initial}., {billet}"
+
+
+def _resolve_unit_for_incident(building: dict) -> str:
+    """Pick a unit whose footprint plausibly owns an incident at this building.
+    Used to weight the watch-officer roster draw; falls back to None if the
+    building can't be tied to a unit (we then sample uniformly across all
+    units)."""
+    name = building.get("name", "")
+    # Match unit names that appear in the building name (e.g. "CLB-6 Motor Pool")
+    candidates = ("CLB-6", "CLB-1", "3d Maint Bn", "2d Tank Bn", "2d LAR Bn",
+                  "MALS-31", "MWSS-372", "2d LAAD Bn", "5/11 Marines", "7th ESB")
+    for c in candidates:
+        if c in name:
+            return c
+    return ""
+
+
+def generate_incidents(seed: int, count: int = OUTPUT_TARGETS["incident_count"],
+                       roster: Optional[List] = None, units: Optional[List] = None) -> List[Incident]:
     rng = random.Random(seed + 5)
     installation = _load_installation()
     start = SIMULATION_START_DATE
     incidents: List[Incident] = []
+
+    # If roster + units are supplied, watch-officer names rotate through the
+    # canonical roster filtered to officer/SNCO ranks, weighted by the unit
+    # plausibly owning the incident's building. Without the roster we fall
+    # back to the legacy 4-name cycle so existing call sites keep working.
+    watch_pool = _build_watch_officer_pool(roster, units) if (roster and units) else None
 
     # Spread incidents across the 365-day window; some cluster (exercises,
     # storm events) but otherwise uniform.
@@ -288,7 +334,28 @@ def generate_incidents(seed: int, count: int = OUTPUT_TARGETS["incident_count"])
         actions = _actions_for(itype, building, rng)
         lessons = _lessons_for(itype, rng)
         reporter = _reporter(rng)
-        watch_officer = rng.choice(["Capt Chen S., SDO", "Capt Vargas R., SDO", "1stLt Park J., OOD", "1stLt Williams T., OOD"])
+        if watch_pool:
+            owning_unit = _resolve_unit_for_incident(building)
+            pool = watch_pool.get(owning_unit) if owning_unit else None
+            if not pool:
+                # Building doesn't tie to a unit (e.g. ECP / housing / utility)
+                # — sample across the full SNCO/officer pool weighted by unit size.
+                flat = []
+                for marines in watch_pool.values():
+                    flat.extend(marines)
+                pool = flat or None
+            if pool:
+                watch_officer = _format_watch_officer(rng.choice(pool), rng)
+            else:
+                watch_officer = rng.choice([
+                    "Capt Chen S., SDO", "Capt Vargas R., SDO",
+                    "1stLt Park J., OOD", "1stLt Williams T., OOD",
+                ])
+        else:
+            watch_officer = rng.choice([
+                "Capt Chen S., SDO", "Capt Vargas R., SDO",
+                "1stLt Park J., OOD", "1stLt Williams T., OOD",
+            ])
 
         incident_num = f"INC-{incident_date.year}-{i+1:04d}"
         incidents.append(Incident(
