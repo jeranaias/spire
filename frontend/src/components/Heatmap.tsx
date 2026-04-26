@@ -76,7 +76,11 @@ export function Heatmap({ units, equipmentTypes, onCellClick }: Props) {
                   className="border-b border-[var(--color-border)] px-2 py-2 text-center font-medium"
                   title={eq}
                 >
-                  {eq.replace("_", " ")}
+                  {/* Walkthrough audit: prior code replaced only the
+                   * FIRST underscore, so AN_TPQ36_FIREFINDER rendered as
+                   * 'AN TPQ36_FIREFINDER'. Replace all underscores so
+                   * every equipment header is human-readable. */}
+                  {eq.replace(/_/g, " ")}
                 </th>
               ))}
             </tr>
@@ -86,8 +90,14 @@ export function Heatmap({ units, equipmentTypes, onCellClick }: Props) {
               <tr key={u.uic} className="hover:bg-[var(--color-surface-hover)]">
                 <td className="sticky left-0 z-10 border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
                   <div className="font-sans font-medium text-[var(--color-text)]">{u.unit}</div>
-                  <div className="text-xs text-[var(--color-text-muted)]">
-                    {u.location}
+                  {/* Walkthrough audit: prior subtitle showed u.location
+                   * ('Camp Lejeune, NC' etc.), which conflicted with the
+                   * COP installation name 'Camp Henderson' a Marine sees
+                   * one row up. Show the UIC (the canonical unit
+                   * identifier in MILDEP records) instead — that's what
+                   * the operator recognises and it can't drift. */}
+                  <div className="text-xs text-[var(--color-text-muted)] tabular-nums tracking-wide">
+                    {u.uic}
                   </div>
                 </td>
                 {equipmentTypes.map((eq) => {
