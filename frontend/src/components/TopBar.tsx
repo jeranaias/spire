@@ -146,9 +146,12 @@ export function TopBar() {
          * the role selector + alert badge always have room. The hidden
          * controls remain available — DensityToggle is on the help
          * overlay, AirGap mode flips via Security Manager wall, ModeBadge
-         * mirrors the StatusFooter mode chip. */}
+         * mirrors the StatusFooter mode chip. NodeStatus also hides
+         * below xl: an icon-only dot conveys no meaning without its
+         * label, and would just add visual noise next to the role
+         * selector. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
-          <NodeStatus />
+          <span className="hidden xl:contents"><NodeStatus /></span>
           <span className="hidden xl:contents"><AirGapToggle /></span>
           <span className="hidden xl:contents"><DensityToggle /></span>
           <RoleSelector role={role} onChange={onRoleChange} />
