@@ -539,8 +539,13 @@ export function BastionView() {
         {/* Installation title badge — top-left. Metrics row uses chip-flow
          * so when the response drawer narrows the map column the chips wrap
          * to 2x2 instead of mid-token-truncating "10 RF" → "10 R" (#27). */}
+        {/* Walkthrough audit: COP card was at top-left, directly on top
+         * of the unit marker cluster (3d Maint Bn, 2d LAR Bn, 7th ESB
+         * labels were partially obscured). Move to bottom-left, where
+         * the map is empty and the MapLibre attribution sits at
+         * bottom-right (no conflict). */}
         <div
-          className="pointer-events-none absolute left-3 top-3 z-[6] max-w-[min(60vw,320px)] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
+          className="pointer-events-none absolute bottom-12 left-3 z-[6] max-w-[min(60vw,320px)] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
         >
           <div
             className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
@@ -592,7 +597,7 @@ export function BastionView() {
          * sandbox control and never gets confused with a HIGH alert. */}
         {(role === "mef_commander" || role === "security_manager" || role === "g4") && (
           <div
-            className="pointer-events-auto absolute left-3 top-[88px] z-[7] flex items-center gap-1.5"
+            className="pointer-events-auto absolute left-3 top-3 z-[7] flex items-center gap-1.5"
             role="region"
             aria-label="Sim controls"
           >
