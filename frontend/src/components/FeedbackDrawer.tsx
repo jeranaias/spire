@@ -142,6 +142,17 @@ export function FeedbackDrawer() {
   const activeType = ISSUE_TYPES.find((t) => t.value === issueType)!;
   const showSeverity = issueType === "bug";
 
+  // Lock body scroll while the drawer is open so the underlying view
+  // doesn't drift when the operator scrolls inside the form.
+  useEffect(() => {
+    if (!open) return;
+    const prior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prior;
+    };
+  }, [open]);
+
   // Diagnostics auto-attached to every submission. Shown to the operator
   // expandably so they know what we're sending — never hidden context.
   const diagnostics = useDiagnostics(role, location.pathname);

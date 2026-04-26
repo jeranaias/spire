@@ -73,6 +73,17 @@ export function NodeStatus() {
     return () => ctrl.stop();
   }, [visible]);
 
+  // Lock body scroll when the conflict-resolution drawer is open so wheel
+  // events don't bleed through to the underlying view.
+  useEffect(() => {
+    if (!open) return;
+    const prior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prior;
+    };
+  }, [open]);
+
   if (!visible || !state) return null;
 
   const cmp = state.compare;
