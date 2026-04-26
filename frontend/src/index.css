@@ -464,6 +464,56 @@ body {
   background: var(--color-surface-hover) !important;
 }
 
+/* MapLibre attribution + scale bar — defaults are white-on-light. Match the
+ * dark SPIRE chrome so the bottom-right corner stops reading as "the map
+ * library forgot it was inside a defense console". */
+.maplibregl-ctrl-attrib {
+  background: color-mix(in oklab, var(--color-surface) 88%, transparent) !important;
+  color: var(--color-text-muted) !important;
+  border-radius: 3px !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+}
+.maplibregl-ctrl-attrib a,
+.maplibregl-ctrl-attrib a:visited {
+  color: var(--color-text-secondary) !important;
+}
+.maplibregl-ctrl-attrib a:hover {
+  color: var(--color-text) !important;
+}
+.maplibregl-ctrl-attrib-button {
+  background-color: var(--color-surface) !important;
+  filter: invert(0.9) hue-rotate(180deg);
+}
+.maplibregl-ctrl-scale {
+  background: color-mix(in oklab, var(--color-surface) 88%, transparent) !important;
+  color: var(--color-text-muted) !important;
+  border-color: var(--color-border-active) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 10px !important;
+  padding: 2px 6px !important;
+}
+
+/* MapLibre nav controls (zoom/compass) — same dark treatment so the
+ * top-right control stack matches the rest of the chrome. */
+.maplibregl-ctrl-group {
+  background: color-mix(in oklab, var(--color-surface) 92%, transparent) !important;
+  border: 1px solid var(--color-border) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3) !important;
+}
+.maplibregl-ctrl-group button {
+  background-color: transparent !important;
+}
+.maplibregl-ctrl-group button:hover {
+  background-color: var(--color-surface-hover) !important;
+}
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--color-border) !important;
+}
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(0.85) hue-rotate(180deg);
+}
+
 /* Custom scrollbar for dark surfaces */
 ::-webkit-scrollbar {
   width: 8px;
