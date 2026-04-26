@@ -5,6 +5,10 @@ interface Props {
   value: string | number;
   delta?: number;
   deltaLabel?: string;
+  // Walkthrough #26 — tooltip explaining the delta value (week-over-week).
+  deltaTooltip?: string;
+  // Walkthrough #41 — small contextual footnote (e.g. "Target ≤ 14d").
+  footnote?: string;
   tone?: "neutral" | "success" | "warning" | "danger";
   unit?: string;
 }
@@ -51,7 +55,7 @@ function ChevronDown(props: { className?: string }) {
   );
 }
 
-export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neutral", unit }: Props) {
+export function MetricCard({ label, value, delta, deltaLabel = "7d", deltaTooltip, footnote, tone = "neutral", unit }: Props) {
   const t = TONE[tone];
 
   return (
@@ -71,10 +75,12 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
         style={{ background: t.accent, opacity: tone === "neutral" ? 0.3 : 0.9 }}
       />
 
-      {/* Label — mono, uppercase, tracked */}
+      {/* Label — mono, uppercase, tracked.
+       * Walkthrough #29 — bumped from text-[10px] to text-xs (12px) so KPI
+       * labels are legible without leaning in. */}
       <div
-        className="font-mono text-xs font-medium uppercase tracking-wider"
-        style={{ color: "var(--color-text-muted)" }}
+        className="font-mono font-medium uppercase tracking-wider"
+        style={{ color: "var(--color-text-muted)", fontSize: "0.75rem" }}
       >
         {label}
       </div>
@@ -104,9 +110,13 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
         )}
       </div>
 
-      {/* Delta with graphic chevron */}
+      {/* Delta with graphic chevron.
+       * Walkthrough #26 — `title` adds a hover-explanation of what 7D means. */}
       {delta != null && (
-        <div className="mt-3 flex items-center gap-1.5 text-sm font-mono tabular-nums">
+        <div
+          className="mt-3 flex items-center gap-1.5 text-sm font-mono tabular-nums"
+          title={deltaTooltip}
+        >
           {delta > 0 ? (
             <ChevronUp className="text-[var(--color-success)]" />
           ) : delta < 0 ? (
@@ -127,6 +137,15 @@ export function MetricCard({ label, value, delta, deltaLabel = "7d", tone = "neu
           <span className="uppercase text-[var(--color-text-muted)] tracking-wider">
             {deltaLabel}
           </span>
+        </div>
+      )}
+      {/* Walkthrough #41 — contextual footnote (target / supporting note). */}
+      {footnote && (
+        <div
+          className="mt-2 font-mono uppercase text-[var(--color-text-muted)] tracking-wider"
+          style={{ fontSize: "0.625rem" }}
+        >
+          {footnote}
         </div>
       )}
     </div>
