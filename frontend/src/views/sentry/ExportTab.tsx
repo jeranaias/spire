@@ -261,7 +261,7 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
               >
                 <span className="font-mono text-sm text-[var(--color-text)]">{d.sr_number}</span>
                 <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-                  {d.unit_name} · {d.equipment_type}
+                  {d.unit_name} · {d.equipment_type.replace(/_/g, " ")}
                 </span>
                 <div className="ml-auto flex items-center gap-1">
                   {d.flags.map((f) => (

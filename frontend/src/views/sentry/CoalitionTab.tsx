@@ -532,7 +532,7 @@ function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
       <div className="flex items-center gap-2 text-sm">
         <span className="font-semibold text-[var(--color-text)]">{record.sr_number}</span>
         <span className="text-[var(--color-text-muted)] tracking-wide">
-          {record.equipment_type} · {record.unit_name}
+          {record.equipment_type?.replace(/_/g, " ")} · {record.unit_name}
         </span>
         {/* Walkthrough #15 — only render the REDACTED count when this record
             actually has at least one redaction span. Clean PMCS records with
