@@ -23,7 +23,9 @@ import "@fontsource/jetbrains-mono/600.css";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ScopeGuard } from "./components/ScopeGuard";
-import { ClassificationBand } from "./components/ClassificationBand";
+// ClassificationBand is rendered once in App.tsx (the app shell) — see
+// Walkthrough #JOB-F. Importing it here would invite a second instance
+// in the Suspense fallback, the exact duplication this fix eliminates.
 import { registerRoleSource } from "./api";
 import { useSpireStore, ROLE_DEFAULT_VIEW } from "./state/store";
 import "./index.css";
@@ -77,15 +79,20 @@ function HomeRoute() {
   return <Navigate to={ROLE_DEFAULT_VIEW[role] ?? "/bastion"} replace />;
 }
 
-// Lightweight Suspense fallback — uses the live ClassificationBand so the
-// CAPCO U-banner is always visible while a view chunk is loading. Keeps
-// the chrome continuous and prevents a "flash of empty" between navs.
+// Lightweight Suspense fallback. The app shell (App.tsx) already renders
+// ClassificationBand once at the top of the page; the Outlet sits inside
+// <main>, so the U-banner stays visible across transitions. We DO NOT
+// render a second ClassificationBand here — Walkthrough #JOB-F (review
+// SENTRY #26) caught a duplicate banner briefly appearing at y=212 during
+// role swaps because the fallback rendered its own band inside the
+// Outlet while the shell's band was still mounted above. Single source
+// of truth for the banner is App.tsx; the fallback now only fills the
+// view region with a status line.
 function ViewSuspense({ children }: { children: React.ReactNode }) {
   return (
     <Suspense
       fallback={
         <div className="flex h-full flex-col">
-          <ClassificationBand />
           <div className="flex flex-1 items-center justify-center font-mono text-sm uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
             Loading…
           </div>
