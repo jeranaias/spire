@@ -129,11 +129,14 @@ export function AdminView() {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-4">
-        <h2
+        {/* Promoted from h2 to h1 — this view is the document, not a
+         * subsection. Single h1 per view anchors the screen-reader
+         * outline. */}
+        <h1
           className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
         >
           Admin · Training Flywheel
-        </h2>
+        </h1>
         <div className="mt-1 spire-body-muted">
           Every operator decision feeds the model improvement cycle. Outcomes scored against ground truth populate
           the rolling accuracy trend; below 80% accuracy across ≥ 20 outcomes triggers a retraining recommendation.

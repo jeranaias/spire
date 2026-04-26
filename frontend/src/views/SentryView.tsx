@@ -40,6 +40,8 @@ export function SentryView() {
 
   return (
     <div className="flex h-full flex-col">
+      {/* Single h1 per view for screen-reader document outline. */}
+      <h1 className="sr-only">SENTRY · Classification &amp; Release</h1>
       <SentrySubnav />
       <div className="flex-1 overflow-hidden">
         <Routes>
