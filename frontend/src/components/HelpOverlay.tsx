@@ -52,6 +52,17 @@ export function HelpOverlay() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  // Lock body scroll while open so wheel/touch gestures don't slip past
+  // the modal and yank the underlying view. Restored on unmount/close.
+  useEffect(() => {
+    if (!open) return;
+    const prior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prior;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   return (
