@@ -269,7 +269,8 @@ export function Spiro() {
         }
         case "find_asset": {
           const a = r.asset || r;
-          return `${a.asset_id || "?"}: ${a.equipment_type || "?"} · ${a.unit_name || "?"} · ${a.current_status || a.status || "?"}.`;
+          const eq = (a.equipment_type || "?").replace(/_/g, " ");
+          return `${a.asset_id || "?"}: ${eq} · ${a.unit_name || "?"} · ${a.current_status || a.status || "?"}.`;
         }
         case "search_assets": {
           const items: any[] = r.matches || r.assets || [];
