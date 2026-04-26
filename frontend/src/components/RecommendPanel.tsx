@@ -29,7 +29,7 @@ const KIND_LABEL: Record<string, string> = {
   redistribute: "REDISTRIBUTE",
 };
 
-export function RecommendPanel({ unit }: { unit?: string }) {
+export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hideHeader?: boolean }) {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
   const [data, setData] = useState<RecommendActionsAsset[] | null>(null);
@@ -101,23 +101,25 @@ export function RecommendPanel({ unit }: { unit?: string }) {
 
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2.5">
-        <div>
+      {!hideHeader && (
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2.5">
+          <div>
+            <div
+              className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
+            >
+              Recommended Actions · GC-1 Auto Replenishment
+            </div>
+            <div className="mt-0.5 spire-body-muted text-base">
+              Top {data.length} at-risk assets. Each action ranked by impact-per-dollar-per-day.
+            </div>
+          </div>
           <div
-            className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
-            Recommended Actions · GC-1 Auto Replenishment
-          </div>
-          <div className="mt-0.5 spire-body-muted text-base">
-            Top {data.length} at-risk assets. Each action ranked by impact-per-dollar-per-day.
+            {unit ? `Scope: ${unit}` : "Fleet-wide"}
           </div>
         </div>
-        <div
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
-        >
-          {unit ? `Scope: ${unit}` : "Fleet-wide"}
-        </div>
-      </div>
+      )}
       <div className="flex flex-col gap-3 p-3">
         {data.map((asset) => (
           <AssetActionGroup

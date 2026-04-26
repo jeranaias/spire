@@ -367,7 +367,7 @@ export function ForecastTab() {
           }
         >
           <div className="border-t border-[var(--color-border)]">
-            <RecommendPanel unit={unit === "FLEET" ? undefined : unit} />
+            <RecommendPanel unit={unit === "FLEET" ? undefined : unit} hideHeader />
           </div>
         </CollapsiblePanel>
       </div>

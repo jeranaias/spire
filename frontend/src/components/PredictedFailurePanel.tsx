@@ -17,7 +17,7 @@ import { api, type PredictedFailureAsset, type FailurePrediction } from "../api"
 import { useSpireStore } from "../state/store";
 import { useNavigate } from "react-router-dom";
 
-export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
+export function PredictedFailurePanel({ unit, hideHeader = false }: { unit?: string | null; hideHeader?: boolean }) {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
   const nav = useNavigate();
@@ -85,10 +85,12 @@ export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
     <div className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2">
         <div>
-          <div className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
-            Predicted Failures · GC-3
-          </div>
-          <div className="mt-0.5 spire-body-muted text-base">
+          {!hideHeader && (
+            <div className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
+              Predicted Failures · GC-3
+            </div>
+          )}
+          <div className={hideHeader ? "spire-body-muted text-base" : "mt-0.5 spire-body-muted text-base"}>
             {data.length} asset{data.length === 1 ? "" : "s"} flagged within {horizon}d horizon
             <span className="ml-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
               engine: {engine}
