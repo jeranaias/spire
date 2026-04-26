@@ -50,8 +50,10 @@ export function HelpOverlay() {
         return;
       }
 
-      // Esc closes only if open AND focus isn't in a field.
-      if (e.key === "Escape" && open && !inField) {
+      // Walkthrough audit: Escape always closes when open. The prior
+      // !inField guard meant Escape did nothing if the operator had
+      // focused the SPIRO textarea before opening Help.
+      if (e.key === "Escape" && open) {
         setOpen(false);
       }
     }

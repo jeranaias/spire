@@ -129,9 +129,11 @@ export function FeedbackDrawer() {
         return;
       }
 
-      // Esc closes only if the drawer is open AND focus isn't in a field
-      // (so we don't steal focus while a Marine is mid-sentence).
-      if (e.key === "Escape" && open && !inField) {
+      // Walkthrough audit: Escape now always closes the drawer when open,
+      // even if focus is inside the textarea. The previous "!inField" guard
+      // was over-applied — Escape on an open modal/drawer is universal UX,
+      // and operators couldn't dismiss after typing in the body field.
+      if (e.key === "Escape" && open) {
         setOpen(false);
       }
     }
