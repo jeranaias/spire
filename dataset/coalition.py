@@ -143,14 +143,52 @@ def apply_redactions_with_spans(
                     after = re.sub(r"\s*\([^)]*\)", "", before)
                     out[key] = after
                     _add(key, before, after, "billet_nickname")
-        elif field == "serial_number" and "serial_number" in out:
-            before = out["serial_number"]
-            out["serial_number"] = "[SERIAL REDACTED]"
-            _add("serial_number", before, out["serial_number"], "serial_number")
-        elif field == "tm_reference" and "tm_reference" in out:
-            before = out["tm_reference"]
-            out["tm_reference"] = "[TM REFERENCE REDACTED]"
-            _add("tm_reference", before, out["tm_reference"], "tm_reference")
+        elif field == "serial_number":
+            # Walkthrough #2 — serial_number redaction must also strip
+            # serials from the remark text. Earlier code only replaced
+            # `out["serial_number"]`, leaving "S/N USMC-12345" visible
+            # in the partner remark while showing a "SERIAL × REDACTED"
+            # badge. Now both surfaces are redacted in lockstep.
+            if "serial_number" in out:
+                before = out["serial_number"]
+                out["serial_number"] = "[SERIAL REDACTED]"
+                _add("serial_number", before, out["serial_number"], "serial_number")
+            for key in ("remark", "poc"):
+                if key in out and isinstance(out[key], str):
+                    before = out[key]
+                    after = re.sub(
+                        r"S/N\s+(USA|USMC[A-Z\-]*)[-\s]?[\w-]+",
+                        "[SERIAL REDACTED]",
+                        before,
+                    )
+                    if after != before:
+                        out[key] = after
+                        _add(key, before, after, "serial_number")
+        elif field == "tm_reference":
+            # Walkthrough #2 — tm_reference redaction must also strip TM
+            # numbers inline in remarks. "Replaced both batteries per TM
+            # 9-2320-391-10" should become "...per [TM REFERENCE REDACTED]".
+            if "tm_reference" in out:
+                before = out["tm_reference"]
+                out["tm_reference"] = "[TM REFERENCE REDACTED]"
+                _add("tm_reference", before, out["tm_reference"], "tm_reference")
+            for key in ("remark", "poc"):
+                if key in out and isinstance(out[key], str):
+                    before = out[key]
+                    after = re.sub(
+                        r"\[\s*CLASSIFIED\s+TM[^\]]*\]",
+                        "[TM REFERENCE REDACTED]",
+                        before,
+                        flags=re.IGNORECASE,
+                    )
+                    after = re.sub(
+                        r"TM\s+\d+(?:-\d+){2,4}[A-Z]?(?:-[A-Z0-9]+)?",
+                        "[TM REFERENCE REDACTED]",
+                        after,
+                    )
+                    if after != before:
+                        out[key] = after
+                        _add(key, before, after, "tm_reference")
         elif field == "fault_component" and "fault_component" in out:
             before = out["fault_component"]
             after = _generalize_component(before)
