@@ -418,8 +418,13 @@ async def mark_text(payload: dict):
             "issues": issues,
         },
         "audit": {
-            # Walkthrough #32 — operator-readable engine string.
-            "engine": "SENTRY Pattern Engine + Language Model Reviewer",
+            # Walkthrough audit: prior string claimed 'SENTRY Pattern
+            # Engine + Language Model Reviewer' but only the pattern
+            # engine actually ran for the synchronous /mark call. Be
+            # honest about which engine produced the recommendation —
+            # an operator who copies this into a chain-of-custody report
+            # shouldn't see a fictional reviewer claim.
+            "engine": "SENTRY Pattern Engine (rule-based)",
             "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         },
     }
