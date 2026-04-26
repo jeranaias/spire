@@ -138,8 +138,14 @@ export const api = {
   },
   bastion: {
     cop: () => jsonFetch<BastionCOP>("/bastion/cop"),
-    alerts: (limit = 30) => jsonFetch<{ alerts: BastionAlert[]; fused_threats?: FusedThreat[] }>(`/bastion/alerts?limit=${limit}`),
+    alerts: (limit = 30) =>
+      jsonFetch<BastionAlertsResponse>(`/bastion/alerts?limit=${limit}`),
     fusedThreats: () => jsonFetch<{ fused_threats: FusedThreat[] }>("/bastion/fused-threats"),
+    alertAction: (id: string, action: "ack" | "snooze" | "resolve" | "unack") =>
+      jsonFetch<{ ok: boolean; alert_id: string; state: AlertState | null }>(
+        `/bastion/alerts/${encodeURIComponent(id)}/${action}`,
+        { method: "POST", body: JSON.stringify({}) },
+      ),
     incidents: (limit = 50) => jsonFetch<{ incidents: any[] }>(`/bastion/incidents?limit=${limit}`),
     incidentResponse: (id: string) => jsonFetch<IncidentResponse>(`/bastion/incidents/${id}/response`),
     simulateThermalHawk: (unit = "CLB-6") =>
@@ -631,8 +637,14 @@ export interface FusedThreat {
   building?: string | null;
   fused: true;
   confidence: number;
-  correlation_chain: { source: string; id: string; title: string; timestamp: string }[];
+  correlation_chain: { source: string; id: string; title: string; timestamp: string; label?: string }[];
   response_taskings: string[];
+}
+
+export interface AlertState {
+  status: "acknowledged" | "snoozed" | "resolved";
+  at: string;
+  snooze_until?: string;
 }
 
 export interface BastionAlert {
@@ -649,6 +661,16 @@ export interface BastionAlert {
   fpcon_recommended?: string;
   model_info?: any;
   response_available?: boolean;
+  // Per-alert state baked in by the backend so the front-end never has
+  // to infer ack / snooze / resolve from local component state.
+  _state?: AlertState;
+}
+
+export interface BastionAlertsResponse {
+  alerts: BastionAlert[];
+  fused_threats?: FusedThreat[];
+  total: number;
+  severity_counts: Record<string, number>;
 }
 
 export interface IncidentResponse {

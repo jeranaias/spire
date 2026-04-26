@@ -357,6 +357,16 @@ export interface MapCanvasProps {
   simActive?: boolean;
   simTargetBuilding?: string;
   simCordons?: { radius_m: number; label: string }[];
+  // When true, the map applies right-edge padding so markers (especially
+  // ECP B at the east edge) aren't clipped by the response/threat drawer.
+  drawerOpen?: boolean;
+  // Bumped by parent each time a sim resolves. MapCanvas caches the
+  // pre-sim viewport on simulate and restores it when this counter ticks.
+  simResolveSignal?: number;
+  // Bumped by parent to request a fit-bounds back to the full installation
+  // (all units in viewport) — wired to the Reset View button so the
+  // operator can recover from any zoom/pan state.
+  resetViewSignal?: number;
 }
 
 export function MapCanvas({
@@ -372,6 +382,9 @@ export function MapCanvas({
   simActive,
   simTargetBuilding,
   simCordons,
+  drawerOpen,
+  simResolveSignal,
+  resetViewSignal,
 }: MapCanvasProps) {
   const mapRef = useRef<any>(null);
   const [hoverBuilding, setHoverBuilding] = useState<Building | null>(null);
@@ -383,6 +396,16 @@ export function MapCanvas({
   // buildings, ECPs, rally points; just no vector basemap underneath.
   const [mapStyle, setMapStyle] = useState<string | typeof FALLBACK_STYLE>(MAP_STYLE);
   const styleRetryRef = useRef(0);
+  // Cached pre-sim viewport. Captured the moment the operator triggers the
+  // sim so resolve-sim restores the framing they were on, not just clears
+  // the cordon overlays. Reviewer flagged that "Resolve sim · drop FPCON"
+  // left the operator silently zoomed at the incident with no zoom-back.
+  const preSimViewRef = useRef<{ longitude: number; latitude: number; zoom: number } | null>(null);
+  // First-load fit-to-units pass — at the entry zoom of 14.7 some units
+  // (CLB-1, 3d Maint Bn) sat off-viewport, so the operator only saw ~5 of
+  // the 10 unit markers. We fit-bounds to all unit positions on the first
+  // render that has both the map ref and the placed-units list ready.
+  const initialFitDoneRef = useRef(false);
 
   // Smart anchor picker — chooses bottom / top / left / right based on where
   // the marker lands in the viewport so left-edge ECPs don't render their
@@ -517,13 +540,175 @@ export function MapCanvas({
     };
   }, []);
 
-  // Fly to the sim target when the sim fires.
+  // Fly to the sim target when the sim fires. Cache the prior viewport so
+  // sim-resolve can restore it (#4).
   useEffect(() => {
     if (!simActive || !simTargetBuilding || !mapRef.current) return;
+    const map = mapRef.current;
     const b = buildingById.get(simTargetBuilding);
     if (!b || b.lat == null || b.lon == null) return;
-    mapRef.current.flyTo({ center: [b.lon, b.lat], zoom: 17, duration: 1200 });
-  }, [simActive, simTargetBuilding, buildingById]);
+    try {
+      const c = map.getCenter();
+      preSimViewRef.current = {
+        longitude: c.lng,
+        latitude: c.lat,
+        zoom: map.getZoom(),
+      };
+    } catch {
+      /* tolerant — best-effort cache */
+    }
+    map.flyTo({
+      center: [b.lon, b.lat],
+      zoom: 17,
+      duration: 1200,
+      // Right-padding so the response drawer (400px) doesn't bury the
+      // target reticle behind the panel.
+      padding: drawerOpen ? { top: 0, bottom: 0, left: 0, right: 400 } : undefined,
+    });
+  }, [simActive, simTargetBuilding, buildingById, drawerOpen]);
+
+  // Sim-resolve restoration. Parent bumps `simResolveSignal` when the
+  // operator clicks "Resolve sim · drop FPCON" so we fly back to the cached
+  // pre-sim viewport instead of leaving the operator zoomed in. The cordon
+  // overlays clear because `simActive` flips false at the same time
+  // (cordon Source is gated on `simActive && simTarget && simCordons`).
+  useEffect(() => {
+    if (!simResolveSignal || !mapRef.current) return;
+    const map = mapRef.current;
+    const cached = preSimViewRef.current;
+    if (cached) {
+      map.flyTo({
+        center: [cached.longitude, cached.latitude],
+        zoom: cached.zoom,
+        duration: 900,
+      });
+      preSimViewRef.current = null;
+    } else {
+      // No cache (e.g. sim was already running before mount) — fall back to
+      // a fit-to-all-units pass so the operator sees the full picture.
+      fitToAllUnits();
+    }
+    // Belt-and-suspenders: explicitly trigger a resize on the map so the
+    // canvas honours any drawer-close that happened in the same React tick.
+    try { map.resize(); } catch { /* tolerant */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simResolveSignal]);
+
+  // Fit-bounds helper — computes a bounding box covering every unit marker
+  // and ECP and zooms the map so all of them are in viewport with a small
+  // padding. Honours drawer state so the right-edge ECP isn't clipped.
+  const fitToAllUnits = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const points: Array<[number, number]> = [];
+    for (const u of units) {
+      const homeId = UNIT_BUILDING[u.unit];
+      const home = homeId ? buildingById.get(homeId) : undefined;
+      const lat = home?.lat ?? null;
+      const lon = home?.lon ?? null;
+      if (lat != null && lon != null) points.push([lon, lat]);
+    }
+    for (const e of ecps) {
+      if (e.lat != null && e.lon != null) points.push([e.lon, e.lat]);
+    }
+    if (points.length < 2) return;
+    let minLon = +Infinity, maxLon = -Infinity, minLat = +Infinity, maxLat = -Infinity;
+    for (const [lon, lat] of points) {
+      if (lon < minLon) minLon = lon;
+      if (lon > maxLon) maxLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    try {
+      map.fitBounds(
+        [[minLon, minLat], [maxLon, maxLat]],
+        {
+          padding: drawerOpen
+            ? { top: 80, bottom: 80, left: 80, right: 420 }
+            : { top: 80, bottom: 80, left: 80, right: 80 },
+          duration: 700,
+          maxZoom: 15.5,
+        },
+      );
+    } catch {
+      /* tolerant — best-effort */
+    }
+  }, [units, ecps, buildingById, drawerOpen]);
+
+  // First-load fit so all unit markers are in viewport at default zoom (#21).
+  // Runs once after the map style finishes loading and units are available.
+  useEffect(() => {
+    if (initialFitDoneRef.current) return;
+    const map = mapRef.current;
+    if (!map) return;
+    if (units.length === 0 || buildingById.size === 0) return;
+    const run = () => {
+      if (initialFitDoneRef.current) return;
+      initialFitDoneRef.current = true;
+      fitToAllUnits();
+    };
+    if (map.isStyleLoaded && map.isStyleLoaded()) {
+      run();
+    } else {
+      const onLoad = () => run();
+      try { map.once("load", onLoad); } catch { /* tolerant */ }
+    }
+  }, [units, buildingById, fitToAllUnits]);
+
+  // Reset-view signal — fires when the operator clicks the Reset View
+  // button next to the zoom controls. Always re-fits to all units AND
+  // wipes any cached pre-sim viewport so a fresh sim starts cleanly.
+  useEffect(() => {
+    if (!resetViewSignal) return;
+    preSimViewRef.current = null;
+    fitToAllUnits();
+  }, [resetViewSignal, fitToAllUnits]);
+
+  // Drawer-aware reflow. When the right drawer (response or fused threats)
+  // opens or closes, kick a resize so MapLibre re-measures and the
+  // currently-centered point ends up in the *visible* portion of the
+  // canvas. Without this the right-edge ECP "B" gets clipped behind the
+  // drawer (#24).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const id = window.setTimeout(() => {
+      try { map.resize(); } catch { /* tolerant */ }
+    }, 80);
+    return () => window.clearTimeout(id);
+  }, [drawerOpen]);
+
+  // Bump the road-label layers' minzoom so major arteries are legible at
+  // the entry zoom (#22). CartoDB Dark Matter hides road labels until ~z14;
+  // we drop them all to z12 so Brewster / Holcomb / Stone read on first load.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      try {
+        const style = map.getStyle && map.getStyle();
+        if (!style || !style.layers) return;
+        for (const layer of style.layers) {
+          // The CartoDB style names road label layers like
+          // "highway-name-major", "road_major_label", "road-label" etc.
+          // Match anything that's a symbol layer mentioning "road" or "highway".
+          if (layer.type !== "symbol") continue;
+          const id: string = layer.id || "";
+          if (!/road|highway|street/i.test(id)) continue;
+          if (!/label|name|text/i.test(id)) continue;
+          // Drop minzoom so labels appear at our entry zoom (~14.7).
+          map.setLayerZoomRange(id, 12, 24);
+        }
+      } catch {
+        /* tolerant — style not ready yet */
+      }
+    };
+    if (map.isStyleLoaded && map.isStyleLoaded()) apply();
+    try { map.on("styledata", apply); } catch { /* tolerant */ }
+    return () => {
+      try { map.off && map.off("styledata", apply); } catch { /* tolerant */ }
+    };
+  }, [mapStyle]);
 
   // Hover handler for buildings — queries the polygon layer.
   const onMouseMove = useCallback((e: any) => {
@@ -779,7 +964,10 @@ export function MapCanvas({
                   className="mt-1 rounded-sm bg-[color-mix(in_oklab,#0a0c13_80%,transparent)] px-1.5 py-[1px] font-mono text-xs tabular-nums tracking-wide"
                   style={{ color }}
                 >
-                  {u.unit} · {Math.round(u.mc_rate * 100)}%
+                  {/* Precision parity (#30): one decimal everywhere. The
+                   * alert body reads "MC 50.0%"; the map marker has to
+                   * agree, not round to 50%. */}
+                  {u.unit} · {(u.mc_rate * 100).toFixed(1)}%
                 </div>
               </div>
             </Marker>
@@ -946,7 +1134,7 @@ export function MapCanvas({
                 className="font-mono text-xs uppercase tracking-widest"
                 style={{ color: mcColor(unitSelected.u.mc_rate) }}
               >
-                Unit · MC {Math.round(unitSelected.u.mc_rate * 100)}%
+                Unit · MC {(unitSelected.u.mc_rate * 100).toFixed(1)}%
               </div>
               <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
                 {unitSelected.u.unit}
@@ -1021,6 +1209,120 @@ export function MapCanvas({
         <NavigationControl position="top-right" showCompass showZoom />
         <ScaleControl position="bottom-right" unit="metric" maxWidth={140} />
       </MapGL>
+
+      {/* Reset view button — sits just below MapLibre's NavigationControl on
+       * the top-right. Refits the camera to all units and ECPs and clears
+       * any cached pre-sim viewport. Reviewer flagged that an operator who
+       * pans/zooms in the heat of an incident has no obvious way to "go
+       * back to the wide picture" (#28). */}
+      <button
+        type="button"
+        onClick={() => {
+          // Use a local fitToAllUnits-equivalent path. We can't reach the
+          // memoised callback directly from the render body without a ref,
+          // so we replicate the fit-bounds inline here and clear the cache.
+          preSimViewRef.current = null;
+          const map = mapRef.current;
+          if (!map) return;
+          const points: Array<[number, number]> = [];
+          for (const u of units) {
+            const homeId = UNIT_BUILDING[u.unit];
+            const home = homeId ? buildingById.get(homeId) : undefined;
+            if (home && home.lat != null && home.lon != null) points.push([home.lon, home.lat]);
+          }
+          for (const e of ecps) {
+            if (e.lat != null && e.lon != null) points.push([e.lon, e.lat]);
+          }
+          if (points.length < 2) return;
+          let minLon = +Infinity, maxLon = -Infinity, minLat = +Infinity, maxLat = -Infinity;
+          for (const [lon, lat] of points) {
+            if (lon < minLon) minLon = lon;
+            if (lon > maxLon) maxLon = lon;
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+          }
+          try {
+            map.fitBounds(
+              [[minLon, minLat], [maxLon, maxLat]],
+              {
+                padding: drawerOpen
+                  ? { top: 80, bottom: 80, left: 80, right: 420 }
+                  : { top: 80, bottom: 80, left: 80, right: 80 },
+                duration: 700,
+                maxZoom: 15.5,
+              },
+            );
+          } catch { /* tolerant */ }
+        }}
+        className="absolute right-2 z-[7] flex h-8 w-[29px] items-center justify-center rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] font-mono text-xs uppercase text-[var(--color-text)] shadow hover:bg-[var(--color-surface-hover)] tracking-widest"
+        // 116px ≈ NavigationControl (56px tall) + ~10px gap + standard top-3 inset.
+        style={{ top: "116px" }}
+        title="Reset view — fit all units and ECPs in viewport"
+        aria-label="Reset view"
+      >
+        ⤢
+      </button>
+
+      {/* Active-overlay legend — explains the pink cordon hatching, cyan
+       * selection ring, and yellow route line so the operator doesn't
+       * have to guess. Renders only when at least one overlay is active
+       * (#26). Bottom-left so it doesn't fight with the scale bar. */}
+      <MapLegend
+        cordonActive={!!simActive && !!simCordons && simCordons.length > 0}
+        selectionActive={!!selectedUnit || !!unitSelected || !!ecpSelected || !!rpSelected}
+        routeActive={false}
+      />
+    </div>
+  );
+}
+
+function MapLegend({
+  cordonActive,
+  selectionActive,
+  routeActive,
+}: {
+  cordonActive: boolean;
+  selectionActive: boolean;
+  routeActive: boolean;
+}) {
+  if (!cordonActive && !selectionActive && !routeActive) return null;
+  return (
+    <div
+      className="pointer-events-none absolute bottom-3 left-3 z-[7] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-2 py-1.5 font-mono text-xs text-[var(--color-text)] shadow backdrop-blur tracking-wider"
+      role="region"
+      aria-label="Map legend"
+    >
+      <div className="mb-1 text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
+        Overlay legend
+      </div>
+      {cordonActive && (
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-block h-3 w-5 rounded-sm border"
+            style={{
+              borderColor: "#ef4444",
+              background:
+                "repeating-linear-gradient(45deg, color-mix(in oklab, #ef4444 25%, transparent) 0 3px, transparent 3px 6px)",
+            }}
+          />
+          <span>Cordon (exclusion)</span>
+        </div>
+      )}
+      {selectionActive && (
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-block h-3 w-5 rounded-sm border"
+            style={{ borderColor: "#22d3ee", borderStyle: "dashed" }}
+          />
+          <span>Selection</span>
+        </div>
+      )}
+      {routeActive && (
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-[3px] w-5" style={{ background: "#eab308" }} />
+          <span>Route</span>
+        </div>
+      )}
     </div>
   );
 }
