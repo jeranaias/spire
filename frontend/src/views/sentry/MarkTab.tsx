@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type MarkResult } from "../../api";
 import { SegmentedControl } from "../../components/SegmentedControl";
@@ -12,6 +12,27 @@ const RELEASE_AUTHS = [
 ] as const;
 
 type Auth = typeof RELEASE_AUTHS[number]["value"];
+
+// Walkthrough #5 — Distribution Statement (A-F) and REL TO caveat are
+// independent fields. Helper text below the result panel renders both as
+// separate columns per DoDI 5230.24.
+const DISTRIBUTION_AUTHORITY: Record<Auth, { dist: string; relTo: string; note: string }> = {
+  US_ONLY: {
+    dist:  "Distribution C",
+    relTo: "(no foreign release)",
+    note:  "Authorized to U.S. Government agencies and their contractors. Further distribution only as directed by the originator.",
+  },
+  FVEY: {
+    dist:  "Distribution C",
+    relTo: "REL TO USA, AUS, CAN, GBR, NZL",
+    note:  "Distribution authorized to U.S. Government agencies and their contractors. REL TO authorizes the foreign release.",
+  },
+  NATO: {
+    dist:  "Distribution C",
+    relTo: "REL TO NATO",
+    note:  "Distribution authorized to U.S. Government agencies and their contractors. REL TO NATO authorizes the foreign release.",
+  },
+};
 
 const SAMPLES = [
   {
@@ -33,13 +54,18 @@ const SAMPLES = [
 
 export function MarkTab() {
   const role = useSpireStore((s) => s.role);
-  const [text, setText] = useState("");
+  // Walkthrough #3 — uncontrolled textarea so fast typing doesn't drop
+  // characters through React's controlled-input round-trip.
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [textVersion, setTextVersion] = useState(0);
   const [release, setRelease] = useState<Auth>("US_ONLY");
   const [result, setResult] = useState<MarkResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const pushToast = useSpireStore((s) => s.pushToast);
+  const debounceRef = useRef<number | null>(null);
+  const latestTextRef = useRef<string>("");
 
   if (role !== "data_custodian" && role !== "security_manager") {
     return (
@@ -51,18 +77,49 @@ export function MarkTab() {
     );
   }
 
-  async function mark() {
-    if (!text.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await api.sentry.mark(text, release);
-      setResult(r);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
+  function scheduleMark(immediate = false) {
+    if (debounceRef.current) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
     }
+    const text = (textareaRef.current?.value ?? "").trim();
+    latestTextRef.current = text;
+    if (!text) {
+      setResult(null);
+      return;
+    }
+    const ms = immediate ? 0 : 250;
+    debounceRef.current = window.setTimeout(async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // Walkthrough #3 — re-fire engine on every input change. The audit
+        // timestamp returned advances on every fresh response so the right
+        // pane never shows stale evidence/timestamp from a prior input.
+        const r = await api.sentry.mark(latestTextRef.current, release);
+        setResult(r);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+      }
+    }, ms);
+  }
+
+  // Walkthrough #3 — release-authority change re-fires the engine.
+  useEffect(() => {
+    if ((textareaRef.current?.value ?? "").trim()) {
+      scheduleMark(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [release]);
+
+  function loadSample(preset: string) {
+    if (textareaRef.current) {
+      textareaRef.current.value = preset;
+    }
+    setTextVersion((v) => v + 1);
+    scheduleMark(true);
   }
 
   return (
@@ -70,15 +127,17 @@ export function MarkTab() {
       <div className="flex w-1/2 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
         <h2 className="mb-1 text-sm font-semibold">Upstream marking — recommend before release</h2>
         <div className="mb-4 text-xs text-[var(--color-text-muted)]">
-          Paste a paragraph, remark, or draft section. The Tier-1 pattern engine returns a recommended
-          classification and caveat set per DoDM 5200.01. Runs entirely local; no language model required.
+          {/* Walkthrough #32 — operator-readable copy, no engine jargon. */}
+          Paste a paragraph, remark, or draft section. The pattern engine returns a recommended
+          classification and caveat set per DoDM 5200.01. Recommendations refresh automatically
+          as you type or change release authority.
         </div>
 
         <div className="mb-2 flex flex-wrap gap-2">
           {SAMPLES.map((s) => (
             <button
               key={s.label}
-              onClick={() => setText(s.text)}
+              onClick={() => loadSample(s.text)}
               className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
             >
               {s.label}
@@ -87,8 +146,12 @@ export function MarkTab() {
         </div>
 
         <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+          ref={textareaRef}
+          // Walkthrough #3 — uncontrolled. defaultValue avoids the batched-
+          // render path that was dropping fast-typed characters.
+          defaultValue=""
+          key={textVersion}
+          onChange={() => scheduleMark(false)}
           placeholder="Paste a draft paragraph, SR remark, or operational text..."
           className="min-h-[240px] flex-1 resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-sm leading-relaxed text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
         />
@@ -104,13 +167,9 @@ export function MarkTab() {
             options={RELEASE_AUTHS.map((r) => ({ value: r.value, label: r.label }))}
             onChange={setRelease}
           />
-          <button
-            onClick={mark}
-            disabled={loading || !text.trim()}
-            className="ml-auto rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-5 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50 tracking-widest"
-          >
-            {loading ? "Marking …" : "Recommend Marking"}
-          </button>
+          <span className="ml-auto font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            {loading ? "Marking …" : "Live · auto-refreshes"}
+          </span>
           {error && <span className="text-xs text-[var(--color-danger)]">{error}</span>}
         </div>
       </div>
@@ -124,6 +183,19 @@ export function MarkTab() {
         {result && (
           <>
             <MarkingBanner result={result} />
+
+            {/* Walkthrough #4 — release-authority validator banner. */}
+            {result.release_compatibility && result.release_compatibility.status !== "ok" && (
+              <ReleaseCompatibilityBanner compat={result.release_compatibility} />
+            )}
+
+            {/* Walkthrough #5 — Distribution Statement + REL TO caveat as
+                independent fields side-by-side. */}
+            <DistributionAuthorityPanel
+              release={release}
+              caveats={result.caveats_recommended}
+            />
+
             <div className="mb-4 flex items-center gap-3">
               <div className="font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
                 Confidence <span className="tabular-nums text-[var(--color-text)]">{(result.confidence * 100).toFixed(0)}%</span>
@@ -134,12 +206,14 @@ export function MarkTab() {
                 onClick={async () => {
                   setDownloading(true);
                   try {
+                    const text = textareaRef.current?.value ?? "";
                     const attest = {
                       input_hash: await sha256(text),
                       recommended_marking: result.recommended_classification,
                       caveats: result.caveats_recommended,
                       confidence: result.confidence,
                       evidence: result.evidence,
+                      release_compatibility: result.release_compatibility,
                       engine: result.audit.engine,
                       timestamp: result.audit.timestamp,
                       release_authority: release,
@@ -157,6 +231,10 @@ export function MarkTab() {
                   }
                 }}
                 className="ml-auto rounded-sm border border-[var(--color-border)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] tracking-widest"
+                disabled={result.release_compatibility?.status === "block"}
+                title={result.release_compatibility?.status === "block"
+                  ? "Cannot generate attestation while release is blocked."
+                  : undefined}
               >
                 {downloading ? "…" : "↓ Attestation"}
               </button>
@@ -258,6 +336,90 @@ function MarkingBanner({ result }: { result: MarkResult }) {
         >
           DoDM 5200.01
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Walkthrough #4 — release-authority validator banner.
+function ReleaseCompatibilityBanner({
+  compat,
+}: {
+  compat: NonNullable<MarkResult["release_compatibility"]>;
+}) {
+  const isBlock = compat.status === "block";
+  const color = isBlock ? "var(--color-danger)" : "var(--color-warning)";
+  const label = isBlock ? "Release Blocked" : "Release Warning";
+  return (
+    <div
+      className="mb-4 rounded-sm border-l-[6px] p-3"
+      style={{
+        borderLeftColor: color,
+        background: `color-mix(in oklab, ${color} 10%, var(--color-surface))`,
+        borderTop: "1px solid color-mix(in oklab, " + color + " 30%, var(--color-border))",
+        borderRight: "1px solid color-mix(in oklab, " + color + " 30%, var(--color-border))",
+        borderBottom: "1px solid color-mix(in oklab, " + color + " 30%, var(--color-border))",
+      }}
+      role={isBlock ? "alert" : "status"}
+    >
+      <div
+        className="font-mono text-xs font-semibold uppercase tracking-widest"
+        style={{ color }}
+      >
+        {label}
+      </div>
+      <ul className="mt-1 space-y-0.5 text-sm text-[var(--color-text)]">
+        {compat.issues.map((issue, i) => (
+          <li key={i} className="leading-snug">{issue}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Walkthrough #5 — Distribution Statement + REL TO caveat side-by-side.
+function DistributionAuthorityPanel({
+  release,
+  caveats,
+}: {
+  release: Auth;
+  caveats: string[];
+}) {
+  const auth = DISTRIBUTION_AUTHORITY[release];
+  const relTo = caveats.find((c) => c.startsWith("REL TO")) ?? auth.relTo;
+  return (
+    <div className="mb-4 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+      <div
+        className="mb-2 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]"
+      >
+        Release Posture · DoDI 5230.24
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <div className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+            Distribution Statement
+          </div>
+          <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
+            {auth.dist}
+          </div>
+          <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
+            Controls who can access (U.S. Government, contractors, etc.).
+          </div>
+        </div>
+        <div>
+          <div className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+            REL TO Caveat
+          </div>
+          <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
+            {relTo || "(no foreign release)"}
+          </div>
+          <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
+            Controls which foreign nationals may receive.
+          </div>
+        </div>
+      </div>
+      <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+        {auth.note}
       </div>
     </div>
   );
