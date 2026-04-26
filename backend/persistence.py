@@ -234,6 +234,29 @@ def recent_entries(limit: int = 50) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def entries_for_subject(subject_id: str, limit: int = 50) -> list[dict]:
+    """Walkthrough #31 — audit-chain entries scoped to a single subject (SR
+    number, asset id, release id) so the per-record audit-entry viewer can
+    surface the actual hash-chained artifact behind a marking decision or
+    release event without sifting a 500-row recent_entries dump.
+    """
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id, ts, actor, kind, subject_id, payload, prev_hash, self_hash "
+            "FROM audit_log WHERE subject_id = ? ORDER BY id DESC LIMIT ?",
+            (subject_id, limit),
+        ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["payload"] = json.loads(d["payload"]) if d.get("payload") else {}
+        except Exception:  # noqa: BLE001
+            d["payload"] = {"raw": d.get("payload", "")}
+        out.append(d)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Domain writes
 # ---------------------------------------------------------------------------

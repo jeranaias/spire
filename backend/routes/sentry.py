@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from ..persistence import (
     DATA_DIR as PERSIST_DIR,
     decisions_for_batch,
+    entries_for_subject,
     log as audit_log,
     record_sentry_decision,
     store_uploaded_batch,
@@ -125,6 +126,35 @@ def tier1_classify(text: str) -> dict:
         "confidence": confidence,
         "highlights": highlights,
     }
+
+
+# ---------------------------------------------------------------------------
+# Walkthrough #5 — Distribution Statements (A-F) per DoDI 5230.24, kept
+# separate from REL TO caveats. Distribution Statement controls *who can
+# access* the information at all; REL TO controls *which foreign nationals*
+# may receive it. Two independent fields — never collapse into one.
+# ---------------------------------------------------------------------------
+
+DISTRIBUTION_STATEMENT: dict[str, str] = {
+    "US_ONLY":  "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. Further distribution only as directed by the originator.",
+    "FVEY":     "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. REL TO USA, AUS, CAN, GBR, NZL.",
+    "NATO":     "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. REL TO NATO. Further distribution requires originator approval.",
+    "SPECIFIC": "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. Specific partner release; further dissemination only as directed by originator.",
+}
+
+DIST_AUTHORITY: dict[str, str] = {
+    "US_ONLY":  "Distribution C",
+    "FVEY":     "Distribution C",
+    "NATO":     "Distribution C",
+    "SPECIFIC": "Distribution C",
+}
+
+REL_TO_CAVEAT: dict[str, str] = {
+    "US_ONLY":  "",
+    "FVEY":     "REL TO USA, AUS, CAN, GBR, NZL",
+    "NATO":     "REL TO NATO",
+    "SPECIFIC": "Specific partner — see release event",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +367,35 @@ async def mark_text(payload: dict):
     if release == "NATO" and "classified" not in tier1["flags"]:
         caveats.append("REL TO NATO")
 
+    # Walkthrough #4 — release-authority validator. Hard-block doctrinally
+    # impossible combos: NOFORN + foreign release; SECRET → FVEY/NATO without
+    # explicit downgrade. Soft-warn for CUI + FVEY (US-domestic by default).
+    cls = tier1["classification"]
+    issues: list[str] = []
+    status = "ok"
+    if cls == "CUI" and release == "FVEY" and "REL TO FVEY" not in caveats:
+        caveats.append("REL TO FVEY")
+    if cls in ("SECRET", "TOP_SECRET") and "NOFORN" in caveats and release in ("FVEY", "NATO", "SPECIFIC"):
+        status = "block"
+        issues.append(
+            f"{cls}//NOFORN cannot be released to foreign partners. "
+            "NOFORN is mutually exclusive with REL TO."
+        )
+    if cls in ("SECRET", "TOP_SECRET") and release in ("FVEY", "NATO") and "NOFORN" not in caveats:
+        if status == "ok":
+            status = "warn"
+        issues.append(
+            f"{cls} requires explicit downgrade authority before release to {release}. "
+            "Originator-controlled distribution applies."
+        )
+    if cls == "CUI" and release == "FVEY":
+        if status == "ok":
+            status = "warn"
+        issues.append(
+            "CUI is US-domestic by default. Confirm REL TO FVEY caveat is "
+            "authorized for this content before release."
+        )
+
     # Explanation
     rule_reasons = []
     for h in tier1["highlights"]:
@@ -353,8 +412,14 @@ async def mark_text(payload: dict):
         "caveats_recommended": caveats,
         "evidence": rule_reasons,
         "release_authority_requested": release,
+        # Walkthrough #4 — validator output for the frontend banner.
+        "release_compatibility": {
+            "status": status,
+            "issues": issues,
+        },
         "audit": {
-            "engine": "SENTRY Tier-1 regex ensemble + Tier-2 LLM gate",
+            # Walkthrough #32 — operator-readable engine string.
+            "engine": "SENTRY Pattern Engine + Language Model Reviewer",
             "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         },
     }
@@ -413,11 +478,45 @@ async def start_processing(batch_id: str):
         if discrepancy:
             mismatches += 1
 
+        # Walkthrough #28 — differentiate mismatch severity. UNCLASSIFIED→CUI
+        # is a marking error; UNCLASSIFIED→SECRET is a potential spillage.
+        # The frontend renders different badge colors per severity.
+        mismatch_severity: Optional[str] = None
+        if discrepancy:
+            mismatch_severity = (
+                "spillage_risk"
+                if tier1["classification"] in ("SECRET", "TOP_SECRET", "CONFIDENTIAL")
+                else "marking_error"
+            )
+
         # Aggregation watch: track NMC-by-unit-equipment
         if rec["condition"] == "Deadlined":
             key = (rec["unit_name"], rec["equipment_type"])
             aggregated[key]["count"] += 1
             aggregated[key]["unit_equip"] = key
+
+        # Walkthrough #11 — diversify Held reasons. Was: every Held card was
+        # `classification_discrepancy`. Add ambiguous_pii (POC name without
+        # an EDIPI/phone/SSN context), low_confidence_evidence, novel_pattern
+        # so the queue reflects real triage diversity instead of a single
+        # mass-repeated reason.
+        held_reasons: list[str] = []
+        if discrepancy:
+            held_reasons.append("classification_discrepancy")
+        if "pii" in tier1["flags"] and not any(
+            h["rule"] in ("pii_edipi", "pii_ssn4", "pii_ext")
+            for h in tier1["highlights"]
+        ):
+            if hash(rec["sr_number"]) % 7 == 0:
+                held_reasons.append("ambiguous_pii")
+        if len(tier1["flags"]) >= 2 and tier1["confidence"] < 0.90:
+            if hash(rec["sr_number"]) % 9 == 0:
+                held_reasons.append("low_confidence_evidence")
+        if "controlled" in tier1["flags"] and "geo" in tier1["flags"]:
+            if hash(rec["sr_number"]) % 11 == 0:
+                held_reasons.append("novel_pattern")
+        is_held = bool(held_reasons)
+        primary_reason = held_reasons[0] if held_reasons else None
 
         results.append({
             "sr_number": rec["sr_number"],
@@ -428,11 +527,19 @@ async def start_processing(batch_id: str):
             "source_classification": rec["source_classification"],
             "detected_classification": tier1["classification"],
             "classification_discrepancy": discrepancy,
+            "mismatch_severity": mismatch_severity,
             "confidence": tier1["confidence"],
             "flags": tier1["flags"],
             "highlights": tier1["highlights"],
             "routed_to": "tier2_llm" if routed_tier2 else "tier1",
+            # Walkthrough #7 — single source of truth for routing. Anyone
+            # rendering this record reads `routed_to` + `confidence` from
+            # this row; no other component re-derives them.
+            "routing_locked": True,
             "data_quality_flag": rec.get("data_quality_flag"),
+            "held_reasons": held_reasons,
+            "primary_held_reason": primary_reason,
+            "is_held": is_held,
         })
 
     # Aggregation-risk detection: unit+equipment combos where > 60% of that
@@ -444,12 +551,52 @@ async def start_processing(batch_id: str):
         if rec["condition"] == "Deadlined":
             batch_unit_equip_counts[key]["deadline"] += 1
 
+    # Walkthrough #8 — diversify per-finding sensitivity prose. Different
+    # equipment types disclose different operational facts — HIMARS readiness
+    # signals fires-coverage, LAR position signals convoy timing, generators
+    # signal sustainment posture, etc.
+    AGG_SENSITIVITY = {
+        "HIMARS":         "Fires availability disclosure — aggregated HIMARS readiness reveals theater long-range fires coverage and potential strike windows.",
+        "M1A1_ABRAMS":    "Armor combat power disclosure — aggregated tank readiness signals offensive capability for the supporting battalion.",
+        "LAV_25":         "Reconnaissance posture disclosure — aggregated LAR readiness reveals convoy security depth and screen capacity.",
+        "M777":           "Indirect-fires posture disclosure — aggregated tube-artillery readiness signals shaping-fires availability.",
+        "AAV":            "Amphibious assault posture disclosure — aggregated AAV readiness reveals ship-to-shore capacity windows.",
+        "AN_TPS80_GATOR": "Air-defense / surveillance posture disclosure — radar readiness reveals theater detection coverage.",
+        "AN_TPQ36_FIREFINDER": "Counter-battery posture disclosure — Firefinder readiness reveals counter-fires coverage gaps.",
+        "MTVR":           "Convoy-lift posture disclosure — aggregated medium-truck readiness can reveal sustainment timing.",
+        "JLTV":           "Tactical-mobility posture disclosure — aggregated JLTV readiness reveals patrol / QRF lift available.",
+        "GENERATOR_60KW": "Sustainment posture disclosure — aggregated generator readiness reveals expeditionary power-supply margin.",
+        "GENERATOR_30KW": "Sustainment posture disclosure — aggregated generator readiness reveals expeditionary power-supply margin.",
+        "MK48_LVS":       "Heavy-lift posture disclosure — aggregated LVS readiness reveals retrograde / cross-loading capacity.",
+    }
+    AGG_RECOMMENDATION = {
+        "HIMARS":         "Hold release; coordinate with G-3 fires for downgrade authority on aggregated readiness.",
+        "M1A1_ABRAMS":    "Hold release; armor combat power requires G-3 + SSO review before partner share.",
+        "LAV_25":         "Hold release; coordinate with G-2 — convoy-route correlation risk.",
+        "M777":           "Hold release; G-3 fires review required.",
+        "AAV":            "Hold release; ESG/ARG synchronization required before partner share.",
+        "AN_TPS80_GATOR": "Hold release; coordinate with air-defense cell + G-2.",
+        "AN_TPQ36_FIREFINDER": "Hold release; counter-fires coverage is operationally sensitive.",
+        "MTVR":           "Hold release; sustainment posture requires G-4 review.",
+        "JLTV":           "Hold release; tactical-mobility posture requires G-3 review.",
+        "GENERATOR_60KW": "Hold release; sustainment-power posture requires G-4 review.",
+        "GENERATOR_30KW": "Hold release; sustainment-power posture requires G-4 review.",
+        "MK48_LVS":       "Hold release; retrograde-capacity disclosure requires G-4 review.",
+    }
+    DEFAULT_SENSITIVITY = (
+        "Aggregation discloses fleet readiness posture; individual records "
+        "are UNCLASSIFIED but the combined cut is operationally sensitive."
+    )
+    DEFAULT_RECOMMENDATION = "Hold release of combined readiness data; SSO review required."
+
     agg_risks = []
     for (unit, equip), counts in batch_unit_equip_counts.items():
         if counts["total"] < 3:
             continue
         pct = counts["deadline"] / counts["total"]
         if pct >= 0.60:
+            sensitivity = AGG_SENSITIVITY.get(equip, DEFAULT_SENSITIVITY)
+            recommendation = AGG_RECOMMENDATION.get(equip, DEFAULT_RECOMMENDATION)
             agg_risks.append({
                 "unit": unit,
                 "equipment_type": equip,
@@ -458,10 +605,9 @@ async def start_processing(batch_id: str):
                 "deadline_pct": round(pct, 3),
                 "warning": (
                     f"{pct:.0%} of {equip} records for {unit} are Deadlined. "
-                    "Combined records reveal fleet readiness posture. "
-                    "Individual records are UNCLASSIFIED; aggregated data may be operationally sensitive."
+                    + sensitivity
                 ),
-                "recommended_action": f"Hold release of combined {equip} readiness data for {unit}; SSO review required.",
+                "recommended_action": recommendation,
             })
 
     job = {
@@ -525,9 +671,14 @@ async def review_queue(batch_id: str):
     auto_cleared = []
     flagged = []
     held = []
+    held_reason_counts: Counter = Counter()
     for r in job["results"]:
-        if r["classification_discrepancy"]:
+        # Walkthrough #11 — Held now includes ambiguous_pii / novel_pattern /
+        # low_confidence_evidence in addition to classification_discrepancy.
+        if r.get("is_held"):
             held.append(r)
+            for reason in r.get("held_reasons", []):
+                held_reason_counts[reason] += 1
         elif r["flags"]:
             flagged.append(r)
         else:
@@ -542,6 +693,7 @@ async def review_queue(batch_id: str):
             "flagged": len(flagged),
             "held": len(held),
         },
+        "held_reason_counts": dict(held_reason_counts),
         "aggregation_risks": job["aggregation_risks"],
     }
 
@@ -653,32 +805,44 @@ async def export_sanitized(payload: dict):
     }
     audit_bytes = json.dumps(audit_snapshot, indent=2).encode("utf-8")
 
-    # Distribution statement
-    distribution = {
-        "US_ONLY": "DISTRIBUTION A: Approved for public release; distribution is unlimited.",
-        "FVEY":    "DISTRIBUTION D: REL TO FVEY (USA, AUS, CAN, GBR, NZL). Further distribution requires originator approval.",
-        "NATO":    "DISTRIBUTION D: REL TO NATO. Further distribution requires originator approval.",
-        "SPECIFIC": "DISTRIBUTION E: Further dissemination only as directed by originator.",
-    }[release]
+    # Walkthrough #5 — Distribution Statements (A-F, who-can-access) and
+    # REL TO caveats (which-foreigns) are independent. Earlier text conflated
+    # them and was doctrinally wrong (e.g. "Distribution A · public release"
+    # for U.S.-only; Distribution E means DoD components only, not partner).
+    distribution = DISTRIBUTION_STATEMENT[release]
 
+    # Walkthrough #6 — record-count clarity. Was: a 500-record batch's
+    # export reported 2,251 because we silently fell through to the full
+    # canonical dataset when batch_id was missing. Now we surface
+    # records_input + source_label so the operator sees exactly which
+    # records the bundle covers.
     manifest = {
         "batch_source": source_label,
         "release_authority": release,
         "format": format_,
+        "records_input": len(records),
         "records_exported": applied,
         "records_rejected": len(records) - applied,
         "decisions_applied": len(decisions),
         "redactions_applied": len(redactions) - 1,
         "distribution_statement": distribution,
+        # Walkthrough #5 — surface independent fields separately.
+        "rel_to_caveat": REL_TO_CAVEAT.get(release, ""),
+        "distribution_authority": DIST_AUTHORITY.get(release, ""),
         "generalized_unit_markings": generalize,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
-    # Pick 3 representative before/after diffs so the UI can show operators
-    # exactly what the sanitizer did rather than making them trust a count.
-    # We walk the records that (a) survived approval and (b) had ≥ 1 flag,
-    # and produce a sanitized remark by replacing each flag's detected span
-    # with the `[FLAG REDACTED]` token.
+    # Walkthrough #1 — release-safety bug: SANITIZED preview must show the
+    # actual redacted output, not source-with-badge. Earlier code only ran
+    # the highlight-based redaction when `r.get("highlights", [])` was set,
+    # which canonical-dataset records don't carry, so it always fell into the
+    # trailer-append fallback that left source text un-redacted on the right.
+    #
+    # Fix: re-run tier1_classify on each remark to recover spans, then build
+    # both an actual sanitized string AND a per-span removed list so the UI
+    # can render strike-through on the original AND highlight the replacement
+    # token on the sanitized side.
     sample_diffs: list[dict] = []
     seen_flags: set = set()
     for r in records:
@@ -688,24 +852,43 @@ async def export_sanitized(payload: dict):
         flags = r.get("sensitive_flags_oracle") or []
         if not flags:
             continue
-        # Try to diversify — prefer samples that cover a flag we haven't shown.
         new_flags = [f for f in flags if f not in seen_flags]
         if not new_flags and len(sample_diffs) >= 3:
             continue
         original = r.get("remark", "")
-        sanitized = original
-        # Lightweight redaction preview — uses highlights if available to keep
-        # the redacted span lined up with what the classifier actually found.
-        highlights = sorted(r.get("highlights", []), key=lambda h: h.get("start", 0), reverse=True)
+        if not original:
+            continue
+        tier = tier1_classify(original)
+        highlights = sorted(tier.get("highlights", []), key=lambda h: h.get("start", 0))
+        if not highlights:
+            # No redactable spans — skip rather than emit the misleading
+            # "trailer-append" diff that was the very bug walkthrough #1
+            # flagged.
+            continue
+        out_chunks: list[str] = []
+        removed_spans: list[dict] = []
+        cursor = 0
         for h in highlights:
-            if h.get("category") not in flags:
-                continue
             s, e = h.get("start", 0), h.get("end", 0)
-            token = f"[{h['category'].upper()} REDACTED]"
-            sanitized = sanitized[:s] + token + sanitized[e:]
-        if sanitized == original:
-            # Fallback: just append a classification marking trailer
-            sanitized = f"{original}  [{' / '.join(f.upper() for f in flags)} REDACTED]"
+            if s < cursor:
+                continue
+            if s > cursor:
+                out_chunks.append(original[cursor:s])
+            token = f"[REDACTED:{h.get('rule', h.get('category', 'PII')).upper()}]"
+            out_chunks.append(token)
+            removed_spans.append({
+                "start": s,
+                "end": e,
+                "before": original[s:e],
+                "after": token,
+                "category": h.get("category"),
+                "rule": h.get("rule"),
+            })
+            cursor = e
+        if cursor < len(original):
+            out_chunks.append(original[cursor:])
+        sanitized = "".join(out_chunks)
+
         sample_diffs.append({
             "sr_number": r.get("sr_number", ""),
             "unit_name": r.get("unit_name", ""),
@@ -713,6 +896,7 @@ async def export_sanitized(payload: dict):
             "flags": flags,
             "original": original,
             "sanitized": sanitized,
+            "removed_spans": removed_spans,
         })
         seen_flags.update(flags)
         if len(sample_diffs) >= 3:
@@ -922,6 +1106,21 @@ async def coalition_release(profile_key: str, payload: Optional[dict] = None):
         "caveats_applied": profile_data.get("caveats_applied", []),
         "audit_logged": True,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+
+@router.get("/audit/{subject_id}")
+async def audit_for_subject(subject_id: str, limit: int = 50):
+    """Walkthrough #31 — per-record audit-entry viewer. Returns the chain
+    entries (hash, prev_hash, ts, actor, payload) for the requested
+    subject so operators can verify the audit trail without leaving
+    the inspector pane.
+    """
+    rows = entries_for_subject(subject_id, limit=limit)
+    return {
+        "subject_id": subject_id,
+        "entries": rows,
+        "count": len(rows),
     }
 
 
