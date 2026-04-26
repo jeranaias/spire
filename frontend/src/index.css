@@ -332,14 +332,18 @@ body {
   100% { offset-distance: 100%; opacity: 0.9; }
 }
 
-/* Marquee ticker (footer telemetry) */
+/* Marquee ticker (footer telemetry) — slowed to 144s (was 72s). Reviewer
+ * caught the prior cadence cycling so fast the operator couldn't read a
+ * full label before it slid off-screen. The audit hash + classification
+ * posture pin to fixed positions in the footer (see StatusFooter.tsx)
+ * so the marquee carries only the rotating telemetry. */
 @keyframes ticker-slide {
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
 }
 .ticker {
   display: inline-flex;
-  animation: ticker-slide 72s linear infinite;
+  animation: ticker-slide 144s linear infinite;
   white-space: nowrap;
 }
 
