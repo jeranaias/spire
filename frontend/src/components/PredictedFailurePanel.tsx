@@ -121,31 +121,20 @@ export function PredictedFailurePanel({ unit }: { unit?: string | null }) {
             key={a.asset_id}
             asset={a}
             onDraftRequisition={() => {
-              // Honest toast wording — this click does NOT open a draft panel
-              // below; it filters the Risk Board to the asset's unit +
-              // equipment so the operator can pick a recommendation. The
-              // Recommended Actions surface lives on PULSE Forecast (one tab
-              // over). We scroll to top so the filter chip + Predicted
-              // Failures panel are both immediately visible.
+              // Reviewer round 2: prior "scroll-to-top + toast" was a
+              // no-op-with-side-effects — the URL changed but the operator
+              // landed nowhere useful. Recommended Actions actually live on
+              // PULSE Forecast (GC-1 panel). Navigate there scoped to this
+              // asset's unit so the operator lands directly on the action
+              // ranking for the predicted-failing asset.
               pushToast({
                 tone: "info",
-                text: `Filtered to ${a.unit_name} + ${a.equipment_type} · pick a recommendation from the panel above`,
-                ttlMs: 4500,
+                text: `Opening recommended actions for ${a.unit_name} · ${a.equipment_type}`,
+                ttlMs: 4000,
               });
-              nav(`/pulse/risk?unit=${encodeURIComponent(a.unit_name)}&equipment=${encodeURIComponent(a.equipment_type)}`);
-              // Scroll the operator back to the top of the scroll container
-              // so the panel "above" actually becomes visible.
-              if (typeof window !== "undefined") {
-                window.requestAnimationFrame(() => {
-                  // The panel scroll container is the nearest .overflow-y-auto
-                  // ancestor; fallback to window.
-                  const scroller = document.querySelector(
-                    "[data-pulse-risk-scroll]",
-                  ) as HTMLElement | null;
-                  if (scroller) scroller.scrollTo({ top: 0, behavior: "smooth" });
-                  else window.scrollTo({ top: 0, behavior: "smooth" });
-                });
-              }
+              nav(
+                `/pulse/forecast?unit=${encodeURIComponent(a.unit_name)}&asset=${encodeURIComponent(a.asset_id)}`,
+              );
             }}
           />
         ))}
