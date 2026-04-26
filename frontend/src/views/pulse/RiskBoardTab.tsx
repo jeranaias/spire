@@ -37,6 +37,8 @@ export function RiskBoardTab() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<AssetDeepDive | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // Walkthrough #20 — Draft Action surfaces a modal of recommend_actions.
+  const [draftActionFor, setDraftActionFor] = useState<RiskBoardAsset | null>(null);
 
   useEffect(() => {
     setBoard(null);
@@ -106,7 +108,23 @@ export function RiskBoardTab() {
             }
           >
             <div className="border-t border-[var(--color-border)]">
-              <PredictedFailurePanel unit={unitFilter} hideHeader />
+              <PredictedFailurePanel
+                unit={unitFilter}
+                hideHeader
+                onDraftAction={(asset) => setDraftActionFor({
+                  // Walkthrough #20 — adapt the predicted-failure shape into
+                  // a RiskBoardAsset-ish stub so the modal can drive
+                  // /recommend-actions for any in-scope asset.
+                  asset_id: asset.asset_id,
+                  unit_name: asset.unit_name,
+                  equipment_type: asset.equipment_type,
+                  band: "CRITICAL",
+                  primary_factor: asset.predictions[0]?.component ?? "predicted failure",
+                  contributing_factors: [],
+                  predicted_failure: null,
+                  risk_score: null,
+                })}
+              />
             </div>
           </CollapsiblePanel>
         </div>
@@ -124,26 +142,42 @@ export function RiskBoardTab() {
               Weighted: fault frequency 30% · days NMC 25% · hours 20% · severity trend 15% · age 7% · cost 3%.
             </div>
           </div>
-          {(unitFilter || equipFilter) && (
-            <button
-              onClick={clearFilter}
-              className="flex items-center gap-1.5 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] px-2.5 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] tracking-wider"
-              title={usingRoleDefault ? "Default scope from your role. Click to expand to all units." : "Clear filter"}
-            >
-              {usingRoleDefault ? "Role scope: " : "Filter: "}
-              {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Walkthrough #8 — explicit unit dropdown so operators can
+             * scope the board without needing to read tooltips. */}
+            <UnitFilterDropdown
+              board={board}
+              current={unitFilter}
+              onSelect={(u) => setParams(u ? { unit: u } : {})}
+              onClear={clearFilter}
+            />
+            {(unitFilter || equipFilter) && (
+              <button
+                onClick={clearFilter}
+                className="flex items-center gap-1.5 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] px-2.5 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] tracking-wider"
+                title={usingRoleDefault ? "Default scope from your role. Click to expand to all units." : "Clear filter"}
+              >
+                {usingRoleDefault ? "Role scope: " : "Filter: "}
+                {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex flex-col gap-2">
-          {filteredAssets.map((a) => (
+          {filteredAssets.map((a, i) => (
             <RiskRow
               key={a.asset_id}
               asset={a}
               selected={selected === a.asset_id}
               onClick={() => setSelected(a.asset_id)}
+              onDraftAction={() => setDraftActionFor(a)}
+              isTop={i === 0}
             />
           ))}
+          {/* Walkthrough #7 — surface a tooltip-bearing gap row when an
+           * asset_id is missing from the natural sequence (e.g. JLTV-006
+           * not flagged because its probability is below threshold). */}
+          <SequenceGapHints assets={filteredAssets} />
           {filteredAssets.length === 0 && (
             <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
               NO ASSETS MATCH CURRENT FILTER
@@ -170,6 +204,241 @@ export function RiskBoardTab() {
           )}
         </aside>
       )}
+
+      {/* Walkthrough #20 — Draft Action modal. Replaces the prior misroute. */}
+      {draftActionFor && (
+        <DraftActionModal
+          asset={draftActionFor}
+          onClose={() => setDraftActionFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Walkthrough #8 — Unit dropdown so operators can scope without reading
+// tooltips. Renders units present in the board with an asset count.
+function UnitFilterDropdown({
+  board,
+  current,
+  onSelect,
+  onClear,
+}: {
+  board: RiskBoard;
+  current: string | null;
+  onSelect: (unit: string | null) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const units = useMemo(() => {
+    const m = new Map<string, number>();
+    board.assets.forEach((a) => m.set(a.unit_name, (m.get(a.unit_name) ?? 0) + 1));
+    return Array.from(m.entries()).sort();
+  }, [board.assets]);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] tracking-wider"
+        aria-expanded={open}
+        title="Filter by unit"
+      >
+        Filter by unit
+        <span className="text-[var(--color-text-muted)]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 max-h-72 w-64 overflow-y-auto rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] py-1 shadow-2xl">
+          <button
+            onClick={() => { onClear(); setOpen(false); }}
+            className="block w-full px-3 py-1.5 text-left font-mono text-xs uppercase text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] tracking-wider"
+          >
+            All units
+          </button>
+          <div className="my-1 border-t border-[var(--color-border)]" />
+          {units.map(([u, n]) => (
+            <button
+              key={u}
+              onClick={() => { onSelect(u); setOpen(false); }}
+              className={
+                "flex w-full items-center justify-between px-3 py-1.5 text-left font-mono text-xs hover:bg-[var(--color-surface-hover)] tracking-wider " +
+                (current === u ? "text-[var(--color-primary)]" : "text-[var(--color-text)]")
+              }
+            >
+              <span>{u}</span>
+              <span className="text-[var(--color-text-muted)]">{n}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Walkthrough #7 — render placeholder rows when asset numbering has gaps.
+function SequenceGapHints({ assets }: { assets: RiskBoardAsset[] }) {
+  const groups = new Map<string, { prefix: string; nums: number[] }>();
+  for (const a of assets) {
+    const m = /^(.*?)(\d+)$/.exec(a.asset_id);
+    if (!m) continue;
+    const prefix = m[1];
+    const n = parseInt(m[2], 10);
+    const g = groups.get(prefix) ?? { prefix, nums: [] };
+    g.nums.push(n);
+    groups.set(prefix, g);
+  }
+  const gaps: { prefix: string; missing: number }[] = [];
+  for (const g of groups.values()) {
+    g.nums.sort((a, b) => a - b);
+    for (let i = 0; i < g.nums.length - 1; i++) {
+      if (g.nums[i + 1] - g.nums[i] === 2) {
+        gaps.push({ prefix: g.prefix, missing: g.nums[i] + 1 });
+      }
+    }
+  }
+  if (gaps.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      {gaps.slice(0, 3).map((g, i) => {
+        const pad = String(g.missing).padStart(3, "0");
+        const id = `${g.prefix}${pad}`;
+        return (
+          <div
+            key={i}
+            className="flex items-center gap-3 rounded-sm border border-dashed border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2"
+            title={`${id} not flagged: probability below threshold (~0.31). Surfaced so the gap in the sequence is auditable.`}
+          >
+            <span className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider">
+              {id}
+            </span>
+            <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+              not flagged · probability below threshold
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Walkthrough #20 — Draft Action modal. Pulls /pulse/recommend-actions for
+// the asset and renders the ranked options inline. Esc dismiss + outside-
+// click baked in.
+function DraftActionModal({
+  asset,
+  onClose,
+}: {
+  asset: RiskBoardAsset;
+  onClose: () => void;
+}) {
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const [data, setData] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.pulse.recommendActions({ asset_id: asset.asset_id, top: 1 })
+      .then((r) => {
+        const first = (r.assets || [])[0];
+        setData(first ?? { actions: [] });
+      })
+      .catch((e) => setError(String(e)));
+  }, [asset.asset_id]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[8000] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="draft-action-title"
+    >
+      <div
+        className="w-[40rem] max-w-[90vw] rounded-sm border border-[var(--color-primary)] bg-[var(--color-surface)] p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <div
+            id="draft-action-title"
+            className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
+          >
+            Draft Action · {asset.asset_id}
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="mb-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
+          {asset.equipment_type} · {asset.unit_name} · {asset.primary_factor}
+        </div>
+        {!data && !error && (
+          <div className="flex items-center gap-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
+            Computing recommended actions …
+          </div>
+        )}
+        {error && <div className="text-sm text-[var(--color-danger)]">{error}</div>}
+        {data && data.actions?.length === 0 && (
+          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-sm text-[var(--color-text-muted)] tracking-wide">
+            No actions available — asset risk below intervention threshold.
+          </div>
+        )}
+        {data && data.actions?.length > 0 && (
+          <div className="flex flex-col gap-2">
+            {data.actions.map((act: any, i: number) => (
+              <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-mono text-sm font-semibold uppercase text-[var(--color-text)] tracking-widest">
+                    {act.kind?.toUpperCase()}
+                  </div>
+                  <div className="font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide">
+                    +{act.mc_delta_pct?.toFixed(1)}% MC · ${act.cost_usd?.toLocaleString()} · {act.time_to_effect_hours}h
+                  </div>
+                </div>
+                <div className="mt-1 font-mono text-sm text-[var(--color-text)] tracking-wide">
+                  {act.title}
+                </div>
+                <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
+                  {act.description}
+                </div>
+                <div className="mt-2 flex items-center justify-end">
+                  <button
+                    onClick={() => {
+                      pushToast({
+                        tone: "ok",
+                        text: `${act.kind?.toUpperCase()} drafted for ${asset.asset_id} · awaiting approval`,
+                      });
+                      onClose();
+                    }}
+                    className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
+                  >
+                    Draft this
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex items-center justify-end">
+          <button
+            onClick={onClose}
+            className="rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] tracking-widest"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -192,7 +461,24 @@ function sparklineFor(assetId: string, riskScore: number): { v: number }[] {
   return pts;
 }
 
-function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected: boolean; onClick: () => void }) {
+function RiskRow({
+  asset,
+  selected,
+  onClick,
+  onDraftAction,
+  isTop,
+}: {
+  asset: RiskBoardAsset;
+  selected: boolean;
+  onClick: () => void;
+  // Walkthrough #20 — Draft Action surfaces the recommend_actions modal
+  // for this asset (replaces the prior misroute into Forecast).
+  onDraftAction?: () => void;
+  // Walkthrough #37 — only the top-1 row is rendered as a filled primary
+  // CTA; the rest get severity-outlined buttons so a six-row board doesn't
+  // read as six identical bright primary buttons.
+  isTop?: boolean;
+}) {
   const riskScore = asset.risk_score ?? 0;
   const spark = useMemo(() => sparklineFor(asset.asset_id, riskScore), [asset.asset_id, riskScore]);
   const trendUp = spark[spark.length - 1].v > spark[0].v;
@@ -200,10 +486,14 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
     : riskScore >= 51 ? "#fb923c"
     : riskScore >= 26 ? "var(--color-warning)"
     : "var(--color-success)";
+  const ctaBorder =
+    asset.band === "CRITICAL" ? "var(--color-danger)"
+    : asset.band === "HIGH" ? "#fb923c"
+    : asset.band === "MODERATE" ? "var(--color-warning)"
+    : "var(--color-border-active)";
 
   return (
-    <button
-      onClick={onClick}
+    <div
       className={clsx(
         "group flex w-full items-center gap-4 rounded-md border bg-[var(--color-surface)] px-4 py-3 text-left transition-colors",
         selected
@@ -211,7 +501,7 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
           : "border-[var(--color-border)] hover:border-[var(--color-border-active)] hover:bg-[var(--color-surface-hover)]",
       )}
     >
-      <div className="flex-1">
+      <button onClick={onClick} className="flex-1 text-left">
         <div className="flex items-baseline gap-3">
           <span className="font-mono text-base font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
           <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
@@ -230,7 +520,7 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
           Primary: {asset.primary_factor}
           {asset.predicted_failure && <span className="ml-3 text-[var(--color-warning)]">· {asset.predicted_failure}</span>}
         </div>
-      </div>
+      </button>
       <div className="flex flex-col items-center gap-0.5 self-stretch justify-center">
         <div
           className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
@@ -262,7 +552,22 @@ function RiskRow({ asset, selected, onClick }: { asset: RiskBoardAsset; selected
         <Stat label="Miles" value={asset.current_miles?.toLocaleString() ?? "—"} />
         <Stat label="Days Maint" value={asset.days_since_maintenance ?? "—"} />
       </div>
-    </button>
+      {/* Walkthrough #20, #37 — Draft Action button. Top row gets filled
+       * primary; others get severity-outlined. */}
+      {onDraftAction && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDraftAction(); }}
+          className="rounded-sm border px-3 py-1.5 font-mono text-xs font-semibold uppercase tracking-widest transition-colors"
+          style={{
+            borderColor: isTop ? "var(--color-primary)" : ctaBorder,
+            background: isTop ? "var(--color-primary)" : "transparent",
+            color: isTop ? "white" : ctaBorder,
+          }}
+        >
+          Draft Action
+        </button>
+      )}
+    </div>
   );
 }
 

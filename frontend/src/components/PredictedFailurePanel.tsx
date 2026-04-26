@@ -17,7 +17,18 @@ import { api, type PredictedFailureAsset, type FailurePrediction } from "../api"
 import { useSpireStore } from "../state/store";
 import { useNavigate } from "react-router-dom";
 
-export function PredictedFailurePanel({ unit, hideHeader = false }: { unit?: string | null; hideHeader?: boolean }) {
+export function PredictedFailurePanel({
+  unit,
+  hideHeader = false,
+  onDraftAction,
+}: {
+  unit?: string | null;
+  hideHeader?: boolean;
+  // Walkthrough #20 — when consumed by the Risk Board, route Draft Action
+  // through a parent-supplied callback that opens an in-place modal of
+  // recommend_actions; otherwise default to navigating into Forecast.
+  onDraftAction?: (asset: PredictedFailureAsset) => void;
+}) {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
   const nav = useNavigate();
@@ -55,8 +66,8 @@ export function PredictedFailurePanel({ unit, hideHeader = false }: { unit?: str
   }
   if (data.length === 0) {
     // Visible "no predictions" line so operators don't wonder whether the
-    // panel is broken vs. simply quiet. Engine label is preserved so the
-    // J2-vs-rule_based distinction is still legible at a glance.
+    // panel is broken vs. simply quiet. Engine label sanitized to the
+    // operator-readable variant — see engineLabel().
     return (
       <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
         <span
@@ -74,8 +85,11 @@ export function PredictedFailurePanel({ unit, hideHeader = false }: { unit?: str
         >
           No assets above threshold within {horizon}d horizon
         </span>
-        <span className="ml-auto font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-          engine: {engine}
+        <span
+          className="ml-auto font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
+          title={`Internal engine id: ${engine}`}
+        >
+          {engineLabel(engine)}
         </span>
       </div>
     );
@@ -92,8 +106,11 @@ export function PredictedFailurePanel({ unit, hideHeader = false }: { unit?: str
           )}
           <div className={hideHeader ? "spire-body-muted text-base" : "mt-0.5 spire-body-muted text-base"}>
             {data.length} asset{data.length === 1 ? "" : "s"} flagged within {horizon}d horizon
-            <span className="ml-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-              engine: {engine}
+            <span
+              className="ml-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
+              title={`Internal engine id: ${engine}`}
+            >
+              {engineLabel(engine)}
             </span>
           </div>
         </div>
@@ -123,12 +140,13 @@ export function PredictedFailurePanel({ unit, hideHeader = false }: { unit?: str
             key={a.asset_id}
             asset={a}
             onDraftRequisition={() => {
-              // Reviewer round 2: prior "scroll-to-top + toast" was a
-              // no-op-with-side-effects — the URL changed but the operator
-              // landed nowhere useful. Recommended Actions actually live on
-              // PULSE Forecast (GC-1 panel). Navigate there scoped to this
-              // asset's unit so the operator lands directly on the action
-              // ranking for the predicted-failing asset.
+              // Walkthrough #20 — when the parent (Risk Board) supplies an
+              // onDraftAction callback, open an in-place modal of
+              // recommend_actions instead of navigating into Forecast.
+              if (onDraftAction) {
+                onDraftAction(a);
+                return;
+              }
               pushToast({
                 tone: "info",
                 text: `Opening recommended actions for ${a.unit_name} · ${a.equipment_type}`,
@@ -227,4 +245,18 @@ function criticalityColor(c: string): string {
   if (c === "high") return "var(--color-danger)";
   if (c === "medium") return "var(--color-warning)";
   return "var(--color-text-secondary)";
+}
+
+// Walkthrough #JOB-D (review #38 PULSE) — translate raw engine identifiers
+// (rule_based_v1, j2_trained, etc.) into operator-readable labels. The
+// internal id remains accessible via the parent span's title attribute for
+// admin / audit views; the visible chrome reads as plain English.
+function engineLabel(id: string): string {
+  if (!id) return "";
+  const norm = id.toLowerCase();
+  if (norm.startsWith("rule_based")) return "Rule-based predictor";
+  if (norm.startsWith("j2") || norm.includes("trained")) return "Trained predictor";
+  if (norm.includes("ensemble")) return "Ensemble predictor";
+  if (norm.startsWith("hawkstack")) return "Pattern engine";
+  return "Predictive engine";
 }
