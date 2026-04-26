@@ -206,11 +206,18 @@ export function ForecastTab() {
             height={CHART_HEIGHT}
             margin={{ top: 16, right: 36, left: 12, bottom: 16 }}
           >
+            {/* Walkthrough audit: with 44 entries (30 history + 14
+             * projection) and no tick reduction, recharts crammed every
+             * date label across the bottom. Use `interval` to space ticks
+             * out so labels are readable, and `minTickGap` to prevent
+             * overlap on narrow charts. */}
             <XAxis
               dataKey="date"
               stroke="var(--color-text-muted)"
               fontSize={10}
               tick={{ fill: "var(--color-text-muted)" }}
+              interval="preserveStartEnd"
+              minTickGap={28}
             />
             {/* Walkthrough #34 — explicit ticks at 25/50/75/100 with minor
              * gridlines. Was: a single light-gray gridline pattern with no
@@ -263,20 +270,33 @@ export function ForecastTab() {
                 }}
               />
             )}
-            {/* Walkthrough #50 — render actual sample paths on top of the
-             * envelope so the operator sees the spaghetti rather than just
-             * the band. We sample 30 of the 200 paths at higher opacity. */}
+            {/* Walkthrough audit: prior code passed each path as a 15-point
+             * series via `<Line data={...}>`. Recharts aligns those points
+             * BY INDEX to the parent series' x-axis (44 entries =
+             * 30 history + 14 projection), so the path lines were drawn at
+             * indices 0-14 (the left side) instead of 30-43 (the projection
+             * window). The chart looked empty for the entire forecast
+             * region. Build each path as a full 44-length array with
+             * nulls for the historical region so it indexes correctly into
+             * the parent series. */}
             {visiblePaths.slice(0, 30).map((p, idx) => {
-              // Build a per-path series aligned to the projection x-axis,
-              // pre-pended with the last historical value at TODAY so the
-              // path connects to the actuals line.
-              const pathSeries = (data?.history?.length ? [
-                { date: data!.history[data!.history.length - 1].date.slice(5), v: data!.history[data!.history.length - 1].mc_rate },
-                ...p.map((v, ti) => ({
-                  date: (data!.projection[ti]?.date ?? "").slice(5),
-                  v,
+              const histLen = data?.history?.length ?? 0;
+              if (!histLen || !data?.projection?.length) return null;
+              // 44 entries: nulls for the first (histLen - 1), then last
+              // historical value as the join point, then 14 projection
+              // samples. Aligns 1:1 with `series` (history+projection).
+              const lastHist = data.history[histLen - 1];
+              const pathSeries = [
+                ...Array(histLen - 1).fill(null).map((_, i) => ({
+                  date: data.history[i].date.slice(5),
+                  v: null as number | null,
                 })),
-              ] : []).filter((d) => d.date);
+                { date: lastHist.date.slice(5), v: lastHist.mc_rate },
+                ...p.map((v, ti) => ({
+                  date: (data.projection[ti]?.date ?? "").slice(5),
+                  v: v as number | null,
+                })),
+              ];
               return (
                 <Line
                   key={`path-${idx}`}
@@ -287,7 +307,7 @@ export function ForecastTab() {
                   strokeOpacity={0.18}
                   dot={false}
                   isAnimationActive={false}
-                  connectNulls
+                  connectNulls={false}
                 />
               );
             })}
