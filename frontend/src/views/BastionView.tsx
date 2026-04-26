@@ -283,17 +283,22 @@ export function BastionView() {
 
   // Resolve-sim handler — bumps the resolve signal so the MapCanvas restores
   // the cached pre-sim viewport, drops FPCON via the existing useEffect on
-  // `sim`, and emits an honest toast that mirrors the actual side-effects
-  // (cordons removed, FPCON returning, viewport restored).
+  // `sim`, clears the response drawer (which was opened from the sim alert),
+  // and emits an honest toast that mirrors the actual side-effects.
+  // Walkthrough caught the response drawer staying open after resolve because
+  // `selectedAlert` was set to the sim's alert but never cleared.
   const resolveSim = useCallback(() => {
     setSim(null);
+    setSelectedAlert(null);
+    setSelectedUnit(null);
+    setSelectedUnitIdGlobal(null);
     setSimResolveSignal((n) => n + 1);
     pushToast({
       tone: "ok",
-      text: "Sim resolved · FPCON returning to BRAVO · cordons cleared",
+      text: "Sim resolved · FPCON returning to BRAVO · cordons cleared · drawer closed",
       ttlMs: 3500,
     });
-  }, [pushToast]);
+  }, [pushToast, setSelectedUnitIdGlobal]);
 
   function onUnitClick(unitName: string) {
     setSelectedUnit(unitName);
