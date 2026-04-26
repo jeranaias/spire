@@ -138,7 +138,12 @@ export function StatusFooter() {
       <div
         className="absolute right-0 top-0 z-10 hidden h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs uppercase md:flex tracking-wider"
       >
-        <span className="text-[var(--color-text-muted)]">{status?.mode || "local"}</span>
+        {/* Walkthrough audit: a bare "FULL" between AUDIT and the version
+         * read as a status flag — operators didn't know it meant the
+         * operating mode (full-feature vs lite). Prefix with MODE. */}
+        <span className="text-[var(--color-text-muted)]" title="Operating mode (full-feature vs lite)">
+          MODE {status?.mode?.toUpperCase() || "LOCAL"}
+        </span>
         <span className="text-[var(--color-border-active)]">│</span>
         <span className="text-[var(--color-brand)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
       </div>

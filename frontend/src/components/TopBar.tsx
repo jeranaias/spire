@@ -85,8 +85,16 @@ export function TopBar() {
                         {String(idx + 1).padStart(2, "0")}
                       </span>
                       {tab.label}
-                      <span className="ml-1 text-[10px] text-[var(--color-text-muted)] tracking-widest">
-                        ·LOCK
+                      {/* Walkthrough audit: the "·LOCK" suffix read as
+                       * "01 SENTRY · LOCK" with the dot floating between
+                       * — looks like a separator typo. Replace with a
+                       * proper lock glyph that visually anchors as an
+                       * icon, not text. */}
+                      <span
+                        className="ml-1.5 text-[11px] text-[var(--color-text-muted)]"
+                        aria-label="locked — out of scope for current role"
+                      >
+                        🔒
                       </span>
                     </span>
                   );
