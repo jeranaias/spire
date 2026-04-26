@@ -46,20 +46,17 @@ function formatZulu(iso: string, mode: "short" | "full" = "short"): string {
 
 type SeverityFilter = "ALL" | "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "INFO";
 
-// Maps a unit name to the building id its markers live on. Kept in sync
-// with InstallationSchematic's UNIT_BUILDING table.
-const UNIT_BUILDING: Record<string, string> = {
-  "CLB-6":        "CLB6-MP",
-  "CLB-1":        "MLG-SSC",
-  "3d Maint Bn":  "MLG-SSC",
-  "3/6 Marines":  "TANK-MP",
-  "2d LAR Bn":    "LAR-MP",
-  "MALS-31":      "HH-1",
-  "MWSS-271":     "DL-HQ",
-  "2d LAAD Bn":   "LAAD-TOC",
-  "2/14 Marines": "TOC-MAIN",
-  "7th ESB":      "ESB-WS",
-};
+// Walkthrough audit: a hardcoded unit -> building lookup used to live
+// here. The mapping is now data — each cop.units[].home_building carries
+// the canonical value from `dataset/data/unit_structure.json`. The
+// helper below resolves an arbitrary unit name to its home building id
+// off the live cop payload, so adding/renaming a unit doesn't require
+// touching this file.
+function resolveHomeBuilding(cop: BastionCOP | null, unitName: string | null | undefined): string | null {
+  if (!cop || !unitName) return null;
+  const u = cop.units.find((x) => x.unit === unitName);
+  return u?.home_building ?? null;
+}
 
 export function BastionView() {
   const role = useSpireStore((s) => s.role);
@@ -347,19 +344,16 @@ export function BastionView() {
 
   const simTargetBuilding = useMemo(() => {
     if (!sim) return undefined;
-    return UNIT_BUILDING[sim.alert.unit || "CLB-6"] || "CLB6-MP";
-  }, [sim]);
+    return resolveHomeBuilding(cop, sim.alert.unit) ?? undefined;
+  }, [sim, cop]);
 
   // When an alert is selected, derive a "fly to" target building:
   // - Alerts with a `unit` map to that unit's home building
   // - Alerts with a `grid` fall back to the nearest named building (future)
   const flyToBuilding = useMemo(() => {
     if (!selectedAlert) return null;
-    if (selectedAlert.unit && UNIT_BUILDING[selectedAlert.unit]) {
-      return UNIT_BUILDING[selectedAlert.unit];
-    }
-    return null;
-  }, [selectedAlert]);
+    return resolveHomeBuilding(cop, selectedAlert.unit);
+  }, [selectedAlert, cop]);
 
   // Active vs acknowledged partition + filter strip + free-text search.
   // Acked alerts move below to a collapsed group; resolved already drop
@@ -1308,9 +1302,11 @@ function ResponsePanel({
 //   3. Top 3 fused threats (cross-sensor correlations).
 // Lives top-center on the schematic. Click any alert row to open the
 // existing ResponsePanel — same behaviour as clicking from the sidebar.
-// Hidden when an alert is selected so the response panel has the field
-// of view to itself.
-const G4_UNITS = ["CLB-6", "CLB-1", "3d Maint Bn"];
+// Walkthrough audit: the G-4 unit list used to be a hardcoded triple of
+// ['CLB-6', 'CLB-1', '3d Maint Bn']. CLB-1 belongs to 1st MLG and is out
+// of scope for a 2d MLG G-4, so the list both leaked an out-of-scope
+// unit AND duplicated data the API already scopes. The card now reads
+// the visible units off the role-scoped fleetOverview heatmap response.
 
 function G4CommandSummary({
   alerts,
@@ -1385,7 +1381,7 @@ function G4CommandSummary({
           Unit MC% · 2d MLG
         </div>
         <div className="mt-1 flex flex-col gap-0.5">
-          {G4_UNITS.map((u) => {
+          {Object.keys(mcRates).sort().map((u) => {
             const rate = mcRates[u];
             const tone =
               rate == null ? "var(--color-text-muted)"
