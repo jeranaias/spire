@@ -194,7 +194,10 @@ function PredictedRow({
               <span className="text-[var(--color-text-muted)]">in {p.predicted_window_days}d</span>
               {p.common_failure_modes && p.common_failure_modes.length > 0 && (
                 <span className="text-[var(--color-text-muted)]">
-                  {" "}({p.common_failure_modes.slice(0, 2).join(", ")})
+                  {/* Walkthrough audit: failure-mode keys come back as
+                   * snake_case ('pad_set', 'transfer_case'). Render with
+                   * spaces so the parenthetical reads as prose. */}
+                  {" "}({p.common_failure_modes.slice(0, 2).map((m) => m.replace(/_/g, " ")).join(", ")})
                 </span>
               )}
             </span>

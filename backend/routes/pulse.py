@@ -346,12 +346,15 @@ def _predict_one(asset, recent_faults: dict[str, int]) -> list[dict]:
         pm_bump = min(0.10, pm_overdue * 0.20)
         variance = _asset_variance(asset.asset_id, component)
         offset = _asset_offset(asset.asset_id, component)
-        # Walkthrough #6 — clamp to 0.92 (not 0.96) and add a per-asset
-        # additive offset so saturated assets don't all show the same
-        # 96% bar. Six different assets at the cap now read as distinct
-        # numbers.
-        prob_raw = (base + history_bump + pm_bump) * variance + offset
-        prob = round(min(0.92, max(0.05, prob_raw)), 3)
+        # Walkthrough audit (round 2): the 0.92 hard cap was clipping
+        # high-hour assets to identical values — the screenshot showed
+        # six JLTVs at 4000+ hours all displayed as 92% because variance
+        # and offset weren't enough to differentiate from the cap. Apply
+        # the offset AFTER the cap so saturated assets still get distinct
+        # numbers, and lift the cap a hair so the spread is visible.
+        prob_raw = (base + history_bump + pm_bump) * variance
+        prob_capped = min(0.95, max(0.05, prob_raw))
+        prob = round(min(0.97, max(0.05, prob_capped + offset)), 3)
         if prob < 0.20:
             continue
         window_base = (1.0 - prob) * 26 + 3
