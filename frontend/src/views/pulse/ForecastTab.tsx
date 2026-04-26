@@ -1,14 +1,34 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ComposedChart,
   Line,
   ReferenceLine,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+
+// Measured width via ResizeObserver. We use this instead of Recharts'
+// ResponsiveContainer because the latter regularly reports 0 width on the
+// Rolldown build's first paint, leaving the chart pane blank (Jesse hit this
+// twice). A direct measure with explicit numeric width/height on the chart
+// makes the bug impossible.
+function useElementWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
+  const ref = useRef<T | null>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    if (!ref.current) return;
+    setW(ref.current.getBoundingClientRect().width);
+    const ro = new ResizeObserver((entries) => {
+      const cw = entries[0]?.contentRect.width ?? 0;
+      if (cw > 0) setW(Math.round(cw));
+    });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
 import { api, type Forecast } from "../../api";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
@@ -27,6 +47,8 @@ export function ForecastTab() {
   const [horizon, setHorizon] = useState<Horizon>("14");
   const [data, setData] = useState<Forecast | null>(null);
   const [units, setUnits] = useState<string[]>([]);
+  const [chartRef, chartWidth] = useElementWidth<HTMLDivElement>();
+  const CHART_HEIGHT = 360;
 
   // Re-sync local state if the URL param changes (back / forward nav).
   useEffect(() => {
@@ -158,19 +180,28 @@ export function ForecastTab() {
         </div>
       </div>
 
-      {/* Chart container — fixed height so ResponsiveContainer always has
-       * space to paint. Reviewer caught the chart canvas rendering empty
-       * because flex-1 was returning 0px on certain layouts. Width-100%
-       * stays responsive; height is fixed at 360px which is enough room for
-       * the historical+projected lines + p10/p90 envelope at any date range. */}
-      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3" style={{ height: 360 }}>
+      {/* Chart pane — fixed height; width measured by ResizeObserver. The
+       * ComposedChart receives explicit numeric width/height so paint is
+       * never gated on Recharts' ResponsiveContainer correctly resolving its
+       * parent box (which it does not, reliably, on Rolldown's first frame).
+       * Internal margin gives the chart breathing room — no inner padding on
+       * the wrapper, which used to be the source of double-padding offsets. */}
+      <div
+        ref={chartRef}
+        className="relative shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
+        style={{ height: CHART_HEIGHT, minHeight: CHART_HEIGHT }}
+      >
         {!chartUsable ? (
           <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             Forecast data incomplete · check backend
           </div>
-        ) : (
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={series} margin={{ top: 10, right: 30, left: 0, bottom: 10 }}>
+        ) : chartWidth > 0 ? (
+          <ComposedChart
+            data={series}
+            width={chartWidth}
+            height={CHART_HEIGHT}
+            margin={{ top: 16, right: 36, left: 12, bottom: 16 }}
+          >
             <XAxis
               dataKey="date"
               stroke="var(--color-text-muted)"
@@ -262,7 +293,10 @@ export function ForecastTab() {
               connectNulls
             />
           </ComposedChart>
-        </ResponsiveContainer>
+        ) : (
+          <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            Sizing chart …
+          </div>
         )}
       </div>
 
@@ -357,7 +391,7 @@ export function ForecastTab() {
               className="font-mono uppercase text-[var(--color-primary)]"
               style={{ fontSize: "var(--text-xs)", letterSpacing: "var(--tracking-widest)" }}
             >
-              Recommended Actions · GC-1 Auto Replenishment
+              Recommended Actions · Auto Replenishment
             </span>
           }
           collapsedSummary={
