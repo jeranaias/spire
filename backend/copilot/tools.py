@@ -118,34 +118,63 @@ def _tool_find_cannibalization_match(recipient_asset_id: str, role: str) -> dict
     }
 
 
-def _tool_recommend_actions(unit: Optional[str] = None, role: str = "mef_commander", top: int = 5) -> dict:
+async def _tool_recommend_actions(unit: Optional[str] = None, role: str = "mef_commander", top: int = 5) -> dict:
     """Return ranked replenishment recommendations for a unit (GC-1).
 
-    `unit` is optional — when omitted, the underlying handler returns the
-    operator's whole-scope ranking. The previous signature treated unit as
-    required which broke LLM tool-calls that omitted it.
+    The endpoint returns `{"assets": [{asset_id, unit_name, actions: [...]}]}`,
+    one block per at-risk asset. We flatten that into a single ranked list
+    of actions for the LLM, preserving per-asset context so SPIRO can answer
+    "what should I do" without losing which asset each action targets.
+
+    `unit` is optional — when omitted the underlying handler returns the
+    operator's whole-scope ranking. Earlier versions of this wrapper read
+    `result.actions` (using getattr on a coroutine), which always evaluated
+    to `[]` and reported "no recommendations" even with 39 deadlined assets
+    in scope — caught live during walkthrough audit on 2026-04-26.
     """
     from ..routes.pulse import recommend_actions  # lazy import to avoid cycles
     try:
-        result = recommend_actions(unit=unit, asset_id=None, top=top, role=role)
-        actions = getattr(result, "actions", None)
-        if actions is None and isinstance(result, dict):
-            actions = result.get("actions", [])
-        return {"actions": actions or [], "unit": unit, "count": len(actions or [])}
+        result = await recommend_actions(unit=unit, asset_id=None, top=top, role=role)
+        if not isinstance(result, dict):
+            return {"actions": [], "unit": unit, "count": 0,
+                    "warning": "handler returned unexpected type"}
+
+        flat: list[dict] = []
+        for blk in result.get("assets", []):
+            ctx = {"asset_id": blk.get("asset_id"),
+                   "unit_name": blk.get("unit_name"),
+                   "equipment_type": blk.get("equipment_type")}
+            for act in blk.get("actions", []):
+                flat.append({**act, **ctx})
+        flat.sort(key=lambda a: a.get("score", 0), reverse=True)
+        flat = flat[:top]
+        return {
+            "actions": flat,
+            "unit": unit or "all in scope",
+            "count": len(flat),
+            "as_of": result.get("as_of"),
+        }
     except Exception as e:  # noqa: BLE001
         return {"error": f"recommend_actions failed: {type(e).__name__}: {e}"}
 
 
-def _tool_predict_failures(unit: Optional[str] = None, role: str = "mef_commander", horizon_days: int = 14) -> dict:
+async def _tool_predict_failures(unit: Optional[str] = None, role: str = "mef_commander", horizon_days: int = 14) -> dict:
     """Predict component-level failures within a horizon (GC-3).
 
     `unit` is optional — when omitted, falls back to whole-scope.
+
+    Earlier versions called `predict_failures` (an async handler) without
+    await and read `.predictions` off the coroutine, which always returned
+    `[]`. Same bug as `_tool_recommend_actions`; fixed alongside it.
     """
     from ..routes.pulse import predict_failures
     try:
-        result = predict_failures(unit=unit, asset_id=None, horizon_days=horizon_days, threshold=0.4, role=role)
+        result = await predict_failures(unit=unit, asset_id=None, horizon_days=horizon_days, threshold=0.4, role=role)
+        if not isinstance(result, dict):
+            return {"predictions": [], "horizon_days": horizon_days,
+                    "warning": "handler returned unexpected type"}
         return {
-            "predictions": getattr(result, "predictions", []) or result.get("predictions", []),
+            "predictions": result.get("predictions", []),
             "horizon_days": horizon_days,
         }
     except Exception as e:  # noqa: BLE001
@@ -371,22 +400,28 @@ TOOL_REGISTRY: dict[str, dict] = {
 }
 
 
-def run_tool(name: str, args: dict, role: str) -> dict:
-    """Execute one tool call. Always returns a dict; on error returns {error}."""
+async def run_tool(name: str, args: dict, role: str) -> dict:
+    """Execute one tool call. Always returns a dict; on error returns {error}.
+
+    Some tool runners are sync, some are `async def`, and some are sync
+    but happen to return a coroutine object (because they call an async
+    FastAPI handler under the hood). This dispatcher awaits whichever
+    shape we get. Callers must `await` `run_tool(...)`.
+    """
+    import asyncio, inspect
     entry = TOOL_REGISTRY.get(name)
     if entry is None:
         return {"error": f"unknown tool {name!r}"}
     runner = entry["runner"]
-    # Inject role into the runtime call. Tools that don't take role just
-    # ignore the kwarg.
     try:
         kwargs = dict(args or {})
-        # Walk the runner's signature to pass role only if accepted.
-        import inspect
         sig = inspect.signature(runner)
         if "role" in sig.parameters:
             kwargs["role"] = role
-        return runner(**kwargs)
+        result = runner(**kwargs)
+        if asyncio.iscoroutine(result):
+            result = await result
+        return result
     except TypeError as e:
         return {"error": f"argument error: {e}"}
     except Exception as e:  # noqa: BLE001

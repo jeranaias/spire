@@ -206,7 +206,7 @@ async def execute(plan_id: str, steps: list, role: str) -> dict:
         if not tool:
             results.append({"step": i, "error": "missing tool name"})
             continue
-        out = run_tool(tool, args, role)
+        out = await run_tool(tool, args, role)
         results.append({
             "step": i,
             "tool": tool,
