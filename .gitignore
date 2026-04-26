@@ -58,3 +58,6 @@ tmp/
 # One-shot debug scripts — kept unversioned so the repo stays tidy
 scripts/forecast_debug*.py
 scripts/mgrs_test.py
+
+# Local audit scratch — chrome-devtools driving screenshots
+walkthrough/
