@@ -102,18 +102,29 @@ def _tool_find_cannibalization_match(recipient_asset_id: str, role: str) -> dict
     }
 
 
-def _tool_recommend_actions(unit: Optional[str], role: str, top: int = 5) -> dict:
-    """Return ranked replenishment recommendations for a unit (GC-1)."""
+def _tool_recommend_actions(unit: Optional[str] = None, role: str = "mef_commander", top: int = 5) -> dict:
+    """Return ranked replenishment recommendations for a unit (GC-1).
+
+    `unit` is optional — when omitted, the underlying handler returns the
+    operator's whole-scope ranking. The previous signature treated unit as
+    required which broke LLM tool-calls that omitted it.
+    """
     from ..routes.pulse import recommend_actions  # lazy import to avoid cycles
     try:
         result = recommend_actions(unit=unit, asset_id=None, top=top, role=role)
-        return {"actions": getattr(result, "actions", []) or result.get("actions", [])}
+        actions = getattr(result, "actions", None)
+        if actions is None and isinstance(result, dict):
+            actions = result.get("actions", [])
+        return {"actions": actions or [], "unit": unit, "count": len(actions or [])}
     except Exception as e:  # noqa: BLE001
         return {"error": f"recommend_actions failed: {type(e).__name__}: {e}"}
 
 
-def _tool_predict_failures(unit: Optional[str], role: str, horizon_days: int = 14) -> dict:
-    """Predict component-level failures within a horizon (GC-3)."""
+def _tool_predict_failures(unit: Optional[str] = None, role: str = "mef_commander", horizon_days: int = 14) -> dict:
+    """Predict component-level failures within a horizon (GC-3).
+
+    `unit` is optional — when omitted, falls back to whole-scope.
+    """
     from ..routes.pulse import predict_failures
     try:
         result = predict_failures(unit=unit, asset_id=None, horizon_days=horizon_days, threshold=0.4, role=role)
@@ -147,7 +158,7 @@ def _tool_parse_tmr(text: str) -> dict:
         return {"error": f"parse_tmr failed: {type(e).__name__}: {e}"}
 
 
-def _tool_get_coalition_view(profile: str, role: str) -> dict:
+def _tool_get_coalition_view(profile: str, role: str = "data_custodian") -> dict:
     """Preview the redacted dataset visible to a coalition partner (GC-5)."""
     from ..routes.sentry import coalition_view
     try:

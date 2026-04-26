@@ -216,31 +216,95 @@ def _plan_summary(content: str, steps: list) -> str:
     return f"Run {len(steps)} tool call{'s' if len(steps) != 1 else ''}: {', '.join(s.get('tool', '?') for s in steps)}"
 
 
+_UNIT_CANON = {
+    "clb-6": "CLB-6", "clb 6": "CLB-6", "clb6": "CLB-6",
+    "clb-1": "CLB-1", "clb 1": "CLB-1", "clb1": "CLB-1",
+    "3d maint": "3d Maint Bn", "3d maint bn": "3d Maint Bn", "3rd maint bn": "3d Maint Bn",
+    "3/6 marines": "3/6 Marines", "3/6": "3/6 Marines", "3-6 marines": "3/6 Marines",
+    "2d lar": "2d LAR Bn", "2d lar bn": "2d LAR Bn",
+    "mals-31": "MALS-31", "mals 31": "MALS-31",
+    "mwss-271": "MWSS-271", "mwss 271": "MWSS-271", "mwss-372": "MWSS-271",  # legacy alias
+    "2d laad": "2d LAAD Bn", "2d laad bn": "2d LAAD Bn",
+    "2/14 marines": "2/14 Marines", "2/14": "2/14 Marines", "2-14 marines": "2/14 Marines",
+    "5/10 marines": "2/14 Marines", "5/10": "2/14 Marines",  # legacy alias
+    "7th esb": "7th ESB", "7 esb": "7th ESB",
+}
+
+_PROFILE_CANON = {"japan": "JPN", "jsdf": "JPN", "jpn": "JPN", "australia": "AUS", "aus": "AUS",
+                  "philippines": "PHL", "phl": "PHL", "fvey": "FVEY_BASE", "fvey-log": "FVEY_LOG",
+                  "fvey log": "FVEY_LOG", "five eyes": "FVEY_BASE"}
+
+
+def _extract_unit(text: str, role: str) -> Optional[str]:
+    """Pull a unit name out of natural-language text. Falls back to the
+    operator's role-default unit when not stated explicitly."""
+    lower = text.lower()
+    for k, v in _UNIT_CANON.items():
+        if k in lower:
+            return v
+    # Default per role — Maintenance Chief sees CLB-6, others get None (whole scope).
+    if role == "maintenance_chief":
+        return "CLB-6"
+    return None
+
+
+def _extract_asset_id(text: str) -> Optional[str]:
+    import re
+    m = re.search(r"M\d+-[A-Z_0-9]+-\d+", text, re.IGNORECASE)
+    return m.group(0).upper() if m else None
+
+
+def _extract_profile(text: str) -> Optional[str]:
+    lower = text.lower()
+    for k, v in _PROFILE_CANON.items():
+        if k in lower:
+            return v
+    return None
+
+
 def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
-    """LLM-unreachable fallback — best-effort intent routing."""
+    """LLM-unreachable fallback — best-effort intent routing.
+
+    Now extracts entities (unit names, asset ids, coalition profiles) from
+    the operator's text so plans actually carry them through. Previous
+    version relied on the LLM for entity extraction and degraded to
+    asking the user to retype in a structured form.
+    """
     lower = text.lower()
     steps: list = []
     answer: Optional[str] = None
 
+    asset_id = _extract_asset_id(text)
+    unit = _extract_unit(text, role)
+    profile = _extract_profile(text)
+
     if "cannib" in lower or "donor" in lower:
-        # Try to extract an asset id from the text
-        import re
-        m = re.search(r"M\d+-[A-Z_0-9]+-\d+", text, re.IGNORECASE)
-        if m:
-            asset_id = m.group(0).upper()
+        if asset_id:
             steps = [{"tool": "find_cannibalization_match", "args": {"recipient_asset_id": asset_id}}]
         else:
-            answer = "Tell me the asset id (e.g. M21670-MTVR_CARGO-006) and I'll find a donor."
+            steps = [{"tool": "search_assets", "args": {"query": "deadlined", "limit": 8}}]
+            answer = "Show me the asset id (e.g. M21670-MTVR_CARGO-006) and I'll match a donor. Pulling deadlined assets in your scope as a starting point."
     elif "predict" in lower or "fail" in lower:
-        steps = [{"tool": "predict_failures", "args": {"horizon_days": 14}}]
-    elif "recommend" in lower or "what should i do" in lower:
-        steps = [{"tool": "status_summary", "args": {}}, {"tool": "recommend_actions", "args": {}}]
-    elif "japan" in lower or "jpn" in lower:
-        steps = [{"tool": "get_coalition_view", "args": {"profile": "JPN"}}]
-    elif "where do i start" in lower or "summary" in lower:
+        args: dict = {"horizon_days": 14}
+        if unit:
+            args["unit"] = unit
+        steps = [{"tool": "predict_failures", "args": args}]
+    elif "recommend" in lower or "what should i do" in lower or "top three" in lower or "top 3" in lower:
+        rec_args: dict = {"top": 5}
+        if unit:
+            rec_args["unit"] = unit
+        steps = [{"tool": "status_summary", "args": {}}, {"tool": "recommend_actions", "args": rec_args}]
+    elif profile is not None:
+        steps = [{"tool": "get_coalition_view", "args": {"profile": profile}}]
+    elif "where do i start" in lower or "summary" in lower or "status" in lower:
         steps = [{"tool": "status_summary", "args": {}}]
+    elif "worst" in lower or "highest risk" in lower:
+        steps = [
+            {"tool": "status_summary", "args": {}},
+            {"tool": "predict_failures", "args": {"horizon_days": 14, **({"unit": unit} if unit else {})}},
+        ]
     else:
-        answer = "Language-model gate is unavailable right now. Try a structured query (e.g. 'find a cannib donor for M21670-MTVR_CARGO-006') or refresh in a minute."
+        answer = "Language-model gate is degraded right now. Try a structured query — 'find a cannib donor for M21670-MTVR_CARGO-006', 'predict failures in CLB-6', 'what should I do about my fleet', 'what does Japan see'."
 
     return {
         "plan_id": plan_id,
@@ -248,6 +312,6 @@ def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
         "summary": answer or _plan_summary("", steps),
         "answer": answer,
         "steps": steps,
-        "engine": f"rule-based fallback ({type(Exception(error)).__name__ if error else 'no LLM'})",
+        "engine": f"rule-based fallback ({error[:60]})" if error else "rule-based fallback",
         "tokens_used": None,
     }

@@ -32,8 +32,12 @@ export function HelpOverlay() {
         || e.target instanceof HTMLTextAreaElement
         || (e.target instanceof HTMLElement && e.target.isContentEditable);
 
-      // Shift+/ (= "?") always opens — modifier combo, fires from anywhere.
-      if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+      // "?" is a regular character produced by Shift+/ on US keyboards.
+      // If the operator is typing, they get to type "?". Only open the
+      // help modal when no input has focus. (Previously "always opens"
+      // meant typing "?" inside the SPIRO prompt yanked the help modal —
+      // worse than not having a shortcut at all.)
+      if (!inField && (e.key === "?" || (e.shiftKey && e.key === "/"))) {
         e.preventDefault();
         setOpen((v) => !v);
         return;
