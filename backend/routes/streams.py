@@ -55,32 +55,39 @@ def gate_access_events(dataset, seed: int = 7) -> list[dict]:
         return []
     last_day = dataset.snapshots[-1].snapshot_date
 
+    # Walkthrough audit: prior body pools mentioned a fixed ECP each
+    # ('ECP-4 fence line by sentry'). When randomly paired with a title
+    # for a different ECP ('Gate ECP-2: suspicious loitering ...'), the
+    # title and body referenced different gates — operators couldn't
+    # tell which gate the alert was actually about. Bodies now use an
+    # {ecp} placeholder that gets filled with the title's ECP at render
+    # time, guaranteeing a single coherent gate in every alert.
     after_hours_bodies = [
-        "{vehicle} (plate {plate}) attempted entry at ECP-4 (closed per FPCON BRAVO). Sentry turned away, logged plate and driver.",
-        "{vehicle} ({plate}) approached ECP-2 0237L claiming wrong-gate navigation. Diverted to ECP-1, identity confirmed via sponsor.",
-        "{vehicle} (plate {plate}) tested ECP-4 turnstile arm at 0114L. No badge presented; sentry initiated K-9 sweep, vehicle departed AOA.",
+        "{vehicle} (plate {plate}) attempted entry at {ecp} (closed per FPCON BRAVO). Sentry turned away, logged plate and driver.",
+        "{vehicle} ({plate}) approached {ecp} 0237L claiming wrong-gate navigation. Diverted to nearest open gate, identity confirmed via sponsor.",
+        "{vehicle} (plate {plate}) tested {ecp} turnstile arm at 0114L. No badge presented; sentry initiated K-9 sweep, vehicle departed AOA.",
     ]
     repeat_denial_bodies = [
-        "CAC read failed three times for the same badge holder at ECP-3. PMO advised holder contact RAPIDGate for renewal.",
-        "{vehicle} ({plate}) refused three times at ECP-1 — sponsor company contract lapsed 14d ago. Driver advised to update DBIDS sponsorship.",
-        "Visitor pass {plate} attempted ECP-2 access twice in 90s with mismatched escort. PMO held vehicle pending sponsor callback.",
+        "CAC read failed three times for the same badge holder at {ecp}. PMO advised holder contact RAPIDGate for renewal.",
+        "{vehicle} ({plate}) refused three times at {ecp} — sponsor company contract lapsed 14d ago. Driver advised to update DBIDS sponsorship.",
+        "Visitor pass {plate} attempted {ecp} access twice in 90s with mismatched escort. PMO held vehicle pending sponsor callback.",
     ]
     overflow_bodies = [
-        "Contractor vehicle queue exceeded 12 at 0640. ECP-1 standby lane opened by Watchdog-1.",
-        "Inbound commercial backed up to Westshore Rd at 0712 (32 vehicles). ECP-3 commercial lane manned, queue cleared in 14 min.",
-        "Pre-rush surge at ECP-1: 22 trucks staged before 0530 for delivery window. Sponsoring units pre-cleared via DBIDS batch.",
+        "Contractor vehicle queue exceeded 12 at 0640. {ecp} standby lane opened by Watchdog-1.",
+        "Inbound commercial backed up to perimeter road at 0712 (32 vehicles). {ecp} commercial lane manned, queue cleared in 14 min.",
+        "Pre-rush surge at {ecp}: 22 trucks staged before 0530 for delivery window. Sponsoring units pre-cleared via DBIDS batch.",
     ]
     suspicious_bodies = [
-        "{vehicle} ({plate}) loitered on perimeter road parallel to ECP-2 for 11 min before departing west. Plate logged for SR review.",
-        "Drone-shaped silhouette photographed near ECP-4 fence line by sentry; subject vehicle ({vehicle}, {plate}) departed before contact.",
-        "{vehicle} stopped on shoulder 80m short of ECP-1, occupant photographed signage. Driver complied with disperse order, plate {plate} logged.",
+        "{vehicle} ({plate}) loitered on perimeter road parallel to {ecp} for 11 min before departing west. Plate logged for SR review.",
+        "Drone-shaped silhouette photographed near {ecp} fence line by sentry; subject vehicle ({vehicle}, {plate}) departed before contact.",
+        "{vehicle} stopped on shoulder 80m short of {ecp}, occupant photographed signage. Driver complied with disperse order, plate {plate} logged.",
     ]
 
     scenarios = [
-        ("Gate ECP-4: after-hours attempt at closed ECP", "MODERATE", after_hours_bodies),
-        ("Gate ECP-3: repeat denial on expired credential", "LOW", repeat_denial_bodies),
-        ("Gate ECP-1: commercial lane overflow", "LOW", overflow_bodies),
-        ("Gate ECP-2: suspicious loitering near perimeter", "MODERATE", suspicious_bodies),
+        ("Gate ECP-4: after-hours attempt at closed ECP", "MODERATE", "ECP-4", after_hours_bodies),
+        ("Gate ECP-3: repeat denial on expired credential", "LOW", "ECP-3", repeat_denial_bodies),
+        ("Gate ECP-1: commercial lane overflow", "LOW", "ECP-1", overflow_bodies),
+        ("Gate ECP-2: suspicious loitering near perimeter", "MODERATE", "ECP-2", suspicious_bodies),
     ]
 
     events: list[dict] = []
@@ -90,10 +97,11 @@ def gate_access_events(dataset, seed: int = 7) -> list[dict]:
         d = last_day - timedelta(days=day_offset)
         ts = datetime.combine(d, datetime.min.time()).replace(hour=hour, minute=rng.randint(0, 59))
 
-        title, severity, body_pool = rng.choice(scenarios)
+        title, severity, ecp_id, body_pool = rng.choice(scenarios)
         body = rng.choice(body_pool).format(
             vehicle=rng.choice(_VEHICLE_DESCS),
             plate=_synth_plate(rng),
+            ecp=ecp_id,
         )
         events.append({
             "id": f"gate-{i}",
