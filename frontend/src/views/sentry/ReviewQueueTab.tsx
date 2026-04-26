@@ -626,6 +626,9 @@ function InspectorPane({
   onReject: () => void;
   onClose: () => void;
 }) {
+  // Walkthrough #31 — per-record audit-entry viewer modal so the audit
+  // chain claims in the chrome are backed by inspectable artifacts.
+  const [auditOpen, setAuditOpen] = useState(false);
   const highlights: { start: number; end: number; category: string }[] = record.highlights || [];
   const remark: string = record.remark || "";
   const segments: { text: string; category?: string }[] = [];
@@ -774,6 +777,17 @@ function InspectorPane({
         </section>
       </div>
 
+      {/* Walkthrough #31 — audit-chain viewer button. */}
+      <div className="px-4 pb-2">
+        <button
+          type="button"
+          onClick={() => setAuditOpen(true)}
+          className="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
+        >
+          ↧ View audit chain entry for {record.sr_number}
+        </button>
+      </div>
+
       <div className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-3">
         <button
           onClick={onApprove}
@@ -788,7 +802,88 @@ function InspectorPane({
           ✗ Reject (R)
         </button>
       </div>
+
+      {auditOpen && (
+        <AuditChainModal subjectId={record.sr_number} onClose={() => setAuditOpen(false)} />
+      )}
     </aside>
+  );
+}
+
+// Walkthrough #31 — per-record audit-chain modal. Pulls /sentry/audit/{sr}
+// and shows hash + prev_hash + ts + actor + payload for every chain entry
+// touching this subject so the operator can verify the trail without
+// trawling a 500-row recent_entries dump.
+function AuditChainModal({ subjectId, onClose }: { subjectId: string; onClose: () => void }) {
+  const [data, setData] = useState<{ entries: any[]; count: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.sentry.auditFor(subjectId)
+      .then((r) => { if (!cancelled) setData(r); })
+      .catch((e) => { if (!cancelled) setError(String(e)); });
+    return () => { cancelled = true; };
+  }, [subjectId]);
+  return (
+    <div
+      className="fixed inset-0 z-[8500] flex items-center justify-center bg-black/60 p-6"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl"
+      >
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+          <div>
+            <div className="font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
+              Audit Chain · SHA-256 hash-linked
+            </div>
+            <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
+              Subject: {subjectId}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="max-h-[64vh] overflow-y-auto p-4 font-mono text-xs">
+          {error && (
+            <div className="text-[var(--color-danger)]">Failed to load audit: {error}</div>
+          )}
+          {!error && !data && <div className="text-[var(--color-text-muted)]">Loading …</div>}
+          {data && data.entries.length === 0 && (
+            <div className="text-[var(--color-text-muted)]">
+              No audit entries yet for this subject. The chain is written when
+              a marking decision, review action, or release event fires.
+            </div>
+          )}
+          {data && data.entries.map((e, i) => (
+            <div
+              key={i}
+              className="mb-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2"
+            >
+              <div className="mb-1 flex items-baseline gap-2">
+                <span className="text-[var(--color-primary)]">{e.kind}</span>
+                <span className="text-[var(--color-text-muted)]">{e.ts}</span>
+                <span className="ml-auto text-[var(--color-text-muted)]">actor: {e.actor}</span>
+              </div>
+              <div className="break-all text-[var(--color-text-muted)]">prev_hash: {e.prev_hash}</div>
+              <div className="break-all text-[var(--color-text)]">self_hash: {e.self_hash}</div>
+              {e.payload && Object.keys(e.payload).length > 0 && (
+                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[var(--color-text-secondary)]">
+                  {JSON.stringify(e.payload, null, 2)}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
