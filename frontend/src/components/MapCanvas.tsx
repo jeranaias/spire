@@ -627,7 +627,7 @@ export function MapCanvas({
             ? { top: 80, bottom: 80, left: 80, right: 420 }
             : { top: 80, bottom: 80, left: 80, right: 80 },
           duration: 700,
-          maxZoom: 15.5,
+          maxZoom: 14,
         },
       );
     } catch {
@@ -1249,7 +1249,7 @@ export function MapCanvas({
                   ? { top: 80, bottom: 80, left: 80, right: 420 }
                   : { top: 80, bottom: 80, left: 80, right: 80 },
                 duration: 700,
-                maxZoom: 15.5,
+                maxZoom: 14,
               },
             );
           } catch { /* tolerant */ }
