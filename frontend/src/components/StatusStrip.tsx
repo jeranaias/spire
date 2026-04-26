@@ -247,7 +247,7 @@ export function StatusStrip() {
           id="status-strip-mission-detail"
           className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2"
         >
-          <MissionContextDetail datasetInfo={datasetInfo} />
+          <MissionContextDetail datasetInfo={datasetInfo} overallMc={overallMc} highCount={highCount} />
         </div>
       )}
     </div>
@@ -305,10 +305,32 @@ function Chip({
 // them from installation_data.json. {parent} and {installation} are
 // substituted server-side so the displayed text is honest and editable
 // in data, not in code.
-function MissionContextDetail({ datasetInfo }: { datasetInfo: DatasetInfo | null }) {
+function MissionContextDetail({
+  datasetInfo,
+  overallMc,
+  highCount,
+}: {
+  datasetInfo: DatasetInfo | null;
+  overallMc: number | null;
+  highCount: number;
+}) {
   const objective = datasetInfo?.mission_objective
     ?? "Sustain readiness; defend the installation; preserve QRF responsiveness.";
   const ccir = datasetInfo?.ccir ?? [];
+  // Walkthrough audit: the prior 'Status: Nominal' was a literal string
+  // regardless of fleet state. With overall MC at 69.9% and a live HIGH
+  // alert open, the CCIR was actually NOT being met. Derive status from
+  // the live fleet MC + open HIGH alert count so the chip reconciles
+  // with the metrics one row above.
+  const mcOk = overallMc != null ? overallMc >= 0.70 : null;
+  const highOk = highCount === 0;
+  const allOk = mcOk === true && highOk;
+  const someAttention = mcOk === false || !highOk;
+  const tone = allOk ? "var(--color-success)" : someAttention ? "var(--color-warning)" : "var(--color-text-muted)";
+  const label = allOk ? "Nominal" : someAttention ? "Attention" : "Loading";
+  const reasons: string[] = [];
+  if (mcOk === false) reasons.push(`MC ${(overallMc! * 100).toFixed(1)}% under 70% floor`);
+  if (highCount > 0) reasons.push(`${highCount} HIGH alert${highCount === 1 ? "" : "s"} open`);
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
       <Field label="Objective" body={objective} />
@@ -330,8 +352,10 @@ function MissionContextDetail({ datasetInfo }: { datasetInfo: DatasetInfo | null
         label="Status"
         body={
           <span>
-            <span className="font-semibold text-[var(--color-success)]">Nominal</span>
-            <span className="ml-2 text-[var(--color-text-muted)]">No commander's-attention items.</span>
+            <span className="font-semibold" style={{ color: tone }}>{label}</span>
+            <span className="ml-2 text-[var(--color-text-muted)]">
+              {reasons.length === 0 ? "No commander's-attention items." : reasons.join(" · ")}
+            </span>
           </span>
         }
       />
