@@ -8,7 +8,14 @@
     "center_lon": -77.345,
     "fpcon_default": "BRAVO",
     "total_area_sq_km": 45,
-    "contact_emergency": "DSN 555-911"
+    "contact_emergency": "DSN 555-911",
+    "mission_essential_task": "BASE DEFENSE / FORCE PROTECTION",
+    "mission_objective": "Sustain readiness across {parent}; defend {installation}; preserve QRF responsiveness.",
+    "ccir": [
+      "MC rate \u2265 70% across {parent}",
+      "At least 1 immediate-response QRF",
+      "PACS uptime \u2265 99%"
+    ]
   },
   "buildings": [
     {

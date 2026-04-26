@@ -239,6 +239,9 @@ export interface DatasetInfo {
   // instead of hardcoding 'Camp Henderson · 2d MLG'.
   installation_name?: string | null;
   parent_command?: string | null;
+  mission_essential_task?: string | null;
+  mission_objective?: string | null;
+  ccir?: string[];
   snapshot_days: number;
   fingerprint: string;
   build_id: string;
