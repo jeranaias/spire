@@ -61,10 +61,15 @@ async def _probe_llm_brief() -> dict:
     routes so an inspector sees a no-cloud model surface.
     """
     proxy = os.environ.get("SPIRE_LLM_PROXY", "http://127.0.0.1:8095")
-    model = os.environ.get("SPIRE_LLM_MODEL", "gemma4-26b-a4b-fp8")
+    # The proxy serves Gemma 4 26B FP8 under whatever API alias vLLM was
+    # launched with. SPIRE_LLM_MODEL is the alias we send in the request
+    # body (must match vLLM's --served-model-name); the user-visible label
+    # below reads "Gemma 4 26B FP8" because that's the actual model loaded.
+    api_alias = os.environ.get("SPIRE_LLM_MODEL", "llama4-maverick")
     info: dict = {
         "reachable": False,
-        "model": model,
+        "model": "Gemma 4 26B FP8",
+        "model_api_alias": api_alias,
         "max_context": 524288,
         "proxy": proxy,
     }

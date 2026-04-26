@@ -32,10 +32,40 @@ import "./index.css";
 // gzipped to a ~88 KB shell + lazy chunks per view. The classification
 // band is rendered as the Suspense fallback so first paint of any route
 // is instant — judges never see a blank pane while the chunk lands.
-const SentryView  = lazy(() => import("./views/SentryView").then((m) => ({ default: m.SentryView })));
-const PulseView   = lazy(() => import("./views/PulseView").then((m) => ({ default: m.PulseView })));
-const BastionView = lazy(() => import("./views/BastionView").then((m) => ({ default: m.BastionView })));
-const AdminView   = lazy(() => import("./views/AdminView").then((m) => ({ default: m.AdminView })));
+//
+// Stale-chunk recovery: when a deploy ships, hashed chunk filenames change.
+// A returning user's cached index.html still references the old hashes —
+// dynamic-import then 503s and React's lazy() throws "Failed to fetch
+// dynamically imported module." We catch that specifically and force a
+// hard reload (which pulls the fresh index.html with the new hashes).
+// Without this, every deploy crashed the app for any user with a stale tab.
+function lazyWithRecovery<T extends { default: React.ComponentType<any> }>(loader: () => Promise<T>) {
+  return lazy(async () => {
+    try {
+      return await loader();
+    } catch (err) {
+      const msg = String(err);
+      const isChunkFail = /failed to fetch dynamically imported module|Loading chunk \d+ failed|importing.*chunk/i.test(msg);
+      if (isChunkFail) {
+        // Avoid an infinite reload loop: only reload once per session.
+        const flag = "spire.chunk_reload_attempted";
+        if (!sessionStorage.getItem(flag)) {
+          sessionStorage.setItem(flag, "1");
+          window.location.reload();
+          // Throwing keeps Suspense from resolving against a stale chunk
+          // while the reload kicks in.
+          throw err;
+        }
+      }
+      throw err;
+    }
+  });
+}
+
+const SentryView  = lazyWithRecovery(() => import("./views/SentryView").then((m) => ({ default: m.SentryView })));
+const PulseView   = lazyWithRecovery(() => import("./views/PulseView").then((m) => ({ default: m.PulseView })));
+const BastionView = lazyWithRecovery(() => import("./views/BastionView").then((m) => ({ default: m.BastionView })));
+const AdminView   = lazyWithRecovery(() => import("./views/AdminView").then((m) => ({ default: m.AdminView })));
 
 // Expose the active role to the API layer. Every GET/POST now splices it as
 // `?role=...` so the backend's scoping filter applies per-call.
@@ -69,7 +99,7 @@ function ViewSuspense({ children }: { children: React.ReactNode }) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ErrorBoundary>
+    <ErrorBoundary scope="app">
       <HashRouter>
         <Routes>
           <Route path="/" element={<App />}>

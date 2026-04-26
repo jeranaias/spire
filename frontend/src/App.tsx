@@ -7,6 +7,7 @@ import { ToastLane } from "./components/ToastLane";
 import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useSpireStore } from "./state/store";
 
 export default function App() {
@@ -26,7 +27,13 @@ export default function App() {
       <TopBar />
       <ClassificationBand />
       <main className="min-w-0 flex-1 overflow-hidden">
-        <Outlet />
+        {/* View-scoped boundary — keeps TopBar / role switcher / banner
+         * alive when a view crashes (e.g. stale chunk 503). Reviewer
+         * caught the prior single outer boundary blanking the whole
+         * app, contradicting the "rest of SPIRE is unaffected" copy. */}
+        <ErrorBoundary scope="view">
+          <Outlet />
+        </ErrorBoundary>
       </main>
       <StatusFooter />
       <ToastLane />
