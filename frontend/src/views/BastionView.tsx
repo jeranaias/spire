@@ -497,43 +497,6 @@ export function BastionView() {
 
       {/* Center: schematic */}
       <div className="relative flex-1">
-        {/* Walkthrough #JOB-A — Sim Controls pill row above the COP map.
-         * Browser dry-run caught the SIMULATE THERMALHAWK button as
-         * not-deployed-in-bundle (map agent retired ASK·BASTION but left the
-         * trigger in a TODO). Alerts agent already wired the
-         * `spire:simulate-thermalhawk` window event listener to fire the full
-         * FPCON CHARLIE / sim state / alert refresh chain (see useEffect
-         * around line 264). This pill row dispatches that event.
-         *
-         * Visible to MEF Commander, Security Manager, G-4 only. Neutral
-         * border + ▶ glyph + "Simulate" prefix so it reads as a sandbox
-         * control and never gets confused with a HIGH alert. */}
-        {(role === "mef_commander" || role === "security_manager" || role === "g4") && (
-          <div
-            className="pointer-events-auto absolute left-1/2 top-3 z-[7] -translate-x-1/2"
-            role="region"
-            aria-label="Sim controls"
-          >
-            <button
-              type="button"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent("spire:simulate-thermalhawk"));
-              }}
-              disabled={!!sim}
-              title={
-                sim
-                  ? "Simulation already active — resolve via the response panel"
-                  : "Dispatch a synthetic ThermalHawk UAS detection · escalates FPCON to CHARLIE for the duration"
-              }
-              className="inline-flex h-9 items-center gap-2 rounded-sm border border-dashed border-[var(--color-border-active)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-text)] backdrop-blur transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50 tracking-widest"
-            >
-              <span aria-hidden className="text-[var(--color-primary)]">▶</span>
-              <span className="text-[var(--color-text-muted)]">Simulate</span>
-              <span>ThermalHawk</span>
-            </button>
-          </div>
-        )}
-
         <MapCanvas
           buildings={cop.buildings}
           units={cop.units}
