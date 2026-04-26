@@ -106,7 +106,7 @@ export function RiskBoardTab() {
             }
           >
             <div className="border-t border-[var(--color-border)]">
-              <PredictedFailurePanel unit={unitFilter} />
+              <PredictedFailurePanel unit={unitFilter} hideHeader />
             </div>
           </CollapsiblePanel>
         </div>
