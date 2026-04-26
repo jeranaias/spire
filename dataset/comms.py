@@ -111,6 +111,22 @@ def generate_comms_timeline(now: datetime, seed: int = 0) -> CommsTimeline:
         if target != last_state:
             events.append(CommsEvent(t, last_state, target, reason))
             last_state = target
+    # Walkthrough: ensure the demo opens with CONNECTED. The 14-day walk can
+    # leave the timeline mid-DEGRADED or mid-DISCONNECTED, which makes the
+    # StatusFooter / StatusStrip read DEGRADED on first paint even when the
+    # rest of the system (LLM, alerts, sync) is up. If the last_state isn't
+    # CONNECTED, append a recovery event ~30 min ago so the operator lands
+    # on a green comms posture and can simulate degradation explicitly.
+    if last_state != CommsState.CONNECTED:
+        events.append(
+            CommsEvent(
+                now - timedelta(minutes=30),
+                last_state,
+                CommsState.CONNECTED,
+                "satellite-link recovered",
+            )
+        )
+        last_state = CommsState.CONNECTED
     return CommsTimeline(events=events, current_state=last_state)
 
 
