@@ -185,7 +185,7 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
     if recipient_asset is None or donor_asset is None:
         return None
 
-    event_date = SIMULATION_START_DATE + timedelta(days=352)  # May 19, 2026
+    event_date = SIMULATION_START_DATE + timedelta(days=352)  # 13 days before SIMULATION_END_DATE
     open_date = event_date - timedelta(days=7)               # May 12, 2026
 
     # Build the recipient SR — backordered TURBOCHARGER ASSY, NMCS posture.

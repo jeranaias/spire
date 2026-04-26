@@ -142,7 +142,7 @@ export function FleetOverviewTab() {
               {view === "heatmap" ? "Fleet Readiness · Heatmap" : "Fleet Readiness · CONUS"}
             </h2>
             <div className="mt-0.5 spire-body-muted">
-              MC rate by {view === "heatmap" ? "unit × equipment type" : "garrison location"} — as of {data.as_of}
+              MC rate by {view === "heatmap" ? "unit × equipment type" : "garrison location"} — as of {formatAsOf(data.as_of)}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -238,6 +238,28 @@ export function FleetOverviewTab() {
 function extractUnit(title: string): string | null {
   const m = /^([A-Za-z0-9/\- ]+?)\s/.exec(title);
   return m ? m[1].trim() : null;
+}
+
+// Walkthrough #JOB-B (review #52 / #30) — render the dataset as-of stamp
+// in the same DD MMM YY shape that BASTION's Mission Clock and SENTRY
+// audit timestamps use, so the operator scans every "as of" line as the
+// same date when the dataset's last_day matches today. Backend sends
+// ISO (YYYY-MM-DD); this is presentation-only.
+//
+// Note for PULSE agent: cross-cutting agent edited this file solely to
+// route data.as_of through formatAsOf — none of the data flow / poll /
+// hero metric logic was touched.
+function formatAsOf(iso: string): string {
+  if (!iso) return "—";
+  // Parse as date-only to avoid TZ-shifted display ("2026-04-26" must read
+  // as 26 APR 26 regardless of operator's local zone).
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const [, y, mo, d] = m;
+  const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  const monIdx = parseInt(mo, 10) - 1;
+  if (monIdx < 0 || monIdx > 11) return iso;
+  return `${d} ${months[monIdx]} ${y.slice(2)}`;
 }
 
 // Walkthrough #16, #46 — proper tab semantics with arrow-key nav for the

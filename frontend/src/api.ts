@@ -40,6 +40,7 @@ async function jsonFetch<T>(path: string, init?: RequestInit, injectRole = true)
 export const api = {
   system: {
     status: () => jsonFetch<SystemStatus>("/system/status"),
+    datasetInfo: () => jsonFetch<DatasetInfo>("/system/dataset-info"),
     commsState: () => jsonFetch<CommsStateResponse>("/system/comms/state"),
     setAirGap: (enable: boolean, reason?: string) =>
       jsonFetch<AirGapToggleResult>("/system/comms/airgap", {
@@ -121,10 +122,18 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ text, release_authority }),
       }),
-    export: (release = "US_ONLY", format = "xlsx") =>
+    // Walkthrough #6 — pass batch_id so the export covers the same batch
+    // the operator just processed (was: server fell through to canonical
+    // 2,251 records when batch_id was absent).
+    export: (release = "US_ONLY", format = "xlsx", batchId?: string | null) =>
       jsonFetch<ExportResult>("/sentry/export", {
         method: "POST",
-        body: JSON.stringify({ release_authority: release, format, include_audit: true }),
+        body: JSON.stringify({
+          release_authority: release,
+          format,
+          include_audit: true,
+          batch_id: batchId ?? null,
+        }),
       }),
     coalitionProfiles: () =>
       jsonFetch<{ profiles: CoalitionProfileSummary[] }>("/sentry/coalition/profiles"),
@@ -188,6 +197,22 @@ export interface SystemStatus {
   };
   llm: { reachable: boolean; model: string; max_context: number };
   features: Record<string, boolean>;
+}
+
+// Walkthrough #JOB-B (review #52 / #30) — single source of truth for the
+// dataset's last day. PULSE heatmap "as of" + Forecast "TODAY" pin both
+// read this so they line up with SENTRY/BASTION date stamps. Mission Clock
+// in BASTION continues to show real wall-clock UTC (operating mission
+// time, intentionally separate from the dataset stamp).
+export interface DatasetInfo {
+  dataset_last_day: string | null;
+  dataset_first_day: string | null;
+  snapshot_days: number;
+  fingerprint: string;
+  build_id: string;
+  as_of: string | null;
+  generated_at: string;
+  seed: number;
 }
 
 export interface HeroMetrics {
@@ -537,6 +562,11 @@ export interface MarkResult {
   caveats_recommended: string[];
   evidence: { flag: string; evidence: string; rule: string }[];
   release_authority_requested: string;
+  // Walkthrough #4 — release-authority validator output.
+  release_compatibility?: {
+    status: "ok" | "warn" | "block";
+    issues: string[];
+  };
   audit: { engine: string; timestamp: string };
 }
 
@@ -547,11 +577,16 @@ export interface ExportResult {
   bytes?: number;
   release_authority: string;
   format: string;
+  // Walkthrough #6 — input batch size for record-count clarity.
+  records_input?: number;
   records_exported: number;
   records_rejected: number;
   decisions_applied: number;
   redactions_applied: number;
   distribution_statement: string;
+  // Walkthrough #5 — independent fields.
+  rel_to_caveat?: string;
+  distribution_authority?: string;
   generalized_unit_markings?: boolean;
   download_url: string;
   created_at: string;
