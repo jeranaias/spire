@@ -177,6 +177,33 @@ def _network_egress_summary() -> dict:
         return {"armed": False, "error": str(e)}
 
 
+@router.get("/dataset-info")
+async def dataset_info():
+    """Single source of truth for dataset freshness across views.
+
+    Walkthrough #JOB-B (review #52 / #30) — PULSE's heatmap "as of" and
+    Forecast "TODAY" pin used to read 31 MAY 26 while BASTION + SENTRY
+    showed 26 APR 26 (wall clock). Both surfaces now consult this endpoint
+    so every "as of" stamp lines up.
+
+    The Mission Clock in BASTION's MapHUD intentionally shows real wall-
+    clock UTC (operating mission time) — not the dataset stamp.
+    """
+    ds = get_dataset()
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
+    first_day = ds.snapshots[0].snapshot_date if ds.snapshots else None
+    return {
+        "dataset_last_day": last_day.isoformat() if last_day else None,
+        "dataset_first_day": first_day.isoformat() if first_day else None,
+        "snapshot_days": len({s.snapshot_date for s in ds.snapshots}),
+        "fingerprint": _dataset_fingerprint(),
+        "build_id": "spire-mdm-2026",
+        "as_of": last_day.isoformat() if last_day else None,
+        "generated_at": ds.generated_at,
+        "seed": ds.seed,
+    }
+
+
 @router.get("/audit")
 async def audit(limit: int = 50, role: str | None = None):
     """Append-only hash-chained audit log backed by SQLite. Each entry is

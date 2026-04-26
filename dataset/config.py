@@ -12,8 +12,15 @@ from datetime import date
 # ---------------------------------------------------------------------------
 # Simulation window
 # ---------------------------------------------------------------------------
-SIMULATION_START_DATE = date(2025, 6, 1)
-SIMULATION_END_DATE = date(2026, 5, 31)
+# Walkthrough #JOB-B — slid the canonical simulation window forward so the
+# dataset's last_day matches the operating mission clock at MDM 2026
+# (26 APR 26). PULSE's "as of" text reads from dataset.last_day; SENTRY +
+# BASTION mission clocks read wall-clock UTC. With the dataset ending on
+# 26 APR 26, every "as of" / "TODAY" stamp lines up across views without
+# the operator clocking the prior 5-week mismatch (PULSE was on 31 MAY 26
+# while SENTRY/BASTION were on 26 APR 26 — single source of truth fix).
+SIMULATION_START_DATE = date(2025, 4, 27)
+SIMULATION_END_DATE = date(2026, 4, 26)
 SIMULATION_DAYS = (SIMULATION_END_DATE - SIMULATION_START_DATE).days + 1  # 365
 RANDOM_SEED = 42
 
