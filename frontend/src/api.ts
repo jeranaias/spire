@@ -378,8 +378,16 @@ export interface CoalitionView {
     unit_name?: string;
     equipment_type?: string;
     fault_component?: string;
+    fault_component_original?: string;
     remark_preview?: string;
+    remark_original?: string;
     redactions?: string[];
+    redaction_spans?: {
+      field: string;
+      before: string;
+      after: string;
+      kind: string;
+    }[];
   }[];
   partner_units: { name: string; type: string; point_of_contact?: string }[];
   field_redactions: string[];
