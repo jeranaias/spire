@@ -82,11 +82,25 @@ export function ForecastTab() {
     : 0;
 
   // Render a subset of the 200 MC paths to avoid chart overload.
-  const visiblePaths = data.paths.slice(0, 60);
+  const visiblePaths = (data.paths || []).slice(0, 60);
+
+  // Defense against malformed forecast payloads. If threshold or projection
+  // is missing/NaN we bail to a friendly state instead of letting Recharts
+  // crash the whole view (reviewer caught the chart canvas rendering empty
+  // and the view occasionally crashing — both pointed at unguarded data).
+  const thresholdSafe = typeof data.threshold === "number" && !Number.isNaN(data.threshold)
+    ? data.threshold : 0.85;
+  const chartUsable = series.length > 0 && data.history.length > 0 && data.projection.length > 0;
 
   return (
-    <div className="flex h-full flex-col p-4">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+    // overflow-y-auto on the outer container so the chart + 3 KPIs + Recommend
+    // Actions all stay reachable. Reviewer caught: <main> has overflow:hidden
+    // and the page below the chart was unreachable. Fixed-min-height on the
+    // chart container (instead of flex-1 eating everything) means the
+    // Recommend Actions panel renders below the chart and the page scrolls
+    // when content exceeds viewport.
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2
             className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
@@ -132,7 +146,17 @@ export function ForecastTab() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+      {/* Chart container — fixed height so ResponsiveContainer always has
+       * space to paint. Reviewer caught the chart canvas rendering empty
+       * because flex-1 was returning 0px on certain layouts. Width-100%
+       * stays responsive; height is fixed at 360px which is enough room for
+       * the historical+projected lines + p10/p90 envelope at any date range. */}
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3" style={{ height: 360 }}>
+        {!chartUsable ? (
+          <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            Forecast data incomplete · check backend
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={series} margin={{ top: 10, right: 30, left: 0, bottom: 10 }}>
             <XAxis
@@ -159,11 +183,11 @@ export function ForecastTab() {
               formatter={(v) => (typeof v === "number" ? `${(v * 100).toFixed(1)}%` : String(v ?? "—"))}
             />
             <ReferenceLine
-              y={data.threshold}
+              y={thresholdSafe}
               stroke="var(--color-danger)"
               strokeDasharray="6 4"
               label={{
-                value: `${(data.threshold * 100).toFixed(0)}% threshold`,
+                value: `${(thresholdSafe * 100).toFixed(0)}% threshold`,
                 position: "insideTopRight",
                 fill: "var(--color-danger)",
                 fontSize: 10,
@@ -227,13 +251,12 @@ export function ForecastTab() {
             />
           </ComposedChart>
         </ResponsiveContainer>
+        )}
       </div>
 
-      {/* Cross-probability + spaghetti paths panel (path lines rendered via
-          SVG overlay at the same scale as the chart — Recharts can't easily
-          paint 60 translucent lines efficiently). We render a compact
-          readout row and let the filled ribbon tell the distributional story. */}
-      <div className="mt-3 grid grid-cols-3 gap-3">
+      {/* Cross-probability + spaghetti paths panel — gap from parent flex
+       * gap-4 spaces this from the chart above so we don't double-margin. */}
+      <div className="grid grid-cols-3 gap-3">
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
           <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             Projected · Horizon End

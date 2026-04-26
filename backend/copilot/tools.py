@@ -26,6 +26,22 @@ from ..scoping import allowed_units, COALITION_RELEASE_ROLES
 # call to return a dict so it can stitch the result block back to Gemma.
 # ---------------------------------------------------------------------------
 
+def _is_deadlined(asset) -> bool:
+    """Truth check for "is this asset deadlined right now?" — uses the
+    canonical current_status field (MC / PMC / NMCS / NMCM) emitted by
+    the lifecycle simulation. Anything starting with NMC means the asset
+    is non-mission-capable / deadlined.
+
+    Reviewer caught the prior implementation using a non-existent
+    is_deadlined attribute via getattr default-False, which made every
+    "deadlined" check silently return zero — including SPIRO's
+    status_summary saying deadlined_in_scope: 0 while the alert stream
+    showed 14 NMCS units. This single helper is now the source of truth.
+    """
+    status = getattr(asset, "current_status", "") or ""
+    return status.startswith("NMC")
+
+
 def _tool_find_asset(asset_id: str, role: str) -> dict:
     """Look up one asset by id with role-scoped visibility."""
     ds = get_dataset()
@@ -40,9 +56,9 @@ def _tool_find_asset(asset_id: str, role: str) -> dict:
         "equipment_type": asset.equipment_type,
         "unit_name": asset.unit_name,
         "serial_number": asset.serial_number,
-        "current_state": getattr(asset, "current_state", "unknown"),
+        "current_status": getattr(asset, "current_status", "unknown"),
         "hours": getattr(asset, "current_hours", None),
-        "deadlined": getattr(asset, "is_deadlined", False),
+        "deadlined": _is_deadlined(asset),
     }
 
 
@@ -61,7 +77,7 @@ def _tool_search_assets(query: str, role: str, limit: int = 10) -> dict:
                 "asset_id": a.asset_id,
                 "equipment_type": a.equipment_type,
                 "unit_name": a.unit_name,
-                "deadlined": getattr(a, "is_deadlined", False),
+                "deadlined": _is_deadlined(a),
             })
         if len(hits) >= limit:
             break
@@ -85,7 +101,7 @@ def _tool_find_cannibalization_match(recipient_asset_id: str, role: str) -> dict
             continue
         if allowed is not None and donor.unit_name not in allowed:
             continue
-        if getattr(donor, "is_deadlined", False):
+        if _is_deadlined(donor):
             continue
         candidates.append({
             "donor_asset_id": donor.asset_id,
@@ -179,11 +195,29 @@ def _tool_status_summary(role: str) -> dict:
     ds = get_dataset()
     allowed = allowed_units(ds, role)
     in_scope = ds.assets if allowed is None else [a for a in ds.assets if a.unit_name in allowed]
+    deadlined = [a for a in in_scope if _is_deadlined(a)]
+    by_unit_mc: dict[str, dict[str, int]] = {}
+    for a in in_scope:
+        u = by_unit_mc.setdefault(a.unit_name, {"total": 0, "deadlined": 0})
+        u["total"] += 1
+        if _is_deadlined(a):
+            u["deadlined"] += 1
+    # Worst three units by deadlined count
+    worst = sorted(
+        ({"unit": k, **v, "mc_pct": round(((v["total"]-v["deadlined"])/v["total"])*100, 1) if v["total"] else 100}
+         for k, v in by_unit_mc.items()),
+        key=lambda x: -x["deadlined"],
+    )[:3]
     return {
         "your_assets": len(in_scope),
         "total_units": len(ds.units),
         "your_units": "all" if allowed is None else sorted(allowed),
-        "deadlined_in_scope": sum(1 for a in in_scope if getattr(a, "is_deadlined", False)),
+        "deadlined_in_scope": len(deadlined),
+        "worst_units": worst,
+        "deadlined_examples": [
+            {"asset_id": a.asset_id, "unit": a.unit_name, "equipment": a.equipment_type, "status": a.current_status}
+            for a in deadlined[:5]
+        ],
     }
 
 
