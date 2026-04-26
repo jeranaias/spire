@@ -68,6 +68,7 @@ export function Spiro() {
   const [text, setText] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<"plan" | "execute" | null>(null);
+  const [rawOpen, setRawOpen] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -234,6 +235,58 @@ export function Spiro() {
     if (sr.result && (sr.result as any).error) return "error";
     if (isEmptyResult(sr.result)) return "empty";
     return "ok";
+  }
+
+  // Per-tool operator-readable formatter. Returns a one-line summary of the
+  // tool's result so the chat reads like a conversation, not a JSON dump.
+  // The raw JSON stays accessible via the SHOW RAW toggle for engineering
+  // sanity-checks.
+  function formatResult(tool: string, r: any): string | null {
+    if (!r || typeof r !== "object") return null;
+    if (r.error) return String(r.error);
+    try {
+      switch (tool) {
+        case "status_summary": {
+          const worst: any[] = r.worst_units || [];
+          const head = worst[0];
+          const dead = r.deadlined_in_scope ?? r.deadlined ?? "?";
+          const tail = worst.slice(1, 3).map((u) => `${u.unit} ${u.mc_pct}%`).join(", ");
+          if (!head) return `${r.your_assets ?? "?"} assets in scope · ${dead} deadlined.`;
+          return `${dead} deadlined · worst: ${head.unit} ${head.mc_pct}% MC (${head.mc} MC / ${head.pmc} PMC / ${head.nmcm} NMCM / ${head.nmcs} NMCS / ${head.total} total)${tail ? ` · also ${tail}` : ""}.`;
+        }
+        case "recommend_actions": {
+          const acts: any[] = r.actions || [];
+          if (!acts.length) return "No recommendations in scope.";
+          const top = acts.slice(0, 3).map((a) =>
+            `${a.title || a.kind} (${a.unit_name || a.asset_id || "?"}, $${a.cost_usd}, +${(a.mc_delta_pct * 100).toFixed(0)}% conf ${(a.confidence * 100).toFixed(0)}%)`
+          ).join(" · ");
+          return `${acts.length} ranked actions: ${top}${acts.length > 3 ? ` · +${acts.length - 3} more` : ""}.`;
+        }
+        case "predict_failures": {
+          const preds: any[] = r.predictions || [];
+          if (!preds.length) return `No failures predicted in next ${r.horizon_days || "?"}d.`;
+          return `${preds.length} predicted failures within ${r.horizon_days || "?"}d (top: ${preds[0]?.asset_id || "?"} ${preds[0]?.component || ""}).`;
+        }
+        case "find_asset": {
+          const a = r.asset || r;
+          return `${a.asset_id || "?"}: ${a.equipment_type || "?"} · ${a.unit_name || "?"} · ${a.current_status || a.status || "?"}.`;
+        }
+        case "search_assets": {
+          const items: any[] = r.matches || r.assets || [];
+          return `${items.length} assets matched${items[0] ? ` (e.g. ${items[0].asset_id})` : ""}.`;
+        }
+        case "find_cannibalization_match": {
+          const cands: any[] = r.candidates || [];
+          if (!cands.length) return "No donor candidates found.";
+          const c = cands[0];
+          return `${cands.length} donor candidates · best: ${c.donor_asset_id || c.asset_id} (${c.unit_name || "?"}).`;
+        }
+        case "get_coalition_view": {
+          return `${r.profile || "?"} sees ${r.unit_count ?? "?"} units · ${r.asset_count ?? "?"} assets · ${r.redaction_count ?? "?"} redactions applied.`;
+        }
+      }
+    } catch { /* fall through to null */ }
+    return null;
   }
 
   // Collapsed-pill view — small button on the right edge.
@@ -405,6 +458,9 @@ export function Spiro() {
                   const tone = st === "error" ? "var(--color-danger)" : st === "empty" ? "var(--color-warning)" : "var(--color-success)";
                   const label = st === "error" ? "ERROR" : st === "empty" ? "EMPTY" : "OK";
                   const glyph = st === "error" ? "✗" : st === "empty" ? "⚠" : "✓";
+                  const prose = st === "ok" ? formatResult(sr.tool, sr.result) : null;
+                  const rawKey = `${m.id}:${i}`;
+                  const showRaw = rawOpen[rawKey] === true;
                   return (
                     <div
                       key={i}
@@ -420,9 +476,23 @@ export function Spiro() {
                           Tool ran but produced no results — try a different scope or accept "nothing found."
                         </div>
                       )}
-                      <pre className="mt-1.5 max-h-[10rem] overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--color-text-secondary)]">
-                        {JSON.stringify(sr.result, null, 2).slice(0, 1200)}
-                      </pre>
+                      {prose && (
+                        <div className="mt-1.5 text-[11px] leading-snug text-[var(--color-text)]">
+                          {prose}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setRawOpen((s) => ({ ...s, [rawKey]: !showRaw }))}
+                        className="mt-1.5 text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                      >
+                        {showRaw ? "▾ HIDE RAW JSON" : "▸ SHOW RAW JSON"}
+                      </button>
+                      {showRaw && (
+                        <pre className="mt-1.5 max-h-[14rem] overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--color-text-secondary)]">
+                          {JSON.stringify(sr.result, null, 2).slice(0, 1500)}
+                        </pre>
+                      )}
                     </div>
                   );
                 })}
