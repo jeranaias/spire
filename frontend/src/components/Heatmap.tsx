@@ -17,8 +17,15 @@ function colorForRate(rate: number | null): string {
 
 export function Heatmap({ units, equipmentTypes, onCellClick }: Props) {
   return (
-    <div className="overflow-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <table className="w-full border-collapse font-mono text-xs">
+    // overflow-x-auto + always-visible scrollbar so the rightmost
+    // equipment-type columns never disappear off-screen on narrow widths.
+    // Reviewer caught the rightmost columns clipping behind the alert
+    // sidebar with no scroll affordance.
+    <div
+      className="overflow-x-auto overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
+      style={{ scrollbarGutter: "stable", maxHeight: "calc(100vh - 18rem)" }}
+    >
+      <table className="min-w-max border-collapse font-mono text-xs">
         <thead>
           <tr className="sticky top-0 bg-[var(--color-surface)] text-[var(--color-text-muted)]">
             <th className="sticky left-0 z-10 border-b border-r border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left font-medium">
