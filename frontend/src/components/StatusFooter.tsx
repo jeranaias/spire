@@ -78,18 +78,39 @@ export function StatusFooter() {
   const fingerprintFull = (status?.dataset.fingerprint ?? "").toUpperCase();
   const fingerprint = fingerprintFull.slice(0, 12);
 
-  // Ticker segments — these scroll continuously in a marquee.
-  // AUDIT·SHA256 and CLASSIFICATION are persistent posture indicators and
-  // should NOT cycle (reviewer caught them sliding off before the operator
-  // could read them). Both are pinned in the footer chrome below.
+  // Walkthrough audit: chips used to hardcode 'AES-256-GCM', '0 egress',
+  // and the model val/params strings. Now they read from the live
+  // /system/status payload. When the backend doesn't have torch loaded
+  // (sentry_loaded / pulse_loaded false), the model chips read
+  // 'rule-based fallback' instead of pretending fake validation values.
+  const egressAttempts = status?.network_egress?.unapproved_attempts ?? 0;
+  const encrypted = status?.security?.encrypted_at_rest ?? false;
+  const sentryLoaded = status?.models?.sentry_loaded ?? false;
+  const pulseLoaded = status?.models?.pulse_loaded ?? false;
   const tickerItems: { label: string; value: string; tone?: "ok" | "warn" | "muted" }[] = [
-    { label: "NETWORK", value: "0 egress", tone: "ok" },
-    { label: "ENCRYPTION", value: "AES-256-GCM", tone: "ok" },
+    {
+      label: "NETWORK",
+      value: egressAttempts === 0 ? "0 egress" : `${egressAttempts} unauthorised`,
+      tone: egressAttempts === 0 ? "ok" : "warn",
+    },
+    {
+      label: "ENCRYPTION",
+      value: encrypted ? "AES-256-GCM" : "off",
+      tone: encrypted ? "ok" : "warn",
+    },
     { label: "DATASET", value: `${assets.toLocaleString("en-US")} assets · ${srs.toLocaleString("en-US")} SR`, tone: "muted" },
     { label: "INTEGRITY", value: errs === 0 ? "0 errors" : `${errs} errors`, tone: errs === 0 ? "ok" : "warn" },
     { label: "LLM", value: `${llmModel} · ${llmOk ? "online" : "standby"}`, tone: llmOk ? "ok" : "warn" },
-    { label: "SENTRY·CLASSIFIER", value: "val=1.0 · 413K params", tone: "ok" },
-    { label: "PULSE·RISK", value: "val=0.9974 · 8.8K params", tone: "ok" },
+    {
+      label: "SENTRY·CLASSIFIER",
+      value: sentryLoaded ? "online" : "rule-based fallback",
+      tone: sentryLoaded ? "ok" : "muted",
+    },
+    {
+      label: "PULSE·RISK",
+      value: pulseLoaded ? "online" : "rule-based fallback",
+      tone: pulseLoaded ? "ok" : "muted",
+    },
   ];
 
   const toneColor = (tone?: "ok" | "warn" | "muted") =>
