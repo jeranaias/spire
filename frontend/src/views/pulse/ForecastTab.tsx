@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ComposedChart,
@@ -9,25 +9,38 @@ import {
   YAxis,
 } from "recharts";
 
-// Measured width via ResizeObserver. We use this instead of Recharts'
-// ResponsiveContainer because the latter regularly reports 0 width on the
-// Rolldown build's first paint, leaving the chart pane blank (Jesse hit this
-// twice). A direct measure with explicit numeric width/height on the chart
-// makes the bug impossible.
-function useElementWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
-  const ref = useRef<T | null>(null);
+// Measured width via callback ref + ResizeObserver. Used instead of Recharts'
+// ResponsiveContainer (which reports 0 width on the Rolldown build's first
+// paint and leaves the pane blank).
+//
+// Why a callback ref and not useRef + useEffect: this component has an early
+// `if (!data) return <skeleton>` branch, so on first mount the chart wrapper
+// isn't in the DOM, ref.current is null, and a useEffect with `[]` deps fires
+// once against a null ref and never re-fires when the wrapper later mounts.
+// A callback ref runs whenever React attaches/detaches the underlying
+// element, so we always observe the live wrapper.
+function useElementWidth<T extends HTMLElement>(): [(el: T | null) => void, number] {
   const [w, setW] = useState(0);
-  useEffect(() => {
-    if (!ref.current) return;
-    setW(ref.current.getBoundingClientRect().width);
+  const obsRef = useRef<ResizeObserver | null>(null);
+  const setRef = useCallback((el: T | null) => {
+    obsRef.current?.disconnect();
+    obsRef.current = null;
+    if (!el) return;
+    // Synchronous initial measure — covers the case where the element is
+    // already laid out at attach time and ResizeObserver's first callback
+    // would otherwise deliver the same value one frame late.
+    const initial = Math.round(el.getBoundingClientRect().width);
+    if (initial > 0) setW(initial);
     const ro = new ResizeObserver((entries) => {
       const cw = entries[0]?.contentRect.width ?? 0;
       if (cw > 0) setW(Math.round(cw));
     });
-    ro.observe(ref.current);
-    return () => ro.disconnect();
+    ro.observe(el);
+    obsRef.current = ro;
   }, []);
-  return [ref, w];
+  // Tear down the observer on unmount.
+  useEffect(() => () => obsRef.current?.disconnect(), []);
+  return [setRef, w];
 }
 import { api, type Forecast } from "../../api";
 import { SegmentedControl } from "../../components/SegmentedControl";
