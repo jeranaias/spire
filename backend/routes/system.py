@@ -222,6 +222,19 @@ async def dataset_info():
     ds = get_dataset()
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
     first_day = ds.snapshots[0].snapshot_date if ds.snapshots else None
+    # Walkthrough audit: StatusStrip + various places hardcoded
+    # 'Camp Henderson · 2d MLG'. Surface installation.name and the
+    # most-common unit parent (the role's natural command echelon) so
+    # the strip reads from data.
+    from collections import Counter
+    from .bastion import _load_installation
+    try:
+        inst = _load_installation().get("installation", {})
+        installation_name = inst.get("name")
+    except Exception:
+        installation_name = None
+    parents = Counter(u.parent for u in ds.units if u.parent)
+    parent_command = parents.most_common(1)[0][0] if parents else None
     return {
         "dataset_last_day": last_day.isoformat() if last_day else None,
         "dataset_first_day": first_day.isoformat() if first_day else None,
@@ -231,6 +244,8 @@ async def dataset_info():
         "as_of": last_day.isoformat() if last_day else None,
         "generated_at": ds.generated_at,
         "seed": ds.seed,
+        "installation_name": installation_name,
+        "parent_command": parent_command,
     }
 
 
