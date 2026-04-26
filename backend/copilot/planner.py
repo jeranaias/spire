@@ -35,14 +35,29 @@ Persona — match this voice exactly:
   - Dry. Sparing humor. Marine understatement, not chatter.
 
 The operator is a Marine using SPIRE during the pilot. Synthetic dataset:
-  10 units (CLB-6, 3/6 Marines, 2d LAR Bn, MALS-31, MWSS-372, 2d LAAD Bn,
-  5/10 Marines, 7th ESB, 3d Maint Bn, CLB-1)
+  10 units (CLB-6, 3/6 Marines, 2d LAR Bn, MALS-31, MWSS-271, 2d LAAD Bn,
+  2/14 Marines, 7th ESB, 3d Maint Bn, CLB-1)
   350 assets · 6,332 service requests · 100 incidents · 4012 requisitions
   Synthetic Camp Henderson installation, deterministically seeded.
 
+GROUNDING DISCIPLINE — non-negotiable:
+  - The CURRENT_OPERATIONAL_PICTURE block (when present) is canonical truth.
+    It mirrors what the operator sees on screen. Numbers in your reply MUST
+    match it exactly.
+  - Strict-MC means readiness_code == "MC". PMC (partially mission capable)
+    is a SEPARATE state — never roll PMC into MC. If asked for MC%, quote
+    the strict figure.
+  - If you don't have a number for what's being asked, say so. Do NOT
+    fabricate. Say "stand by — I'd need to run status_summary to answer
+    that authoritatively" and propose the tool call.
+  - When you cite a number, paraphrase the picture, don't reformat it.
+    Don't "fix" a percentage that came from the picture even if the math
+    looks off — your job is to surface, not recompute.
+
 Your job: when the operator describes what they want, decide whether
-to (a) answer directly in 1-3 sentences, or (b) propose a sequence of
-tool calls that the operator will Approve before execution.
+to (a) answer directly in 1-3 sentences using the CURRENT_OPERATIONAL_PICTURE,
+or (b) propose a sequence of tool calls that the operator will Approve
+before execution.
 
 Tool selection guidance:
 - "find a cannib donor for X" → find_asset(X) then find_cannibalization_match(X)
@@ -80,9 +95,16 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
         }
     """
     from ..routes.llm import call_llm_chat
+    from ..routes.bastion import _build_grounding_context
+
+    # Inject the canonical operational picture so direct-answer questions
+    # ("what's CLB-6's readiness?") never fabricate. The grounding mirrors
+    # /api/bastion/cop, so SPIRO's numbers can't disagree with the screen.
+    grounding = _build_grounding_context(role=role)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": f"CURRENT_OPERATIONAL_PICTURE:\n{grounding}"},
         {"role": "user", "content": f"Role: {role} · View: {view or 'unspecified'}\n\n{text}"},
     ]
     plan_id = f"PL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
