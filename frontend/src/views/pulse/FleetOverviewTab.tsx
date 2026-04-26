@@ -375,7 +375,11 @@ function ConusMap({ data, canonicalMc }: { data: FleetOverview; canonicalMc: Map
     "MCAS Beaufort, SC":    { lat: 32.4773, lon: -80.7233, label: "MCAS Beaufort",    state: "SC" },
     "MCAS Yuma, AZ":        { lat: 32.6566, lon: -114.6051, label: "MCAS Yuma",       state: "AZ" },
     "MCAS Cherry Point, NC":{ lat: 34.9008, lon: -76.8808, label: "MCAS Cherry Point", state: "NC" },
-    "Camp Kinser, Okinawa": { lat: 32.6566, lon: -114.6051, label: "Camp Kinser (off-CONUS)", state: "" },
+    // Walkthrough audit: prior coords for Camp Kinser were copy-pasted
+    // from MCAS Yuma (32.66, -114.60 — that's southern Arizona).
+    // Camp Kinser is on Okinawa, Japan. Off the CONUS canvas, but
+    // correct location for any future east-bound view.
+    "Camp Kinser, Okinawa": { lat: 26.2685, lon: 127.7494, label: "Camp Kinser (off-CONUS)", state: "" },
   };
 
   // Albers-USA-like equirectangular projection bounded to the lower 48.
