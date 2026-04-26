@@ -152,7 +152,7 @@ export const api = {
     nlQuery: (text: string) =>
       jsonFetch<NLQueryResult>(`/bastion/nl-query`, {
         method: "POST",
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, role: _getRole() }),
       }),
   },
   llm: {

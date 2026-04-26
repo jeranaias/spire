@@ -537,22 +537,28 @@ async def nl_query(payload: dict):
             "result": await parse_tmr_text_llm(text),
         }
 
-    # General-purpose NL query path. Defense-context system prompt; the LLM
-    # returns a short authoritative answer, falls back to a stub if the
-    # proxy is unreachable.
+    # General-purpose NL query path. We ground the LLM with a snapshot of
+    # what the operator can already see on screen — top alerts, fleet
+    # readiness, deadlined assets in scope — so the model never says
+    # "no data available for CLB-6" while CLB-6 data is on screen next
+    # to the input.
+    grounding = _build_grounding_context(role=payload.get("role"))
     try:
         sys_prompt = (
-            "You are SPIRE, a USMC contested-logistics operating system. The operator "
-            "is a Marine using SPIRE during a 30-day pilot of the synthetic Camp Henderson "
-            "installation. Synthetic dataset: 10 units (CLB-6, 3/6 Marines, 2d LAR Bn, MALS-31, "
-            "MWSS-372, 2d LAAD Bn, 5/10 Marines, 7th ESB, 3d Maint Bn, CLB-1), 350 assets, "
-            "6,332 service requests over 365 days. Answer in 2-4 sentences max. Be authoritative; "
-            "no hedging. If the question requires data you don't have, say so plainly. Never "
-            "speculate about real-world classified data — this is a synthetic environment."
+            "You are SPIRO, the operator-assistant aspect of SPIRE. The operator is a Marine "
+            "using SPIRE during a 30-day pilot of the synthetic Camp Henderson installation. "
+            "Synthetic dataset: 10 units (CLB-6, 3/6 Marines, 2d LAR Bn, MALS-31, MWSS-271, "
+            "2d LAAD Bn, 2/14 Marines, 7th ESB, 3d Maint Bn, CLB-1), 350 assets, 6,332 service "
+            "requests over 365 days. The CURRENT_OPERATIONAL_PICTURE block below is what the "
+            "operator can see on screen right now. Use it. Never claim data is unavailable "
+            "when it's literally in this block. Answer in 2-4 sentences max. Be authoritative; "
+            "no hedging. Cite the specific number, asset id, or unit name. Never speculate "
+            "about real-world classified data — this is a synthetic environment."
         )
         result = await call_llm_chat(
             messages=[
                 {"role": "system", "content": sys_prompt},
+                {"role": "system", "content": f"CURRENT_OPERATIONAL_PICTURE:\n{grounding}"},
                 {"role": "user", "content": text},
             ],
             temperature=0.2,
@@ -565,6 +571,7 @@ async def nl_query(payload: dict):
                 "answer": (result.get("content") or "").strip(),
                 "engine": "Gemma4 via RigRun proxy",
                 "tokens_used": usage.get("total_tokens"),
+                "grounded": True,
             },
         }
     except Exception as e:  # noqa: BLE001
@@ -575,3 +582,50 @@ async def nl_query(payload: dict):
                 "engine": f"unavailable ({type(e).__name__})",
             },
         }
+
+
+def _build_grounding_context(role: str | None) -> str:
+    """Snapshot of the operational picture the LLM should ground its answers
+    against. Pulls top-N alerts, deadlined assets in role scope, and a
+    fleet readiness summary. Trimmed so the prompt stays compact.
+    """
+    from ..state import get_dataset
+    from ..scoping import allowed_units
+    ds = get_dataset()
+    allowed = allowed_units(ds, role)
+    in_scope = ds.assets if allowed is None else [a for a in ds.assets if a.unit_name in allowed]
+
+    deadlined = [a for a in in_scope if getattr(a, "is_deadlined", False)][:8]
+    by_unit: dict[str, dict[str, int]] = {}
+    for a in in_scope:
+        u = by_unit.setdefault(a.unit_name, {"total": 0, "deadlined": 0})
+        u["total"] += 1
+        if getattr(a, "is_deadlined", False):
+            u["deadlined"] += 1
+
+    lines = []
+    lines.append(f"Role scope: {role or 'unrestricted'} · {len(in_scope)} assets visible")
+    lines.append("")
+    lines.append("Fleet readiness by unit:")
+    for unit_name, counts in sorted(by_unit.items()):
+        mc_pct = ((counts["total"] - counts["deadlined"]) / counts["total"] * 100) if counts["total"] else 0
+        lines.append(f"  - {unit_name}: {counts['total']-counts['deadlined']}/{counts['total']} operational ({mc_pct:.1f}% MC)" + (f" · {counts['deadlined']} deadlined" if counts['deadlined'] else ""))
+    lines.append("")
+    if deadlined:
+        lines.append("Currently deadlined assets in scope (top 8):")
+        for a in deadlined:
+            hours = round(a.current_hours, 1) if hasattr(a, 'current_hours') and a.current_hours else "?"
+            lines.append(f"  - {a.asset_id} · {a.equipment_type} · {a.unit_name} · {hours}h")
+    else:
+        lines.append("No currently deadlined assets in scope.")
+
+    # Recent active alerts — pull from the live alert stream.
+    try:
+        from .bastion import _ACTIVE_SIMS
+        if _ACTIVE_SIMS:
+            lines.append("")
+            lines.append(f"Active simulated incidents: {len(_ACTIVE_SIMS)}")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
