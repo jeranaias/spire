@@ -17,7 +17,11 @@ export function TopBar() {
 
   function onRoleChange(r: Role) {
     setRole(r);
-    nav(ROLE_DEFAULT_VIEW[r]);
+    // {replace: true} so back-button doesn't ping-pong between the previous
+    // role's view and this one, AND so any stale query string (?unit=,
+    // ?equipment=, or — historically — ?role=) is cleared on swap. The
+    // Zustand store is the single source of truth for role; URL never is.
+    nav(ROLE_DEFAULT_VIEW[r], { replace: true });
   }
 
   return (
