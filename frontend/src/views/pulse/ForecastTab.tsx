@@ -104,40 +104,24 @@ export function ForecastTab() {
     return [...hist, ...proj];
   }, [data]);
 
-  // Intentionally no early return — the layout stays mounted during fetch
-  // and shows skeletons until `data` arrives. Avoids a Recharts hook-count
-  // mismatch we hit in this Rolldown build when the chart mounted cold with
-  // full data after an early-return loading state.
-  if (!data) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wider">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
-          Running Monte Carlo forecast …
-        </div>
-      </div>
-    );
-  }
-
-  const todayLabel = data.history.length
+  // Walkthrough #21 — keep controls mounted during fetch by NOT returning
+  // an early loading state. Skeleton only fills the chart pane.
+  const dataLoaded = !!data;
+  const todayLabel = data?.history?.length
     ? data.history[data.history.length - 1].date.slice(5)
     : null;
 
-  // Cross probability at horizon end (last projection day)
-  const endCross = data.projection.length
+  const endCross = data?.projection?.length
     ? data.projection[data.projection.length - 1].cross_probability
     : 0;
 
-  // Render a subset of the 200 MC paths to avoid chart overload.
-  const visiblePaths = (data.paths || []).slice(0, 60);
+  // Walkthrough #50 — render the sample paths, not just an envelope. Bump
+  // sample count and opacity so the spaghetti is visible.
+  const visiblePaths = (data?.paths || []).slice(0, 60);
 
-  // Defense against malformed forecast payloads. If threshold or projection
-  // is missing/NaN we bail to a friendly state instead of letting Recharts
-  // crash the whole view (reviewer caught the chart canvas rendering empty
-  // and the view occasionally crashing — both pointed at unguarded data).
-  const thresholdSafe = typeof data.threshold === "number" && !Number.isNaN(data.threshold)
-    ? data.threshold : 0.85;
-  const chartUsable = series.length > 0 && data.history.length > 0 && data.projection.length > 0;
+  const thresholdSafe = typeof data?.threshold === "number" && !Number.isNaN(data!.threshold)
+    ? data!.threshold : 0.85;
+  const chartUsable = !!data && series.length > 0 && data.history.length > 0 && data.projection.length > 0;
 
   return (
     // overflow-y-auto on the outer container so the chart + 3 KPIs + Recommend
@@ -199,12 +183,19 @@ export function ForecastTab() {
        * parent box (which it does not, reliably, on Rolldown's first frame).
        * Internal margin gives the chart breathing room — no inner padding on
        * the wrapper, which used to be the source of double-padding offsets. */}
+      {/* Walkthrough #21 — chart pane shows skeleton while controls stay
+       * mounted above. */}
       <div
         ref={chartRef}
         className="relative shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
         style={{ height: CHART_HEIGHT, minHeight: CHART_HEIGHT }}
       >
-        {!chartUsable ? (
+        {!dataLoaded ? (
+          <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)] mr-2" />
+            Running Monte Carlo forecast …
+          </div>
+        ) : !chartUsable ? (
           <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             Forecast data incomplete · check backend
           </div>
@@ -221,8 +212,12 @@ export function ForecastTab() {
               fontSize={10}
               tick={{ fill: "var(--color-text-muted)" }}
             />
+            {/* Walkthrough #34 — explicit ticks at 25/50/75/100 with minor
+             * gridlines. Was: a single light-gray gridline pattern with no
+             * tick marks at all. */}
             <YAxis
               domain={[0, 1]}
+              ticks={[0, 0.25, 0.5, 0.75, 1.0]}
               tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
               stroke="var(--color-text-muted)"
               fontSize={10}
@@ -238,13 +233,16 @@ export function ForecastTab() {
               }}
               formatter={(v) => (typeof v === "number" ? `${(v * 100).toFixed(1)}%` : String(v ?? "—"))}
             />
+            {/* Walkthrough #35 — move threshold label to the right margin
+             * so it doesn't sit on top of the projected line. `right`
+             * position renders outside the plot area. */}
             <ReferenceLine
               y={thresholdSafe}
               stroke="var(--color-danger)"
               strokeDasharray="6 4"
               label={{
-                value: `${(thresholdSafe * 100).toFixed(0)}% threshold`,
-                position: "insideTopRight",
+                value: `${(thresholdSafe * 100).toFixed(0)}%`,
+                position: "right",
                 fill: "var(--color-danger)",
                 fontSize: 10,
                 fontFamily: "var(--font-mono)",
@@ -265,14 +263,42 @@ export function ForecastTab() {
                 }}
               />
             )}
+            {/* Walkthrough #50 — render actual sample paths on top of the
+             * envelope so the operator sees the spaghetti rather than just
+             * the band. We sample 30 of the 200 paths at higher opacity. */}
+            {visiblePaths.slice(0, 30).map((p, idx) => {
+              // Build a per-path series aligned to the projection x-axis,
+              // pre-pended with the last historical value at TODAY so the
+              // path connects to the actuals line.
+              const pathSeries = (data?.history?.length ? [
+                { date: data!.history[data!.history.length - 1].date.slice(5), v: data!.history[data!.history.length - 1].mc_rate },
+                ...p.map((v, ti) => ({
+                  date: (data!.projection[ti]?.date ?? "").slice(5),
+                  v,
+                })),
+              ] : []).filter((d) => d.date);
+              return (
+                <Line
+                  key={`path-${idx}`}
+                  data={pathSeries}
+                  dataKey="v"
+                  stroke="var(--color-primary)"
+                  strokeWidth={0.6}
+                  strokeOpacity={0.18}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls
+                />
+              );
+            })}
             {/* p10 / p90 envelope lines — thin, translucent, complement
-             * the mean projection. Simpler + more reliable than stacking an
-             * Area ribbon in this Rolldown build. */}
+             * the mean projection. Wider opacity on the band so it reads
+             * as a band, not a hairline (Walkthrough #50 spirit). */}
             <Line
               dataKey="p10"
               stroke="var(--color-primary)"
-              strokeWidth={1}
-              strokeOpacity={0.35}
+              strokeWidth={1.5}
+              strokeOpacity={0.55}
               dot={false}
               isAnimationActive={false}
               connectNulls={false}
@@ -280,8 +306,8 @@ export function ForecastTab() {
             <Line
               dataKey="p90"
               stroke="var(--color-primary)"
-              strokeWidth={1}
-              strokeOpacity={0.35}
+              strokeWidth={1.5}
+              strokeOpacity={0.55}
               dot={false}
               isAnimationActive={false}
               connectNulls={false}
@@ -321,8 +347,14 @@ export function ForecastTab() {
             Projected · Horizon End
           </div>
           <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)]" style={{ lineHeight: 1 }}>
-            {(data.projection.length > 0 ? data.projection[data.projection.length - 1].projected_mc_rate * 100 : 0).toFixed(1)}
-            <span className="ml-0.5 text-base text-[var(--color-text-muted)]">%</span>
+            {dataLoaded ? (
+              <>
+                {(data!.projection.length > 0 ? data!.projection[data!.projection.length - 1].projected_mc_rate * 100 : 0).toFixed(1)}
+                <span className="ml-0.5 text-base text-[var(--color-text-muted)]">%</span>
+              </>
+            ) : (
+              <span className="text-[var(--color-text-muted)]">—</span>
+            )}
           </div>
         </div>
         <div
@@ -338,8 +370,13 @@ export function ForecastTab() {
               : "var(--color-surface)",
           }}
         >
+          {/* Walkthrough #4 — semantic label honors cross direction
+           * (recovery vs decline). starts_below_threshold flips the
+           * meaning to "P(recovery to ≥75%)" for already-below units. */}
           <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
-            P(cross {(data.threshold * 100).toFixed(0)}% threshold)
+            {dataLoaded && (data as any).starts_below_threshold
+              ? `P(recovery to ≥${(data!.threshold * 100).toFixed(0)}%)`
+              : `P(cross ${(thresholdSafe * 100).toFixed(0)}% threshold)`}
           </div>
           <div
             className="mt-1 font-mono text-xl font-semibold tabular-nums"
@@ -361,26 +398,28 @@ export function ForecastTab() {
             First Cross (mean)
           </div>
           <div className="mt-1 font-mono text-lg font-semibold tabular-nums text-[var(--color-text)] tracking-wide">
-            {data.threshold_cross_date
-              ? data.threshold_cross_date.slice(5)
+            {dataLoaded && data!.threshold_cross_date
+              ? data!.threshold_cross_date.slice(5)
               : "—"}
           </div>
           <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            {data.threshold_cross_date
+            {dataLoaded && data!.threshold_cross_date
               ? "mean projection crosses"
               : "no mean crossing in window"}
           </div>
         </div>
       </div>
 
-      {/* Tiny legend indicating the spaghetti paths are truly Monte Carlo */}
-      <div className="mt-2 flex items-center gap-4 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+      {/* Walkthrough #34, #50 — legend includes the spaghetti label since
+       * sample paths are now actually rendered. */}
+      <div className="mt-2 flex flex-wrap items-center gap-4 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
         <LegendDot color="var(--color-success)" label="historical actuals" />
-        <LegendDot color="var(--color-primary)" label="mean projection (200 paths)" dashed />
-        <LegendDot color="var(--color-primary)" label="p10 / p90 envelope" opacity={0.35} />
-        <LegendDot color="var(--color-danger)" label={`${(data.threshold * 100).toFixed(0)}% threshold`} dashed />
+        <LegendDot color="var(--color-primary)" label="mean projection" dashed />
+        <LegendDot color="var(--color-primary)" label="p10 / p90 envelope" opacity={0.55} />
+        <LegendDot color="var(--color-primary)" label="sample paths" opacity={0.18} />
+        <LegendDot color="var(--color-danger)" label={`${(thresholdSafe * 100).toFixed(0)}% threshold`} dashed />
         <span className="ml-auto">
-          {visiblePaths.length} of {data.paths.length} sample paths summarized
+          {dataLoaded ? `${visiblePaths.length} of ${data!.paths.length} sample paths summarized` : ""}
         </span>
       </div>
 
