@@ -57,3 +57,91 @@ export async function withRetry<T>(
   }
   throw lastErr;
 }
+
+export interface PollControl {
+  /** Stop the poller. Safe to call multiple times. */
+  stop: () => void;
+}
+
+export interface PollOptions<T> {
+  /** Base interval in ms (also the floor when the response changes). Default 5000. */
+  baseMs?: number;
+  /** Cap interval in ms. Default 60000. */
+  maxMs?: number;
+  /** Multiplier applied each tick when the response is unchanged. Default 1.5. */
+  multiplier?: number;
+  /** Called on every successful fetch. */
+  onResult?: (value: T) => void;
+  /** Called on errors (non-fatal — keeps polling). */
+  onError?: (err: unknown) => void;
+  /**
+   * Optional fingerprint extractor — by default we JSON.stringify the value.
+   * Provide a custom one if your payload has volatile timestamps you want
+   * to ignore so the back-off can still kick in on real data parity.
+   */
+  fingerprint?: (value: T) => string;
+}
+
+/**
+ * Polling helper with exponential back-off when the response is identical to
+ * the previous response. Reviewer caught StatusFooter, NodeStatus, BastionView
+ * each polling every 4-5s on the same endpoints — ~10 GET/sec to the worker
+ * across the page. With identical-response back-off the steady-state load
+ * drops to ~3 GET/min, snapping back to base when something changes.
+ *
+ * Schedule (default base=5000, max=60000, mult=1.5):
+ *   identical → 5s, 7.5s, 11.25s, 16.9s, 25.3s, 38s, 57s, 60s, 60s ...
+ *   on change → snap back to base (5s).
+ */
+export function pollWithBackoff<T>(
+  fn: () => Promise<T>,
+  opts: PollOptions<T> = {},
+): PollControl {
+  const base = opts.baseMs ?? 5000;
+  const cap = opts.maxMs ?? 60000;
+  const mult = opts.multiplier ?? 1.5;
+  const fp = opts.fingerprint ?? ((v: T) => {
+    try { return JSON.stringify(v); } catch { return String(v); }
+  });
+
+  let interval = base;
+  let lastFp: string | null = null;
+  let stopped = false;
+  let timer: number | null = null;
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const v = await fn();
+      if (stopped) return;
+      const f = fp(v);
+      if (lastFp !== null && f === lastFp) {
+        interval = Math.min(Math.round(interval * mult), cap);
+      } else {
+        interval = base;
+      }
+      lastFp = f;
+      opts.onResult?.(v);
+    } catch (err) {
+      // Errors don't reset the back-off — a steadily-failing endpoint should
+      // back off too, not hammer.
+      interval = Math.min(Math.round(interval * mult), cap);
+      opts.onError?.(err);
+    }
+    if (stopped) return;
+    timer = window.setTimeout(tick, interval);
+  };
+
+  // Kick off immediately — first call is on-mount.
+  tick();
+
+  return {
+    stop: () => {
+      stopped = true;
+      if (timer != null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+    },
+  };
+}

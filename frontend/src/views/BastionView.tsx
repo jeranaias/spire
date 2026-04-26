@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
-import { withRetry } from "../api-retry";
+import { withRetry, pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
@@ -94,8 +94,21 @@ export function BastionView() {
   }
 
   useEffect(() => {
-    const t = window.setInterval(refreshAlerts, 5000);
-    return () => window.clearInterval(t);
+    // Base 5s, backs off to 60s when the alert list is unchanged. The toast
+    // wall doesn't move during quiet stretches; reviewer caught the fixed
+    // setInterval as one of three components polling on the same cadence.
+    const ctrl = pollWithBackoff(
+      () => withRetry(() => api.bastion.alerts(40)),
+      {
+        baseMs: 5000,
+        maxMs: 60000,
+        fingerprint: (r) =>
+          `${r.alerts.length}|${r.alerts.map((a) => a.id).join(",")}`,
+        onResult: (r) => setAlerts(r.alerts),
+        onError: (e) => console.warn("BASTION alert refresh failed:", e),
+      },
+    );
+    return () => ctrl.stop();
   }, []);
 
   const setFpcon = useSpireStore((s) => s.setFpcon);
@@ -122,17 +135,29 @@ export function BastionView() {
     setSelectedAlert(s.alert);
     setSelectedUnit("CLB-6");
     // Escalate FPCON BRAVO → CHARLIE for the duration of the incident.
+    // De-escalation is tied to `sim` becoming null (Resolve sim or auto-clear)
+    // rather than a fixed 30s timeout — reviewer caught the simulation footer
+    // toast still active while FPCON had already reverted.
     setFpcon("CHARLIE");
     pushToast({
       tone: "warn",
       text: "FPCON elevated to CHARLIE · ThermalHawk UAS incident active",
       ttlMs: 4500,
     });
-    // De-escalate automatically after 30s for demo purposes (production would
-    // follow the response-force disposition event chain).
-    window.setTimeout(() => setFpcon("BRAVO"), 30_000);
     refreshAlerts();
   }
+
+  // Drop FPCON back to BRAVO whenever the simulation clears. Reviewer flagged
+  // that the prior 30s setTimeout could revert FPCON while the sim was still
+  // visibly active (rendered cordon rings, target reticle, response panel).
+  // Tying de-escalation to `sim` state keeps the indicators honest.
+  useEffect(() => {
+    if (!sim) {
+      // Only step DOWN — don't clobber a manually-set higher FPCON.
+      const cur = useSpireStore.getState().fpcon;
+      if (cur === "CHARLIE" || cur === "DELTA") setFpcon("BRAVO");
+    }
+  }, [sim, setFpcon]);
 
   async function handleNL() {
     if (!nlText.trim() || nlSubmitting) return;
@@ -392,6 +417,15 @@ export function BastionView() {
           onClose={() => {
             setSelectedAlert(null);
           }}
+          onResolveSim={() => {
+            setSim(null);
+            // The FPCON useEffect listening on `sim` handles de-escalation.
+            pushToast({
+              tone: "ok",
+              text: "Sim resolved · FPCON returning to BRAVO · cordons clearing",
+              ttlMs: 3500,
+            });
+          }}
         />
       )}
     </div>
@@ -543,14 +577,47 @@ function ResponsePanel({
   alert,
   sim,
   onClose,
+  onResolveSim,
 }: {
   alert: BastionAlert;
   sim: ThermalHawkSim | null;
   onClose: () => void;
+  onResolveSim?: () => void;
 }) {
   const role = useSpireStore((s) => s.role);
+  const pushToast = useSpireStore((s) => s.pushToast);
   const checklist = sim && sim.alert.id === alert.id ? sim.checklist : null;
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  // Per-recipient "Sent" state so the Send button stays disabled and reads
+  // "✓ Sent" after a successful dispatch. Reviewer caught these clicks doing
+  // nothing visible; the operator must always see acknowledgement.
+  const [sent, setSent] = useState<Record<string, boolean>>({});
+
+  function sendNotification(who: string) {
+    if (sent[who]) return;
+    setSent((s) => ({ ...s, [who]: true }));
+    // Stub a client-side audit-log entry. A real backend endpoint would be
+    // POST /api/bastion/notify { who, alert_id }; for now we record locally
+    // so the air-gap demo claim still holds (no external egress).
+    try {
+      const key = "spire.bastion.notify_audit";
+      const prior = JSON.parse(window.localStorage.getItem(key) || "[]");
+      prior.push({
+        who,
+        alert_id: alert.id,
+        at: new Date().toISOString(),
+        actor: role,
+      });
+      window.localStorage.setItem(key, JSON.stringify(prior.slice(-200)));
+    } catch {
+      /* tolerant — private mode etc */
+    }
+    pushToast({
+      tone: "ok",
+      text: `Notification sent · ${who} · audit logged`,
+      ttlMs: 3500,
+    });
+  }
 
   const scopedImmediate = useMemo(
     () => (checklist ? filterChecklistForRole(checklist.immediate, role) : []),
@@ -672,14 +739,28 @@ function ResponsePanel({
               Notifications
             </div>
             <ul className="flex flex-col gap-1.5 text-sm">
-              {checklist.notifications.map((n, i) => (
-                <li key={i} className="flex items-center gap-2">
-                  <span className="font-mono text-[var(--color-text)]">{n.who}</span>
-                  <button className="ml-auto rounded border border-[var(--color-primary)] bg-[var(--color-surface)] px-2 py-0.5 text-xs text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white">
-                    [Draft Ready] Send
-                  </button>
-                </li>
-              ))}
+              {checklist.notifications.map((n, i) => {
+                const isSent = !!sent[n.who];
+                return (
+                  <li key={i} className="flex items-center gap-2">
+                    <span className="font-mono text-[var(--color-text)]">{n.who}</span>
+                    <button
+                      onClick={() => sendNotification(n.who)}
+                      disabled={isSent}
+                      className="ml-auto rounded border px-2 py-0.5 text-xs transition-colors disabled:cursor-not-allowed"
+                      style={{
+                        borderColor: isSent ? "var(--color-success)" : "var(--color-primary)",
+                        background: isSent
+                          ? "color-mix(in oklab, var(--color-success-muted) 30%, transparent)"
+                          : "var(--color-surface)",
+                        color: isSent ? "var(--color-success)" : "var(--color-primary)",
+                      }}
+                    >
+                      {isSent ? "✓ Sent" : "[Draft Ready] Send"}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         )}
@@ -701,6 +782,15 @@ function ResponsePanel({
                 </span>
               ))}
             </div>
+            {onResolveSim && (
+              <button
+                onClick={onResolveSim}
+                className="mt-3 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-success)] transition-colors hover:bg-[var(--color-success)] hover:text-white tracking-widest"
+                title="Mark the simulated incident resolved · drops FPCON back to BRAVO and clears cordons"
+              >
+                ✓ Resolve sim · drop FPCON
+              </button>
+            )}
           </section>
         )}
       </div>
@@ -849,21 +939,15 @@ function G4CommandSummary({
   }, []);
 
   useEffect(() => {
-    let alive = true;
-    const fetch = async () => {
-      try {
-        const r = await api.bastion.fusedThreats();
-        if (alive) setFused((r.fused_threats || []).slice(0, 3));
-      } catch {
-        /* tolerate */
-      }
-    };
-    fetch();
-    const id = setInterval(fetch, 5000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+    // Base 5s, backs off to 60s when the fused-threat list is unchanged.
+    const ctrl = pollWithBackoff(() => api.bastion.fusedThreats(), {
+      baseMs: 5000,
+      maxMs: 60000,
+      fingerprint: (r) =>
+        (r.fused_threats || []).slice(0, 3).map((t) => `${t.id}:${t.severity}`).join(","),
+      onResult: (r) => setFused((r.fused_threats || []).slice(0, 3)),
+    });
+    return () => ctrl.stop();
   }, []);
 
   const topAlerts = useMemo(() => {

@@ -15,6 +15,7 @@ import {
   type SyncStateResponse,
   type SyncConflict,
 } from "../api";
+import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
 
 const CMP_COLOR: Record<string, string> = {
@@ -45,26 +46,31 @@ export function NodeStatus() {
 
   useEffect(() => {
     if (!visible) return;
-    let alive = true;
-    async function fetchAll() {
-      try {
+    // Base 5s, backs off to 60s when sync state + conflict list are unchanged.
+    // In a steady-state demo the vector clocks rarely change between ticks,
+    // so the back-off snaps the cadence way down without losing reactivity.
+    const ctrl = pollWithBackoff(
+      async () => {
         const [s, c] = await Promise.all([
           api.system.syncState(),
           api.system.syncConflicts(),
         ]);
-        if (!alive) return;
-        setState(s);
-        setConflicts(c.pending);
-      } catch {
-        /* tolerate */
-      }
-    }
-    fetchAll();
-    const id = setInterval(fetchAll, 5000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+        return { s, c };
+      },
+      {
+        baseMs: 5000,
+        maxMs: 60000,
+        // Ignore the per-call timestamp jitter on the sync-state response —
+        // fingerprint only on the fields that actually drive the chip color.
+        fingerprint: ({ s, c }) =>
+          `${s.compare}|${s.events_logged}|${c.pending.length}|${c.pending.map((x) => x.id).join(",")}`,
+        onResult: ({ s, c }) => {
+          setState(s);
+          setConflicts(c.pending);
+        },
+      },
+    );
+    return () => ctrl.stop();
   }, [visible]);
 
   if (!visible || !state) return null;
