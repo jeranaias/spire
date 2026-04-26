@@ -235,11 +235,19 @@ export function BastionView() {
     prevAlertIdsRef.current = new Set(alerts.map((a) => a.id));
   }, [alerts]);
 
-  async function triggerThermalHawk() {
+  // ThermalHawk sim trigger. Used to live as an in-column button (#37
+  // moved it). Now the map agent owns the SIMULATE button in the COP
+  // header; we expose the trigger via a custom window event so the map
+  // agent can dispatch `new CustomEvent('spire:simulate-thermalhawk')`
+  // without re-implementing the FPCON / sim / toast flow. This keeps
+  // the side-effects (FPCON CHARLIE, sim state, alert refresh) co-located
+  // with the alert column that owns the response panel.
+  const triggerThermalHawk = useCallback(async () => {
     const s = await api.bastion.simulateThermalHawk("CLB-6");
     setSim(s);
     setSelectedAlert(s.alert);
     setSelectedUnit("CLB-6");
+    setSelectedUnitIdGlobal("CLB-6");
     // Escalate FPCON BRAVO → CHARLIE for the duration of the incident.
     // De-escalation is tied to `sim` becoming null (Resolve sim or auto-clear)
     // rather than a fixed 30s timeout — reviewer caught the simulation footer
@@ -251,7 +259,15 @@ export function BastionView() {
       ttlMs: 4500,
     });
     refreshAlerts();
-  }
+  }, [pushToast, setFpcon, setSelectedUnitIdGlobal]);
+
+  useEffect(() => {
+    const handler = () => {
+      void triggerThermalHawk();
+    };
+    window.addEventListener("spire:simulate-thermalhawk", handler);
+    return () => window.removeEventListener("spire:simulate-thermalhawk", handler);
+  }, [triggerThermalHawk]);
 
   // Drop FPCON back to BRAVO whenever the simulation clears. Reviewer flagged
   // that the prior 30s setTimeout could revert FPCON while the sim was still
