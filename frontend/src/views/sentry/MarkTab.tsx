@@ -323,7 +323,7 @@ function MarkingBanner({ result }: { result: MarkResult }) {
             className="mt-1 font-mono text-xl font-semibold uppercase tracking-wide"
             style={{ color, lineHeight: 1 }}
           >
-            {cls.replace("_", " ")}
+            {cls.replace(/_/g, " ")}
             {result.caveats_recommended.length > 0 && (
               <span className="ml-2 text-xl text-[var(--color-text-secondary)]">
                 // {result.caveats_recommended.join(" / ")}

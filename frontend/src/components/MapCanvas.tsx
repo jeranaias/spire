@@ -1070,7 +1070,7 @@ export function MapCanvas({
                 className="font-mono text-xs uppercase tracking-wider"
                 style={{ color: TYPE_COLOR[hoverBuilding.type]?.stroke ?? "#9ca3af" }}
               >
-                {hoverBuilding.id} · {hoverBuilding.type.replace("_", " ")}
+                {hoverBuilding.id} · {hoverBuilding.type.replace(/_/g, " ")}
               </div>
               <div className="mt-0.5 text-base font-semibold text-[var(--color-text)]">
                 {hoverBuilding.name}
