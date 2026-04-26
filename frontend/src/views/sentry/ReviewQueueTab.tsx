@@ -23,6 +23,15 @@ const CLASS_COLOR: Record<string, string> = {
   TOP_SECRET: "var(--color-danger)",
 };
 
+// Walkthrough #11 — describe each Held reason so badges have hover detail
+// and operators can triage by reason rather than by mass-repeated discrepancy.
+const HELD_REASON_DESCRIPTION: Record<string, string> = {
+  classification_discrepancy: "Source marking and detected marking diverge — review for correctness.",
+  ambiguous_pii: "Possible PII without supporting context (no EDIPI/SSN/phone). Could be a false positive.",
+  novel_pattern: "Combination of evidence (controlled item + grid) the engine has not seen before.",
+  low_confidence_evidence: "Multiple flag categories but classifier confidence is below 0.90.",
+};
+
 export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
   const [queue, setQueue] = useState<SentryReviewQueue | null>(null);
   // Records resolved locally via optimistic removal so the view doesn't depend
@@ -112,6 +121,12 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
     [pushToast],
   );
 
+  // Walkthrough #22 — confirmation modal for bulk-approve. The action sits
+  // dangerously close to the column-header bulk button; a misclick used to
+  // fire the bulk approval with no audit prompt. Now we stage the request
+  // and surface a confirmation modal that names the count + audit posture.
+  const [bulkConfirm, setBulkConfirm] = useState<{ col: Column; action: Action; count: number } | null>(null);
+
   const runBulk = useCallback(
     async (col: Column, action: Action) => {
       if (!filteredQueue || bulkRunning) return;
@@ -138,6 +153,17 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
       }
     },
     [filteredQueue, bulkRunning, pushToast],
+  );
+
+  // Walkthrough #22 — bulk action goes through the confirmation modal.
+  const requestBulk = useCallback(
+    (col: Column, action: Action) => {
+      if (!filteredQueue) return;
+      const items: any[] = (filteredQueue as any)[col];
+      if (!items || items.length === 0) return;
+      setBulkConfirm({ col, action, count: items.length });
+    },
+    [filteredQueue],
   );
 
   // Keyboard: ↑/↓ moves within the currently-selected column; A approves, R rejects
@@ -257,7 +283,7 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
             selectedIdx={selected?.col === "auto_cleared" ? selected.idx : null}
             onSelect={(idx) => setSelected({ col: "auto_cleared", idx })}
             bulkAction="Approve all"
-            onBulk={() => runBulk("auto_cleared", "approve")}
+            onBulk={() => requestBulk("auto_cleared", "approve")}
             bulkRunning={bulkRunning}
             onApprove={(sr) => resolveOne(sr, "approve")}
             onReject={(sr) => resolveOne(sr, "reject")}
@@ -269,7 +295,7 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
             selectedIdx={selected?.col === "flagged" ? selected.idx : null}
             onSelect={(idx) => setSelected({ col: "flagged", idx })}
             bulkAction="Approve remaining"
-            onBulk={() => runBulk("flagged", "approve")}
+            onBulk={() => requestBulk("flagged", "approve")}
             bulkRunning={bulkRunning}
             onApprove={(sr) => resolveOne(sr, "approve")}
             onReject={(sr) => resolveOne(sr, "reject")}
@@ -295,10 +321,121 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
         )}
       </div>
 
+      {/* Walkthrough #20 — aggregation matrix renders matrix-first, prose
+          below, anchored at the bottom of the queue. */}
       {showAggregation && queue && (
         <AggregationRiskPanel risks={queue.aggregation_risks} onClose={() => setShowAggregation(false)} />
       )}
+
+      {/* Walkthrough #22 — bulk-action confirmation modal. */}
+      {bulkConfirm && (
+        <BulkConfirmModal
+          col={bulkConfirm.col}
+          action={bulkConfirm.action}
+          count={bulkConfirm.count}
+          onCancel={() => setBulkConfirm(null)}
+          onConfirm={() => {
+            const c = bulkConfirm;
+            setBulkConfirm(null);
+            void runBulk(c.col, c.action);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// Walkthrough #22 — confirmation modal so a stray click on the column-
+// header bulk button never silently approves 374 records. Names the count
+// + records the audit consequence so the operator commits with intent.
+function BulkConfirmModal({
+  col,
+  action,
+  count,
+  onCancel,
+  onConfirm,
+}: {
+  col: Column;
+  action: Action;
+  count: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const verb = action === "approve" ? "approve" : "reject";
+  const colLabel = col === "auto_cleared" ? "auto-cleared" : col === "flagged" ? "flagged" : "held";
+  return (
+    <div
+      className="fixed inset-0 z-[8500] flex items-center justify-center bg-black/60 p-6"
+      role="dialog"
+      aria-modal="true"
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
+      >
+        <div className="font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-warning)]">
+          Confirm Bulk {action === "approve" ? "Approval" : "Rejection"}
+        </div>
+        <div className="mt-2 spire-body text-sm">
+          {action === "approve" ? "Approve" : "Reject"} all <strong>{count.toLocaleString()}</strong>{" "}
+          {colLabel} records?
+        </div>
+        <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+          A bulk-{verb} entry will be written to the SHA-256 chained audit
+          log. Individual undo is still available per-record from toasts.
+        </div>
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-sm border border-[var(--color-border)] px-3 py-1.5 font-mono text-xs font-semibold uppercase text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] tracking-wider"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={clsx(
+              "rounded-sm px-4 py-1.5 font-mono text-xs font-semibold uppercase text-white tracking-wider",
+              action === "approve"
+                ? "border border-[var(--color-success)] bg-[var(--color-success)] hover:brightness-110"
+                : "border border-[var(--color-danger)] bg-[var(--color-danger)] hover:brightness-110",
+            )}
+          >
+            Confirm {verb} {count.toLocaleString()}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Walkthrough #28 — differentiate the badge by severity. Marking errors
+// (UNCLASSIFIED → CUI) are warning orange; spillage risks (UNCLASSIFIED
+// → SECRET) are danger red and louder. Keeps the text label distinct so
+// the audit trail shows the *kind* of mismatch, not just "MIS-MARKED".
+function MismatchBadge({ severity }: { severity: string }) {
+  const isSpillage = severity === "spillage_risk";
+  const color = isSpillage ? "var(--color-danger)" : "var(--color-warning)";
+  const label = isSpillage ? "SPILLAGE RISK" : "MARKING ERROR";
+  return (
+    <span
+      className="ml-auto rounded-sm border px-1 font-semibold tracking-wider"
+      style={{
+        color,
+        borderColor: color,
+        background: `color-mix(in oklab, ${color} 12%, transparent)`,
+        boxShadow: isSpillage ? `0 0 6px ${color}` : undefined,
+      }}
+      title={
+        isSpillage
+          ? "Source marked UNCLASSIFIED but engine recommends SECRET-or-higher. Potential spillage."
+          : "Source marking does not match recommended marking. Likely under-marking error."
+      }
+    >
+      {label}
+    </span>
   );
 }
 
@@ -392,22 +529,25 @@ function ReviewCard({
           : "border-[var(--color-border)] hover:border-[var(--color-border-active)]",
       )}
     >
-      {/* Banner-style classification stripe — DoDM 5200.01 convention */}
+      {/* Walkthrough #29 — flip the arrow direction so the prose reads
+          "orig: UNCLASSIFIED → recommend: CUI" rather than the ambiguous
+          "CUI ← UNCLASSIFIED" that scanned as a downgrade. Walkthrough #28
+          differentiates marking_error vs spillage_risk badge severity. */}
       <div
-        className="flex items-center gap-2 border-b border-[var(--color-border)] px-2 py-1 font-mono text-sm font-semibold uppercase tracking-wider"
+        className="flex flex-wrap items-center gap-1.5 border-b border-[var(--color-border)] px-2 py-1 font-mono text-xs font-semibold uppercase tracking-wider"
         style={{
           background: `color-mix(in oklab, ${detectedColor} 14%, var(--color-bg))`,
           color: detectedColor,
         }}
       >
         <span className="h-3 w-1 rounded-[1px]" style={{ background: detectedColor }} />
-        <span>{detected}</span>
-        <span className="text-[var(--color-text-muted)]">←</span>
-        <span className="text-[var(--color-text-muted)]">{record.source_classification}</span>
+        <span className="text-[var(--color-text-muted)]">orig:</span>
+        <span className="text-[var(--color-text)]">{record.source_classification}</span>
+        <span className="text-[var(--color-text-muted)]">→</span>
+        <span className="text-[var(--color-text-muted)]">recommend:</span>
+        <span style={{ color: detectedColor }}>{detected}</span>
         {record.classification_discrepancy && (
-          <span className="ml-auto rounded-sm border border-[var(--color-danger)] px-1 text-xs" style={{ color: "var(--color-danger)" }}>
-            MIS-MARKED
-          </span>
+          <MismatchBadge severity={record.mismatch_severity ?? "marking_error"} />
         )}
       </div>
       <div className="px-2 py-2">
@@ -417,6 +557,21 @@ function ReviewCard({
           <span className="text-[var(--color-text-muted)]">· {record.unit_name}</span>
         </div>
         <div className="line-clamp-2 text-sm text-[var(--color-text-secondary)]">{record.remark}</div>
+        {/* Walkthrough #11 — surface diversified Held reasons as badges so
+            the operator can triage the queue by reason kind. */}
+        {Array.isArray(record.held_reasons) && record.held_reasons.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1 text-xs">
+            {record.held_reasons.map((r: string) => (
+              <span
+                key={r}
+                className="rounded-sm border border-[var(--color-danger-muted)] px-1 py-[1px] font-mono font-semibold uppercase tracking-wider text-[var(--color-danger)]"
+                title={HELD_REASON_DESCRIPTION[r] ?? r}
+              >
+                {r.replace(/_/g, " ")}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="mt-1.5 flex items-center gap-1 text-xs">
           {(record.flags || []).map((f: string) => (
             <span
@@ -597,13 +752,24 @@ function InspectorPane({
             Routing
           </div>
           <div className="flex items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-base">
+            {/* Walkthrough #7 — single source of truth: record.routed_to +
+                record.confidence are the canonical fields; no other component
+                re-derives them. Walkthrough #32 — operator-readable text. */}
             <span className="font-mono text-[var(--color-text)]">
-              {record.routed_to === "tier2_llm" ? "Tier 2 · LLM gate" : "Tier 1 · regex ensemble"}
+              {record.routed_to === "tier2_llm" ? "Language Model Reviewer" : "Pattern Engine"}
             </span>
             <span className="text-[var(--color-text-muted)]">·</span>
             <span className="font-mono tabular-nums text-[var(--color-text-secondary)]">
               confidence {(record.confidence ?? 0).toFixed(2)}
             </span>
+            {record.routing_locked && (
+              <span
+                className="ml-auto font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
+                title="Routing decision is locked at processing time and persisted with the record."
+              >
+                LOCKED
+              </span>
+            )}
           </div>
         </section>
       </div>
