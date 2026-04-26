@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ComposedChart,
   Line,
@@ -18,10 +19,21 @@ type Horizon = "7" | "14" | "30";
 
 export function ForecastTab() {
   const role = useSpireStore((s) => s.role);
-  const [unit, setUnit] = useState<string>("FLEET");
+  const [params] = useSearchParams();
+  // Honor an inbound ?unit=… deep link (e.g. from PredictedFailurePanel's
+  // Draft Action button). Defaults to FLEET if no param.
+  const initialUnit = params.get("unit") ?? "FLEET";
+  const [unit, setUnit] = useState<string>(initialUnit);
   const [horizon, setHorizon] = useState<Horizon>("14");
   const [data, setData] = useState<Forecast | null>(null);
   const [units, setUnits] = useState<string[]>([]);
+
+  // Re-sync local state if the URL param changes (back / forward nav).
+  useEffect(() => {
+    const u = params.get("unit");
+    if (u && u !== unit) setUnit(u);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   // Scoped units — role-aware so a G-4 doesn't get MALS-31 in the dropdown.
   useEffect(() => {
