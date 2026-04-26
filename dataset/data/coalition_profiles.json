@@ -5,7 +5,7 @@
     "FVEY_BASE": {
       "display_name": "Five Eyes · Base Release",
       "partners": ["USA", "GBR", "CAN", "AUS", "NZL"],
-      "distribution_statement": "DISTRIBUTION D · REL TO FVEY. Further dissemination requires originator approval.",
+      "distribution_statement": "DISTRIBUTION C · authorized to U.S. Government and contractors · REL TO USA, AUS, CAN, GBR, NZL · further dissemination requires originator approval.",
       "authorized_classifications": ["UNCLASSIFIED", "CUI"],
       "authorized_unit_parents": ["2d MLG", "1st MLG", "3d MLG", "2d MarDiv", "1st MarDiv", "2d MAW", "3d MAW"],
       "field_redactions": ["EDIPI", "POC_PHONE", "billet_nickname"],
@@ -15,7 +15,7 @@
     "FVEY_LOG": {
       "display_name": "Five Eyes · Logistics Coordination",
       "partners": ["USA", "GBR", "CAN", "AUS", "NZL"],
-      "distribution_statement": "DISTRIBUTION D · REL TO FVEY LOG. Coordination-purpose only.",
+      "distribution_statement": "DISTRIBUTION C · authorized to U.S. Government and contractors · REL TO USA, AUS, CAN, GBR, NZL · for logistics coordination only.",
       "authorized_classifications": ["UNCLASSIFIED", "CUI"],
       "authorized_unit_parents": ["2d MLG", "1st MLG", "3d MLG"],
       "authorized_categories": ["readiness_summary", "cannibalization", "requisition_status", "convoy"],
@@ -26,7 +26,7 @@
     "JPN_COALITION": {
       "display_name": "Japan · JSDF Coalition",
       "partners": ["USA", "JPN"],
-      "distribution_statement": "DISTRIBUTION D · REL TO JPN. Per 2024 US-JPN Logistics Coordination MOU.",
+      "distribution_statement": "DISTRIBUTION C · authorized to U.S. Government and contractors · REL TO JPN · per 2024 US-JPN Logistics Coordination MOU.",
       "authorized_classifications": ["UNCLASSIFIED"],
       "authorized_unit_parents": ["2d MLG", "1st MLG", "3d MLG", "MAG-31", "MAG-39"],
       "authorized_categories": ["readiness_summary", "convoy", "coalition_exercise_logistics"],
@@ -41,7 +41,7 @@
     "AUS_COALITION": {
       "display_name": "Australia · ADF Coalition",
       "partners": ["USA", "AUS"],
-      "distribution_statement": "DISTRIBUTION D · REL TO AUS. Per AUSMIN Logistics Interoperability Annex.",
+      "distribution_statement": "DISTRIBUTION C · authorized to U.S. Government and contractors · REL TO AUS · per AUSMIN Logistics Interoperability Annex.",
       "authorized_classifications": ["UNCLASSIFIED", "CUI"],
       "authorized_unit_parents": ["2d MLG", "1st MLG", "3d MLG", "2d MarDiv", "1st MarDiv"],
       "authorized_categories": ["readiness_summary", "convoy", "cannibalization", "combined_exercise_logistics"],
@@ -56,7 +56,7 @@
     "PHL_COALITION": {
       "display_name": "Philippines · AFP Coalition",
       "partners": ["USA", "PHL"],
-      "distribution_statement": "DISTRIBUTION D · REL TO PHL. Per 2024 Enhanced Defense Cooperation Agreement Annex.",
+      "distribution_statement": "DISTRIBUTION C · authorized to U.S. Government and contractors · REL TO PHL · per 2024 Enhanced Defense Cooperation Agreement Annex.",
       "authorized_classifications": ["UNCLASSIFIED"],
       "authorized_unit_parents": ["1st MLG", "3d MLG", "MAG-39"],
       "authorized_categories": ["readiness_summary", "coalition_exercise_logistics"],
