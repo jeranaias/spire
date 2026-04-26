@@ -567,8 +567,11 @@ export function BastionView() {
             <span className="whitespace-nowrap">
               {cop.ecps.length} ECPs
             </span>
-            <span className="whitespace-nowrap">
-              {cop.response_forces_count} RF
+            <span
+              className="whitespace-nowrap"
+              title={`${cop.rally_points.length} rally points, ${cop.response_forces_count} response-force teams assigned`}
+            >
+              {cop.rally_points.length} RP · {cop.response_forces_count} RF
             </span>
             {/* Walkthrough audit: dropped the FPCON pill + // SYNTHETIC DATA
              * stamp from the COP card. FPCON lives in the StatusStrip and
