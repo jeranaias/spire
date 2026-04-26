@@ -129,6 +129,29 @@ export function BastionView() {
     };
   }, [role]);
 
+  // Walkthrough audit: '/' focuses the alert search box (vim/Slack/Linear
+  // convention). Only fires when focus isn't already in a field, so a
+  // Marine typing '/' inside SPIRO or the search itself doesn't get yanked.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "/") return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        (t && t.isContentEditable)
+      ) return;
+      const search = document.getElementById("bastion-alert-search") as HTMLInputElement | null;
+      if (search) {
+        e.preventDefault();
+        search.focus();
+        search.select();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Apply backend response to local + global state in one place. Both the
   // initial fetch and the poll converge on this so the TopBar badge,
   // severity tooltip, and any future cross-view consumer always see the
@@ -940,11 +963,12 @@ function AlertStreamHeader({
       </div>
       <div className="px-2 pb-2">
         <input
+          id="bastion-alert-search"
           type="search"
           value={searchQuery}
           onChange={(e) => onSearchQuery(e.target.value)}
-          placeholder="Search title, body, unit…"
-          aria-label="Filter alerts"
+          placeholder="Search title, body, unit… ( / )"
+          aria-label="Filter alerts (press / to focus)"
           className="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:outline-none"
         />
       </div>
