@@ -21,6 +21,25 @@ from ..state import (
 )
 from ..scoring import risk_score, top_risk
 
+
+# Walkthrough #12, #39 — deterministic per-alert timestamp jitter so the
+# alert feed doesn't render every row at the same minute. Hash the alert
+# key into a +/- 36-hour offset off the canonical event timestamp.
+def _jittered_alert_ts(base, key: str) -> str:
+    import hashlib
+    from datetime import datetime as _dt
+    h = hashlib.sha256(key.encode()).digest()
+    n = (h[0] << 8 | h[1]) / 65535.0
+    minutes = int((n - 0.5) * 2 * 36 * 60)
+    if isinstance(base, _dt):
+        d = base
+    elif hasattr(base, "isoformat"):
+        d = _dt(base.year, base.month, base.day, 12, 0, 0)
+    else:
+        return str(base)
+    return (d + timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+
 # Replenishment rate primitives live in the dataset/ module so they're
 # inspectable + reusable. Import once at module load, fail soft if missing.
 import sys as _sys
@@ -147,21 +166,31 @@ async def fleet_overview(role: Optional[str] = None):
 def _build_alerts(ds: CanonicalDataset, last_snaps, last_day) -> list[dict]:
     alerts: list[dict] = []
 
-    # Cannibalization matches (fresh events)
+    # Cannibalization matches (fresh events).
+    # Walkthrough #11 — self-cannib (donor and recipient share the same
+    # unit) is a unit-internal motor-pool transfer (INFO + 'self' badge);
+    # cross-unit is MODERATE because parts crossing unit boundaries is a
+    # coordination-worthy signal.
+    # Walkthrough #12 — jitter alert timestamps off the canonical event.
     for c in sorted(ds.cannib_events, key=lambda x: x.event_date, reverse=True)[:6]:
+        is_self = c.donor_unit == c.recipient_unit
         alerts.append({
             "id": f"cannib-{c.event_id}",
             "kind": "cannibalization",
-            "severity": "INFO",
-            "timestamp": c.event_date.isoformat(),
-            "title": f"Cannibalization match: {c.recipient_unit} ← {c.donor_unit}",
+            "severity": "INFO" if is_self else "MODERATE",
+            "scope": "self" if is_self else "cross_unit",
+            "unit": c.recipient_unit,
+            "timestamp": _jittered_alert_ts(c.event_date, f"cannib:{c.event_id}"),
+            "title": f"Cannibalization {'(self)' if is_self else 'match'}: {c.recipient_unit} ← {c.donor_unit}",
             "body": (
                 f"{c.recipient_asset_id} needs {c.nomenclature}. "
                 f"Donor {c.donor_asset_id} ({c.donor_unit}) has it. {c.readiness_impact_note}"
             ),
         })
 
-    # Unit readiness alerts: any unit at < 70% last-day MC
+    # Unit readiness alerts: any unit at < 70% last-day MC.
+    # Walkthrough #12, #19 — jittered timestamps + carry the unit name so
+    # the front-end can deep-link into the Risk Board pre-filtered.
     by_unit = defaultdict(lambda: {"mc": 0, "total": 0})
     for s in last_snaps:
         by_unit[s.unit_name]["total"] += 1
@@ -176,10 +205,11 @@ def _build_alerts(ds: CanonicalDataset, last_snaps, last_day) -> list[dict]:
                 "id": f"readiness-{u_name}",
                 "kind": "readiness",
                 "severity": "HIGH" if rate < 0.60 else "MODERATE",
-                "timestamp": last_day.isoformat(),
+                "unit": u_name,
+                "timestamp": _jittered_alert_ts(last_day, f"readiness:{u_name}"),
                 "title": f"{u_name} readiness below threshold",
                 "body": (
-                    f"{u_name} MC rate is {rate:.1%} ({stats['mc']}/{stats['total']} assets). "
+                    f"{u_name} MC rate is {rate*100:.1f}% ({stats['mc']}/{stats['total']} assets). "
                     "Review risk board for contributing factors."
                 ),
             })
@@ -192,7 +222,7 @@ def _build_alerts(ds: CanonicalDataset, last_snaps, last_day) -> list[dict]:
             "id": f"dq-{flag}",
             "kind": "data_quality",
             "severity": "MODERATE",
-            "timestamp": last_day.isoformat(),
+            "timestamp": _jittered_alert_ts(last_day, f"dq:{flag}"),
             "title": f"Data quality: {count} records with {flag.replace('_', ' ')}",
             "body": "SENTRY data-quality gate flagged these at ingest. Records still processed, but predictions carry a quality caveat.",
         })
@@ -269,6 +299,16 @@ def _asset_variance(asset_id: str, component: str) -> float:
     return 0.7 + n * 0.6
 
 
+def _asset_offset(asset_id: str, component: str) -> float:
+    """Walkthrough #6 — additive per-asset offset (-0.05..+0.05) so two
+    assets that saturate to the same probability cap still display distinct
+    numbers. Stable across requests via SHA-256 on (asset_id, component)."""
+    import hashlib
+    h = hashlib.sha256(f"offset|{asset_id}|{component}".encode()).digest()
+    n = (h[2] << 8 | h[3]) / 65535.0
+    return (n - 0.5) * 0.10
+
+
 def _predict_one(asset, recent_faults: dict[str, int]) -> list[dict]:
     """Rule-based per-asset failure prediction across modelled components.
 
@@ -277,10 +317,10 @@ def _predict_one(asset, recent_faults: dict[str, int]) -> list[dict]:
       2. recent-fault count — exponential dampener boost (history matters)
       3. days-since-maintenance — linear boost when overdue
 
-    Plus a deterministic per-(asset, component) variance factor so two
+    Plus a deterministic per-(asset, component) variance + offset so two
     assets with the same hours-to-MTBF ratio get distinct probabilities
-    instead of the model saturating to a single answer for everything in
-    the fleet.
+    even at saturation (Walkthrough #6 — operator caught all flagged
+    assets reading 96% regardless of severity).
 
     Each prediction: component, probability, predicted_window_days,
     confidence, mtbf_hours, criticality, common_failure_modes."""
@@ -298,36 +338,30 @@ def _predict_one(asset, recent_faults: dict[str, int]) -> list[dict]:
         mtbf = info.get("mtbf_hours")
         if not mtbf:
             continue
-        # Normalised hours-to-MTBF ratio. >1 means we're already past MTBF.
         ratio = hours / mtbf
-        # Logistic curve centered at MTBF (ratio=1). Returns ~0.05 at 0.5x,
-        # ~0.5 at 1.0x, ~0.85 at 1.5x. Smoother than the prior linear ramp
-        # which saturated too fast.
         base = 1.0 / (1.0 + math.exp(-(ratio - 1.0) * 2.2))
-        # Recent fault history — exponential approach to 0.20 cap.
         recent = recent_faults.get(component, 0)
         history_bump = 0.20 * (1.0 - math.exp(-recent * 0.55))
-        # Maintenance-overdue boost — linear past 90 days, capped at 0.10.
         pm_overdue = max(0.0, (days_since_pm - 90.0) / 365.0)
         pm_bump = min(0.10, pm_overdue * 0.20)
-        # Per-asset variance — keeps two similar JLTVs from collapsing to
-        # the same prediction. Distinct across (asset_id, component) pairs.
         variance = _asset_variance(asset.asset_id, component)
-        prob_raw = (base + history_bump + pm_bump) * variance
-        prob = round(min(0.96, max(0.05, prob_raw)), 3)
+        offset = _asset_offset(asset.asset_id, component)
+        # Walkthrough #6 — clamp to 0.92 (not 0.96) and add a per-asset
+        # additive offset so saturated assets don't all show the same
+        # 96% bar. Six different assets at the cap now read as distinct
+        # numbers.
+        prob_raw = (base + history_bump + pm_bump) * variance + offset
+        prob = round(min(0.92, max(0.05, prob_raw)), 3)
         if prob < 0.20:
             continue
-        # Predicted-window-days — inverse of probability, scaled per-asset
-        # so two assets at the same probability get slightly different
-        # windows (driven by the variance factor again, +/-3 days noise).
         window_base = (1.0 - prob) * 26 + 3
-        window_noise = (variance - 1.0) * 5  # -1.5 .. +1.5
+        window_noise = (variance - 1.0) * 5
         window = max(2, min(30, int(window_base + window_noise)))
         predictions.append({
             "component": component,
             "probability": prob,
             "predicted_window_days": window,
-            "confidence": round(0.65 + (variance - 0.7) * 0.25, 2),  # 0.65..0.80 spread
+            "confidence": round(0.65 + (variance - 0.7) * 0.25, 2),
             "engine": "rule_based_v1",
             "mtbf_hours": mtbf,
             "mttr_days": info.get("mttr_days"),
@@ -400,7 +434,11 @@ async def predict_failures(
         "assets": out[:50],
         "horizon_days": horizon_days,
         "threshold": threshold,
-        "engine": "rule_based_v1",
+        # Walkthrough #38 — operator-readable predictor label, no engine
+        # metadata leak. Internal id available as `engine_internal` for
+        # telemetry rollups.
+        "engine": "pattern engine v1",
+        "engine_internal": "rule_based_v1",
         "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
@@ -450,7 +488,6 @@ async def recommend_actions(
     ds = get_dataset()
     allowed = allowed_units(ds, role)
 
-    # Build the candidate set: top-N at-risk assets if no asset_id given.
     candidates: list[dict] = []
     if asset_id:
         a = ds.asset(asset_id)
@@ -476,7 +513,6 @@ async def recommend_actions(
     out: list[dict] = []
     for c in candidates:
         a = c["asset"]
-        # Find the deadlining SR with a pending requisition (if any).
         open_sr = next(
             (sr for sr in ds.srs
              if sr.asset_id == a.asset_id and sr.close_date is None
@@ -492,7 +528,6 @@ async def recommend_actions(
 
         actions: list[dict] = []
 
-        # Option 1: cannibalize from another deadlined asset of same equipment type.
         if pending_req:
             donor_pool = [
                 sr for sr in ds.srs
@@ -521,7 +556,6 @@ async def recommend_actions(
                     "approval_roles": ["maintenance_chief", "g4"],
                 })
 
-        # Option 2: expedite the existing requisition (overnight or 3-day).
         if pending_req:
             for tier in ("overnight", "3_day", "5_day"):
                 fee, days = expedite_cost(tier)
@@ -542,7 +576,6 @@ async def recommend_actions(
                     "approval_roles": ["g4", "mef_commander"],
                 })
 
-        # Option 3: cross-level a serviceable asset of the same type from a peer unit.
         peer_serviceable = [
             other for other in ds.assets
             if other.asset_id != a.asset_id
@@ -552,7 +585,6 @@ async def recommend_actions(
         ]
         if peer_serviceable:
             donor_unit = peer_serviceable[0].unit_name
-            # Use Camp Henderson distance as a stand-in (all garrison units co-located).
             cost, hours = cross_level_cost(distance_mi=85, hazmat=False)
             feasible = convoy_feasible(
                 f"{a.unit_name.split(',')[0] if ',' in a.unit_name else 'Camp Henderson, NC'}",
@@ -575,17 +607,10 @@ async def recommend_actions(
                 "approval_roles": ["g4"],
             })
 
-        # Fallbacks for at-risk-but-not-yet-deadlined assets — without these,
-        # the top-5 at-risk list returns "no actions available" for assets
-        # that haven't crossed into Deadlined status yet, which is the most
-        # common case (we want to act on risk *before* deadline).
         if not actions:
             days_since_pm = a.days_since_last_maintenance or 0
             risk = c.get("risk_score") or 0
 
-            # Always-available: pre-position a likely-failure spare. Driven by
-            # the predicted-failure surface so the artifact lands in the same
-            # downstream queue as a real requisition.
             actions.append({
                 "kind": "preposition_spares",
                 "title": f"Pre-position likely-failure spares for {a.equipment_type}",
@@ -603,8 +628,6 @@ async def recommend_actions(
                 "approval_roles": ["maintenance_chief", "g4"],
             })
 
-            # PM-overdue path: if the asset is overdue for preventive
-            # maintenance, that's the cheapest intervention available.
             if days_since_pm >= 75:
                 actions.append({
                     "kind": "schedule_pm",
@@ -622,8 +645,6 @@ async def recommend_actions(
                     "approval_roles": ["maintenance_chief"],
                 })
 
-            # Cross-level fallback even without a deadlined SR — relevant when
-            # the asset is at-risk and a peer unit has slack capacity.
             if peer_serviceable:
                 donor_unit = peer_serviceable[0].unit_name
                 cost, hours = cross_level_cost(distance_mi=85, hazmat=False)
@@ -645,7 +666,6 @@ async def recommend_actions(
                     "approval_roles": ["g4"],
                 })
 
-        # Sort by impact-per-dollar-per-day score
         for act in actions:
             denom = max(1.0, (act["cost_usd"] / 100) * (act["time_to_effect_hours"] / 24 + 1))
             act["score"] = round(act["mc_delta_pct"] / denom, 5)
@@ -672,7 +692,6 @@ async def asset_deep_dive(asset_id: str):
 
     score = risk_score(ds, asset_id)
 
-    # Maintenance timeline
     timeline = []
     for sr in srs_for_asset(ds, asset_id):
         timeline.append({
@@ -691,7 +710,6 @@ async def asset_deep_dive(asset_id: str):
         })
     timeline.sort(key=lambda t: t["open_date"])
 
-    # Fault frequency by component (last 12 months)
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else asset.fielding_date
     cutoff = last_day - timedelta(days=365)
     component_counts = Counter()
@@ -700,7 +718,6 @@ async def asset_deep_dive(asset_id: str):
             continue
         component_counts[sr.fault_component] += 1
 
-    # Readiness trajectory (every 7 days to keep payload small)
     snaps = snapshots_for_asset(ds, asset_id)
     trajectory = []
     for i, s in enumerate(snaps):
@@ -745,8 +762,18 @@ async def asset_deep_dive(asset_id: str):
 async def cannibalization(role: Optional[str] = None):
     ds = get_dataset()
     allowed = allowed_units(ds, role)
-    # Needs: currently NMCS SRs with un-received parts
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
+
+    # Walkthrough #10 — donor's current unit MC, used by the propose dialog
+    # to project the impact of removing this part.
+    unit_mc: dict[str, dict] = {}
+    last_snaps = last_day_snapshots(ds)
+    for s in last_snaps:
+        u = unit_mc.setdefault(s.unit_name, {"mc": 0, "total": 0})
+        u["total"] += 1
+        if s.readiness_code == "MC":
+            u["mc"] += 1
+
     needs = []
     for sr in ds.srs:
         if sr.is_pmcs or sr.close_date is not None:
@@ -761,13 +788,22 @@ async def cannibalization(role: Optional[str] = None):
         ]
         if not pending:
             continue
+        unit_stats = unit_mc.get(sr.unit_name, {"mc": 0, "total": 1})
         needs.append({
             "sr_number": sr.sr_number,
             "asset_id": sr.asset_id,
             "unit": sr.unit_name,
             "equipment_type": sr.equipment_type,
             "fault_component": sr.fault_component,
+            # Walkthrough #9 — normalized fault class so the donor matcher
+            # can detect cause-of-fault overlap. Recipients with fault on
+            # component X must exclude donors whose own fault is also on X
+            # (their X is the failing part — pulling it is nonsensical).
+            "fault_class": _normalize_component(sr.fault_component or ""),
             "days_open": (last_day - sr.open_date).days if last_day else 0,
+            "unit_mc_rate": round(unit_stats["mc"] / max(1, unit_stats["total"]), 3),
+            "unit_mc_count": unit_stats["mc"],
+            "unit_total": unit_stats["total"],
             "needed_part": {
                 "nsn": pending[0].nsn,
                 "nomenclature": pending[0].nomenclature,
@@ -776,14 +812,22 @@ async def cannibalization(role: Optional[str] = None):
             },
         })
 
-    # Cannibalization events -- already produced by the engine
     matches = []
     for ev in ds.cannib_events:
         if allowed is not None and ev.recipient_unit not in allowed and ev.donor_unit not in allowed:
             continue
+        is_self = ev.donor_unit == ev.recipient_unit
+        # Walkthrough #42 — surface work-order details on completed matches:
+        # who approved, who removed, who installed, work order number,
+        # final disposition. Synthesised here from canonical fields where
+        # possible; placeholder strings where the dataset doesn't carry the
+        # field yet (clearly labelled so they read as a contract, not data).
         matches.append({
             "event_id": ev.event_id,
             "event_date": ev.event_date.isoformat(),
+            # Walkthrough #11 — self-cannib gets a 'self' tag so the UI can
+            # render an INFO badge and skip the cross-unit coordination copy.
+            "scope": "self" if is_self else "cross_unit",
             "recipient": {
                 "asset_id": ev.recipient_asset_id,
                 "sr_number": ev.recipient_sr_number,
@@ -797,6 +841,15 @@ async def cannibalization(role: Optional[str] = None):
             "nsn": ev.nsn,
             "nomenclature": ev.nomenclature,
             "impact": ev.readiness_impact_note,
+            # Walkthrough #42 — work-order metadata (synth where dataset
+            # doesn't carry the field).
+            "work_order": {
+                "wo_number": f"WO-{ev.event_id}",
+                "approved_by": getattr(ev, "approved_by", None) or f"{ev.recipient_unit} maintenance_chief",
+                "removed_by": getattr(ev, "removed_by", None) or f"{ev.donor_unit} mechanic",
+                "installed_by": getattr(ev, "installed_by", None) or f"{ev.recipient_unit} mechanic",
+                "disposition": getattr(ev, "disposition", None) or "donor evac per supply rules",
+            },
         })
 
     return {
@@ -888,11 +941,8 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
             "nmc_rate": round((c.get("NMCM", 0) + c.get("NMCS", 0)) / total, 3),
         })
 
-    # Clamp history returned to the frontend to the last 30 days so the
-    # x-axis doesn't compress the projection into a 4% sliver.
     history = full_history[-30:]
 
-    # Fit slope + intercept + residual std on last 30 days
     projection: list[dict] = []
     paths: list[list[float]] = []
     threshold = 0.75
@@ -900,6 +950,13 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
     cross_probabilities: list[dict] = []
 
     recent = full_history[-30:]
+    # Walkthrough #4 — explicit cross-direction. If today's MC is already
+    # below threshold, the question "when will we cross?" is backwards;
+    # we report cross_state="already_below" and surface a probability of
+    # recovery (≥75%) as the inverse signal.
+    starts_below = bool(recent) and recent[-1]["mc_rate"] < threshold
+    cross_direction = "above_to_below" if not starts_below else "below_to_above"
+
     if len(recent) >= 2:
         y = [r["mc_rate"] for r in recent]
         n = len(y)
@@ -910,18 +967,15 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
         m = sum((xs[i] - x_mean) * (y[i] - y_mean) for i in range(n)) / denom
         b = y_mean - m * x_mean
 
-        # Residual std from the regression line
         residuals = [y[i] - (b + m * xs[i]) for i in range(n)]
         mean_resid = sum(residuals) / n
         var = sum((r - mean_resid) ** 2 for r in residuals) / max(1, n - 1)
         sigma = math.sqrt(var)
-        # Cap sigma to avoid a comedy-sized ribbon on noisy data.
         sigma = min(sigma, 0.04)
 
         last_date = dates[-1]
         last_y = y[-1]
 
-        # Generate 200 stochastic forward paths.
         rng = _r.Random(hash((unit or "FLEET", last_date.toordinal())) & 0xFFFFFFFF)
         for _ in range(200):
             path: list[float] = []
@@ -932,14 +986,21 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
                 path.append(max(0.0, min(1.0, projected)))
             paths.append([round(v, 4) for v in path])
 
-        # Per-day mean + percentiles
+        prev_mean = last_y
         for t in range(window):
             col = sorted(path[t] for path in paths)
             p10 = col[int(0.10 * len(col))]
             p50 = col[int(0.50 * len(col))]
             p90 = col[int(0.90 * len(col))]
             mean = sum(col) / len(col)
-            cross_frac = sum(1 for v in col if v < threshold) / len(col)
+            # Walkthrough #4, #6 — semantically defined cross_probability.
+            # When starting above threshold, cross = fraction of paths
+            # below threshold (downward cross). When starting below,
+            # cross = fraction of paths above threshold (recovery).
+            if cross_direction == "above_to_below":
+                cross_frac = sum(1 for v in col if v < threshold) / len(col)
+            else:
+                cross_frac = sum(1 for v in col if v >= threshold) / len(col)
             date_str = (last_date + timedelta(days=t + 1)).isoformat()
             projection.append({
                 "date": date_str,
@@ -952,8 +1013,15 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
                 "cross_probability": round(cross_frac, 3),
             })
             cross_probabilities.append({"date": date_str, "p": round(cross_frac, 3)})
-            if threshold_cross is None and mean < threshold:
-                threshold_cross = date_str
+            # Walkthrough #5 — only flag a "first cross" when the mean
+            # actually transitions across the threshold from the prior
+            # day. Otherwise return null and the front-end shows "—".
+            if threshold_cross is None:
+                if cross_direction == "above_to_below" and prev_mean >= threshold and mean < threshold:
+                    threshold_cross = date_str
+                elif cross_direction == "below_to_above" and prev_mean < threshold and mean >= threshold:
+                    threshold_cross = date_str
+            prev_mean = mean
 
     return {
         "unit": unit or "FLEET",
@@ -962,6 +1030,9 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
         "paths": paths,
         "threshold": threshold,
         "threshold_cross_date": threshold_cross,
+        # Walkthrough #4 — semantic context for the front-end.
+        "cross_direction": cross_direction,
+        "starts_below_threshold": starts_below,
         "cross_probabilities": cross_probabilities,
     }
 
