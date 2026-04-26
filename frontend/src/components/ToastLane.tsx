@@ -20,8 +20,12 @@ export function ToastLane() {
   const errors = toasts.filter((t) => t.tone === "error");
   const others = toasts.filter((t) => t.tone !== "error");
 
+  // Walkthrough #19 — toast lane moved from bottom-right (where it covered
+  // REPORT ISSUE + Generate Release Package action clusters) to top-right.
+  // top-12 sits below the global TopBar so the lane never overlaps action
+  // buttons in the bottom-right of any view.
   return (
-    <div className="pointer-events-none fixed bottom-16 right-4 z-[9000] flex max-w-sm flex-col gap-2">
+    <div className="pointer-events-none fixed top-12 right-4 z-[9000] flex max-w-sm flex-col gap-2">
       <div role="alert" aria-live="assertive" aria-atomic="false" className="flex flex-col gap-2">
         {errors.map((t) => (
           <ToastRow key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />

@@ -24,15 +24,18 @@ export function SegmentedControl<T extends string>({
         "inline-flex overflow-hidden rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]",
         className,
       )}
-      role="radiogroup"
+      // Walkthrough #21 — visually a button bar, not radios. Use group
+      // semantics (role="group" + aria-pressed) so SR announcements line
+      // up with what operators see on screen.
+      role="group"
     >
       {options.map((o, i) => {
         const active = o.value === value;
         return (
           <button
             key={o.value}
-            role="radio"
-            aria-checked={active}
+            type="button"
+            aria-pressed={active}
             onClick={() => onChange(o.value)}
             className={clsx(
               // 44px tap target per Apple HIG / WCAG 2.5.5. Filter pills used
@@ -41,7 +44,10 @@ export function SegmentedControl<T extends string>({
               i > 0 && "border-l border-[var(--color-border)]",
               active
                 ? "bg-[var(--color-primary)] text-white"
-                : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]",
+                // Walkthrough #23 — bump unselected color to clear WCAG AA
+                // (≥ 3:1 against bg-[var(--color-bg)]). The previous
+                // --color-text-secondary token measured ~2.4:1 on dark.
+                : "text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]",
             )}
           >
             {o.label}
