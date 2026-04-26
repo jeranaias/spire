@@ -388,6 +388,12 @@ def inject_cannibalizations(srs, assets, seed: int) -> List[CannibalizationEvent
         )
         for donor in ranked:
             event_date = recip.open_date + timedelta(days=rng.randint(3, 10))
+            # Walkthrough: a recipient open_date late in the sim window pushed
+            # event_date past SIMULATION_END_DATE, surfacing a cannibalization
+            # alert dated in the future relative to the mission clock. Clamp
+            # to the sim end so every cannib event is in the operational past.
+            if event_date > SIMULATION_END_DATE:
+                event_date = SIMULATION_END_DATE
             days_deadlined = (event_date - donor.open_date).days
             events.append(CannibalizationEvent(
                 event_id=f"CAN-{len(events)+1:04d}",
