@@ -85,11 +85,14 @@ export interface SpireState {
 }
 
 export const ROLE_LABELS: Record<Role, string> = {
-  maintenance_chief: "Maintenance Chief (CLB-6)",
-  g4: "G-4 (2d MLG)",
+  // Walkthrough caught long forms truncating in the TopBar dropdown at
+  // common widths. Marine-shorthand fits without ellipsis; the unit
+  // assignment surfaces in the role brief and on the StatusStrip.
+  maintenance_chief: "Maint Chief",
+  g4: "G-4 / 2d MLG",
   mef_commander: "MEF Commander",
   data_custodian: "Data Custodian",
-  security_manager: "Security Manager",
+  security_manager: "Security Mgr",
 };
 
 // Where the role dropdown lands each persona on switch. Mapped per the
