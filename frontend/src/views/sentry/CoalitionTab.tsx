@@ -42,6 +42,23 @@ export function CoalitionTab() {
   const [view, setView] = useState<CoalitionView | null>(null);
   const [loading, setLoading] = useState(false);
   const [releasing, setReleasing] = useState(false);
+  // Per-session list of releases prepared in this tab. Reviewer caught the
+  // celebratory toast disappearing with no destination — so we surface a
+  // "Recent Releases" panel below that operators can scroll back through,
+  // with the release_id, partners, and a deep-link to the audit chain.
+  const [recentReleases, setRecentReleases] = useState<{
+    release_id: string;
+    profile: string;
+    partners: string[];
+    created_at: string;
+  }[]>(() => {
+    try {
+      const raw = window.localStorage.getItem("spire.sentry.recent_releases");
+      return raw ? (JSON.parse(raw) as any[]).slice(-10) : [];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     api.sentry.coalitionProfiles().then((r) => setProfiles(r.profiles)).catch(() => {});
@@ -62,10 +79,29 @@ export function CoalitionTab() {
     setReleasing(true);
     try {
       const r = await api.sentry.coalitionRelease(view.profile_key);
+      // Append to recents + persist so the operator can scroll back to
+      // confirm a release shipped (and find the audit chain entry by id).
+      setRecentReleases((prev) => {
+        const next = [
+          ...prev,
+          {
+            release_id: r.release_id,
+            profile: r.profile,
+            partners: r.partners,
+            created_at: r.created_at,
+          },
+        ].slice(-10);
+        try {
+          window.localStorage.setItem("spire.sentry.recent_releases", JSON.stringify(next));
+        } catch {
+          /* tolerant */
+        }
+        return next;
+      });
       pushToast({
         tone: "ok",
-        text: `Release ${r.release_id} prepared for ${r.partners.join(", ")} · audit logged`,
-        ttlMs: 5000,
+        text: `✓ Release ${r.release_id} prepared for ${r.partners.join(", ")} · audit logged · see Recent Releases below`,
+        ttlMs: 6000,
       });
     } catch (e) {
       pushToast({ tone: "error", text: `Release failed: ${e}` });
@@ -93,7 +129,19 @@ export function CoalitionTab() {
             Coalition Interoperability · Live Partner View
           </h2>
           <div className="mt-1 spire-body-muted">
-            "Show me what JSDF sees right now." Live-data preview scoped through the partner's release profile.
+            {(() => {
+              // Template the partner name from the active profile so the
+              // intro doesn't keep saying "what JSDF sees" while the operator
+              // is on Philippines · AFP. Falls back to the profile display
+              // name when no `partners` came back (rare).
+              const partnerName =
+                view?.partners?.[0]
+                ?? profiles.find((p) => p.key === selected)?.partners?.[0]
+                ?? profiles.find((p) => p.key === selected)?.display_name
+                ?? "this partner";
+              return `"Show me what ${partnerName} sees right now."`;
+            })()}{" "}
+            Live-data preview scoped through the partner's release profile.
             Same canonical dataset; different release ceiling, different redactions, different caveats — all applied in real time.
           </div>
         </div>
@@ -282,6 +330,50 @@ export function CoalitionTab() {
             View as-of {view.as_of} · Profile loaded from data/coalition_profiles.json
           </div>
         </>
+      )}
+
+      {recentReleases.length > 0 && (
+        <div className="mt-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="font-mono text-xs uppercase text-[var(--color-success)] tracking-widest">
+              Recent Releases · {recentReleases.length}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setRecentReleases([]);
+                try { window.localStorage.removeItem("spire.sentry.recent_releases"); } catch { /* tolerant */ }
+              }}
+              className="font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-wider"
+            >
+              Clear ✕
+            </button>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {[...recentReleases].reverse().map((r) => (
+              <div
+                key={r.release_id}
+                className="flex items-baseline gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm"
+              >
+                <span className="font-semibold text-[var(--color-text)]">{r.release_id}</span>
+                <span className="text-xs text-[var(--color-text-muted)] tracking-wide">
+                  {r.profile} · {r.partners.join(" · ")}
+                </span>
+                <span className="ml-auto text-xs text-[var(--color-text-muted)] tracking-wider">
+                  {new Date(r.created_at).toLocaleString([], {
+                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+                  })}
+                </span>
+                <span className="rounded-sm border border-[var(--color-success-muted)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-success)] tracking-wider">
+                  audit logged
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 font-mono text-xs italic text-[var(--color-text-muted)] tracking-wider">
+            Each release_id is preserved in the SHA-256 chained audit log; downstream packagers consume the same ids.
+          </div>
+        </div>
       )}
     </div>
   );

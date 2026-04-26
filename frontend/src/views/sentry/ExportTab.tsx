@@ -45,7 +45,15 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     try {
       const r = await api.sentry.export(authority, format);
       setResult(r as any);
-      pushToast({ tone: "ok", text: `Export prepared · ${(r.records_exported ?? 0).toLocaleString()} records` });
+      // Toast carries a click-through link so the operator never wonders
+      // "where did the file go?" after a successful export. Reviewer caught
+      // the celebratory toast having no destination.
+      pushToast({
+        tone: "ok",
+        text: `✓ Export ${r.export_id} · ${(r.records_exported ?? 0).toLocaleString()} records · ${((r.bytes ?? 0) / 1024).toFixed(1)} KB`,
+        link: r.download_url ? { label: "Download", href: r.download_url } : undefined,
+        ttlMs: 6000,
+      });
     } catch (err) {
       pushToast({ tone: "error", text: "Export failed" });
     } finally {
