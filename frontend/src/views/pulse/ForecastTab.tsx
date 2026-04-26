@@ -82,22 +82,47 @@ export function ForecastTab() {
   }, [unit, horizon]);
 
   // Build the combined series. Null-guarded so hooks order stays stable.
+  // Walkthrough audit: per-path data was passed via `<Line data={...}>`,
+  // which recharts appends to the parent x-axis as additional categories
+  // (44 path dates × 30 paths got rendered as duplicate ticks at the end
+  // of the chart). Inline each sampled path as a `path{i}` field on the
+  // parent series so every line shares the same 44-position x-axis.
+  const PATHS_TO_RENDER = 30;
   const series = useMemo(() => {
     if (!data) return [];
-    const hist = data.history.map((h) => ({
-      date: h.date.slice(5),
-      actual: h.mc_rate,
-      projected: undefined as number | undefined,
-      p10: undefined as number | undefined,
-      p90: undefined as number | undefined,
-    }));
-    const proj = data.projection.map((p) => ({
-      date: p.date.slice(5),
-      actual: undefined as number | undefined,
-      projected: p.projected_mc_rate,
-      p10: p.p10,
-      p90: p.p90,
-    }));
+    const hist = data.history.map((h, hi) => {
+      const row: Record<string, unknown> = {
+        date: h.date.slice(5),
+        actual: h.mc_rate,
+        projected: undefined,
+        p10: undefined,
+        p90: undefined,
+      };
+      // Pre-fill path columns so each row has the same shape (recharts
+      // tolerates `null` better than `undefined` for skipped points).
+      for (let i = 0; i < PATHS_TO_RENDER; i++) row[`path${i}`] = null;
+      // Anchor each path at TODAY (last hist row) with the actual value
+      // so the spaghetti reads as continuing from the historical line.
+      if (hi === data.history.length - 1) {
+        for (let i = 0; i < PATHS_TO_RENDER; i++) row[`path${i}`] = h.mc_rate;
+      }
+      return row;
+    });
+    const proj = data.projection.map((p, pi) => {
+      const row: Record<string, unknown> = {
+        date: p.date.slice(5),
+        actual: undefined,
+        projected: p.projected_mc_rate,
+        p10: p.p10,
+        p90: p.p90,
+      };
+      const paths = data.paths || [];
+      for (let i = 0; i < PATHS_TO_RENDER; i++) {
+        const v = paths[i]?.[pi];
+        row[`path${i}`] = v != null ? v : null;
+      }
+      return row;
+    });
     if (hist.length && proj.length) {
       proj[0] = { ...proj[0], actual: hist[hist.length - 1].actual };
     }
@@ -270,47 +295,22 @@ export function ForecastTab() {
                 }}
               />
             )}
-            {/* Walkthrough audit: prior code passed each path as a 15-point
-             * series via `<Line data={...}>`. Recharts aligns those points
-             * BY INDEX to the parent series' x-axis (44 entries =
-             * 30 history + 14 projection), so the path lines were drawn at
-             * indices 0-14 (the left side) instead of 30-43 (the projection
-             * window). The chart looked empty for the entire forecast
-             * region. Build each path as a full 44-length array with
-             * nulls for the historical region so it indexes correctly into
-             * the parent series. */}
-            {visiblePaths.slice(0, 30).map((p, idx) => {
-              const histLen = data?.history?.length ?? 0;
-              if (!histLen || !data?.projection?.length) return null;
-              // 44 entries: nulls for the first (histLen - 1), then last
-              // historical value as the join point, then 14 projection
-              // samples. Aligns 1:1 with `series` (history+projection).
-              const lastHist = data.history[histLen - 1];
-              const pathSeries = [
-                ...Array(histLen - 1).fill(null).map((_, i) => ({
-                  date: data.history[i].date.slice(5),
-                  v: null as number | null,
-                })),
-                { date: lastHist.date.slice(5), v: lastHist.mc_rate },
-                ...p.map((v, ti) => ({
-                  date: (data.projection[ti]?.date ?? "").slice(5),
-                  v: v as number | null,
-                })),
-              ];
-              return (
-                <Line
-                  key={`path-${idx}`}
-                  data={pathSeries}
-                  dataKey="v"
-                  stroke="var(--color-primary)"
-                  strokeWidth={0.6}
-                  strokeOpacity={0.18}
-                  dot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-              );
-            })}
+            {/* Walkthrough audit (round 2): paths now live as path0..pathN
+             * fields on the parent series rows, so every Line shares the
+             * one 44-position x-axis. No per-Line data prop, so recharts
+             * doesn't append per-path categories to the bottom axis. */}
+            {Array.from({ length: PATHS_TO_RENDER }).map((_, idx) => (
+              <Line
+                key={`path-${idx}`}
+                dataKey={`path${idx}`}
+                stroke="var(--color-primary)"
+                strokeWidth={0.6}
+                strokeOpacity={0.18}
+                dot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            ))}
             {/* p10 / p90 envelope lines — thin, translucent, complement
              * the mean projection. Wider opacity on the band so it reads
              * as a band, not a hairline (Walkthrough #50 spirit). */}
