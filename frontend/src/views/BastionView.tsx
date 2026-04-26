@@ -599,22 +599,30 @@ function ResponsePanel({
     // Stub a client-side audit-log entry. A real backend endpoint would be
     // POST /api/bastion/notify { who, alert_id }; for now we record locally
     // so the air-gap demo claim still holds (no external egress).
+    let auditDepth = 0;
     try {
       const key = "spire.bastion.notify_audit";
       const prior = JSON.parse(window.localStorage.getItem(key) || "[]");
-      prior.push({
+      const entry = {
         who,
         alert_id: alert.id,
+        alert_title: alert.title,
         at: new Date().toISOString(),
         actor: role,
-      });
-      window.localStorage.setItem(key, JSON.stringify(prior.slice(-200)));
+      };
+      prior.push(entry);
+      const trimmed = prior.slice(-200);
+      window.localStorage.setItem(key, JSON.stringify(trimmed));
+      auditDepth = trimmed.length;
     } catch {
       /* tolerant — private mode etc */
     }
+    // Toast text echoes the recipient + the running audit count so the
+    // operator sees a state change every click (reviewer caught the prior
+    // toast looking identical between sends and feeling like nothing fired).
     pushToast({
       tone: "ok",
-      text: `Notification sent · ${who} · audit logged`,
+      text: `✓ Sent ${who}${auditDepth ? ` · audit #${auditDepth}` : ""}`,
       ttlMs: 3500,
     });
   }
@@ -745,9 +753,16 @@ function ResponsePanel({
                   <li key={i} className="flex items-center gap-2">
                     <span className="font-mono text-[var(--color-text)]">{n.who}</span>
                     <button
-                      onClick={() => sendNotification(n.who)}
+                      type="button"
+                      onClick={(e) => {
+                        // stopPropagation guards against any future ancestor
+                        // click handler swallowing the event before it lands.
+                        e.stopPropagation();
+                        sendNotification(n.who);
+                      }}
                       disabled={isSent}
-                      className="ml-auto rounded border px-2 py-0.5 text-xs transition-colors disabled:cursor-not-allowed"
+                      title={isSent ? `Already sent to ${n.who}` : `Send draft notification to ${n.who} · audit logged`}
+                      className="ml-auto rounded border px-2 py-1 font-mono text-xs font-semibold uppercase tracking-wider transition-colors disabled:cursor-not-allowed"
                       style={{
                         borderColor: isSent ? "var(--color-success)" : "var(--color-primary)",
                         background: isSent
@@ -756,7 +771,7 @@ function ResponsePanel({
                         color: isSent ? "var(--color-success)" : "var(--color-primary)",
                       }}
                     >
-                      {isSent ? "✓ Sent" : "[Draft Ready] Send"}
+                      {isSent ? `✓ Sent ${n.who}` : "Send Draft"}
                     </button>
                   </li>
                 );
