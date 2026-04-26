@@ -108,6 +108,13 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
         {"role": "user", "content": f"Role: {role} · View: {view or 'unspecified'}\n\n{text}"},
     ]
     plan_id = f"PL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+    # Two-tier LLM call:
+    # 1. Tools-enabled call (Gemma can return tool_calls for agentic flows).
+    # 2. If the proxy 400s/502s on the tools schema (some vLLM builds reject
+    #    `tool_choice: "auto"` or the tools list shape), retry plain chat
+    #    and rely on the rule-based intent router for tool selection.
+    # Either way the operator gets a grounded direct answer; agentic plans
+    # work when the proxy supports tools, fall back to rule-based otherwise.
     try:
         result = await call_llm_chat(
             messages=messages,
@@ -142,8 +149,43 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
             "tokens_used": usage.get("total_tokens"),
         }
     except Exception as e:  # noqa: BLE001
-        # Graceful degradation — rule-based intent routing.
-        return _rule_based_plan(text, role, plan_id, error=str(e))
+        err = str(e)
+        # Tools schema rejected by upstream — retry plain chat, no tools.
+        # vLLM builds vary in tool_choice / tools support; an unsupported
+        # schema returns 400/502 from the proxy. The operator still gets a
+        # grounded direct answer (the CURRENT_OPERATIONAL_PICTURE system
+        # message is in `messages`), and the rule-based router below
+        # populates tool steps from intent regex.
+        is_tools_problem = (
+            "auto" in err.lower()
+            or "tool" in err.lower()
+            or "400" in err
+            or "502" in err
+        )
+        if is_tools_problem:
+            try:
+                result = await call_llm_chat(
+                    messages=messages,
+                    temperature=0.1,
+                    max_tokens=400,
+                )
+                content = (result.get("content") or "").strip()
+                usage = result.get("usage") or {}
+                # Run rule-based intent extraction in parallel for tool steps.
+                rb = _rule_based_plan(text, role, plan_id, error="")
+                return {
+                    "plan_id": plan_id,
+                    "intent": rb["intent"],
+                    "summary": content or rb["summary"],
+                    "answer": content or rb["answer"],
+                    "steps": rb["steps"],
+                    "engine": "Gemma4 via RigRun proxy (no-tools fallback)",
+                    "tokens_used": usage.get("total_tokens"),
+                }
+            except Exception as e2:  # noqa: BLE001
+                err = f"{err} | retry: {e2}"
+        # Final fallback — rule-based intent routing only.
+        return _rule_based_plan(text, role, plan_id, error=err)
 
 
 async def execute(plan_id: str, steps: list, role: str) -> dict:
