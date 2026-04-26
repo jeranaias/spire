@@ -203,17 +203,34 @@ def _tool_parse_tmr(text: str) -> dict:
         return {"error": f"parse_tmr failed: {type(e).__name__}: {e}"}
 
 
-def _tool_get_coalition_view(profile: str, role: str = "data_custodian") -> dict:
-    """Preview the redacted dataset visible to a coalition partner (GC-5)."""
+async def _tool_get_coalition_view(profile: str, role: str = "data_custodian") -> dict:
+    """Preview the redacted dataset visible to a coalition partner (GC-5).
+
+    Walkthrough audit (same class as recommend_actions / predict_failures
+    earlier): coalition_view is `async def`. The previous wrapper called
+    it synchronously and treated the returned coroutine as a result
+    object — every getattr returned the default, so the tool reported
+    'no profile / no partners / no units' regardless of input.
+    """
     from ..routes.sentry import coalition_view
     try:
-        result = coalition_view(profile_key=profile)
+        result = await coalition_view(profile_key=profile)
+        if isinstance(result, dict):
+            return {
+                "profile": profile,
+                "display_name": result.get("display_name"),
+                "distribution_statement": result.get("distribution_statement"),
+                "partners": result.get("partners", []),
+                "allowed_units": result.get("allowed_units", []),
+                "unit_count": len(result.get("allowed_units", [])),
+                "sample_count": len(result.get("sample_records", [])),
+                "caveats_applied": result.get("caveats_applied", []),
+            }
         return {
             "profile": profile,
             "distribution_statement": getattr(result, "distribution_statement", None),
             "partners": getattr(result, "partners", []),
-            "units_allowed": getattr(result, "units_allowed", []),
-            "units_blocked_count": len(getattr(result, "units_blocked", [])),
+            "allowed_units": getattr(result, "allowed_units", []),
         }
     except Exception as e:  # noqa: BLE001
         return {"error": f"coalition_view failed: {type(e).__name__}: {e}"}

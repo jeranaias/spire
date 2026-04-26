@@ -283,7 +283,13 @@ export function Spiro() {
           return `${cands.length} donor candidates · best: ${c.donor_asset_id || c.asset_id} (${c.unit_name || "?"}).`;
         }
         case "get_coalition_view": {
-          return `${r.profile || "?"} sees ${r.unit_count ?? "?"} units · ${r.asset_count ?? "?"} assets · ${r.redaction_count ?? "?"} redactions applied.`;
+          // Walkthrough audit: prior format used unit_count/asset_count/
+          // redaction_count fields the API never returned. Read what the
+          // payload actually carries: allowed_units list + sample count
+          // + applied caveats.
+          const partners = Array.isArray(r.partners) ? r.partners.join(", ") : "?";
+          const ucount = r.unit_count ?? (Array.isArray(r.allowed_units) ? r.allowed_units.length : "?");
+          return `${r.display_name || r.profile || "?"} (${partners}): ${ucount} units in scope · ${r.sample_count ?? "?"} sample records · ${(r.caveats_applied || []).length} caveats applied.`;
         }
       }
     } catch { /* fall through to null */ }
