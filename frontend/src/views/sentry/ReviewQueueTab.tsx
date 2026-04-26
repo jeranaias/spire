@@ -252,7 +252,13 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
             Flagged <span className="tabular-nums">{filteredQueue.counts.flagged}</span>
           </span>
           <span>
-            <span className="mr-1 inline-block h-2 w-2 rounded-full bg-[var(--color-danger)]" />
+            {/* Walkthrough #27 — Held = red end-to-end. Header strip dot
+                used to show orange while card borders + the column accent
+                were red, which read as two different states. */}
+            <span
+              className="mr-1 inline-block h-2 w-2 rounded-full bg-[var(--color-danger)]"
+              style={{ boxShadow: "0 0 4px var(--color-danger)" }}
+            />
             Held <span className="tabular-nums">{filteredQueue.counts.held}</span>
           </span>
           <span className="text-[var(--color-text-muted)]">
