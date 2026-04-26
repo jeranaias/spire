@@ -625,7 +625,13 @@ export function MapCanvas({
         {
           padding: drawerOpen
             ? { top: 80, bottom: 80, left: 80, right: 420 }
-            : { top: 80, bottom: 80, left: 80, right: 80 },
+            // Walkthrough audit: bumped right padding from 80 -> 220 so
+            // the eastern-most ECP doesn't land under the SPIRO panel
+            // (fixed at 26rem on the right edge ~416px). Map's clientWidth
+            // is the full window width but the rightmost slice is covered
+            // by SPIRO whenever it's open. fitBounds treats the rightmost
+            // bound conservatively now.
+            : { top: 80, bottom: 80, left: 80, right: 220 },
           duration: 700,
           maxZoom: 13.5,
         },
