@@ -69,15 +69,22 @@ def _load_installation() -> dict:
 # each unit's pin sits over its own sector of the installation.
 # Base: 34.658 N, -77.398 W (center)
 UNIT_COORDS = {
+    # Walkthrough caught three units (3/6 Marines, MWSS-271, 2/14 Marines)
+    # collapsing to the default fallback lat/lon (34.658, -77.398) because
+    # the dict still keyed legacy names (MWSS-372, 5/11 Marines, 2d Tank Bn).
+    # Result: the Lejeune dot stack — three pins at identical coords with
+    # overlapping labels. All 10 canonical unit names now have unique
+    # coords spread across the Camp Henderson area so each marker reads on
+    # its own.
     "CLB-6":        (34.6690, -77.4210),   # CLB-6 motor pool NW
     "CLB-1":        (34.6510, -77.4050),   # SW sector
-    "3d Maint Bn":  (34.6700, -77.3750),   # NE forward (proxy for Okinawa on Camp Henderson)
-    "2d Tank Bn":   (34.6480, -77.4170),   # SW tank sector
+    "3d Maint Bn":  (34.6700, -77.3750),   # NE forward
+    "3/6 Marines":  (34.6480, -77.4170),   # SW infantry quad
     "2d LAR Bn":    (34.6550, -77.4150),   # West LAR lanes
     "MALS-31":      (34.6700, -77.3820),   # airfield N
-    "MWSS-372":     (34.6610, -77.3680),   # E airfield support
+    "MWSS-271":     (34.6610, -77.3680),   # E airfield support
     "2d LAAD Bn":   (34.6670, -77.3900),   # LAAD TOC
-    "5/11 Marines": (34.6450, -77.3900),   # S artillery area
+    "2/14 Marines": (34.6450, -77.3900),   # S artillery area
     "7th ESB":      (34.6630, -77.4240),   # W engineer workshop
 }
 
