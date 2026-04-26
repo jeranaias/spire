@@ -80,6 +80,24 @@ export function NodeStatus() {
   const label = CMP_LABEL[cmp];
   const hasConflicts = conflicts.length > 0;
 
+  // Pull a fresh sync-state + conflicts pair so the chip color, vector
+  // clocks, and "events_logged" counter all reflect post-mutation truth.
+  // Reviewer caught the LOCAL counter staying at 0 events and the PEER
+  // box still saying "[no entries]" after seeding a conflict — the UI was
+  // pinned to the initial state captured by the polling effect.
+  async function refreshState() {
+    try {
+      const [s, c] = await Promise.all([
+        api.system.syncState(),
+        api.system.syncConflicts(),
+      ]);
+      setState(s);
+      setConflicts(c.pending);
+    } catch (e) {
+      console.warn("sync state refresh failed:", e);
+    }
+  }
+
   async function resolve(conflictId: string, winner: "local" | "peer") {
     try {
       await api.system.syncResolve(conflictId, winner, role);
@@ -88,8 +106,10 @@ export function NodeStatus() {
         text: `Conflict resolved · ${winner === "local" ? "local" : "peer"} write wins · loser preserved in audit chain`,
         ttlMs: 5000,
       });
-      const c = await api.system.syncConflicts();
-      setConflicts(c.pending);
+      // Refresh BOTH sync state and conflicts so the events_logged counter
+      // ticks up and the chip status (compare/label/color) reflects the
+      // resolved state immediately, not on the next poll tick.
+      await refreshState();
     } catch (e) {
       pushToast({ tone: "error", text: `Resolve failed: ${e}` });
     }
@@ -107,7 +127,12 @@ export function NodeStatus() {
         return;
       }
       setConflicts((prev) => [...prev.filter((x) => x.id !== c.id), c]);
-      pushToast({ tone: "info", text: "Demo conflict seeded · open Node Status to resolve", ttlMs: 4500 });
+      // Force a re-pull of the sync state so the LOCAL/PEER vector clocks
+      // and events_logged counter both jump immediately. Without this the
+      // panel showed the new conflict but the clocks still read empty
+      // until the next 5s poll.
+      await refreshState();
+      pushToast({ tone: "info", text: "Demo conflict seeded · vector clocks refreshed", ttlMs: 4500 });
     } catch (e) {
       pushToast({ tone: "error", text: `Seed failed: ${e}` });
     }
