@@ -1258,7 +1258,10 @@ export function MapCanvas({
               {
                 padding: drawerOpen
                   ? { top: 80, bottom: 80, left: 80, right: 420 }
-                  : { top: 80, bottom: 80, left: 80, right: 80 },
+                  // Walkthrough audit: matches the right:220 padding on the
+                  // primary fitToAllUnits path so Reset View clears the
+                  // SPIRO panel overlay too.
+                  : { top: 80, bottom: 80, left: 80, right: 220 },
                 duration: 700,
                 maxZoom: 13.5,
               },
