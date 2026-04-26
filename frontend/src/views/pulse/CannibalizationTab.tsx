@@ -283,7 +283,12 @@ export function CannibalizationTab() {
                   <div className="font-mono text-base font-semibold text-[var(--color-text)]">{n.asset_id}</div>
                   <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
                     {n.equipment_type.replace(/_/g, " ")} · {n.unit} · open {n.days_open}d · fault: {n.fault_component}
-                    {n.fault_class && (
+                    {/* Walkthrough audit: fault_class often equals
+                     * fault_component (e.g. both 'brake'), and the
+                     * uppercase-styled badge then read 'BRAKE' next to
+                     * the lowercase 'brake' as a noisy duplicate.
+                     * Suppress the badge when they match. */}
+                    {n.fault_class && n.fault_class !== n.fault_component && (
                       <span className="ml-1 rounded-sm border border-[var(--color-border)] px-1 text-[10px] uppercase">
                         class: {n.fault_class}
                       </span>
@@ -348,7 +353,7 @@ export function CannibalizationTab() {
                 {d.equipment_type.replace(/_/g, " ")} · {d.unit} · open {d.days_open}d
               </div>
               <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
-                Fault: {d.fault_component} {d.fault_class && <span className="text-[var(--color-text-muted)]">({d.fault_class})</span>}
+                Fault: {d.fault_component} {d.fault_class && d.fault_class !== d.fault_component && <span className="text-[var(--color-text-muted)]">({d.fault_class})</span>}
               </div>
               {/* Walkthrough #23 — primary CTA-styled Propose button. */}
               <div className="mt-2 flex items-center justify-end">
