@@ -1,24 +1,44 @@
 {
   "_comment": "Cost + time-to-effect rates used by GC-1 autonomous replenishment planner. Inputs to /pulse/recommend-actions when ranking cannibalization / expedite / cross-level / redistribute options. Values are order-of-magnitude plausible, not authoritative DLA rates.",
-
   "action_types": {
     "cannibalize": {
       "description": "Transfer a part from one deadlined asset to another within the same fleet.",
       "base_labor_hours": 3,
       "labor_rate_per_hour": 85,
       "admin_overhead_pct": 0.15,
-      "time_to_effect_hours_range": [6, 24],
-      "requires_approval_roles": ["maintenance_chief", "g4"],
+      "time_to_effect_hours_range": [
+        6,
+        24
+      ],
+      "requires_approval_roles": [
+        "maintenance_chief",
+        "g4"
+      ],
       "risk_note": "Donor stays deadlined; audit chain must preserve removal event."
     },
     "expedite": {
       "description": "Convert a standard requisition to a FAST supply path via premium shipping fees.",
       "fee_tiers": {
-        "3_day":  {"days": 3,  "fee_usd": 650,  "note": "Priority 02 / premium freight"},
-        "5_day":  {"days": 5,  "fee_usd": 320,  "note": "Priority 03 / expedited ground"},
-        "overnight": {"days": 1, "fee_usd": 1850, "note": "Critical-casualty reimbursable"}
+        "3_day": {
+          "days": 3,
+          "fee_usd": 650,
+          "note": "Priority 02 / premium freight"
+        },
+        "5_day": {
+          "days": 5,
+          "fee_usd": 320,
+          "note": "Priority 03 / expedited ground"
+        },
+        "overnight": {
+          "days": 1,
+          "fee_usd": 1850,
+          "note": "Critical-casualty reimbursable"
+        }
       },
-      "requires_approval_roles": ["g4", "mef_commander"],
+      "requires_approval_roles": [
+        "g4",
+        "mef_commander"
+      ],
       "risk_note": "Annual expedite budget is a visible line-item; repeat expedites flag the FSSG."
     },
     "cross_level": {
@@ -26,40 +46,130 @@
       "per_mile_transport_cost_usd": 2.25,
       "handler_labor_hours": 4,
       "labor_rate_per_hour": 85,
-      "time_to_effect_hours_range": [24, 72],
-      "requires_approval_roles": ["g4"],
+      "time_to_effect_hours_range": [
+        24,
+        72
+      ],
+      "requires_approval_roles": [
+        "g4"
+      ],
       "hazmat_surcharge_pct": 0.25
     },
     "redistribute": {
       "description": "Move an excess from one unit to fill a critical gap at another.",
       "per_mile_transport_cost_usd": 2.25,
       "handler_labor_hours": 2,
-      "time_to_effect_hours_range": [12, 48],
-      "requires_approval_roles": ["maintenance_chief", "g4"]
+      "time_to_effect_hours_range": [
+        12,
+        48
+      ],
+      "requires_approval_roles": [
+        "maintenance_chief",
+        "g4"
+      ]
+    },
+    "preposition_spares": {
+      "description": "Stage likely-failure spares before the SR opens, compressing time-to-effect.",
+      "cost_usd": 850,
+      "time_to_effect_hours": 96,
+      "mc_delta_pct": 0.3,
+      "confidence": 0.75,
+      "requires_approval_roles": [
+        "maintenance_chief",
+        "g4"
+      ],
+      "risk_note": "Pre-positioning ties up budget; overspending shows up as unused stockage at the next ASL audit."
+    },
+    "schedule_pm": {
+      "description": "Schedule overdue PMCS-B before the asset slips below MC.",
+      "cost_usd": 240,
+      "time_to_effect_hours": 24,
+      "mc_delta_pct": 0.2,
+      "confidence": 0.85,
+      "requires_approval_roles": [
+        "maintenance_chief"
+      ],
+      "risk_note": "PMCS slot is a fixed shop capacity \u2014 pre-empts other scheduled maintenance."
+    },
+    "cross_level_proactive": {
+      "description": "Pre-stage a serviceable peer asset before the recipient deadlines.",
+      "cost_usd_per_mile": 2.25,
+      "handler_labor_hours": 4,
+      "mc_delta_pct": 0.4,
+      "confidence": 0.65,
+      "time_to_effect_hours_range": [
+        24,
+        72
+      ],
+      "requires_approval_roles": [
+        "g4"
+      ]
     }
   },
-
   "lead_time_overrides": {
-    "_comment": "Per-NSN overrides when real USMC lead-times are known to diverge from the SUPPLY_PATHS defaults. Format: NSN prefix → (supply_path, mean_days, p90_days).",
-    "2815-01": {"supply_path": "slow",    "mean_days": 62, "p90_days": 94, "note": "Engine rebuild parts — depot queue"},
-    "2520-01": {"supply_path": "medium",  "mean_days": 14, "p90_days": 22, "note": "Transmission subassembly"},
-    "2540-01": {"supply_path": "fast",    "mean_days": 5,  "p90_days": 9,  "note": "Brake components — high-volume stockage"},
-    "1560-01": {"supply_path": "backordered", "mean_days": 110, "p90_days": 180, "note": "Airframe structural — DLA depot only"},
-    "6115-01": {"supply_path": "medium",  "mean_days": 18, "p90_days": 28, "note": "Generator parts"}
+    "_comment": "Per-NSN overrides when real USMC lead-times are known to diverge from the SUPPLY_PATHS defaults. Format: NSN prefix \u00e2\u2020\u2019 (supply_path, mean_days, p90_days).",
+    "2815-01": {
+      "supply_path": "slow",
+      "mean_days": 62,
+      "p90_days": 94,
+      "note": "Engine rebuild parts \u00e2\u20ac\u201d depot queue"
+    },
+    "2520-01": {
+      "supply_path": "medium",
+      "mean_days": 14,
+      "p90_days": 22,
+      "note": "Transmission subassembly"
+    },
+    "2540-01": {
+      "supply_path": "fast",
+      "mean_days": 5,
+      "p90_days": 9,
+      "note": "Brake components \u00e2\u20ac\u201d high-volume stockage"
+    },
+    "1560-01": {
+      "supply_path": "backordered",
+      "mean_days": 110,
+      "p90_days": 180,
+      "note": "Airframe structural \u00e2\u20ac\u201d DLA depot only"
+    },
+    "6115-01": {
+      "supply_path": "medium",
+      "mean_days": 18,
+      "p90_days": 28,
+      "note": "Generator parts"
+    }
   },
-
   "criticality_multipliers": {
     "_comment": "Applied on top of base lead time when the part is critical to mission essential equipment (MEL). Mission essential = 1.0x (no multiplier); Training = 1.3x; Admin = 1.6x.",
     "mission_essential": 1.0,
-    "training":          1.3,
-    "administrative":    1.6
+    "training": 1.3,
+    "administrative": 1.6
   },
-
   "convoy_feasibility": {
     "_comment": "Route-level feasibility for cross-level/redistribute actions. Distance in miles between installations; risk 1-5 (1 = garrison-to-garrison, 5 = deployed contested).",
-    "Camp Henderson, NC → Camp Pendleton, CA": {"distance_mi": 2625, "risk": 1, "hazmat_allowed": true,  "mode": "commercial"},
-    "Camp Henderson, NC → MCAS Beaufort, SC":  {"distance_mi": 280,  "risk": 1, "hazmat_allowed": true,  "mode": "organic"},
-    "Camp Henderson, NC → MCAS Yuma, AZ":      {"distance_mi": 2290, "risk": 1, "hazmat_allowed": true,  "mode": "commercial"},
-    "Camp Henderson, NC → Camp Kinser, Okinawa": {"distance_mi": 7600, "risk": 3, "hazmat_allowed": false, "mode": "AMC airlift"}
+    "Camp Henderson, NC \u00e2\u2020\u2019 Camp Pendleton, CA": {
+      "distance_mi": 2625,
+      "risk": 1,
+      "hazmat_allowed": true,
+      "mode": "commercial"
+    },
+    "Camp Henderson, NC \u00e2\u2020\u2019 MCAS Beaufort, SC": {
+      "distance_mi": 280,
+      "risk": 1,
+      "hazmat_allowed": true,
+      "mode": "organic"
+    },
+    "Camp Henderson, NC \u00e2\u2020\u2019 MCAS Yuma, AZ": {
+      "distance_mi": 2290,
+      "risk": 1,
+      "hazmat_allowed": true,
+      "mode": "commercial"
+    },
+    "Camp Henderson, NC \u00e2\u2020\u2019 Camp Kinser, Okinawa": {
+      "distance_mi": 7600,
+      "risk": 3,
+      "hazmat_allowed": false,
+      "mode": "AMC airlift"
+    }
   }
 }

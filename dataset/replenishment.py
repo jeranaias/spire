@@ -78,6 +78,18 @@ def cross_level_cost(distance_mi: float, hazmat: bool = False) -> tuple[float, i
     return round(total, 2), hours
 
 
+def proactive_action_rate(kind: str) -> dict:
+    """Return the cost/time/MC-delta record for a proactive action kind
+    (preposition_spares / schedule_pm / cross_level_proactive).
+
+    Walkthrough audit (no-hardcoding rule): the recommend-actions endpoint
+    used to inline 850 / 240 dollar values directly into the response body.
+    Lifted into replenishment_rates.json so demos can tune the costs
+    without code changes."""
+    r = rates()["action_types"]
+    return r.get(kind, {})
+
+
 def lead_time_for_nsn(nsn: str, criticality: str = "mission_essential") -> tuple[str, int]:
     """Return (supply_path, mean_days) for a given NSN prefix, adjusted
     by criticality. Falls back to 'medium' / 17 days if no match.

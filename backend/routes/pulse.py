@@ -50,6 +50,7 @@ if str(_REPO_ROOT) not in _sys.path:
 try:
     from dataset.replenishment import (  # type: ignore[import-not-found]
         cannibalize_cost, expedite_cost, cross_level_cost, convoy_feasible,
+        proactive_action_rate,
     )
     _REPLENISHMENT_AVAILABLE = True
 except Exception:
@@ -614,38 +615,43 @@ async def recommend_actions(
             days_since_pm = a.days_since_last_maintenance or 0
             risk = c.get("risk_score") or 0
 
+            # Walkthrough audit (no-hardcoding rule): rates were inlined
+            # 850 / 240 / 96h. Lift to replenishment_rates.json so demos
+            # can tune without code edits.
+            ps = proactive_action_rate("preposition_spares")
             actions.append({
                 "kind": "preposition_spares",
                 "title": f"Pre-position likely-failure spares for {a.equipment_type}",
                 "description": f"Risk score {risk}; PULSE predicts component failure within the horizon. Stage spares before the SR opens to compress the time-to-effect window.",
-                "cost_usd": 850,
-                "time_to_effect_hours": 96,
-                "mc_delta_pct": 0.3,
-                "confidence": 0.75,
+                "cost_usd": ps.get("cost_usd", 850),
+                "time_to_effect_hours": ps.get("time_to_effect_hours", 96),
+                "mc_delta_pct": ps.get("mc_delta_pct", 0.3),
+                "confidence": ps.get("confidence", 0.75),
                 "artifact": {
                     "kind": "spare_preposition",
                     "asset_id": a.asset_id,
                     "equipment_type": a.equipment_type,
                     "trigger_risk_score": risk,
                 },
-                "approval_roles": ["maintenance_chief", "g4"],
+                "approval_roles": ps.get("requires_approval_roles", ["maintenance_chief", "g4"]),
             })
 
             if days_since_pm >= 75:
+                pm = proactive_action_rate("schedule_pm")
                 actions.append({
                     "kind": "schedule_pm",
                     "title": f"Schedule overdue PMCS B-check for {a.asset_id}",
                     "description": f"Last PM was {days_since_pm} days ago; PMCS-B due. Catches degradation before it deadlines the asset.",
-                    "cost_usd": 240,
-                    "time_to_effect_hours": 24,
-                    "mc_delta_pct": 0.2,
-                    "confidence": 0.85,
+                    "cost_usd": pm.get("cost_usd", 240),
+                    "time_to_effect_hours": pm.get("time_to_effect_hours", 24),
+                    "mc_delta_pct": pm.get("mc_delta_pct", 0.2),
+                    "confidence": pm.get("confidence", 0.85),
                     "artifact": {
                         "kind": "pmcs_schedule",
                         "asset_id": a.asset_id,
                         "level": "B",
                     },
-                    "approval_roles": ["maintenance_chief"],
+                    "approval_roles": pm.get("requires_approval_roles", ["maintenance_chief"]),
                 })
 
             if peer_serviceable:
