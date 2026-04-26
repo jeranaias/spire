@@ -34,6 +34,19 @@ const CMP_LABEL: Record<string, string> = {
   no_peer_data: "NO PEER",
 };
 
+// Per-state explainer surfaced as the chip's hover/focus tooltip. The
+// "NO PEER" label is honest but opaque — a Marine seeing it for the
+// first time can't tell whether it means a degraded state or single-node
+// mode by design. The longer copy resolves the ambiguity.
+const CMP_TOOLTIP: Record<string, string> = {
+  equal: "Distributed sync · vector clocks reconciled with peer node",
+  before: "This node is BEHIND the peer · gossip pull pending",
+  after: "This node is AHEAD of the peer · gossip push pending",
+  concurrent: "Concurrent edits detected · click to resolve",
+  no_peer_data:
+    "No peer node currently registered — single-node demo. In production this lights up to IN SYNC when distributed sync detects ≥1 peer over the gossip mesh.",
+};
+
 export function NodeStatus() {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
@@ -159,7 +172,8 @@ export function NodeStatus() {
           background: hasConflicts ? "color-mix(in oklab, var(--color-danger-muted) 28%, transparent)" : "transparent",
           color: hasConflicts ? "var(--color-danger)" : "var(--color-text-secondary)",
         }}
-        title="Distributed sync state · click to inspect"
+        title={`${CMP_TOOLTIP[cmp] ?? "Distributed sync state"} · click to inspect`}
+        aria-label={`Distributed sync · ${label.toLowerCase()}. ${CMP_TOOLTIP[cmp] ?? ""} Click to inspect.`}
       >
         <span className="relative flex h-2 w-2" aria-hidden>
           {hasConflicts && (

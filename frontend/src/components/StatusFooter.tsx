@@ -3,6 +3,12 @@ import { api, type SystemStatus } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
 
+// Audit hash + classification posture pin to fixed positions in the footer
+// so they're always readable. The marquee carries only the rotating
+// telemetry. The footer no longer mirrors the classification banner — that
+// is now the single canonical mention; here we surface posture + chain
+// fingerprint instead.
+
 function formatUptime(startedAt: number): string {
   const secs = Math.floor((Date.now() - startedAt) / 1000);
   const h = Math.floor(secs / 3600);
@@ -66,7 +72,11 @@ export function StatusFooter() {
   const llmOk = status?.llm.reachable ?? false;
   const llmModel = status?.llm.model ?? "—";
   const errs = status?.dataset.consistency_errors ?? 0;
-  const fingerprint = (status?.dataset.fingerprint ?? "").slice(0, 12).toUpperCase();
+  // Full fingerprint preserved (no longer slice to 12) — operators copy
+  // the whole hash for incident reports. We render a fixed-width 12-char
+  // prefix in the chrome but the click-to-copy yields the full string.
+  const fingerprintFull = (status?.dataset.fingerprint ?? "").toUpperCase();
+  const fingerprint = fingerprintFull.slice(0, 12);
 
   // Ticker segments — these scroll continuously in a marquee.
   // AUDIT·SHA256 and CLASSIFICATION are persistent posture indicators and
@@ -93,10 +103,17 @@ export function StatusFooter() {
   const track = [...tickerItems, ...tickerItems];
 
   return (
-    <footer className="relative h-8 shrink-0 overflow-hidden border-t border-[var(--color-border)] bg-[var(--color-surface)]">
-      {/* Left-anchored session block — UP/clock + comms-state pulse + audit hash.
-       * Audit hash pins here so it's always visible (reviewer caught it
-       * sliding off in the marquee before operators could read it). */}
+    <footer
+      role="contentinfo"
+      aria-label="System telemetry"
+      className="relative h-8 shrink-0 overflow-hidden border-t border-[var(--color-border)] bg-[var(--color-surface)]"
+    >
+      {/* Left-anchored session block — UP/clock + comms-state pulse + audit
+       * hash. Audit hash is fixed-width tabular monospace and click-to-copy
+       * (full SHA-256, not the truncated prefix). Reviewer caught the prior
+       * mid-truncated `6A49DA70B97B…IFIER v` bleed where the right anchor's
+       * tail lapped the audit field at narrow viewports — fixed grid width
+       * + overflow-hidden block prevents that entirely. */}
       <div
         className="absolute left-0 top-0 z-10 flex h-full items-center gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs tracking-wide"
       >
@@ -112,39 +129,27 @@ export function StatusFooter() {
         <CommsIndicator state={commsState} airGap={airGap} queueDepth={queueDepth} />
         <span className="mx-1 hidden text-[var(--color-border-active)] lg:inline">│</span>
         <span className="hidden uppercase text-[var(--color-text-muted)] tracking-wider lg:inline">AUDIT</span>
-        <span
-          className="hidden tabular-nums text-[var(--color-text-secondary)] lg:inline"
-          title="Append-only audit chain SHA-256 fingerprint"
-        >
-          {fingerprint || "pending"}
-        </span>
+        <AuditHash full={fingerprintFull} short={fingerprint} />
       </div>
 
-      {/* Right-anchored version/mode block + pinned classification posture.
-       * Hidden below md (768px). Classification pins here so the operator
-       * always sees the marking regardless of the ticker position. */}
+      {/* Right-anchored version/mode block. Classification posture lives in
+       * the top banner (single canonical mention) — this side surfaces only
+       * the operating mode + product version. */}
       <div
         className="absolute right-0 top-0 z-10 hidden h-full items-center gap-2 border-l border-[var(--color-border)] bg-[var(--color-surface)] pl-3 pr-3 font-mono text-xs uppercase md:flex tracking-wider"
       >
-        <span
-          className="rounded-sm border border-[var(--color-border-active)] px-1.5 py-[1px] text-[var(--color-text-muted)] tracking-widest"
-          title="Operating classification posture"
-        >
-          UNCLASSIFIED // SYNTHETIC
-        </span>
-        <span className="text-[var(--color-border-active)]">│</span>
         <span className="text-[var(--color-text-muted)]">{status?.mode || "local"}</span>
         <span className="text-[var(--color-border-active)]">│</span>
-        <span className="text-[var(--color-primary)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
+        <span className="text-[var(--color-brand)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
       </div>
 
       {/* Scrolling telemetry ticker between the anchors. Padding values are
        * tuned so the ticker doesn't overlap the anchored blocks at any
        * breakpoint. The left anchor grew on lg breakpoints to accommodate
-       * the pinned audit hash; the right anchor grew on md to accommodate
-       * the pinned classification posture. */}
+       * the pinned audit hash; the right anchor shrank now that the
+       * classification posture is no longer duplicated here. */}
       <div
-        className="absolute inset-y-0 left-0 right-0 z-0 overflow-hidden pl-[14rem] pr-3 md:pl-[18rem] md:pr-[20rem] lg:pl-[28rem]"
+        className="absolute inset-y-0 left-0 right-0 z-0 overflow-hidden pl-[14rem] pr-3 md:pl-[18rem] md:pr-[14rem] lg:pl-[28rem]"
       >
         <div
           className="ticker flex h-full items-center whitespace-nowrap font-mono text-xs tracking-wider"
@@ -174,13 +179,60 @@ export function StatusFooter() {
         }}
       />
       <div
-        className="pointer-events-none absolute right-[20rem] top-0 z-[5] hidden h-full w-10 md:block"
+        className="pointer-events-none absolute right-[14rem] top-0 z-[5] hidden h-full w-10 md:block"
         style={{
           background:
             "linear-gradient(270deg, var(--color-surface) 0%, transparent 100%)",
         }}
       />
     </footer>
+  );
+}
+
+// Audit hash chip — fixed-width tabular monospace 12-char prefix with
+// click-to-copy. Copies the FULL fingerprint to the clipboard and pushes a
+// confirmation toast so the operator sees an acknowledgement. Used in
+// incident reporting flows where the chain fingerprint is the artefact.
+function AuditHash({ full, short }: { full: string; short: string }) {
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const display = short || "pending";
+  const ready = !!full;
+
+  async function copy(e: React.MouseEvent) {
+    e.preventDefault();
+    if (!ready) return;
+    try {
+      await navigator.clipboard.writeText(full);
+      pushToast({
+        tone: "ok",
+        text: `Audit hash copied · ${full.slice(0, 12).toUpperCase()}…`,
+        ttlMs: 2500,
+      });
+    } catch {
+      // Fallback — older browsers / locked-down kiosks. Push a warn toast
+      // so the operator isn't left wondering why the click did nothing.
+      pushToast({ tone: "warn", text: "Clipboard unavailable — long-press to copy manually" });
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      disabled={!ready}
+      title={ready ? `Click to copy full SHA-256 fingerprint · ${full}` : "Audit chain fingerprint pending"}
+      aria-label={ready ? "Copy full audit chain fingerprint" : "Audit fingerprint pending"}
+      // Fixed character width via inline-block + tabular-nums so the chip
+      // never causes ticker text to reflow on poll updates. Enter/Space
+      // already trigger button onClick by default, so keyboard works.
+      className="hidden tabular-nums text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:underline focus-visible:underline disabled:cursor-default disabled:opacity-60 lg:inline-block"
+      style={{ minWidth: "9ch", textAlign: "left" }}
+    >
+      {display}
+      {ready && (
+        <span aria-hidden className="ml-1 text-[var(--color-text-muted)]">⎘</span>
+      )}
+    </button>
   );
 }
 

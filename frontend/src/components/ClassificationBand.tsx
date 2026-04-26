@@ -44,18 +44,27 @@ export function ClassificationBand() {
 
   return (
     <div
-      className="flex h-7 shrink-0 items-center justify-between px-4 font-mono text-sm font-semibold uppercase tracking-widest"
+      // h-8 (was h-7) + flex items-center keeps the banner aligned to the
+      // 14px TopBar baseline rather than sitting flush against it; the
+      // operator scans the chrome as one band, not pasted layers.
+      className="flex h-8 shrink-0 items-center justify-between px-4 py-1 font-mono text-sm font-semibold uppercase tracking-widest"
       style={{
         background: cls.bg,
         color: cls.fg,
       }}
+      role="region"
       aria-label="Classification and force-protection banner"
     >
-      <div className="flex items-baseline gap-3">
-        <span>UNCLASSIFIED // SYNTHETIC DATA // FOR DEMONSTRATION ONLY</span>
+      <div className="flex items-center gap-3 leading-none">
+        {/* Single canonical SYNTHETIC mention — was repeated in COP header,
+         * footer, and inline tags. Removing the dupes makes this banner the
+         * load-bearing classification statement, not redundant chrome. */}
+        <span className="whitespace-nowrap">
+          UNCLASSIFIED // SYNTHETIC DATA // FOR DEMONSTRATION ONLY
+        </span>
       </div>
       <div
-        className="flex items-center gap-2 rounded-sm border px-2.5 py-[1px] font-mono text-xs tracking-widest"
+        className="flex shrink-0 items-center gap-2 rounded-sm border px-2.5 py-[2px] font-mono text-xs leading-none tracking-widest"
         style={{
           borderColor: `color-mix(in oklab, ${tone.fg} 60%, transparent)`,
           background: `color-mix(in oklab, ${cls.bg} 70%, #000)`,

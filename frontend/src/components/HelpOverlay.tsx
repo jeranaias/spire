@@ -13,6 +13,13 @@ const SHORTCUTS = [
   { keys: ["?"],          label: "Open this help" },
   { keys: ["Esc"],         label: "Close any modal" },
   { keys: ["Shift", "F"], label: "Open feedback drawer" },
+  // Vimium-style chord nav. Mirrors the App-level useGoToShortcuts hook;
+  // routes the active role can't see fall back to that role's default
+  // landing surface so the shortcut never throws an InsufficientPrivilege.
+  { keys: ["g", "s"],     label: "Go to SENTRY" },
+  { keys: ["g", "p"],     label: "Go to PULSE" },
+  { keys: ["g", "b"],     label: "Go to BASTION" },
+  { keys: ["g", "a"],     label: "Go to ADMIN (Security Manager only)" },
   { keys: ["A"],           label: "Approve flagged record (Review Queue)" },
   { keys: ["R"],           label: "Reject flagged record (Review Queue)" },
   { keys: ["↑", "↓"],     label: "Navigate flagged records (Review Queue)" },

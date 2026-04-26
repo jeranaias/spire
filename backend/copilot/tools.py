@@ -191,32 +191,60 @@ def _tool_get_coalition_view(profile: str, role: str = "data_custodian") -> dict
 
 
 def _tool_status_summary(role: str) -> dict:
-    """High-level system status for context — useful for `summarize_view`."""
+    """High-level system status for context — uses the canonical end-of-day
+    readiness snapshot (MC / PMC / NMCM / NMCS) so SPIRO's answers can never
+    disagree with the COP map or the alert stream.
+
+    Walkthrough caught the prior version computing MC% from the asset's
+    `current_status` field and treating "anything not deadlined" as MC,
+    which counts PMC as MC. SPIRO then echoed "CLB-6 90.0%, 63/70 ops"
+    while the map and alerts said 55.7%, 39/70. Strict MC only — PMC is
+    its own state.
+    """
+    from collections import Counter
+    from ..state import last_day_snapshots
     ds = get_dataset()
     allowed = allowed_units(ds, role)
-    in_scope = ds.assets if allowed is None else [a for a in ds.assets if a.unit_name in allowed]
-    deadlined = [a for a in in_scope if _is_deadlined(a)]
-    by_unit_mc: dict[str, dict[str, int]] = {}
-    for a in in_scope:
-        u = by_unit_mc.setdefault(a.unit_name, {"total": 0, "deadlined": 0})
-        u["total"] += 1
-        if _is_deadlined(a):
-            u["deadlined"] += 1
-    # Worst three units by deadlined count
-    worst = sorted(
-        ({"unit": k, **v, "mc_pct": round(((v["total"]-v["deadlined"])/v["total"])*100, 1) if v["total"] else 100}
-         for k, v in by_unit_mc.items()),
-        key=lambda x: -x["deadlined"],
-    )[:3]
+    last = last_day_snapshots(ds)
+    if not last:
+        return {"error": "canonical snapshot empty"}
+    in_scope = last if allowed is None else [s for s in last if s.unit_name in allowed]
+
+    by_unit: dict[str, Counter] = {}
+    for s in in_scope:
+        by_unit.setdefault(s.unit_name, Counter())[s.readiness_code] += 1
+
+    rows = []
+    for unit_name, c in by_unit.items():
+        total = sum(c.values())
+        mc = c.get("MC", 0)
+        pmc = c.get("PMC", 0)
+        nmcm = c.get("NMCM", 0)
+        nmcs = c.get("NMCS", 0)
+        deadlined = nmcm + nmcs
+        rows.append({
+            "unit": unit_name,
+            "total": total,
+            "mc": mc,
+            "pmc": pmc,
+            "nmcm": nmcm,
+            "nmcs": nmcs,
+            "deadlined": deadlined,
+            "mc_pct": round((mc / total) * 100, 1) if total else 100,
+        })
+    # Worst three units by *strict* MC% (lowest first), tie-broken by deadlined count.
+    worst = sorted(rows, key=lambda x: (x["mc_pct"], -x["deadlined"]))[:3]
+
+    deadlined_snaps = [s for s in in_scope if s.readiness_code in ("NMCM", "NMCS")]
     return {
         "your_assets": len(in_scope),
         "total_units": len(ds.units),
         "your_units": "all" if allowed is None else sorted(allowed),
-        "deadlined_in_scope": len(deadlined),
+        "deadlined_in_scope": len(deadlined_snaps),
         "worst_units": worst,
         "deadlined_examples": [
-            {"asset_id": a.asset_id, "unit": a.unit_name, "equipment": a.equipment_type, "status": a.current_status}
-            for a in deadlined[:5]
+            {"asset_id": s.asset_id, "unit": s.unit_name, "equipment": s.equipment_type, "status": s.readiness_code}
+            for s in deadlined_snaps[:5]
         ],
     }
 

@@ -182,22 +182,38 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
         mc_rate = c.get("MC", 0) / total
         if mc_rate < 0.70:
             nmcs = c.get("NMCS", 0)
+            mc = c.get("MC", 0)
+            pmc = c.get("PMC", 0)
+            nmcm = c.get("NMCM", 0)
+            # Reconcile every number on screen — MC + PMC + NMCM + NMCS == total.
+            # The previous body read "32/64 assets · 17 NMCS" and left the
+            # reviewer trying to make 32+17 = 64 (it doesn't; the missing 15
+            # were PMC + NMCM). One body, one decomposition, every number
+            # accounted for. Precision uniform at 1 decimal across the app.
             out.append({
                 "id": f"pulse-readiness-{unit_name}",
                 "source": "PULSE",
                 "severity": "HIGH" if mc_rate < 0.60 else "MODERATE",
                 "timestamp": _jittered_timestamp(last_day, f"readiness:{unit_name}"),
                 "title": _readiness_title(unit_name, mc_rate, nmcs, total),
-                "body": f"{unit_name} MC rate {mc_rate:.1%} ({c.get('MC',0)}/{total} assets · {nmcs} NMCS)",
+                "body": (
+                    f"{unit_name} MC {mc_rate*100:.1f}% · "
+                    f"{mc} MC / {pmc} PMC / {nmcm} NMCM / {nmcs} NMCS / {total} total"
+                ),
                 "unit": unit_name,
             })
 
-    # Cannibalization matches
+    # Cannibalization matches.
+    # Severity heuristic — single-unit cannibalization (donor and recipient
+    # are the same unit) is INFO; cross-unit is MODERATE because parts
+    # leaving one unit's fleet for another's is a maintenance signal worth
+    # a yellow stripe. Reviewer caught all-INFO under-weighting cross-unit.
     for ev in sorted(ds.cannib_events, key=lambda e: e.event_date, reverse=True):
+        cross_unit = ev.donor_unit and ev.recipient_unit and ev.donor_unit != ev.recipient_unit
         out.append({
             "id": f"pulse-cannib-{ev.event_id}",
             "source": "PULSE",
-            "severity": "INFO",
+            "severity": "MODERATE" if cross_unit else "INFO",
             "timestamp": ev.event_date.isoformat(),
             "title": f"Cannibalization: {ev.recipient_unit} ← {ev.donor_unit}",
             "body": f"{ev.nomenclature} transferred ({ev.asset_pair_body() if hasattr(ev, 'asset_pair_body') else ev.recipient_asset_id + ' from ' + ev.donor_asset_id})",
@@ -260,10 +276,89 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
     fused = fuse_alerts(out, window_minutes=60)
     fused_records = [t.to_alert_dict() for t in fused]
 
+    # Apply per-alert state (ack / snooze / resolve) so the front-end can
+    # render canonical groups + drop resolved rows. Snoozes auto-expire
+    # via _is_snoozed; resolves remove the row from the response entirely
+    # so the count drops only when the operator says it does.
+    visible: list[dict] = []
+    for a in out:
+        st = _ALERT_STATE.get(a["id"])
+        if st and st.get("status") == "resolved":
+            continue
+        if st:
+            a = {**a, "_state": st}
+        visible.append(a)
+
+    # Severity breakdown — exposed so the TopBar badge can show the live
+    # tooltip "30 open alerts (HIGH: x, MODERATE: y, INFO: z)" without
+    # the front-end having to reduce the array client-side.
+    sev_counts: dict[str, int] = {}
+    for a in visible:
+        sev_counts[a["severity"]] = sev_counts.get(a["severity"], 0) + 1
+
     return {
-        "alerts": out[:limit],
+        "alerts": visible[:limit],
         "fused_threats": fused_records,
+        "total": len(visible),
+        "severity_counts": sev_counts,
     }
+
+
+# ---------------------------------------------------------------------------
+# Per-alert state — ack / snooze / resolve
+#
+# In-memory store keyed by alert_id. A real deployment would persist to the
+# audit log; for the demo we keep state for the life of the process so the
+# operator's clicks survive role swaps + remounts. The /alerts response
+# bakes the per-alert state into the payload so the front-end never has to
+# infer it.
+# ---------------------------------------------------------------------------
+
+_ALERT_STATE: dict[str, dict] = {}
+
+
+def _is_snoozed(state: dict) -> bool:
+    if state.get("status") != "snoozed":
+        return False
+    until = state.get("snooze_until")
+    if not until:
+        return False
+    try:
+        return datetime.fromisoformat(until.replace("Z", "")) > datetime.utcnow()
+    except Exception:
+        return False
+
+
+@router.post("/alerts/{alert_id}/{action}")
+async def alert_action(alert_id: str, action: str):
+    """ack / snooze / resolve / unack a single alert.
+
+    The handler is intentionally tolerant of unknown ids — synthetic alerts
+    regenerate their ids on every poll for some sources, so we accept any
+    id and keep state keyed by it. Unknown actions return 400."""
+    now = datetime.utcnow()
+    if action == "ack":
+        _ALERT_STATE[alert_id] = {
+            "status": "acknowledged",
+            "at": now.isoformat(timespec="seconds") + "Z",
+        }
+    elif action == "snooze":
+        until = now + timedelta(hours=1)
+        _ALERT_STATE[alert_id] = {
+            "status": "snoozed",
+            "at": now.isoformat(timespec="seconds") + "Z",
+            "snooze_until": until.isoformat(timespec="seconds") + "Z",
+        }
+    elif action == "resolve":
+        _ALERT_STATE[alert_id] = {
+            "status": "resolved",
+            "at": now.isoformat(timespec="seconds") + "Z",
+        }
+    elif action == "unack":
+        _ALERT_STATE.pop(alert_id, None)
+    else:
+        raise HTTPException(status_code=400, detail=f"unknown action: {action}")
+    return {"ok": True, "alert_id": alert_id, "state": _ALERT_STATE.get(alert_id)}
 
 
 @router.get("/fused-threats")
@@ -477,7 +572,7 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
             "parameters": 1_770_000,
             "architecture": "Thornveil proprietary architecture + Thornveil neck + Thornveil detection head",
             "training": "Thornveil training protocol on Anti-UAV410",
-            "deployment_target": "Hailo-8 edge accelerator (~$80)",
+            "deployment_target": "Hailo-8 edge accelerator (~$80 USD per node)",
         },
         "response_available": True,
     }
@@ -613,9 +708,16 @@ async def nl_query(payload: dict):
             "intent": "general_query",
             "result": {
                 "answer": (result.get("content") or "").strip(),
-                "engine": "Gemma4 via RigRun proxy",
-                "tokens_used": usage.get("total_tokens"),
-                "grounded": True,
+                # Operator never sees these — they live under _meta for the
+                # admin/audit surfaces only. Walkthrough caught the prior
+                # version leaking `engine: Gemma4 via RigRun proxy · 234 tokens`
+                # into the chat bubble; that's developer telemetry, not a
+                # command-tool answer.
+                "_meta": {
+                    "engine": "Gemma4 via RigRun proxy",
+                    "tokens_used": usage.get("total_tokens"),
+                    "grounded": True,
+                },
             },
         }
     except Exception as e:  # noqa: BLE001
@@ -623,53 +725,68 @@ async def nl_query(payload: dict):
             "intent": "general_query",
             "result": {
                 "answer": "Language-model gate unavailable right now. Try a structured query (e.g. 'submit TMR from Lejeune to Geiger, 5 MTVRs, Wednesday') or refresh in a minute.",
-                "engine": f"unavailable ({type(e).__name__})",
+                "_meta": {"engine": f"unavailable ({type(e).__name__})"},
             },
         }
 
 
 def _build_grounding_context(role: str | None) -> str:
     """Snapshot of the operational picture the LLM should ground its answers
-    against. Pulls top-N alerts, deadlined assets in role scope, and a
-    fleet readiness summary. Trimmed so the prompt stays compact.
+    against. Mirrors the canonical readiness counter used by /api/bastion/cop
+    and /api/bastion/alerts so the LLM can never disagree with what the
+    operator sees on screen.
+
+    Walkthrough caught: prior version computed MC% as (total-deadlined)/total,
+    counting PMC as MC. SPIRO then echoed e.g. "CLB-6 90.0% (63/70)" while
+    the map and alert stream showed 55.7% (39/70). Source of truth is the
+    end-of-day snapshot's readiness_code (MC / PMC / NMCM / NMCS) — strict-MC
+    only counts MC.
     """
-    from ..state import get_dataset
+    from collections import Counter
+    from ..state import get_dataset, last_day_snapshots
     from ..scoping import allowed_units
     ds = get_dataset()
     allowed = allowed_units(ds, role)
-    in_scope = ds.assets if allowed is None else [a for a in ds.assets if a.unit_name in allowed]
+    last = last_day_snapshots(ds)
+    if not last:
+        return "Operational picture unavailable (canonical dataset is empty)."
+    in_scope = last if allowed is None else [s for s in last if s.unit_name in allowed]
 
-    deadlined = [a for a in in_scope if ((getattr(a, "current_status", "") or "").startswith("NMC"))][:8]
-    by_unit: dict[str, dict[str, int]] = {}
-    for a in in_scope:
-        u = by_unit.setdefault(a.unit_name, {"total": 0, "deadlined": 0})
-        u["total"] += 1
-        if ((getattr(a, "current_status", "") or "").startswith("NMC")):
-            u["deadlined"] += 1
+    by_unit: dict[str, Counter] = {}
+    for s in in_scope:
+        by_unit.setdefault(s.unit_name, Counter())[s.readiness_code] += 1
 
-    lines = []
-    lines.append(f"Role scope: {role or 'unrestricted'} · {len(in_scope)} assets visible")
+    lines: list[str] = []
+    lines.append(
+        f"Role scope: {role or 'unrestricted'} · {len(in_scope)} assets visible "
+        f"(end-of-day {last[0].snapshot_date.isoformat()} canonical snapshot)"
+    )
     lines.append("")
-    lines.append("Fleet readiness by unit:")
-    for unit_name, counts in sorted(by_unit.items()):
-        mc_pct = ((counts["total"] - counts["deadlined"]) / counts["total"] * 100) if counts["total"] else 0
-        lines.append(f"  - {unit_name}: {counts['total']-counts['deadlined']}/{counts['total']} operational ({mc_pct:.1f}% MC)" + (f" · {counts['deadlined']} deadlined" if counts['deadlined'] else ""))
+    lines.append("Per-unit readiness (strict MC = readiness_code == 'MC'; PMC is partial, NOT MC):")
+    for unit_name, c in sorted(by_unit.items()):
+        total = sum(c.values())
+        mc = c.get("MC", 0)
+        pmc = c.get("PMC", 0)
+        nmcm = c.get("NMCM", 0)
+        nmcs = c.get("NMCS", 0)
+        mc_pct = (mc / total * 100) if total else 0.0
+        lines.append(
+            f"  - {unit_name}: MC {mc_pct:.1f}% · {mc} MC / {pmc} PMC / {nmcm} NMCM / {nmcs} NMCS · {total} total"
+        )
     lines.append("")
-    if deadlined:
-        lines.append("Currently deadlined assets in scope (top 8):")
-        for a in deadlined:
-            hours = round(a.current_hours, 1) if hasattr(a, 'current_hours') and a.current_hours else "?"
-            lines.append(f"  - {a.asset_id} · {a.equipment_type} · {a.unit_name} · {hours}h")
+
+    deadlined_snaps = [s for s in in_scope if s.readiness_code in ("NMCM", "NMCS")][:8]
+    if deadlined_snaps:
+        lines.append("Deadlined examples in scope (top 8):")
+        for s in deadlined_snaps:
+            lines.append(
+                f"  - {s.asset_id} · {s.equipment_type} · {s.unit_name} · status={s.readiness_code}"
+            )
     else:
         lines.append("No currently deadlined assets in scope.")
 
-    # Recent active alerts — pull from the live alert stream.
-    try:
-        from .bastion import _ACTIVE_SIMS
-        if _ACTIVE_SIMS:
-            lines.append("")
-            lines.append(f"Active simulated incidents: {len(_ACTIVE_SIMS)}")
-    except Exception:
-        pass
+    if _ACTIVE_SIMS:
+        lines.append("")
+        lines.append(f"Active simulated incidents: {len(_ACTIVE_SIMS)}")
 
     return "\n".join(lines)

@@ -326,9 +326,6 @@ export function Spiro() {
               </>
             )}
 
-            <div className="font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">
-              engine: {plan.engine}{plan.tokens_used ? ` · ${plan.tokens_used} tokens` : ""}
-            </div>
           </div>
         )}
 
