@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
 import { withRetry, pollWithBackoff, formatApiError } from "../api-retry";
@@ -243,6 +243,12 @@ export function BastionView() {
 
   // Detect new alerts arriving in the poll so we can scan-line the row.
   const prevAlertIdsRef = useRef<Set<string>>(new Set());
+  // Track the active scan-line clear timer so we can cancel it when the
+  // component unmounts mid-flight, or when a fresh batch lands while the
+  // previous 700ms window is still pending. Without this, a stale
+  // setRecentAlertIds(new Set()) can fire after unmount (React warns),
+  // and back-to-back batches race each other for the clear.
+  const scanLineTimerRef = useRef<number | null>(null);
   useEffect(() => {
     const prev = prevAlertIdsRef.current;
     const fresh = new Set<string>();
@@ -251,10 +257,26 @@ export function BastionView() {
     }
     if (fresh.size > 0) {
       setRecentAlertIds(fresh);
-      window.setTimeout(() => setRecentAlertIds(new Set()), 700);
+      if (scanLineTimerRef.current != null) {
+        window.clearTimeout(scanLineTimerRef.current);
+      }
+      scanLineTimerRef.current = window.setTimeout(() => {
+        setRecentAlertIds(new Set());
+        scanLineTimerRef.current = null;
+      }, 700);
     }
     prevAlertIdsRef.current = new Set(alerts.map((a) => a.id));
   }, [alerts]);
+
+  // Unmount-time cleanup for the scan-line timer.
+  useEffect(() => {
+    return () => {
+      if (scanLineTimerRef.current != null) {
+        window.clearTimeout(scanLineTimerRef.current);
+        scanLineTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // ThermalHawk sim trigger. Used to live as an in-column button (#37
   // moved it). Now the map agent owns the SIMULATE button in the COP
@@ -829,11 +851,30 @@ function AlertRow({
   const glyph = SEVERITY_GLYPH[alert.severity] || SEVERITY_GLYPH.INFO;
   const acked = alert._state?.status === "acknowledged";
   const snoozed = alert._state?.status === "snoozed";
+  // Keyboard accessibility: AlertRow is the primary BASTION drill-down
+  // affordance. A `<div onClick>` is mouse-only and skipped by Tab —
+  // an operator on a hardened keyboard-only watch-floor station can't
+  // reach the alert detail at all. We keep `<div>` (rather than a real
+  // `<button>`) because the row contains nested action buttons (Ack,
+  // Snooze, Resolve) and a button-inside-button is invalid HTML;
+  // role + tabIndex + Enter/Space handler give the same semantics.
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick();
+    }
+  };
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={`${alert.severity} ${alert.source}: ${alert.title}`}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
       className={clsx(
         "relative mb-1.5 cursor-pointer overflow-hidden rounded-sm border-l-4 bg-[var(--color-surface)] px-2 py-1.5 transition-colors",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]",
         selected ? "border border-[var(--color-primary)]" : "border-r border-t border-b border-[var(--color-border)]",
         acked && "opacity-60",
       )}
