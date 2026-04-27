@@ -396,11 +396,15 @@ function RollingChart({ points }: { points: { bucket_end: string; accuracy: numb
       {xs.map((x, i) => (
         <circle key={i} cx={x} cy={ys[i]} r="2.5" fill="var(--color-primary)" />
       ))}
+      {/* Walkthrough audit: prior axis labels were 'MM-DD' only.
+       * For a multi-week chart that crossed a year boundary the labels
+       * read identically. Render 'DD MMM' so a January→December run
+       * stays disambiguated. */}
       <text x="0" y={h + 15} fill="var(--color-text-muted)" fontSize="8" fontFamily="JetBrains Mono, monospace">
-        {points[0]?.bucket_end?.slice(5, 10)}
+        {fmtAxis(points[0]?.bucket_end)}
       </text>
       <text x={w} y={h + 15} fill="var(--color-text-muted)" fontSize="8" textAnchor="end" fontFamily="JetBrains Mono, monospace">
-        {points[points.length - 1]?.bucket_end?.slice(5, 10)} · accuracy
+        {fmtAxis(points[points.length - 1]?.bucket_end)} · accuracy
       </text>
     </svg>
   );
@@ -410,4 +414,13 @@ function accColor(a: number): string {
   if (a >= 0.9) return "var(--color-success)";
   if (a >= 0.8) return "var(--color-warning)";
   return "var(--color-danger)";
+}
+
+function fmtAxis(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${day} ${months[d.getUTCMonth()]}`;
 }
