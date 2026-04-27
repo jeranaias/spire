@@ -61,3 +61,9 @@ scripts/mgrs_test.py
 
 # Local audit scratch — chrome-devtools driving screenshots
 walkthrough/
+
+# ThermalHawk live-feed assets — fetched via scripts/fetch_thermal_demo.sh.
+# Real thermal drone frames live outside the repo so the tree stays small;
+# the deploy box pulls them once. Trained model weights live elsewhere
+# (see models/README.md and SPIRE_THERMALHAWK_WEIGHTS env var).
+/data/thermal_demo/

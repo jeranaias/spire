@@ -796,6 +796,62 @@ async def clear_simulation(sim_id: str):
 
 
 # ---------------------------------------------------------------------------
+# ThermalHawk live video feed
+# ---------------------------------------------------------------------------
+
+@router.get("/thermalhawk/feed")
+async def thermalhawk_feed(frame: int = 0):
+    """Single-frame endpoint for the BASTION live thermal feed.
+
+    Returns one PNG-encoded frame (base64) plus the boxes the live
+    ThermalHawk model produced + measured latency. Frontend polls
+    this at ~5 FPS via incrementing `frame` so the canvas plays the
+    sequence as a video with bounding-box overlays.
+
+    Frame source priority:
+      1. SPIRE_THERMALHAWK_FRAMES dir (preferred, real Anti-UAV410)
+      2. SPIRE_THERMALHAWK_VIDEO file
+      3. Bundled Roboflow Thermal-Drone (Zenodo CC-BY-4.0, on disk)
+      4. Procedural fallback (only if no frames bundled)
+
+    Returns 503 when the model isn't loaded — frontend should advertise
+    'sim only' in that case rather than rendering noise."""
+    from ..ml.thermal_feed import get_thermal_frame_with_detections
+    payload = get_thermal_frame_with_detections(frame_idx=int(frame))
+    if payload is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ThermalHawk model not loaded — set SPIRE_THERMALHAWK_WEIGHTS to enable the live feed",
+        )
+    return payload
+
+
+@router.get("/thermalhawk/feed/info")
+async def thermalhawk_feed_info():
+    """Static metadata about the live feed source — surfaced in the
+    operator-facing 'live feed' panel header so the source/license/
+    threshold reads honestly."""
+    from ..model_hooks import STATE as MS
+    from ..ml.thermal_feed import _list_antiuav_frames, _BUNDLED_FRAMES_DIR  # noqa
+    frames = _list_antiuav_frames()
+    using_bundled = bool(frames) and str(_BUNDLED_FRAMES_DIR) in str(frames[0])
+    return {
+        "model_loaded": MS.thermalhawk_model is not None,
+        "frame_count_in_loop": len(frames) if frames else 240,
+        "source": (
+            "Roboflow Thermal-Drone (Zenodo 15633051, CC-BY-4.0)"
+            if using_bundled
+            else "Anti-UAV410" if frames
+            else "procedural"
+        ),
+        "default_score_threshold": (
+            0.05 if using_bundled else 0.30 if frames else 0.20
+        ),
+        "model_metadata": MS.thermalhawk_metadata,
+    }
+
+
+# ---------------------------------------------------------------------------
 # TMR list — surfaces the canonical synthetic TMR dataset for the BASTION TMR
 # panel. Distinct from the NL TMR parser at /nl-query, which still consumes
 # free-text operator input and routes to the rule-based / LLM extractor.
