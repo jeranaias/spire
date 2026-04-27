@@ -302,6 +302,12 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
         st = _ALERT_STATE.get(a["id"])
         if st and st.get("status") == "resolved":
             continue
+        # Walkthrough audit: a row could be left tagged 'snoozed' indefinitely
+        # because the snoozed-status check above didn't consult snooze_until.
+        # Drop the state when the snooze window has lapsed so the row reads
+        # as active again instead of pretending the operator silenced it.
+        if st and st.get("status") == "snoozed" and not _is_snoozed(st):
+            st = None
         if st:
             a = {**a, "_state": st}
         visible.append(a)
