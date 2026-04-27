@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { api, type CoalitionProfileSummary, type CoalitionView } from "../../api";
+import { formatApiError } from "../../api-retry";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 
@@ -78,8 +79,8 @@ export function CoalitionTab() {
         // exactly like 'no data for this profile' rather than 'fetch
         // failed during deploy churn'. Set viewError so the empty state
         // names the actual problem.
-        setViewError(String(e).slice(0, 200));
-        pushToast({ tone: "error", text: `Coalition view failed: ${e}` });
+        setViewError(formatApiError(e));
+        pushToast({ tone: "error", text: `Coalition view failed: ${formatApiError(e)}` });
       })
       .finally(() => setLoading(false));
   }, [selected, pushToast]);
@@ -114,7 +115,7 @@ export function CoalitionTab() {
         ttlMs: 6000,
       });
     } catch (e) {
-      pushToast({ tone: "error", text: `Release failed: ${e}` });
+      pushToast({ tone: "error", text: `Release failed: ${formatApiError(e)}` });
     } finally {
       setReleasing(false);
     }

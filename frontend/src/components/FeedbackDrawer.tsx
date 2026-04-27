@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useSpireStore, ROLE_LABELS } from "../state/store";
+import { formatApiError } from "../api-retry";
 
 type IssueType = "bug" | "idea" | "question" | "praise";
 
@@ -207,7 +208,7 @@ export function FeedbackDrawer() {
       setIssueType("bug");
       setOpen(false);
     } catch (e) {
-      pushToast({ tone: "error", text: `Submit failed: ${e}` });
+      pushToast({ tone: "error", text: `Submit failed: ${formatApiError(e)}` });
     } finally {
       setSubmitting(false);
     }

@@ -74,7 +74,7 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
         return n;
       });
     } catch (e) {
-      pushToast({ tone: "error", text: `Approval failed: ${e}` });
+      pushToast({ tone: "error", text: `Approval failed: ${formatApiError(e)}` });
     } finally {
       setPendingApproval(null);
     }
