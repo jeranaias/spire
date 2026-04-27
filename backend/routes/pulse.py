@@ -37,7 +37,12 @@ def _jittered_alert_ts(base, key: str) -> str:
         d = _dt(base.year, base.month, base.day, 12, 0, 0)
     else:
         return str(base)
-    return (d + timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    # Walkthrough audit: prior version returned ISO without 'Z' suffix
+    # ('2026-04-27T02:52:00'). The frontend's `new Date()` interprets a
+    # bare ISO as LOCAL time — operators in UTC-7 saw the alert
+    # timestamp parse as 7 hours in the future, which the AlertCard
+    # then flagged as 'SYNTH'. Append 'Z' so it parses as UTC.
+    return (d + timedelta(minutes=minutes)).isoformat(timespec="seconds") + "Z"
 
 
 # Replenishment rate primitives live in the dataset/ module so they're
