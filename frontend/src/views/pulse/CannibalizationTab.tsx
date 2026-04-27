@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Cannibalization } from "../../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, type Cannibalization, type DonorCandidate } from "../../api";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
+import { formatApiError } from "../../api-retry";
 
 type NeedRow = {
   sr_number: string;
@@ -16,6 +17,9 @@ type NeedRow = {
   unit_mc_count?: number;
   unit_total?: number;
   needed_part: { nsn: string; nomenclature: string; unit_cost: number };
+  // Issue #17 — server-computed donor candidates per need.
+  donor_candidates?: DonorCandidate[];
+  no_donor_reason?: string | null;
 };
 
 type MatchRow = {
@@ -43,9 +47,27 @@ export function CannibalizationTab() {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
   const [data, setData] = useState<Cannibalization | null>(null);
+  // Issue #17 follow-on (review feedback): a swallowed fetch error left
+  // the loading overlay up forever; surface a retryable error pane
+  // instead, mirroring the Forecast tab's behaviour.
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  // Task #3 follow-on: timestamp of last successful response so the
+  // operator can see how fresh the donor list is at a glance. Same
+  // pattern as ForecastTab.
+  const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
+  // Task #3 follow-on (review polish): named handler for parity with
+  // ForecastTab's reload(); stable identity also keeps the header button
+  // from re-rendering on unrelated state changes.
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+  // Task #3 follow-on: AbortController + generation guard, mirroring the
+  // ForecastTab fix. Without this, a fast role swap or post-propose
+  // refetch can land its response after a newer one and leave the donor
+  // pane out of sync.
+  const reqGenRef = useRef(0);
   const [selectedNeed, setSelectedNeed] = useState<NeedRow | null>(null);
   const [proposedLocal, setProposedLocal] = useState<MatchRow[]>([]);
-  const [confirmDonor, setConfirmDonor] = useState<{ need: NeedRow; donor: NeedRow } | null>(null);
+  const [confirmDonor, setConfirmDonor] = useState<{ need: NeedRow; donor: DonorCandidate } | null>(null);
   const [committing, setCommitting] = useState(false);
   // Walkthrough #43 — filter chips
   const [unitFilter, setUnitFilter] = useState<string | null>(null);
@@ -59,34 +81,58 @@ export function CannibalizationTab() {
     setData(null);
     setSelectedNeed(null);
     setProposedLocal([]);
+    setError(null);
     // Walkthrough audit: prior code had no .catch — transient 502s
     // logged 'Uncaught (in promise)' instead of letting the empty
-    // state render naturally.
-    api.pulse.cannibalization()
-      .then(setData)
-      .catch(() => { /* tolerate; empty-state copy explains 'no needs' */ });
-  }, [role]);
+    // state render naturally. Review feedback: a silent failure also
+    // pinned the loading overlay forever; capture the error so the UI
+    // can surface a retry pane.
+    // Task #3 follow-on: AbortController + generation guard so a fast
+    // role swap or post-propose refetch can't land a stale response.
+    const myGen = ++reqGenRef.current;
+    const ctrl = new AbortController();
+    api.pulse.cannibalization(ctrl.signal)
+      .then((d) => {
+        if (myGen !== reqGenRef.current) return;
+        setData(d);
+        setLastRefreshed(Date.now());
+      })
+      .catch((e) => {
+        if (myGen !== reqGenRef.current) return;
+        if (e?.name === "AbortError") return;
+        setError(formatApiError(e, "Cannibalization data unavailable."));
+      });
+    return () => ctrl.abort();
+  }, [role, reloadKey]);
 
-  // Walkthrough #9 — Donor candidates with cause-of-fault overlap exclusion.
-  // If recipient's fault class matches donor's fault class, the donor's
-  // own X is the failing part — pulling it is nonsensical. Drop it.
-  const donors = useMemo(() => {
-    if (!data || !selectedNeed) return [];
-    return (data.open_needs as NeedRow[]).filter((n) => {
-      if (n.sr_number === selectedNeed.sr_number) return false;
-      if (n.needed_part.nsn !== selectedNeed.needed_part.nsn) return false;
-      // Walkthrough #9 — exclude donors whose own fault class matches the
-      // recipient's. The donor would be the worst possible source of that
-      // exact part since their copy of it is also failing.
-      if (
-        selectedNeed.fault_class &&
-        n.fault_class &&
-        selectedNeed.fault_class === n.fault_class
-      ) return false;
-      return true;
-    });
-  }, [data, selectedNeed]);
+  // Issue #17 — Donor candidates are now computed server-side. Previous
+  // client-side matcher required donors to be open SRs with the same NSN
+  // as the recipient, which is the inverse of cannibalization (a donor
+  // HAS the part; the recipient NEEDS it). Result: every selection
+  // produced an empty donor list in the demo dataset. The backend now
+  // emits a curated list per need (deadlined-other-fault peers first,
+  // operational-swap fallback when none exist).
+  const donors: DonorCandidate[] = selectedNeed?.donor_candidates ?? [];
+  const noDonorReason: string | null = selectedNeed?.no_donor_reason ?? null;
 
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <div className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
+          Cannibalization Unavailable
+        </div>
+        <div className="max-w-md font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
+          {error}
+        </div>
+        <button
+          onClick={reload}
+          className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (!data) return <LoadingOverlay message="Matching needs with donors …" />;
 
   const allNeeds = data.open_needs as NeedRow[];
@@ -122,7 +168,9 @@ export function CannibalizationTab() {
         donor: { asset_id: confirmDonor.donor.asset_id, unit: confirmDonor.donor.unit },
         nsn: confirmDonor.need.needed_part.nsn,
         nomenclature: confirmDonor.need.needed_part.nomenclature,
-        impact: `Proposed by operator · recipient ${confirmDonor.need.unit} gains ${confirmDonor.need.needed_part.nomenclature} from ${confirmDonor.donor.unit}.`,
+        impact: confirmDonor.donor.category === "operational_swap"
+          ? `Proposed by operator · operational ${confirmDonor.donor.asset_id} (${confirmDonor.donor.unit}) yields ${confirmDonor.need.needed_part.nomenclature} to ${confirmDonor.need.asset_id}; donor will be deadlined until replenished.`
+          : `Proposed by operator · recipient ${confirmDonor.need.unit} gains ${confirmDonor.need.needed_part.nomenclature} from ${confirmDonor.donor.unit}.`,
       };
       setProposedLocal((prev) => [optimistic, ...prev]);
       // Walkthrough audit (CRITICAL): prior code had no client-side timeout
@@ -139,7 +187,10 @@ export function CannibalizationTab() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             recipient_sr: confirmDonor.need.sr_number,
+            // donor_sr is null for operational_swap donors; backend
+            // accepts donor_asset_id as the alternate identifier.
             donor_sr: confirmDonor.donor.sr_number,
+            donor_asset_id: confirmDonor.donor.asset_id,
             nsn: confirmDonor.need.needed_part.nsn,
           }),
           signal: ctrl.signal,
@@ -157,47 +208,45 @@ export function CannibalizationTab() {
       });
       setConfirmDonor(null);
       setSelectedNeed(null);
+      // Task #3 follow-on: trigger a fresh fetch so the open-needs and
+      // matches lists pick up the proposal from the server (not just the
+      // optimistic row). The optimistic row is fine for instant feedback,
+      // but server truth resolves moments later — and any newly-deadlined
+      // donor is reflected in donor_candidates for sibling needs.
+      reload();
     } finally {
       setCommitting(false);
     }
   }
 
   // Walkthrough #45 — bulk auto-propose top match per need.
+  // Issue #17 follow-on: now sources candidates from the server-curated
+  // donor_candidates list. The 'Cross-unit, different fault class' toggle
+  // narrows further by excluding intra-unit donors (deadlined-other-fault
+  // donors are inherently different-fault-class already).
   function autoProposeTopMatches() {
     if (!data) return;
     let count = 0;
     const proposals: MatchRow[] = [];
     for (const need of filteredNeeds) {
-      const candidates = (data.open_needs as NeedRow[]).filter((n) =>
-        n.sr_number !== need.sr_number &&
-        n.needed_part.nsn === need.needed_part.nsn &&
-        // Walkthrough audit: the checkbox 'Cross-unit, different fault
-        // class' adds the cross-unit predicate when toggled on. The
-        // different-fault-class predicate below applies in BOTH modes
-        // (cause-of-fault overlap is always invalid — see #9).
-        (!crossUnitOnly || n.unit !== need.unit) &&
-        (n.fault_class !== need.fault_class)
-      );
-      if (candidates.length === 0) continue;
-      // Prefer cross-unit donors; among those, the lowest unit_mc_rate
-      // donor is the worst choice (their unit is hurting too) so prefer
-      // donor with HIGHER mc_rate i.e. unit can spare it.
-      candidates.sort((a, b) => {
-        const aCross = a.unit !== need.unit ? 1 : 0;
-        const bCross = b.unit !== need.unit ? 1 : 0;
-        if (aCross !== bCross) return bCross - aCross;
-        return (b.unit_mc_rate ?? 0) - (a.unit_mc_rate ?? 0);
+      const candidates = (need.donor_candidates ?? []).filter((c) => {
+        if (crossUnitOnly && c.unit === need.unit) return false;
+        return true;
       });
-      const isSelf = candidates[0].unit === need.unit;
+      if (candidates.length === 0) continue;
+      // Server already sorts deadlined-other-fault donors first then by
+      // donor unit MC rate (descending). Honour that order.
+      const top = candidates[0];
+      const isSelf = top.unit === need.unit;
       proposals.push({
         event_id: `CAN-LOCAL-${Date.now()}-${count}`,
         event_date: new Date().toISOString().slice(0, 10),
         scope: isSelf ? "self" : "cross_unit",
         recipient: { asset_id: need.asset_id, unit: need.unit },
-        donor: { asset_id: candidates[0].asset_id, unit: candidates[0].unit },
+        donor: { asset_id: top.asset_id, unit: top.unit },
         nsn: need.needed_part.nsn,
         nomenclature: need.needed_part.nomenclature,
-        impact: `Auto-proposed top match · ${need.asset_id} ← ${candidates[0].asset_id}.`,
+        impact: `Auto-proposed top match · ${need.asset_id} ← ${top.asset_id}.`,
       });
       count++;
     }
@@ -212,14 +261,37 @@ export function CannibalizationTab() {
   return (
     <div className="flex h-full overflow-hidden">
       <section className="flex w-5/12 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
-        <div className="mb-3">
-          <h3
-            className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
-          >
-            Needs · Open NMCS Assets ({needs.length}{filteredNeeds.length !== allNeeds.length ? ` of ${allNeeds.length}` : ""})
-          </h3>
-          <div className="mt-0.5 spire-body-muted">
-            Deadlined assets with un-received parts. Click a need to find compatible donors.
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3
+              className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
+            >
+              Needs · Open NMCS Assets ({needs.length}{filteredNeeds.length !== allNeeds.length ? ` of ${allNeeds.length}` : ""})
+            </h3>
+            <div className="mt-0.5 spire-body-muted">
+              Deadlined assets with un-received parts. Click a need to find compatible donors.
+            </div>
+          </div>
+          {/* Task #3 follow-on: manual reload + last-refreshed timestamp,
+           * matching the ForecastTab affordance so operators have a
+           * consistent way to re-pull server truth on both PULSE tabs. */}
+          <div className="flex shrink-0 flex-col items-end gap-0.5">
+            <button
+              onClick={reload}
+              className="rounded-sm border border-[var(--color-border-active)] px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] tracking-widest"
+              title="Re-fetch open needs and donor candidates"
+              aria-label="Reload cannibalization data"
+            >
+              Reload
+            </button>
+            {lastRefreshed != null && (
+              <span
+                className="font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest tabular-nums"
+                title={new Date(lastRefreshed).toString()}
+              >
+                refreshed {new Date(lastRefreshed).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+              </span>
+            )}
           </div>
         </div>
 
@@ -343,7 +415,7 @@ export function CannibalizationTab() {
           </h3>
           <div className="mt-0.5 spire-body-muted">
             {selectedNeed
-              ? `Compatible NSN ${selectedNeed.needed_part.nsn} · same fault-class donors filtered out (their copy of the part is also failing).`
+              ? `Compatible donor for ${selectedNeed.needed_part.nomenclature.toLowerCase()} · same equipment type, intact part, no cause-of-fault overlap.`
               : "Select a need to see compatible donors."}
           </div>
         </div>
@@ -353,41 +425,74 @@ export function CannibalizationTab() {
           </div>
         )}
         {selectedNeed && donors.length === 0 && (
-          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            NO COMPATIBLE DONORS
+          <div className="rounded-sm border border-dashed border-[var(--color-warning-muted)] bg-[color-mix(in_oklab,var(--color-warning-muted)_8%,transparent)] p-4 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide leading-relaxed">
+            <div className="mb-1 font-semibold uppercase text-[var(--color-warning)] tracking-widest">
+              No compatible donor
+            </div>
+            {/* Issue #17 — server explains WHY the list is empty. */}
+            {noDonorReason ?? (
+              <>No same-equipment peer has an intact {selectedNeed.needed_part.nomenclature.toLowerCase()} in the role-scoped fleet.</>
+            )}
           </div>
         )}
         <div className="flex flex-col gap-2">
-          {donors.map((d) => (
-            <div
-              key={d.sr_number}
-              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
-            >
-              <div className="flex items-baseline justify-between">
-                <div className="font-mono text-base font-semibold text-[var(--color-text)]">{d.asset_id}</div>
-                <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-                  {d.unit_mc_rate != null && (
-                    <span className="mr-2 tabular-nums">unit MC {(d.unit_mc_rate * 100).toFixed(1)}%</span>
+          {donors.map((d, idx) => {
+            const isOpSwap = d.category === "operational_swap";
+            return (
+              <div
+                key={`${d.asset_id}-${idx}`}
+                className="rounded-sm border bg-[var(--color-surface)] p-3"
+                style={{
+                  borderColor: isOpSwap
+                    ? "color-mix(in oklab, var(--color-warning) 35%, var(--color-border))"
+                    : "var(--color-border)",
+                }}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="font-mono text-base font-semibold text-[var(--color-text)]">{d.asset_id}</div>
+                  <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+                    {d.unit_mc_rate != null && (
+                      <span className="tabular-nums">unit MC {(d.unit_mc_rate * 100).toFixed(1)}%</span>
+                    )}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+                  <span>{d.equipment_type.replace(/_/g, " ")}</span>
+                  <span>·</span>
+                  <span>{d.unit}</span>
+                  {/* Issue #17 — donor category badge so the operator
+                   * knows whether the donor is itself deadlined (safe to
+                   * pull) or operational (pulling deadlines them). */}
+                  {isOpSwap ? (
+                    <span className="rounded-sm border border-[var(--color-warning)] px-1 text-[10px] uppercase text-[var(--color-warning)] tracking-widest">
+                      operational swap
+                    </span>
+                  ) : (
+                    <span className="rounded-sm border border-[var(--color-border-active)] px-1 text-[10px] uppercase text-[var(--color-text-secondary)] tracking-widest">
+                      deadlined · other fault
+                    </span>
                   )}
-                </span>
+                </div>
+                {d.fault_component && (
+                  <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
+                    Donor fault: {d.fault_component} {d.fault_class && d.fault_class !== d.fault_component && <span className="text-[var(--color-text-muted)]">({d.fault_class})</span>} · open {d.days_open}d
+                  </div>
+                )}
+                <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
+                  {d.rationale}
+                </div>
+                {/* Walkthrough #23 — primary CTA-styled Propose button. */}
+                <div className="mt-2 flex items-center justify-end">
+                  <button
+                    onClick={() => setConfirmDonor({ need: selectedNeed!, donor: d })}
+                    className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
+                  >
+                    Propose
+                  </button>
+                </div>
               </div>
-              <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-                {d.equipment_type.replace(/_/g, " ")} · {d.unit} · open {d.days_open}d
-              </div>
-              <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
-                Fault: {d.fault_component} {d.fault_class && d.fault_class !== d.fault_component && <span className="text-[var(--color-text-muted)]">({d.fault_class})</span>}
-              </div>
-              {/* Walkthrough #23 — primary CTA-styled Propose button. */}
-              <div className="mt-2 flex items-center justify-end">
-                <button
-                  onClick={() => setConfirmDonor({ need: selectedNeed!, donor: d })}
-                  className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
-                >
-                  Propose
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
@@ -511,7 +616,7 @@ function ConfirmProposeModal({
   onConfirm,
 }: {
   need: NeedRow;
-  donor: NeedRow;
+  donor: DonorCandidate;
   committing: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -526,9 +631,16 @@ function ConfirmProposeModal({
   const projectedMc = donorTotal > 0
     ? Math.max(0, (donorMcCount - 1) / donorTotal)
     : donorMc;
-  const donorIsNmcs = donor.fault_component != null;  // donor itself was a need = NMCS
-  // Walkthrough #10 — operator must acknowledge the impact when donor is NMCS.
-  const [acknowledged, setAcknowledged] = useState(!donorIsNmcs);
+  // Issue #17 — donor categories carry distinct risk profiles:
+  // - deadlined_other_fault: donor is NMCS but on a different system; the
+  //   recipient's needed part is intact on that asset.
+  // - operational_swap: donor is MC/PMC; pulling the part deadlines them
+  //   and the operator must acknowledge that impact.
+  const isOpSwap = donor.category === "operational_swap";
+  const requiresAcknowledgement = isOpSwap;
+  // Walkthrough #10 — operator must acknowledge the impact when pulling
+  // from an operational asset (deadlines the donor).
+  const [acknowledged, setAcknowledged] = useState(!requiresAcknowledgement);
 
   // Walkthrough #24 — Esc dismiss + click-outside + focus-trap.
   useEffect(() => {
@@ -615,7 +727,7 @@ function ConfirmProposeModal({
           <div
             className="mb-3 rounded-sm border bg-[var(--color-bg)] px-3 py-2 font-mono text-xs tracking-wide"
             style={{
-              borderColor: donorIsNmcs
+              borderColor: isOpSwap
                 ? "color-mix(in oklab, var(--color-danger) 40%, var(--color-border))"
                 : "color-mix(in oklab, var(--color-warning) 30%, var(--color-border))",
             }}
@@ -624,9 +736,9 @@ function ConfirmProposeModal({
             <div className="mt-0.5 text-sm text-[var(--color-text)] tabular-nums">
               {donor.unit}: {(donorMc * 100).toFixed(1)}% → {(projectedMc * 100).toFixed(1)}% (≈{((donorMc - projectedMc) * 100).toFixed(1)} pp)
             </div>
-            {donorIsNmcs && (
+            {isOpSwap && (
               <div className="mt-1 text-[var(--color-danger)]">
-                ⚠ Donor is itself NMCS. Confirm operator acknowledgement before committing.
+                ⚠ Donor is currently operational. Pulling this part will deadline {donor.asset_id}.
               </div>
             )}
           </div>
@@ -640,7 +752,7 @@ function ConfirmProposeModal({
         </div>
 
         {/* Walkthrough #10 — block commit until acknowledgement */}
-        {donorIsNmcs && (
+        {requiresAcknowledgement && (
           <label className="mb-3 flex items-start gap-2 font-mono text-xs text-[var(--color-warning)] tracking-wide">
             <input
               type="checkbox"
@@ -648,7 +760,7 @@ function ConfirmProposeModal({
               onChange={(e) => setAcknowledged(e.target.checked)}
               className="mt-0.5 accent-[var(--color-warning)]"
             />
-            I acknowledge the donor is NMCS and the unit MC drop is acceptable.
+            I acknowledge {donor.asset_id} will be deadlined when this part is pulled.
           </label>
         )}
 

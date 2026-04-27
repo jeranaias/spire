@@ -52,6 +52,39 @@ async def lifespan(app: FastAPI):
         for e in ms["errors"]:
             print(f"[SPIRE]   model load: {e}")
 
+    # Task #3 follow-on (PR polish): cannibalization donor canary.
+    # The matcher previously emitted zero donors for every demo recipient
+    # (issue #17). The fix now produces 32/32 coverage on the seed dataset,
+    # but a future dataset / matcher change could silently regress that.
+    # Running the matcher at boot and logging per-equipment-type donor
+    # coverage means a regression shows up in the startup log immediately.
+    try:
+        from .routes.pulse import cannibalization as _cannib_endpoint
+        result = await _cannib_endpoint(role=None)
+        needs_list = result.get("open_needs", []) if isinstance(result, dict) else []
+        total_needs = len(needs_list)
+        zero_donor_needs = [n for n in needs_list if not n.get("donor_candidates")]
+        if total_needs == 0:
+            print("[SPIRE] Cannibalization canary: dataset has no open NMCS needs (skipped).")
+        else:
+            covered = total_needs - len(zero_donor_needs)
+            print(
+                f"[SPIRE] Cannibalization canary: {covered}/{total_needs} open needs "
+                f"have at least one donor candidate."
+            )
+            if zero_donor_needs:
+                # Group starving needs by equipment_type so a regression that
+                # affects, say, all MTVR_WRECKER lookups jumps out.
+                from collections import Counter
+                starving = Counter(n.get("equipment_type", "?") for n in zero_donor_needs)
+                summary = ", ".join(f"{et}×{c}" for et, c in starving.most_common())
+                print(
+                    f"[SPIRE]   WARNING: {len(zero_donor_needs)} need(s) have NO donor candidates "
+                    f"({summary}). Possible matcher / dataset regression — see issue #17."
+                )
+    except Exception as canary_err:  # noqa: BLE001 — canary must never block startup
+        print(f"[SPIRE] Cannibalization canary failed: {canary_err!r}")
+
     print("[SPIRE] Ready.")
     yield
 
@@ -67,8 +100,8 @@ app = FastAPI(
 # prod, but in dev we CORS them separately.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    allow_origin_regex=".*",
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
