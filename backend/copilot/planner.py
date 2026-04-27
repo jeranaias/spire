@@ -433,7 +433,7 @@ def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
         steps = [{"tool": "get_coalition_view", "args": {"profile": profile}}]
     elif "where do i start" in lower or "summary" in lower or "status" in lower:
         steps = [{"tool": "status_summary", "args": {}}]
-    elif "worst" in lower or "highest risk" in lower:
+    elif "worst" in lower or "highest risk" in lower or "highest-risk" in lower or "riskiest" in lower:
         steps = [
             {"tool": "status_summary", "args": {}},
             {"tool": "predict_failures", "args": {"horizon_days": 14, **({"unit": unit} if unit else {})}},
