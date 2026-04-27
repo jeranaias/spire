@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { api, type RiskBoard, type RiskBoardAsset, type AssetDeepDive } from "../../api";
+import { formatApiError } from "../../api-retry";
 import { RiskBar } from "../../components/RiskBar";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
@@ -44,7 +45,7 @@ export function RiskBoardTab() {
     setBoard(null);
     setSelected(null);
     setDetail(null);
-    api.pulse.riskBoard(30).then(setBoard).catch((e) => setError(String(e)));
+    api.pulse.riskBoard(30).then(setBoard).catch((e) => setError(formatApiError(e)));
   }, [role]);
 
   const filteredAssets = useMemo(() => {
@@ -74,7 +75,7 @@ export function RiskBoardTab() {
     api.pulse
       .assetDeepDive(selected)
       .then(setDetail)
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(formatApiError(e)))
       .finally(() => setDetailLoading(false));
   }, [selected]);
 
@@ -341,7 +342,7 @@ function DraftActionModal({
         const first = (r.assets || [])[0];
         setData(first ?? { actions: [] });
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(formatApiError(e)));
   }, [asset.asset_id]);
 
   useEffect(() => {

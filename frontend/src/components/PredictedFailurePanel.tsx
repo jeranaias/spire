@@ -14,6 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, type PredictedFailureAsset, type FailurePrediction } from "../api";
+import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { useNavigate } from "react-router-dom";
 
@@ -46,7 +47,7 @@ export function PredictedFailurePanel({
         setData(r.assets);
         setEngine(r.engine);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(formatApiError(e)));
   }, [unit, horizon, role]);
 
   if (error) {

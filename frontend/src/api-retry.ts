@@ -145,3 +145,23 @@ export function pollWithBackoff<T>(
     },
   };
 }
+
+/**
+ * formatApiError — turn a thrown api error into operator-readable copy.
+ *
+ * Walkthrough audit: setError(String(e)) was leaking raw nginx 502 HTML
+ * into UI panels — operators saw <html><head><title>502 Bad Gateway in
+ * the error message. This helper strips HTML and recognises common
+ * upstream error states, returning a posture line instead.
+ */
+export function formatApiError(err: unknown, fallback?: string): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/<html|Bad Gateway|Gateway Time-?out|nginx/i.test(raw)) {
+    return fallback ?? "Backend reconnecting — view will refresh shortly.";
+  }
+  if (/Failed to fetch|NetworkError|ERR_NETWORK/i.test(raw)) {
+    return "Network error — check connection and retry.";
+  }
+  // Trim long error strings to a reasonable length
+  return raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
+}
