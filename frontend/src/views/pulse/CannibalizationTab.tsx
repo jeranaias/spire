@@ -53,7 +53,7 @@ export function CannibalizationTab() {
   // Walkthrough #44 — sort control
   const [sortMode, setSortMode] = useState<SortMode>("days_open");
   // Walkthrough #45 — same-fault-class only mode
-  const [sameClassOnly, setSameClassOnly] = useState(false);
+  const [crossUnitOnly, setSameClassOnly] = useState(false);
 
   useEffect(() => {
     setData(null);
@@ -158,12 +158,11 @@ export function CannibalizationTab() {
       const candidates = (data.open_needs as NeedRow[]).filter((n) =>
         n.sr_number !== need.sr_number &&
         n.needed_part.nsn === need.needed_part.nsn &&
-        // Walkthrough audit: the 'sameClassOnly' checkbox label was
-        // 'Cross-unit, different fault class' but the prior code only
-        // restricted by fault class — same-unit candidates still passed.
-        // Add the cross-unit predicate when the toggle is on so the
-        // checkbox label and filter behavior actually agree.
-        (!sameClassOnly || (n.unit !== need.unit && n.fault_class && need.fault_class && n.fault_class !== need.fault_class)) &&
+        // Walkthrough audit: the checkbox 'Cross-unit, different fault
+        // class' adds the cross-unit predicate when toggled on. The
+        // different-fault-class predicate below applies in BOTH modes
+        // (cause-of-fault overlap is always invalid — see #9).
+        (!crossUnitOnly || n.unit !== need.unit) &&
         (n.fault_class !== need.fault_class)
       );
       if (candidates.length === 0) continue;
@@ -261,7 +260,7 @@ export function CannibalizationTab() {
             <label className="flex items-center gap-1 text-[var(--color-text-muted)]">
               <input
                 type="checkbox"
-                checked={sameClassOnly}
+                checked={crossUnitOnly}
                 onChange={(e) => setSameClassOnly(e.target.checked)}
                 className="accent-[var(--color-primary)]"
               />
