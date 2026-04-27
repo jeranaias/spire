@@ -72,13 +72,22 @@ export function ForecastTab() {
 
   // Scoped units — role-aware so a G-4 doesn't get MALS-31 in the dropdown.
   useEffect(() => {
-    api.bastion.cop().then((cop) => setUnits(cop.units.map((u) => u.unit)));
+    // Walkthrough audit: prior code had no .catch, so a transient
+    // 502 during deploy churn surfaced as 'Uncaught (in promise)' in
+    // the console. Tolerate quietly — the dropdown just stays at FLEET.
+    api.bastion.cop()
+      .then((cop) => setUnits(cop.units.map((u) => u.unit)))
+      .catch(() => { /* tolerate; dropdown stays at FLEET */ });
   }, [role]);
 
   useEffect(() => {
     setData(null);
     const targetUnit = unit === "FLEET" ? undefined : unit;
-    api.pulse.forecast(targetUnit, Number(horizon)).then(setData);
+    // Same pattern: catch transient errors so the chart shows its
+    // 'forecast unavailable' state rather than logging an uncaught.
+    api.pulse.forecast(targetUnit, Number(horizon))
+      .then(setData)
+      .catch(() => { /* keep prior data, chart shows skeleton/empty */ });
   }, [unit, horizon]);
 
   // Build the combined series. Null-guarded so hooks order stays stable.
