@@ -62,7 +62,6 @@ export function BastionView() {
   const role = useSpireStore((s) => s.role);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAlertSeverityCounts = useSpireStore((s) => s.setAlertSeverityCounts);
-  const alertSeverityCounts = useSpireStore((s) => s.alertSeverityCounts);
   const setSelectedUnitIdGlobal = useSpireStore((s) => s.setSelectedUnitId);
   const [cop, setCop] = useState<BastionCOP | null>(null);
   const [alerts, setAlerts] = useState<BastionAlert[]>([]);
@@ -448,7 +447,21 @@ export function BastionView() {
           onSevFilter={setSevFilter}
           searchQuery={searchQuery}
           onSearchQuery={setSearchQuery}
-          severityCounts={alertSeverityCounts}
+          // Walkthrough audit: prior code passed alertSeverityCounts
+          // (raw API counts including acked rows). After an ACK the
+          // 'ALL N' chip stayed at 30 while the stream rendered 29.
+          // Count over alerts MINUS acked rows so the chips reflect
+          // what's actually in the active stream (and don't pre-filter
+          // by current severity selection — that would zero out the
+          // other chips).
+          severityCounts={(() => {
+            const c: Record<string, number> = { CRITICAL: 0, HIGH: 0, MODERATE: 0, LOW: 0, INFO: 0 };
+            for (const a of alerts) {
+              if (a._state?.status === "acknowledged") continue;
+              c[a.severity] = (c[a.severity] ?? 0) + 1;
+            }
+            return c;
+          })()}
         />
         <div className="flex-1 overflow-y-auto p-2">
           {/* Track-G2 — Fused threats live at the top of the alert sidebar.
