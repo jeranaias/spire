@@ -72,6 +72,13 @@ function useGoToShortcuts() {
           case "p": go("/pulse"); break;
           case "b": go("/bastion"); break;
           case "a": go("/admin"); break;
+          // 'g f' opens the feedback drawer. Dispatched as a window event
+          // so FeedbackDrawer can listen without duplicating the chord
+          // window state. Walkthrough audit: prior shortcut was Shift+F
+          // which fires every time you type a capital F.
+          case "f":
+            window.dispatchEvent(new CustomEvent("spire:open-feedback"));
+            break;
         }
         armed = false;
       }

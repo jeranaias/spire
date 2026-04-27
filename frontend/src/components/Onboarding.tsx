@@ -6,7 +6,7 @@
  * Three slides (skip-able at any point, persisted to localStorage):
  *   1. What SPIRE is — what an operator does with it, in 4 lines
  *   2. Your role + what you do here — role-shaped landing surface
- *   3. The three things you should know — `?` for help, Shift+F for
+ *   3. The three things you should know — `?` for help, `g f` for
  *      feedback, ask SPIRO anytime via Ctrl+/
  *
  * Re-runnable via TopBar `?` overlay → "Show me the tour again" (handled
@@ -227,10 +227,10 @@ export function Onboarding() {
               </div>
               <div className="flex gap-3 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] p-3">
                 <div className="flex h-9 w-12 shrink-0 items-center justify-center rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] font-mono text-xs font-semibold text-[var(--color-text)] tracking-widest">
-                  ⇧F
+                  g f
                 </div>
                 <div className="flex-1">
-                  <div className="font-mono text-xs uppercase text-[var(--color-text)] tracking-widest">Shift+F to file feedback</div>
+                  <div className="font-mono text-xs uppercase text-[var(--color-text)] tracking-widest">Press g then f to file feedback</div>
                   <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]">
                     Defect, idea, question, or praise — auto-attaches diagnostics + lands as a GitHub issue.
                   </div>

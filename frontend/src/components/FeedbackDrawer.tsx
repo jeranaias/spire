@@ -4,7 +4,7 @@
  * Designed to be the lowest-friction path for a Marine using SPIRE for the
  * first time to file *any* feedback — bugs, ideas, questions, or praise.
  * Floating button bottom-right with a first-run coachmark so it's visible
- * without onboarding. Shift+F opens it from anywhere.
+ * without onboarding. Press g then f to open from anywhere.
  *
  * Pre-fills role + view + a diagnostics block (browser, viewport, active
  * sim) so the operator never types setup context. On successful submit
@@ -108,25 +108,22 @@ export function FeedbackDrawer() {
     try { localStorage.setItem(COACH_KEY, "1"); } catch {}
   }
 
-  // Quick-keys: Shift+F to open, Esc to close.
-  // Shift+F is a deliberate modifier combo — it should fire from anywhere,
-  // including while the operator is typing in an input. (The previous
-  // implementation early-returned on input focus and effectively killed the
-  // shortcut anywhere a Marine had a cursor.) Plain "f" still does nothing
-  // in inputs because the condition requires Shift.
+  // Quick-keys: 'g f' chord to open (dispatched by App's chord router
+  // via the spire:open-feedback custom event so all chord state lives
+  // in one place), Esc to close.
+  //
+  // Walkthrough audit: prior shortcut was Shift+F. That fires every time
+  // the operator types a capital F (Shift IS how you type F), so the
+  // drawer popped open mid-sentence in any input field. Switched to a
+  // vimium-style 'g f' chord — matches the existing 'g s' / 'g p' /
+  // 'g b' / 'g a' go-to chords in App.tsx, no modifier needed,
+  // can't collide with normal typing.
   useEffect(() => {
+    function onOpen() {
+      setOpen((v) => !v);
+      dismissCoach();
+    }
     function onKey(e: KeyboardEvent) {
-      // Shift+F always opens. e.key normalizes to "F" with shift on most
-      // browsers, "f" with shift on a few — accept both for safety.
-      // Note: we don't gate on inField here because Shift+F is unlikely
-      // to collide with mid-sentence typing.
-      if (e.shiftKey && (e.key === "F" || e.key === "f")) {
-        e.preventDefault();
-        setOpen((v) => !v);
-        dismissCoach();
-        return;
-      }
-
       // Walkthrough audit: Escape now always closes the drawer when open,
       // even if focus is inside the textarea. The previous "!inField" guard
       // was over-applied — Escape on an open modal/drawer is universal UX,
@@ -135,8 +132,12 @@ export function FeedbackDrawer() {
         setOpen(false);
       }
     }
+    window.addEventListener("spire:open-feedback", onOpen as EventListener);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("spire:open-feedback", onOpen as EventListener);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
   const activeType = ISSUE_TYPES.find((t) => t.value === issueType)!;
@@ -254,7 +255,7 @@ export function FeedbackDrawer() {
             </div>
             <div className="mt-1 font-mono text-sm leading-snug text-[var(--color-text)]">
               Bug, idea, question, even praise — drop it here any time.
-              Press <kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1 text-xs">Shift</kbd>+<kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1 text-xs">F</kbd> from anywhere.
+              Press <kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1 text-xs">g</kbd> then <kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1 text-xs">f</kbd> from anywhere.
             </div>
             <div
               className="absolute bottom-[-7px] right-6 h-3 w-3 rotate-45 border-b border-r border-[var(--color-primary)] bg-[var(--color-surface)]"
@@ -268,7 +269,7 @@ export function FeedbackDrawer() {
           style={{
             animation: coachVisible ? "feedback-pulse 1.6s ease-in-out infinite" : undefined,
           }}
-          title="Report issue / idea / question (Shift+F)"
+          title="Report issue / idea / question (press g then f)"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 2L1 21h22L12 2zm0 5l7.5 12h-15L12 7zm-1 4v3h2v-3h-2zm0 5v2h2v-2h-2z" />
