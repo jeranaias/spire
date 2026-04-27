@@ -121,7 +121,10 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
               <KV label="Source" value={batch.source} />
               <KV label="Records" value={batch.record_count} />
               <KV label="Status" value={batch.status} />
-              <KV label="Created" value={batch.created_at} mono />
+              {/* Walkthrough audit: raw ISO bled into the batch header. Render
+               * audit-grade DD MMM YYYY · HHMMz so the Created stamp reads as
+               * prose, not a debug timestamp. */}
+              <KV label="Created" value={fmtBatchTimestamp(batch.created_at)} mono />
             </div>
           </section>
 
@@ -232,4 +235,13 @@ function KV({ label, value, mono }: { label: string; value: any; mono?: boolean 
       <div className={clsx(mono && "font-mono", "text-[var(--color-text)]")}>{String(value)}</div>
     </div>
   );
+}
+
+function fmtBatchTimestamp(iso: string | undefined | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  const z = (n: number) => String(n).padStart(2, "0");
+  return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
 }

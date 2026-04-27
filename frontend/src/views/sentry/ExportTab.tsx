@@ -143,8 +143,21 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             >
               Export Prepared
             </h4>
-            <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-              {result.created_at}
+            <span
+              className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide"
+              title={result.created_at}
+            >
+              {/* Walkthrough audit: raw ISO ('2026-04-27T15:30:42Z') in the
+               * Export Prepared corner read like a debug print. Render the
+               * audit-grade DD MMM YYYY · HHMMz format used elsewhere. */}
+              {(() => {
+                const iso = result.created_at || "";
+                const d = new Date(iso);
+                if (Number.isNaN(d.getTime())) return iso;
+                const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+                const z = (n: number) => String(n).padStart(2, "0");
+                return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
+              })()}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3">
