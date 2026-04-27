@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Cannibalization, type DonorCandidate } from "../../api";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
@@ -56,6 +56,10 @@ export function CannibalizationTab() {
   // operator can see how fresh the donor list is at a glance. Same
   // pattern as ForecastTab.
   const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
+  // Task #3 follow-on (review polish): named handler for parity with
+  // ForecastTab's reload(); stable identity also keeps the header button
+  // from re-rendering on unrelated state changes.
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
   // Task #3 follow-on: AbortController + generation guard, mirroring the
   // ForecastTab fix. Without this, a fast role swap or post-propose
   // refetch can land its response after a newer one and leave the donor
@@ -121,7 +125,7 @@ export function CannibalizationTab() {
           {error}
         </div>
         <button
-          onClick={() => setReloadKey((k) => k + 1)}
+          onClick={reload}
           className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
         >
           Retry
@@ -204,12 +208,12 @@ export function CannibalizationTab() {
       });
       setConfirmDonor(null);
       setSelectedNeed(null);
-      // Task #3 follow-on: bump reloadKey so the open-needs and matches
-      // lists pick up the proposal from the server (not just the
+      // Task #3 follow-on: trigger a fresh fetch so the open-needs and
+      // matches lists pick up the proposal from the server (not just the
       // optimistic row). The optimistic row is fine for instant feedback,
       // but server truth resolves moments later — and any newly-deadlined
       // donor is reflected in donor_candidates for sibling needs.
-      setReloadKey((k) => k + 1);
+      reload();
     } finally {
       setCommitting(false);
     }
@@ -273,7 +277,7 @@ export function CannibalizationTab() {
            * consistent way to re-pull server truth on both PULSE tabs. */}
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             <button
-              onClick={() => setReloadKey((k) => k + 1)}
+              onClick={reload}
               className="rounded-sm border border-[var(--color-border-active)] px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] tracking-widest"
               title="Re-fetch open needs and donor candidates"
               aria-label="Reload cannibalization data"
