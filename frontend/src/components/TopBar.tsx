@@ -45,7 +45,10 @@ export function TopBar() {
       />
       <div className="flex h-full min-w-0 items-center justify-between gap-3 px-4">
         <div className="flex min-w-0 items-center gap-4">
-          <div className="flex shrink-0 items-center gap-2.5">
+          <div
+            className="flex shrink-0 items-center gap-2.5"
+            data-tour-id="brand"
+          >
             <SpireMark />
             <div className="flex flex-col leading-none">
               <span
@@ -61,7 +64,7 @@ export function TopBar() {
               </span>
             </div>
           </div>
-          <nav className="flex shrink-0 items-center gap-0">
+          <nav className="flex shrink-0 items-center gap-0" data-tour-id="nav-tabs">
             {tabs
               // ADMIN remains hidden when the role isn't security_manager
               // (it's a privileged surface, not a teaser). Other tabs render
@@ -153,11 +156,11 @@ export function TopBar() {
          * selector. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
           <span className="hidden xl:contents"><NodeStatus /></span>
-          <span className="hidden xl:contents"><AirGapToggle /></span>
+          <span className="hidden xl:contents" data-tour-id="airgap"><AirGapToggle /></span>
           <span className="hidden xl:contents"><DensityToggle /></span>
-          <RoleSelector role={role} onChange={onRoleChange} />
+          <span data-tour-id="role-selector"><RoleSelector role={role} onChange={onRoleChange} /></span>
           <span className="hidden xl:contents"><ModeBadge mode={operatingMode} /></span>
-          <AlertBadge count={alertCount} />
+          <span data-tour-id="alert-badge"><AlertBadge count={alertCount} /></span>
         </div>
       </div>
     </header>

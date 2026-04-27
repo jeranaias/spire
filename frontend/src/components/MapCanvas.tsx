@@ -75,6 +75,20 @@ const TYPE_COLOR: Record<string, { fill: string; stroke: string; label: string }
   maintenance:    { fill: "#201808", stroke: "#eab308", label: "MX"    },
 };
 
+// Cordon ring color: prefer the zone label (inner / outer / awareness),
+// fall back to the historical radius band so any caller that hasn't
+// labeled their zones still gets a sensible color. See the inline note
+// at the cordon GeoJSON site for why this exists.
+function pickCordonColor(label: string | undefined, radius_m: number): string {
+  const lc = (label ?? "").toLowerCase();
+  if (lc.startsWith("inner"))     return "#ef4444"; // red
+  if (lc.startsWith("outer"))     return "#fb923c"; // amber
+  if (lc.startsWith("awareness")) return "#3b82f6"; // blue
+  if (radius_m <= 250) return "#ef4444";
+  if (radius_m <= 500) return "#fb923c";
+  return "#3b82f6";
+}
+
 function mcColor(rate: number): string {
   if (rate >= 0.90) return "#22c55e";
   if (rate >= 0.75) return "#eab308";
@@ -925,7 +939,20 @@ export function MapCanvas({
                 id: i,
                 properties: {
                   radius_m: cz.radius_m,
-                  color: cz.radius_m <= 300 ? "#ef4444" : cz.radius_m <= 500 ? "#fb923c" : "#3b82f6",
+                  // Color the ring by zone *role*, not by raw radius.
+                  // Backend labels are "Inner cordon — …" / "Outer cordon
+                  // — …" / "Awareness ring …", so prefix-match the label
+                  // first. This keeps an operator who sets a non-default
+                  // inner radius (e.g. 300m to over-evacuate, or 200m for
+                  // a tight cordon) still rendered red, where a hard
+                  // ≤250m threshold would have flipped it to amber after
+                  // the #16 default change.
+                  //
+                  // Radius bands (≤250 / ≤500 / else) remain as a
+                  // fallback for any cordon that arrives without a
+                  // label or with an unrecognized prefix, so existing
+                  // call sites that pass numeric zones keep rendering.
+                  color: pickCordonColor(cz.label, cz.radius_m),
                 },
                 geometry: { type: "Point", coordinates: [stLon, stLat] },
               })),

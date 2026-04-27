@@ -239,7 +239,7 @@ export function FeedbackDrawer() {
 
   return (
     <>
-      <div className="pointer-events-none fixed bottom-12 right-4 z-[8500]">
+      <div className="pointer-events-none fixed bottom-12 right-4 z-[8500]" data-tour-id="feedback-button">
         {coachVisible && (
           <div
             onClick={dismissCoach}

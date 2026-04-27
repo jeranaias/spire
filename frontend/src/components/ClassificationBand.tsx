@@ -46,14 +46,18 @@ export function ClassificationBand() {
     <div
       // h-8 (was h-7) + flex items-center keeps the banner aligned to the
       // 14px TopBar baseline rather than sitting flush against it; the
-      // operator scans the chrome as one band, not pasted layers.
-      className="flex h-8 shrink-0 items-center justify-between px-4 py-1 font-mono text-sm font-semibold uppercase tracking-widest"
+      // operator scans the chrome as one band, not pasted layers. Font
+      // bumped semibold → bold (T004 polish) so the watermark survives
+      // the high-contrast color blocks on CUI/SECRET backgrounds where
+      // semibold was reading washed-out at glance distance.
+      className="flex h-8 shrink-0 items-center justify-between px-4 py-1 font-mono text-sm font-bold uppercase tracking-widest"
       style={{
         background: cls.bg,
         color: cls.fg,
       }}
       role="region"
       aria-label="Classification and force-protection banner"
+      data-tour-id="classification"
     >
       <div className="flex items-center gap-3 leading-none">
         {/* Single canonical SYNTHETIC mention — was repeated in COP header,

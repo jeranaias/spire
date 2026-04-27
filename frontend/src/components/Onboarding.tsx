@@ -14,6 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { useSpireStore, ROLE_LABELS, type Role } from "../state/store";
+import { startTour } from "./GuidedTour";
 
 const SEEN_KEY = "spire.onboarding.v1.seen";
 
@@ -249,12 +250,33 @@ export function Onboarding() {
           >
             Back
           </button>
-          <button
-            onClick={next}
-            className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-6 py-2 font-mono text-xs font-semibold uppercase text-white tracking-widest hover:bg-[var(--color-primary-hover)]"
-          >
-            {step === 2 ? "Get started" : "Next"}
-          </button>
+          <div className="flex items-center gap-2">
+            {step === 2 && (
+              <button
+                onClick={() => {
+                  // Mark onboarding seen so the autostart guard in
+                  // GuidedTour fires next time too — but launch the tour
+                  // immediately now since the operator opted in.
+                  try { localStorage.setItem(SEEN_KEY, "1"); } catch { /* tolerant */ }
+                  try { localStorage.removeItem("spire.tour.v1.seen"); } catch { /* tolerant */ }
+                  setOpen(false);
+                  // Brief gap so the modal unmount doesn't fight the
+                  // spotlight cutout positioning.
+                  window.setTimeout(() => startTour(), 180);
+                }}
+                className="rounded-sm border border-[var(--color-border-active)] px-4 py-2 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)] tracking-widest"
+                title="Walk me through the screen one piece at a time"
+              >
+                Show me around
+              </button>
+            )}
+            <button
+              onClick={next}
+              className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-6 py-2 font-mono text-xs font-semibold uppercase text-white tracking-widest hover:bg-[var(--color-primary-hover)]"
+            >
+              {step === 2 ? "Get started" : "Next"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

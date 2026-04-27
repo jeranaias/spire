@@ -697,8 +697,14 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
         "sim_id": sim_id,
         "alert": alert,
         "checklist": _response_checklist_for("UAS_INCURSION", "CRITICAL", location=motor_pool["name"]),
+        # GH #16 — pilot feedback (SSgt Garcia, 25 APR 26): for the
+        # tighter motor-pool footprints in the terrain we tested on, a
+        # 300m inner cordon over-evacuated nearby admin spaces. 250m
+        # holds the immediate evacuation/secure ring tight to the
+        # building, the outer cordon at 500m keeps the access-restricted
+        # zone wide enough to stand off a typical small-UAS payload.
         "cordon_zones": [
-            {"radius_m": 300, "label": "Inner cordon — evacuate, secure"},
+            {"radius_m": 250, "label": "Inner cordon — evacuate, secure"},
             {"radius_m": 500, "label": "Outer cordon — restrict access"},
             {"radius_m": 1000, "label": "Awareness zone — alert"},
         ],

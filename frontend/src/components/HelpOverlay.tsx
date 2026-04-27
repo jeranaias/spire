@@ -8,20 +8,23 @@
  */
 import { useEffect, useState } from "react";
 import { useSpireStore, ROLE_LABELS, VIEW_SCOPE } from "../state/store";
+import { AboutFaq } from "./AboutFaq";
+import { startTour } from "./GuidedTour";
 
-const SHORTCUTS = [
+// Tagged so we can dim chord rows when the seat has shortcuts disabled.
+const SHORTCUTS: { keys: string[]; label: string; chord?: boolean }[] = [
   { keys: ["?"],          label: "Open this help" },
   { keys: ["Esc"],         label: "Close any modal" },
   { keys: ["/"],           label: "Focus alert search (BASTION)" },
   { keys: ["Ctrl", "/"], label: "Toggle SPIRO copilot" },
-  { keys: ["g", "f"], label: "Open feedback drawer" },
+  { keys: ["g", "f"], label: "Open feedback drawer", chord: true },
   // Vimium-style chord nav. Mirrors the App-level useGoToShortcuts hook;
   // routes the active role can't see fall back to that role's default
   // landing surface so the shortcut never throws an InsufficientPrivilege.
-  { keys: ["g", "s"],     label: "Go to SENTRY" },
-  { keys: ["g", "p"],     label: "Go to PULSE" },
-  { keys: ["g", "b"],     label: "Go to BASTION" },
-  { keys: ["g", "a"],     label: "Go to ADMIN (Security Manager only)" },
+  { keys: ["g", "s"],     label: "Go to SENTRY",      chord: true },
+  { keys: ["g", "p"],     label: "Go to PULSE",       chord: true },
+  { keys: ["g", "b"],     label: "Go to BASTION",     chord: true },
+  { keys: ["g", "a"],     label: "Go to ADMIN (Security Manager only)", chord: true },
   { keys: ["A"],           label: "Approve flagged record (Review Queue)" },
   { keys: ["R"],           label: "Reject flagged record (Review Queue)" },
   { keys: ["↑", "↓"],     label: "Navigate flagged records (Review Queue)" },
@@ -32,7 +35,10 @@ const SHORTCUTS = [
 
 export function HelpOverlay() {
   const role = useSpireStore((s) => s.role);
+  const shortcutsEnabled = useSpireStore((s) => s.shortcutsEnabled);
+  const setShortcutsEnabled = useSpireStore((s) => s.setShortcutsEnabled);
   const [open, setOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -46,6 +52,10 @@ export function HelpOverlay() {
       // help modal when no input has focus. (Previously "always opens"
       // meant typing "?" inside the SPIRO prompt yanked the help modal —
       // worse than not having a shortcut at all.)
+      //
+      // The `?` opener is intentionally exempt from `shortcutsEnabled`:
+      // even an operator who silenced chord nav still needs a way to
+      // discover the toggle, and the toggle lives on the Help overlay.
       if (!inField && (e.key === "?" || (e.shiftKey && e.key === "/"))) {
         e.preventDefault();
         setOpen((v) => !v);
@@ -112,24 +122,76 @@ export function HelpOverlay() {
               Shortcuts
             </div>
             <ul className="flex flex-col gap-1.5">
-              {SHORTCUTS.map((s, i) => (
-                <li key={i} className="flex items-center justify-between">
-                  <div className="flex items-center gap-1">
-                    {s.keys.map((k, j) => (
-                      <kbd
-                        key={j}
-                        className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-[1px] font-mono text-xs text-[var(--color-text)] tracking-wide"
-                      >
-                        {k}
-                      </kbd>
-                    ))}
-                  </div>
-                  <span className="font-mono text-sm text-[var(--color-text-secondary)]">
-                    {s.label}
-                  </span>
-                </li>
-              ))}
+              {SHORTCUTS.map((s, i) => {
+                const dimmed = !!s.chord && !shortcutsEnabled;
+                return (
+                  <li
+                    key={i}
+                    className="flex items-center justify-between"
+                    style={{ opacity: dimmed ? 0.4 : 1 }}
+                    title={dimmed ? "Disabled — re-enable global keyboard chords below" : undefined}
+                  >
+                    <div className="flex items-center gap-1">
+                      {s.keys.map((k, j) => (
+                        <kbd
+                          key={j}
+                          className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-[1px] font-mono text-xs text-[var(--color-text)] tracking-wide"
+                        >
+                          {k}
+                        </kbd>
+                      ))}
+                    </div>
+                    <span className="font-mono text-sm text-[var(--color-text-secondary)]">
+                      {s.label}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
+
+            {/* Toggle for global keyboard chords. The pilot cohort flagged
+             * the original Shift+F shortcut as firing on people typing
+             * capital F's mid-sentence (#20–#22). The chord was rebuilt
+             * as a vimium-style `g f`, dampened to ignore form-control
+             * focus, and now also kill-switchable from this overlay so
+             * an operator who never wants chords can just turn them off.
+             * The `?` Help opener stays live so the toggle stays
+             * discoverable. */}
+            <div
+              className="mt-4 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2.5"
+              role="group"
+              aria-labelledby="spire-shortcut-toggle-label"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div
+                    id="spire-shortcut-toggle-label"
+                    className="font-mono text-xs font-semibold uppercase text-[var(--color-text)] tracking-widest"
+                  >
+                    Global keyboard chords
+                  </div>
+                  <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]">
+                    Silences the <kbd className="px-1 text-[10px]">g</kbd>+letter chord nav and the <kbd className="px-1 text-[10px]">g</kbd> <kbd className="px-1 text-[10px]">f</kbd> feedback opener. <kbd className="px-1 text-[10px]">?</kbd> stays live.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShortcutsEnabled(!shortcutsEnabled)}
+                  role="switch"
+                  aria-checked={shortcutsEnabled}
+                  className="inline-flex h-9 min-w-[5.5rem] items-center justify-center rounded-sm border px-3 font-mono text-xs font-semibold uppercase tracking-widest transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                  style={{
+                    borderColor: shortcutsEnabled ? "var(--color-success)" : "var(--color-border-active)",
+                    background: shortcutsEnabled
+                      ? "color-mix(in oklab, var(--color-success-muted) 22%, transparent)"
+                      : "transparent",
+                    color: shortcutsEnabled ? "var(--color-success)" : "var(--color-text-muted)",
+                  }}
+                >
+                  {shortcutsEnabled ? "ON" : "OFF"}
+                </button>
+              </div>
+            </div>
           </section>
 
           <section>
@@ -161,12 +223,40 @@ export function HelpOverlay() {
         </div>
 
         <div
-          className="mt-5 border-t border-[var(--color-border)] pt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
+          className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
         >
-          File issues with the floating button bottom-right (or press g then f) ·
-          See SPIRE_INSTALL.md + CONTRIBUTING.md in the repo root for setup
+          <span>
+            File issues with the floating button bottom-right (or press g then f) ·
+            See SPIRE_INSTALL.md + CONTRIBUTING.md in the repo root for setup
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                // Clear the seen flag so the tour treats this as a fresh
+                // run, then close help and start. The 120ms gap lets the
+                // help modal animation finish before the spotlight cuts
+                // in, otherwise the cutout falls under the modal backdrop.
+                try { localStorage.removeItem("spire.tour.v1.seen"); } catch { /* tolerant */ }
+                setOpen(false);
+                window.setTimeout(() => startTour(), 120);
+              }}
+              className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-[var(--color-border-active)] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] tracking-widest"
+              title="Walk me through the screen one piece at a time"
+            >
+              ◎ Take the tour
+            </button>
+            <button
+              type="button"
+              onClick={() => setAboutOpen(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-[var(--color-primary)] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_15%,transparent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] tracking-widest"
+            >
+              About SPIRE · FAQ →
+            </button>
+          </div>
         </div>
       </div>
+      {aboutOpen && <AboutFaq onClose={() => setAboutOpen(false)} />}
     </div>
   );
 }

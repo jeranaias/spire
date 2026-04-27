@@ -68,6 +68,14 @@ export interface SpireState {
   // Track-G3 — density toggle. Persisted per role in localStorage.
   density: Density;
 
+  // Pilot feedback (#20–#22) — operators want to be able to silence the
+  // global keyboard chords (`g s`/`g p`/`g b`/`g a`/`g f` and `?`) when
+  // they're sharing a screen with someone who keeps "typing" the chords
+  // by accident. The chords are still input-aware (no firing inside form
+  // controls) but a hard kill switch is more discoverable than "just
+  // don't press g". Persisted in localStorage; default = enabled.
+  shortcutsEnabled: boolean;
+
   setRole: (r: Role) => void;
   setOperatingMode: (m: OperatingMode) => void;
   setAlertCount: (n: number) => void;
@@ -80,6 +88,7 @@ export interface SpireState {
   setAirGap: (active: boolean) => void;
   setQueueDepth: (n: number) => void;
   setDensity: (d: Density) => void;
+  setShortcutsEnabled: (enabled: boolean) => void;
   pushToast: (t: Omit<Toast, "id">) => string;
   dismissToast: (id: string) => void;
 }
@@ -149,6 +158,27 @@ function saveDensity(d: Density): void {
   }
 }
 
+// Keyboard chord toggle. Default = enabled. Persists per seat so an
+// operator who turned them off doesn't re-discover them on every refresh.
+const SHORTCUTS_KEY = "spire.shortcutsEnabled";
+function loadShortcutsEnabled(): boolean {
+  try {
+    const raw = window.localStorage.getItem(SHORTCUTS_KEY);
+    if (raw === "0") return false;
+    if (raw === "1") return true;
+  } catch {
+    /* tolerant */
+  }
+  return true;
+}
+function saveShortcutsEnabled(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(SHORTCUTS_KEY, enabled ? "1" : "0");
+  } catch {
+    /* tolerant */
+  }
+}
+
 const DEFAULT_ROLE: Role = "mef_commander";
 
 // Deep-link initial role.
@@ -211,6 +241,7 @@ export const useSpireStore = create<SpireState>((set) => ({
   queueDepth: 0,
   toasts: [],
   density: typeof window !== "undefined" ? loadDensity() : "dense",
+  shortcutsEnabled: typeof window !== "undefined" ? loadShortcutsEnabled() : true,
   setRole: (role) => {
     try { window.localStorage.setItem(ROLE_KEY, role); } catch { /* tolerant */ }
     set({ role });
@@ -228,6 +259,10 @@ export const useSpireStore = create<SpireState>((set) => ({
   setDensity: (density) => {
     saveDensity(density);
     set({ density });
+  },
+  setShortcutsEnabled: (shortcutsEnabled) => {
+    saveShortcutsEnabled(shortcutsEnabled);
+    set({ shortcutsEnabled });
   },
   pushToast: (t) => {
     const id = uid();

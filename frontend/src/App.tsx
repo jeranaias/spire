@@ -9,6 +9,8 @@ import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
 import { Onboarding } from "./components/Onboarding";
+import { GuidedTour } from "./components/GuidedTour";
+import { QuickHelpButton } from "./components/QuickHelpButton";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ROLE_DEFAULT_VIEW, useSpireStore, VIEW_SCOPE } from "./state/store";
 
@@ -21,6 +23,7 @@ import { ROLE_DEFAULT_VIEW, useSpireStore, VIEW_SCOPE } from "./state/store";
 function useGoToShortcuts() {
   const nav = useNavigate();
   const role = useSpireStore((s) => s.role);
+  const shortcutsEnabled = useSpireStore((s) => s.shortcutsEnabled);
 
   useEffect(() => {
     let armed = false;
@@ -55,6 +58,7 @@ function useGoToShortcuts() {
     }
 
     function onKey(e: KeyboardEvent) {
+      if (!shortcutsEnabled) return;
       if (inField(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -85,7 +89,7 @@ function useGoToShortcuts() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [nav, role]);
+  }, [nav, role, shortcutsEnabled]);
 }
 
 export default function App() {
@@ -132,9 +136,11 @@ export default function App() {
       <StatusFooter />
       <ToastLane />
       <FeedbackDrawer />
+      <QuickHelpButton />
       <HelpOverlay />
       <Spiro />
       <Onboarding />
+      <GuidedTour />
     </div>
   );
 }
