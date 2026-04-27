@@ -10,6 +10,37 @@
 
 ---
 
+## 0. Marine Made — product attribution
+
+**SPIRE the product is Marine Made.** Every line of SPIRE's hackathon
+work product (the SENTRY / PULSE / BASTION / SPIRO surfaces, the
+synthetic dataset engine, the role-shaped UI, the operational workflows,
+the audit chain integration, the air-gap mode, the GCSS-MC schema
+isomorphism, the live-feed scaffolding) was designed, built, and shipped
+by SSgt Jesse Morgan, USMC — an active-duty Marine — on duty time
+during the MDM 2026 hackathon period. The design choices reflect what a
+Marine actually needs at the workbench, not what a contractor guesses
+they need.
+
+Per Section 3, that hackathon work product is U.S. Government-owned. It
+is also unambiguously Marine-authored.
+
+**Thornveil LLC's contribution is separable, pre-existing, and listed
+under Section 2.** Components like RigRun (classification-aware AI
+proxy), HawkStack (neural-architecture methodology), and ThermalHawk
+(thermal drone detection model) were developed by Jesse Morgan via
+Thornveil LLC *prior to* and *independent of* this event, are covered
+by provisional patents filed 1 March 2026, and are made available to
+the demo under the limited license described in Section 4. Government
+use of those Thornveil components beyond evaluation requires a separate
+agreement.
+
+The two contributions compose cleanly: SPIRE is the Marine-built
+product surface; Thornveil components are the optional intelligence
+backbone the demo plugs into.
+
+---
+
 ## 1. Purpose
 
 This document establishes the intellectual property (IP) boundaries for software, models, and datasets produced during the MDM 2026 AI Forum Hackathon. It distinguishes between:

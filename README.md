@@ -1,8 +1,14 @@
 # SPIRE
 
-**Contested Logistics Operating System**
+**Contested Logistics Operating System** — Marine Made.
 Sanitization, Prediction, Intelligence, Readiness Engine.
-Local Intelligence · No Cloud · IL5-Fit · Built by Marines, on duty time.
+Local Intelligence · No Cloud · IL5-Fit
+
+> **Marine Made.** SPIRE itself — every surface, every workflow, every
+> role-mapping — is designed and built by an active-duty Marine
+> (SSgt Jesse Morgan, USMC) for the operators it's actually for.
+> Built on duty time, by somebody who's been the Maint Chief filling out
+> the spreadsheets — not by a contractor guessing what a Marine needs.
 
 **Live demo**: <https://spire-mdm.fly.dev> (synthetic data, public during pilot)
 
