@@ -633,6 +633,35 @@ export function BastionView() {
           </div>
         )}
 
+        {/* Walkthrough audit: when a sim is active and the operator
+         * dismisses the response panel (✕), there was no surface left
+         * to resolve the sim — they'd have to re-open the alert from
+         * the stream. Replace the hidden Sim Controls pill with a
+         * persistent 'Resolve sim · drop FPCON' chip in the same slot
+         * during sims, so the resolve action is always one click away. */}
+        {sim && (role === "mef_commander" || role === "security_manager" || role === "g4") && (
+          <div
+            className="pointer-events-auto absolute left-3 top-3 z-[7] flex items-center gap-1.5"
+            role="region"
+            aria-label="Sim resolve"
+          >
+            <span
+              className="rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_18%,transparent)] px-2 py-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-warning)] backdrop-blur tracking-widest"
+            >
+              Sim Active
+            </span>
+            <button
+              type="button"
+              onClick={() => setConfirmResolve(true)}
+              title="Resolve simulation · drop FPCON BRAVO and clear cordon overlays"
+              className="inline-flex h-9 items-center gap-2 rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,transparent)] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-success)] backdrop-blur transition-colors hover:bg-[color-mix(in_oklab,var(--color-success-muted)_50%,transparent)] tracking-widest"
+            >
+              <span aria-hidden>✓</span>
+              <span>Resolve sim</span>
+            </button>
+          </div>
+        )}
+
         {/* Track-G1 — G-4 command summary card. Three columns of "what
          * matters in the next 30 seconds": MC% per scoped unit, top alerts,
          * top fused threats. Renders only for the G-4 role and only when no
