@@ -419,8 +419,10 @@ function McMethodologyHelp({
     };
   }, [open, onClose]);
 
-  // Format dataset.last_day as "26 APR 26" to match PULSE's "as of"
-  // line + BASTION's mission clock face. Plain ISO would clash visually.
+  // Walkthrough audit: prior format was '26 APR 26' (year-suffix '26')
+  // which an operator can mis-read as 'April 26th' if the day prefix
+  // was clipped. Use full 'DD MMM YYYY' format so the day is
+  // unambiguously prefixed and the year is the full four digits.
   const lastDayDisplay = (() => {
     if (!datasetLastDay) return null;
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(datasetLastDay);
@@ -429,7 +431,7 @@ function McMethodologyHelp({
     const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
     const monIdx = parseInt(mo, 10) - 1;
     if (monIdx < 0 || monIdx > 11) return datasetLastDay;
-    return `${d} ${months[monIdx]} ${y.slice(2)}`;
+    return `${d} ${months[monIdx]} ${y}`;
   })();
 
   return (
