@@ -536,7 +536,13 @@ export function MapCanvas({
     if (!flyToBuilding || !mapRef.current) return;
     const b = buildingById.get(flyToBuilding);
     if (!b || b.lat == null || b.lon == null) return;
-    mapRef.current.flyTo({ center: [b.lon, b.lat], zoom: 16.5, duration: 900 });
+    // Same defensive try/catch as the sim-trigger fly above — a transient
+    // MapLibre crash in flyTo should not unmount the BASTION view.
+    try {
+      mapRef.current.flyTo({ center: [b.lon, b.lat], zoom: 16.5, duration: 900 });
+    } catch (err) {
+      console.warn("MapCanvas: building flyTo failed:", err);
+    }
   }, [flyToBuilding, buildingById]);
 
   // Reviewer caught the map collapsing to a corner with units piled on each
@@ -599,14 +605,22 @@ export function MapCanvas({
     // builds when the prior camera state had a non-zero padding
     // and the new state nulled it. Always pass a fully-specified
     // padding object — when the drawer is closed, all zeros.
-    map.flyTo({
-      center: [b.lon, b.lat],
-      zoom: 17,
-      duration: 1200,
-      padding: drawerOpen
-        ? { top: 0, bottom: 0, left: 0, right: 400 }
-        : { top: 0, bottom: 0, left: 0, right: 0 },
-    });
+    // Also wrap in try/catch — if a future MapLibre regression breaks
+    // camera transitions, the BASTION view doesn't blow up, the map
+    // just stays at the previous viewport.
+    try {
+      map.flyTo({
+        center: [b.lon, b.lat],
+        zoom: 17,
+        duration: 1200,
+        padding: drawerOpen
+          ? { top: 0, bottom: 0, left: 0, right: 400 }
+          : { top: 0, bottom: 0, left: 0, right: 0 },
+      });
+    } catch (err) {
+      // Best-effort camera move; tolerate transient MapLibre issues.
+      console.warn("MapCanvas: sim-trigger flyTo failed:", err);
+    }
   }, [simActive, simTargetBuilding, buildingById, drawerOpen]);
 
   // Sim-resolve restoration. Parent bumps `simResolveSignal` when the
@@ -619,11 +633,15 @@ export function MapCanvas({
     const map = mapRef.current;
     const cached = preSimViewRef.current;
     if (cached) {
-      map.flyTo({
-        center: [cached.longitude, cached.latitude],
-        zoom: cached.zoom,
-        duration: 900,
-      });
+      try {
+        map.flyTo({
+          center: [cached.longitude, cached.latitude],
+          zoom: cached.zoom,
+          duration: 900,
+        });
+      } catch (err) {
+        console.warn("MapCanvas: sim-resolve flyTo failed:", err);
+      }
       preSimViewRef.current = null;
     } else {
       // No cache (e.g. sim was already running before mount) — fall back to
