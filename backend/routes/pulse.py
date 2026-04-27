@@ -840,13 +840,29 @@ async def cannibalization(role: Optional[str] = None):
         if s.readiness_code == "MC":
             u["mc"] += 1
 
-    needs = []
+    # Issue #17 fix — compute donor candidates server-side using the proper
+    # "donor still has the recipient's needed part because their own fault
+    # is on a DIFFERENT component" model. The previous frontend matcher
+    # required donors to be waiting on the same NSN, which is the inverse
+    # of what cannibalization actually means (a donor HAS the part; a
+    # recipient NEEDS it). Result: with the demo dataset, every recipient
+    # rendered an empty donor list because deadlined assets sharing an NSN
+    # also shared the failing component.
+    #
+    # Donor categories produced here:
+    #   - deadlined_other_fault: another deadlined asset of the same
+    #     equipment_type whose own fault class differs from the part
+    #     class the recipient needs (their copy of the part is intact).
+    #   - operational_swap: a same-equipment-type asset that is currently
+    #     RFI/Operational. Pulling the part would deadline them, so the
+    #     UI flags it as a fallback option for completeness.
+
+    # Index deadlined+pending SRs once for fast donor lookup.
+    deadlined_open: list = []  # (sr, pending_req[0])
     for sr in ds.srs:
         if sr.is_pmcs or sr.close_date is not None:
             continue
         if sr.condition != "Deadlined":
-            continue
-        if allowed is not None and sr.unit_name not in allowed:
             continue
         pending = [
             r for r in sr.requisitions
@@ -854,7 +870,123 @@ async def cannibalization(role: Optional[str] = None):
         ]
         if not pending:
             continue
+        deadlined_open.append((sr, pending[0]))
+
+    # Index serviceable peers by equipment_type for the operational-swap
+    # fallback. Status codes: MC = mission capable (full), PMC = partial
+    # mission capable (degraded but operational). NMCM/NMCS are not-MC
+    # for maintenance/supply reasons and aren't safe donors.
+    serviceable_by_et: dict[str, list] = {}
+    for a in ds.assets:
+        if a.current_status not in ("MC", "PMC"):
+            continue
+        serviceable_by_et.setdefault(a.equipment_type, []).append(a)
+
+    needs = []
+    for sr, pending_req in deadlined_open:
+        if allowed is not None and sr.unit_name not in allowed:
+            continue
         unit_stats = unit_mc.get(sr.unit_name, {"mc": 0, "total": 1})
+        recipient_fault_class = _normalize_component(sr.fault_component or "")
+        # The class of the *part being requested*. We exclude donors whose
+        # own deadlining fault is on this same class — their copy of the
+        # part the recipient needs is the one that actually broke.
+        needed_part_class = _normalize_component(pending_req.nomenclature or "")
+
+        donor_candidates: list[dict] = []
+        # Tier 1: deadlined peers of same equipment_type with a different
+        # fault class and not waiting for the same NSN themselves.
+        for d_sr, d_pend in deadlined_open:
+            if d_sr.sr_number == sr.sr_number:
+                continue
+            if d_sr.equipment_type != sr.equipment_type:
+                continue
+            d_fault_class = _normalize_component(d_sr.fault_component or "")
+            # Donor's own failure must not be on the recipient's needed
+            # part class (otherwise their copy is also broken) and must
+            # not be on the same class as recipient (cause-of-fault
+            # overlap, see walkthrough #9).
+            if d_fault_class == needed_part_class:
+                continue
+            if d_fault_class and recipient_fault_class and d_fault_class == recipient_fault_class:
+                continue
+            if d_pend.nsn == pending_req.nsn:
+                continue
+            d_unit_stats = unit_mc.get(d_sr.unit_name, {"mc": 0, "total": 1})
+            donor_candidates.append({
+                "category": "deadlined_other_fault",
+                "sr_number": d_sr.sr_number,
+                "asset_id": d_sr.asset_id,
+                "unit": d_sr.unit_name,
+                "equipment_type": d_sr.equipment_type,
+                "fault_component": d_sr.fault_component,
+                "fault_class": d_fault_class,
+                "days_open": (last_day - d_sr.open_date).days if last_day else 0,
+                "unit_mc_rate": round(d_unit_stats["mc"] / max(1, d_unit_stats["total"]), 3),
+                "unit_mc_count": d_unit_stats["mc"],
+                "unit_total": d_unit_stats["total"],
+                "rationale": (
+                    f"Deadlined on {d_sr.fault_component}; recipient's "
+                    f"needed {pending_req.nomenclature.lower()} is intact."
+                ),
+            })
+
+        # Tier 2: operational-swap fallback — when no Tier 1 donor exists,
+        # surface MC/PMC peers (any unit, including the recipient's own
+        # motor pool, since intra-unit pulls are the easiest to execute)
+        # so the demo path always has at least one path to action. Clearly
+        # labelled so the operator knows pulling the part deadlines the
+        # donor.
+        if not donor_candidates:
+            for peer in serviceable_by_et.get(sr.equipment_type, []):
+                if peer.asset_id == sr.asset_id:
+                    continue
+                if allowed is not None and peer.unit_name not in allowed:
+                    continue
+                p_unit_stats = unit_mc.get(peer.unit_name, {"mc": 0, "total": 1})
+                donor_candidates.append({
+                    "category": "operational_swap",
+                    "sr_number": None,
+                    "asset_id": peer.asset_id,
+                    "unit": peer.unit_name,
+                    "equipment_type": peer.equipment_type,
+                    "fault_component": None,
+                    "fault_class": None,
+                    "days_open": 0,
+                    "unit_mc_rate": round(p_unit_stats["mc"] / max(1, p_unit_stats["total"]), 3),
+                    "unit_mc_count": p_unit_stats["mc"],
+                    "unit_total": p_unit_stats["total"],
+                    "rationale": (
+                        f"Operational asset · pulling {pending_req.nomenclature.lower()} "
+                        f"would deadline {peer.asset_id}."
+                    ),
+                })
+                if len(donor_candidates) >= 6:
+                    break
+
+        # Stable ordering: deadlined-other-fault first, then highest
+        # donor-unit MC (unit can spare it most), then most-days-open
+        # (already in evac queue).
+        donor_candidates.sort(key=lambda c: (
+            0 if c["category"] == "deadlined_other_fault" else 1,
+            -(c.get("unit_mc_rate") or 0.0),
+            -(c.get("days_open") or 0),
+        ))
+
+        # Empty-state reason — populated only when truly empty so the UI
+        # can explain WHY there are no donors. The frontend reads this
+        # verbatim into the empty-state copy.
+        if donor_candidates:
+            no_donor_reason = None
+        else:
+            no_donor_reason = (
+                f"No in-scope {sr.equipment_type.replace('_', ' ').lower()} "
+                f"donor has a compatible {pending_req.nomenclature.lower()} "
+                "with sufficient remaining hours. Try widening the role "
+                "scope or checking the expedite/cross-level options on "
+                "Forecast · Recommended Actions."
+            )
+
         needs.append({
             "sr_number": sr.sr_number,
             "asset_id": sr.asset_id,
@@ -865,17 +997,19 @@ async def cannibalization(role: Optional[str] = None):
             # can detect cause-of-fault overlap. Recipients with fault on
             # component X must exclude donors whose own fault is also on X
             # (their X is the failing part — pulling it is nonsensical).
-            "fault_class": _normalize_component(sr.fault_component or ""),
+            "fault_class": recipient_fault_class,
             "days_open": (last_day - sr.open_date).days if last_day else 0,
             "unit_mc_rate": round(unit_stats["mc"] / max(1, unit_stats["total"]), 3),
             "unit_mc_count": unit_stats["mc"],
             "unit_total": unit_stats["total"],
             "needed_part": {
-                "nsn": pending[0].nsn,
-                "nomenclature": pending[0].nomenclature,
-                "unit_cost": pending[0].unit_cost,
-                "supply_path": pending[0].supply_path,
+                "nsn": pending_req.nsn,
+                "nomenclature": pending_req.nomenclature,
+                "unit_cost": pending_req.unit_cost,
+                "supply_path": pending_req.supply_path,
             },
+            "donor_candidates": donor_candidates,
+            "no_donor_reason": no_donor_reason,
         })
 
     matches = []
@@ -937,15 +1071,24 @@ async def propose_cannibalization(payload: dict):
     to the audit chain with a PROPOSED status. A production build would add a
     review gate + approval chain before committing."""
     recipient_sr = payload.get("recipient_sr")
+    # Issue #17 — donor may be an operational asset (no open SR). The
+    # frontend now sends donor_asset_id for that case so we can still log
+    # the proposal end-to-end.
     donor_sr = payload.get("donor_sr")
+    donor_asset_id = payload.get("donor_asset_id")
     nsn = payload.get("nsn")
-    if not (recipient_sr and donor_sr and nsn):
-        raise HTTPException(status_code=400, detail="recipient_sr, donor_sr, nsn required")
+    if not (recipient_sr and (donor_sr or donor_asset_id) and nsn):
+        raise HTTPException(
+            status_code=400,
+            detail="recipient_sr, nsn, and one of donor_sr/donor_asset_id required",
+        )
 
     proposal = {
         "proposal_id": f"PROP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
         "recipient_sr": recipient_sr,
         "donor_sr": donor_sr,
+        "donor_asset_id": donor_asset_id,
+        "donor_kind": "deadlined" if donor_sr else "operational_swap",
         "nsn": nsn,
         "status": "PROPOSED",
         "proposed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",

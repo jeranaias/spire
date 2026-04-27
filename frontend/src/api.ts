@@ -83,8 +83,15 @@ export const api = {
     riskBoard: (top = 20) => jsonFetch<RiskBoard>(`/pulse/risk-board?top=${top}`),
     assetDeepDive: (assetId: string) => jsonFetch<AssetDeepDive>(`/pulse/assets/${encodeURIComponent(assetId)}`),
     cannibalization: () => jsonFetch<Cannibalization>("/pulse/cannibalization"),
-    forecast: (unit?: string, window = 14) =>
-      jsonFetch<Forecast>(`/pulse/forecast?window=${window}${unit ? `&unit=${encodeURIComponent(unit)}` : ""}`),
+    // Issues #19–#22 — accept an AbortSignal so callers can cancel
+    // in-flight requests when navigating away or changing inputs. Without
+    // this, late-arriving responses overwrite fresh ones (race) and the
+    // chart appears stuck on stale or missing data.
+    forecast: (unit?: string, window = 14, signal?: AbortSignal) =>
+      jsonFetch<Forecast>(
+        `/pulse/forecast?window=${window}${unit ? `&unit=${encodeURIComponent(unit)}` : ""}`,
+        { signal },
+      ),
     feedback: (assetId: string, correct: boolean, note = "") =>
       jsonFetch<{ ok: boolean }>(`/pulse/feedback/${encodeURIComponent(assetId)}`, {
         method: "POST",
@@ -319,8 +326,39 @@ export interface AssetDeepDive {
   readiness_trajectory: any[];
 }
 
+export interface DonorCandidate {
+  category: "deadlined_other_fault" | "operational_swap";
+  sr_number: string | null;
+  asset_id: string;
+  unit: string;
+  equipment_type: string;
+  fault_component: string | null;
+  fault_class: string | null;
+  days_open: number;
+  unit_mc_rate: number;
+  unit_mc_count: number;
+  unit_total: number;
+  rationale: string;
+}
+
+export interface CannibalizationNeed {
+  sr_number: string;
+  asset_id: string;
+  unit: string;
+  equipment_type: string;
+  fault_component: string;
+  fault_class?: string;
+  days_open: number;
+  unit_mc_rate?: number;
+  unit_mc_count?: number;
+  unit_total?: number;
+  needed_part: { nsn: string; nomenclature: string; unit_cost: number; supply_path?: string };
+  donor_candidates: DonorCandidate[];
+  no_donor_reason: string | null;
+}
+
 export interface Cannibalization {
-  open_needs: any[];
+  open_needs: CannibalizationNeed[];
   completed_matches: any[];
   total_events: number;
 }
