@@ -176,11 +176,33 @@ export function FeedbackDrawer() {
         submitter: submitter.trim() || null,
         diagnostics,
       };
-      const r = await fetch("/api/system/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      // Walkthrough audit (CRITICAL): prior submit didn't check r.ok and
+      // didn't set a client-side timeout. When Fly cold-started the backend,
+      // the POST sat behind a ~30s machine boot, then nginx returned a 502
+      // HTML body, and `r.json()` either crashed parsing the HTML or
+      // returned a weird object — operator saw no toast at all because the
+      // catch handler swallowed the error after the form was already in a
+      // half-dead state. Now: 30s AbortController, explicit r.ok check,
+      // distinct error messages so the operator knows what failed.
+      const ctrl = new AbortController();
+      const timer = window.setTimeout(() => ctrl.abort(), 30_000);
+      let r: Response;
+      try {
+        r = await fetch("/api/system/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal,
+        });
+      } finally {
+        window.clearTimeout(timer);
+      }
+      if (!r.ok) {
+        const text = await r.text().catch(() => "");
+        throw new Error(
+          `${r.status} ${r.statusText}${text ? `: ${text.slice(0, 140)}` : ""}`,
+        );
+      }
       const j = await r.json();
       if (j.github_issue_url) {
         pushToast({
