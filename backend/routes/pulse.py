@@ -359,8 +359,13 @@ def _predict_one(asset, recent_faults: dict[str, int]) -> list[dict]:
         # numbers (0.88, 0.90, 0.93, 0.95, 0.96, 0.91, etc).
         prob_raw = (base + history_bump + pm_bump) * variance
         if prob_raw >= 0.85:
-            # Saturated zone — distribute around 0.91 with ±0.05 offset.
-            prob = round(0.91 + offset, 3)
+            # Saturated zone — distribute across [0.78, 0.94] using both
+            # variance and offset. Variance gives the asset's overall risk
+            # tier; offset gives per-component spread within the tier.
+            # Wider band so per-asset top probabilities differ at the
+            # display precision (rounds to 1 decimal in UI).
+            prob = round(0.86 + (variance - 1.0) * 0.20 + offset, 3)
+            prob = max(0.65, min(0.97, prob))
         else:
             prob = round(max(0.05, prob_raw + offset * 0.5), 3)
         if prob < 0.20:
