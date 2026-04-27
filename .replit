@@ -2,6 +2,7 @@ modules = ["nodejs-20", "python-3.12", "web", "bash"]
 [agent]
 expertMode = true
 stack = "BEST_EFFORT_FALLBACK"
+integrations = ["github:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
@@ -54,6 +55,10 @@ externalPort = 80
 localPort = 8000
 externalPort = 8000
 exposeLocalhost = true
+
+[[ports]]
+localPort = 23636
+externalPort = 3000
 
 [deployment]
 deploymentTarget = "vm"

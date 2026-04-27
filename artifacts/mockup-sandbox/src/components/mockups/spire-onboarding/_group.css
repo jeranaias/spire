@@ -1,0 +1,30 @@
+/* SPIRE Onboarding — group baseline.
+ * Each variant defines its OWN scoped tokens via a wrapper class
+ * (.fn-shell, .bc-shell, .md-shell). This file holds only the
+ * shared modal harness reset so variants don't bleed onto each other.
+ */
+
+.spire-onb-host {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+/* Shared modal-card geometry — every variant uses this width / radius scaffold
+ * so layout truly is a constant across the three. Aesthetic is in the variant
+ * stylesheet only. */
+.spire-onb-card {
+  width: 100%;
+  max-width: 40rem;
+  margin: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+  position: relative;
+}

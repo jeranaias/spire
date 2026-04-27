@@ -1,0 +1,274 @@
+/* Marine Doctrine — bold scarlet + gold on deep navy.
+ * All tokens scoped to .md-shell. */
+
+.md-shell {
+  --md-bg-1:    #061226;
+  --md-bg-2:    #0a1a36;
+  --md-card:    #0e2148;
+  --md-card-2:  #112553;
+  --md-rule:    #1f3878;
+  --md-rule-on: #2c4a96;
+
+  --md-text:        #f1efe6;        /* eggshell */
+  --md-text-soft:   #c9cfdc;
+  --md-text-muted:  #8995ad;
+
+  --md-scarlet:     #c8102e;        /* USMC scarlet */
+  --md-scarlet-2:   #a30d24;
+  --md-gold:        #ffcc33;        /* USMC gold */
+  --md-gold-2:      #d8a420;
+
+  --md-display: "Oxanium", "Bebas Neue", "Inter", system-ui, sans-serif;
+  --md-body:    "Inter", "IBM Plex Sans", system-ui, sans-serif;
+  --md-mono:    "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+
+  background:
+    radial-gradient(circle at 18% 20%, rgba(255, 204, 51, 0.06) 0%, transparent 38%),
+    radial-gradient(circle at 88% 90%, rgba(200, 16, 46, 0.10) 0%, transparent 40%),
+    linear-gradient(160deg, var(--md-bg-1) 0%, var(--md-bg-2) 100%);
+  color: var(--md-text);
+  font-family: var(--md-body);
+}
+
+/* Card — bold double-edge: thin gold inside a thick navy frame */
+.md-card {
+  background: var(--md-card);
+  border: 1px solid var(--md-rule-on);
+  border-radius: 6px;
+  padding: 1.5rem 1.5rem 1.4rem;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 204, 51, 0.18),
+    0 24px 50px -16px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Diagonal scarlet doctrine ribbon — pushed into the corner so it
+ * reads as decorative chrome and doesn't crowd the step row or title. */
+.md-banner {
+  position: absolute;
+  top: -10px;
+  right: -78px;
+  width: 220px;
+  transform: rotate(34deg);
+  background: linear-gradient(90deg, var(--md-scarlet-2) 0%, var(--md-scarlet) 100%);
+  border-top: 1px solid var(--md-gold);
+  border-bottom: 1px solid var(--md-scarlet-2);
+  padding: 4px 0;
+  text-align: center;
+  box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.92;
+}
+.md-banner-text {
+  font-family: var(--md-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  color: var(--md-gold);
+  text-transform: uppercase;
+}
+
+/* Layout primitives */
+.md-row { display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 1; }
+.md-gap { gap: 8px; }
+
+/* Step indicator */
+.md-tick {
+  display: inline-block;
+  width: 36px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 0;
+  border: 1px solid var(--md-rule);
+}
+.md-tick-on {
+  background: var(--md-gold);
+  border-color: var(--md-gold-2);
+  box-shadow: 0 0 6px rgba(255, 204, 51, 0.45);
+}
+.md-step-label {
+  margin-left: 8px;
+  font-family: var(--md-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--md-gold-2);
+  text-transform: uppercase;
+}
+
+/* Eyebrow — gold tick + scarlet text, military stencil */
+.md-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--md-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--md-scarlet);
+}
+.md-eyebrow-on-dark { color: var(--md-gold); }
+.md-eyebrow-mark {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  background: var(--md-scarlet);
+  box-shadow: 4px 0 0 var(--md-gold);
+}
+
+/* Title — chunky display, tight tracking */
+.md-title {
+  margin: 8px 0 0;
+  font-family: var(--md-display);
+  font-size: 1.95rem;
+  line-height: 1.10;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--md-text);
+  text-transform: uppercase;
+}
+
+/* Body */
+.md-body {
+  font-family: var(--md-body);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--md-text-soft);
+  position: relative;
+  z-index: 1;
+}
+.md-body strong {
+  color: var(--md-text);
+  font-weight: 700;
+  /* Inline emphasis only — no new structural row.
+   * Identity comes from a subtle gold underline, not a block break. */
+  background-image: linear-gradient(transparent 88%, rgba(255, 204, 51, 0.55) 88%);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  padding: 0 1px;
+}
+
+/* Inner panel — black-navy with gold pill */
+.md-panel {
+  background: linear-gradient(180deg, rgba(4, 10, 24, 0.65) 0%, rgba(8, 18, 40, 0.55) 100%);
+  border: 1px solid var(--md-rule-on);
+  border-left: 3px solid var(--md-gold);
+  border-radius: 4px;
+  padding: 14px 16px 14px;
+  position: relative;
+  z-index: 1;
+}
+.md-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.md-pill {
+  font-family: var(--md-mono);
+  font-size: 9px;
+  letter-spacing: 0.20em;
+  padding: 3px 8px;
+  background: var(--md-scarlet);
+  color: var(--md-text);
+  border-radius: 2px;
+  text-transform: uppercase;
+  font-weight: 700;
+  box-shadow: 0 1px 0 var(--md-scarlet-2);
+}
+
+.md-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--md-body);
+  font-size: 0.86rem;
+  color: var(--md-text);
+}
+.md-list li {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+.md-li-num {
+  font-family: var(--md-display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--md-gold);
+  background: rgba(255, 204, 51, 0.10);
+  border: 1px solid rgba(255, 204, 51, 0.30);
+  border-radius: 2px;
+  text-align: center;
+  padding: 1px 0;
+}
+
+/* Footer + buttons */
+.md-footer {
+  margin-top: 4px;
+  border-top: 1px solid var(--md-rule);
+  padding-top: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  z-index: 1;
+}
+
+.md-btn {
+  font-family: var(--md-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  padding: 11px 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.md-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--md-rule-on);
+  color: var(--md-text-muted);
+}
+.md-btn-ghost:disabled { opacity: 0.40; cursor: default; }
+
+.md-btn-primary {
+  background: linear-gradient(180deg, var(--md-scarlet) 0%, var(--md-scarlet-2) 100%);
+  border: 1px solid var(--md-scarlet-2);
+  color: var(--md-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 204, 51, 0.30),
+    0 6px 14px -4px rgba(200, 16, 46, 0.55);
+  padding-right: 18px;
+}
+.md-btn-primary:hover {
+  background: linear-gradient(180deg, #d51735 0%, var(--md-scarlet) 100%);
+}
+.md-btn-arrow {
+  display: inline-block;
+  color: var(--md-gold);
+  font-weight: 700;
+}
+
+.md-link {
+  background: transparent;
+  border: 0;
+  font-family: var(--md-mono);
+  font-size: 10px;
+  letter-spacing: 0.20em;
+  color: var(--md-text-muted);
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.md-link:hover { color: var(--md-gold); }

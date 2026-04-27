@@ -1,0 +1,231 @@
+/* Field Notebook — warm/analog/tactile.
+ * All tokens scoped to .fn-shell. */
+
+.fn-shell {
+  /* Warm parchment palette */
+  --fn-bg-1: #efe4cc;
+  --fn-bg-2: #ddc9a3;
+  --fn-paper: #f6ecd5;
+  --fn-card: #fbf3df;
+  --fn-ink: #2a2218;
+  --fn-ink-soft: #5a4a35;
+  --fn-ink-muted: #8a7a5d;
+  --fn-rule: #c9b48a;
+  --fn-rule-soft: #d8c8a4;
+  --fn-stamp: #8a2c1f;     /* oxide red, faded field-stamp */
+  --fn-stamp-ink: #6e2419;
+  --fn-olive: #4a5535;     /* secondary accent, olive drab */
+
+  --fn-font-display: "Source Serif 4", "Libre Baskerville", Georgia, serif;
+  --fn-font-body:    "Source Serif 4", "Lora", Georgia, serif;
+  --fn-font-mono:    "Special Elite", "Courier Prime", "JetBrains Mono", "Courier New", monospace;
+  --fn-font-hand:    "Architects Daughter", "Caveat", cursive;
+
+  background:
+    /* faint horizontal ruled-paper lines */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 27px,
+      rgba(120, 95, 55, 0.10) 27px,
+      rgba(120, 95, 55, 0.10) 28px
+    ),
+    /* coffee-ring corner */
+    radial-gradient(circle at 92% 8%, rgba(110, 70, 30, 0.12) 0%, transparent 22%),
+    /* warm vignette */
+    radial-gradient(ellipse at 50% 50%, var(--fn-paper) 0%, var(--fn-bg-1) 70%, var(--fn-bg-2) 100%);
+  font-family: var(--fn-font-body);
+  color: var(--fn-ink);
+}
+
+/* Card = parchment leaf with a subtle deckled border + tape */
+.fn-card {
+  background: var(--fn-card);
+  border: 1px solid var(--fn-rule);
+  border-radius: 2px;
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.04),
+    0 14px 28px -14px rgba(60, 40, 10, 0.45),
+    inset 0 0 0 6px var(--fn-card),
+    inset 0 0 0 7px var(--fn-rule-soft);
+  background-image:
+    /* paper grain */
+    radial-gradient(rgba(140, 100, 50, 0.06) 1px, transparent 1.2px),
+    /* warm wash */
+    linear-gradient(180deg, #fbf3df 0%, #f3e7c9 100%);
+  background-size: 3px 3px, 100% 100%;
+}
+
+/* Tape strip pinned to the top of the leaf */
+.fn-card::before {
+  content: "";
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%) rotate(-1.2deg);
+  width: 110px;
+  height: 22px;
+  background: rgba(220, 200, 145, 0.70);
+  border: 1px solid rgba(150, 120, 60, 0.25);
+  border-radius: 1px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.10);
+  pointer-events: none;
+}
+
+.fn-corner-fold {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, transparent 50%, rgba(150, 115, 60, 0.18) 50%);
+  border-top: 1px solid var(--fn-rule);
+  border-left: 1px solid var(--fn-rule);
+  border-bottom-right-radius: 2px;
+  pointer-events: none;
+}
+
+/* Layout primitives */
+.fn-row { display: flex; align-items: center; justify-content: space-between; }
+.fn-gap { gap: 0.5rem; }
+
+/* Eyebrow / labels — typewriter mono */
+.fn-eyebrow {
+  font-family: var(--fn-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fn-ink-soft);
+}
+
+.fn-step-label {
+  margin-left: 0.5rem;
+  color: var(--fn-ink-muted);
+  font-size: 10px;
+}
+
+/* Stamp = the eyebrow gets a faded field-stamp box */
+.fn-stamp {
+  display: inline-block;
+  border: 1.5px solid var(--fn-stamp);
+  color: var(--fn-stamp);
+  padding: 2px 7px;
+  border-radius: 1px;
+  transform: rotate(-1.5deg);
+  letter-spacing: 0.20em;
+  font-weight: 700;
+  opacity: 0.92;
+  background: rgba(255, 245, 220, 0.4);
+}
+
+/* Step ticks = ruled hand-strokes, not filled bars */
+.fn-tick {
+  display: inline-block;
+  width: 30px;
+  height: 4px;
+  background: var(--fn-rule-soft);
+  border-radius: 1px;
+}
+.fn-tick-on {
+  background: var(--fn-stamp);
+  box-shadow: 0 0 0 1px rgba(138, 44, 31, 0.20);
+}
+
+/* Title — set in serif, like a field manual heading */
+.fn-title {
+  margin-top: 4px;
+  font-family: var(--fn-font-display);
+  font-size: 1.65rem;
+  line-height: 1.18;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--fn-ink);
+}
+
+/* Body — warm serif, cozy line-height */
+.fn-body {
+  font-family: var(--fn-font-body);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--fn-ink-soft);
+}
+
+/* Inner panel — looks like a clipped paste-in note */
+.fn-panel {
+  border: 1px dashed var(--fn-rule);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 23px,
+      rgba(120, 95, 55, 0.09) 23px,
+      rgba(120, 95, 55, 0.09) 24px
+    ),
+    rgba(255, 250, 235, 0.55);
+  padding: 14px 16px 16px;
+  border-radius: 2px;
+}
+
+.fn-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--fn-font-mono);
+  font-size: 12px;
+  line-height: 1.85;
+  color: var(--fn-ink);
+  letter-spacing: 0.01em;
+}
+.fn-list li::marker { content: ""; }
+
+/* Footer + buttons */
+.fn-footer {
+  margin-top: 6px;
+  border-top: 1px dashed var(--fn-rule);
+  padding-top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fn-btn {
+  font-family: var(--fn-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 9px 22px;
+  border-radius: 1px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+.fn-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--fn-rule);
+  color: var(--fn-ink-muted);
+}
+.fn-btn-ghost:disabled { opacity: 0.35; cursor: default; }
+
+.fn-btn-primary {
+  background: var(--fn-stamp);
+  border: 1px solid var(--fn-stamp-ink);
+  color: #f6ecd5;
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.10),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
+.fn-btn-primary:hover { background: var(--fn-stamp-ink); }
+
+.fn-link {
+  background: transparent;
+  border: 0;
+  font-family: var(--fn-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--fn-ink-muted);
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.fn-link:hover { color: var(--fn-ink); }
