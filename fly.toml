@@ -57,8 +57,11 @@ primary_region = "iad"
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  # Bumped 1gb → 2gb. The dataset + canonical state holds ~150MB at
+  # Bumped 1gb → 4gb. The dataset + canonical state holds ~150MB at
   # rest, but cold-start spikes during boot (snapshot replay, scoring
-  # warmup) hit ~700MB. Under 1gb, an OOM-kill mid-boot looks
-  # identical to 'backend disconnecting' from the operator's seat.
-  memory = "2gb"
+  # warmup) hit ~700MB, and Monte Carlo forecast paths + the audit
+  # chain verifier have transient peaks past 1.5gb under concurrent
+  # load. 4gb gives the demo a hard ceiling well above the worst
+  # observed working set; OOM-kills mid-demo are showstoppers and
+  # not worth the cost saving.
+  memory = "4gb"

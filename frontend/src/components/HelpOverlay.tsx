@@ -14,7 +14,7 @@ const SHORTCUTS = [
   { keys: ["Esc"],         label: "Close any modal" },
   { keys: ["/"],           label: "Focus alert search (BASTION)" },
   { keys: ["Ctrl", "/"], label: "Toggle SPIRO copilot" },
-  { keys: ["Shift", "F"], label: "Open feedback drawer" },
+  { keys: ["g", "f"], label: "Open feedback drawer" },
   // Vimium-style chord nav. Mirrors the App-level useGoToShortcuts hook;
   // routes the active role can't see fall back to that role's default
   // landing surface so the shortcut never throws an InsufficientPrivilege.
@@ -163,7 +163,7 @@ export function HelpOverlay() {
         <div
           className="mt-5 border-t border-[var(--color-border)] pt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
         >
-          File issues with the floating button bottom-right (or Shift+F) ·
+          File issues with the floating button bottom-right (or press g then f) ·
           See SPIRE_INSTALL.md + CONTRIBUTING.md in the repo root for setup
         </div>
       </div>
