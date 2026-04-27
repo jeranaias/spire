@@ -203,6 +203,15 @@ def _tool_parse_tmr(text: str) -> dict:
         return {"error": f"parse_tmr failed: {type(e).__name__}: {e}"}
 
 
+_TOOL_PROFILE_ALIASES = {
+    "japan": "JPN_COALITION", "jpn": "JPN_COALITION", "jsdf": "JPN_COALITION",
+    "australia": "AUS_COALITION", "aus": "AUS_COALITION", "adf": "AUS_COALITION",
+    "philippines": "PHL_COALITION", "phl": "PHL_COALITION", "afp": "PHL_COALITION",
+    "fvey": "FVEY_BASE", "five eyes": "FVEY_BASE",
+    "fvey-log": "FVEY_LOG", "fvey log": "FVEY_LOG",
+}
+
+
 async def _tool_get_coalition_view(profile: str, role: str = "data_custodian") -> dict:
     """Preview the redacted dataset visible to a coalition partner (GC-5).
 
@@ -211,13 +220,19 @@ async def _tool_get_coalition_view(profile: str, role: str = "data_custodian") -
     it synchronously and treated the returned coroutine as a result
     object — every getattr returned the default, so the tool reported
     'no profile / no partners / no units' regardless of input.
+
+    Defense-in-depth: if Gemma sends a short alias ("JPN", "Japan",
+    "FVEY") the canonicalizer maps it to the full backend key. The
+    planner regex catches this on the rule-based path; this catches
+    it on the LLM-tool-call path.
     """
     from ..routes.sentry import coalition_view
+    canonical = _TOOL_PROFILE_ALIASES.get(profile.lower().strip(), profile)
     try:
-        result = await coalition_view(profile_key=profile)
+        result = await coalition_view(profile_key=canonical)
         if isinstance(result, dict):
             return {
-                "profile": profile,
+                "profile": canonical,
                 "display_name": result.get("display_name"),
                 "distribution_statement": result.get("distribution_statement"),
                 "partners": result.get("partners", []),
@@ -227,7 +242,7 @@ async def _tool_get_coalition_view(profile: str, role: str = "data_custodian") -
                 "caveats_applied": result.get("caveats_applied", []),
             }
         return {
-            "profile": profile,
+            "profile": canonical,
             "distribution_statement": getattr(result, "distribution_statement", None),
             "partners": getattr(result, "partners", []),
             "allowed_units": getattr(result, "allowed_units", []),
@@ -391,11 +406,17 @@ TOOL_REGISTRY: dict[str, dict] = {
             "type": "function",
             "function": {
                 "name": "get_coalition_view",
-                "description": "Preview the redacted dataset visible to a coalition partner (GC-5). Returns distribution statement, partners, and unit visibility counts. Profile is one of FVEY_BASE, FVEY_LOG, JPN, AUS, PHL.",
+                # Walkthrough audit: prior enum used short codes ('JPN' /
+                # 'AUS' / 'PHL') so Gemma's tool_call carried those through
+                # to coalition_view, which expects the full keys from
+                # coalition_profiles.json ('JPN_COALITION' / 'AUS_COALITION'
+                # / 'PHL_COALITION'). 'what does Japan see?' returned
+                # 'unknown profile JPN'. Enum now matches the backend.
+                "description": "Preview the redacted dataset visible to a coalition partner (GC-5). Returns distribution statement, partners, and unit visibility counts. Profile is one of FVEY_BASE, FVEY_LOG, JPN_COALITION, AUS_COALITION, PHL_COALITION.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "profile": {"type": "string", "enum": ["FVEY_BASE", "FVEY_LOG", "JPN", "AUS", "PHL"]},
+                        "profile": {"type": "string", "enum": ["FVEY_BASE", "FVEY_LOG", "JPN_COALITION", "AUS_COALITION", "PHL_COALITION"]},
                     },
                     "required": ["profile"],
                 },
