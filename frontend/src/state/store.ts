@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { mintSession, clearSession } from "../api";
+
 export type Role =
   | "maintenance_chief"
   | "g4"
@@ -214,6 +216,15 @@ export const useSpireStore = create<SpireState>((set) => ({
   setRole: (role) => {
     try { window.localStorage.setItem(ROLE_KEY, role); } catch { /* tolerant */ }
     set({ role });
+    // Drop the previous persona's bearer FIRST so any in-flight request
+    // that lands between this set and the mint resolving falls back to
+    // an unauthenticated call (401) instead of silently using the
+    // outgoing role's token. Then mint the fresh bearer for the new
+    // persona; subsequent jsonFetch calls pick it up from module state.
+    clearSession();
+    void mintSession(role).catch((err) => {
+      console.warn("[SPIRE] session mint failed for role swap", role, err);
+    });
   },
   setOperatingMode: (operatingMode) => set({ operatingMode }),
   setAlertCount: (alertCount) => set({ alertCount }),

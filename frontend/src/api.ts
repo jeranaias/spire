@@ -6,29 +6,54 @@
 
 const BASE = "/api";
 
-// Role read synchronously from the Zustand store on every call. The store
-// owns the active role; we splice it onto GET requests as `?role=...` so the
-// backend's scoping layer can filter per-role. POST routes also take a role
-// via payload where needed.
-let _getRole: () => string = () => "mef_commander";
-export function registerRoleSource(fn: () => string) { _getRole = fn; }
+// ---- Session bearer ------------------------------------------------------
+// The backend trusts ONLY the bearer token (HMAC-signed) for caller role;
+// the previous spoofable `?role=` URL parameter is gone. The token is
+// minted via POST /api/auth/session whenever the persona dropdown changes
+// (and once at boot from the initial role).
+//
+// `_token` holds the current session bearer in module scope so every
+// jsonFetch can splice it onto requests without re-fetching from a store.
+let _token: string | null = null;
+let _tokenRole: string | null = null;
 
-function withRole(path: string): string {
-  try {
-    const role = _getRole();
-    if (!role) return path;
-    const sep = path.includes("?") ? "&" : "?";
-    return `${path}${sep}role=${encodeURIComponent(role)}`;
-  } catch {
-    return path;
+export function getSessionToken(): string | null { return _token; }
+export function getSessionRole(): string | null { return _tokenRole; }
+
+export async function mintSession(role: string): Promise<{ token: string; role: string; expires_at: number }> {
+  // Note: this mint endpoint is itself unauthenticated by design — it's
+  // the persona-switch entry. A CAC/Keycloak deployment would require an
+  // upstream identity assertion in the body and reject mints whose role
+  // claim isn't backed by the assertion's verified groups.
+  const resp = await fetch(`${BASE}/auth/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`mintSession ${resp.status}: ${body.slice(0, 200)}`);
   }
+  const data = await resp.json();
+  _token = data.token;
+  _tokenRole = data.role;
+  return data;
 }
 
-async function jsonFetch<T>(path: string, init?: RequestInit, injectRole = true): Promise<T> {
-  const url = injectRole ? withRole(path) : path;
-  const resp = await fetch(`${BASE}${url}`, {
-    headers: { "Content-Type": "application/json" },
+export function clearSession() {
+  _token = null;
+  _tokenRole = null;
+}
+
+async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string> | undefined) ?? {}),
+  };
+  if (_token) headers["Authorization"] = `Bearer ${_token}`;
+  const resp = await fetch(`${BASE}${path}`, {
     ...init,
+    headers,
   });
   if (!resp.ok) {
     const body = await resp.text();
@@ -48,14 +73,12 @@ export const api = {
         body: JSON.stringify({
           enable,
           reason: reason ?? "operator-initiated",
-          actor_role: _getRole(),
         }),
-      }, false),
+      }),
     queueOp: (op_kind: string, payload: unknown, actor: string) =>
       jsonFetch<{ ok: boolean; local_id: string; queued_at: string; queue_depth: number }>(
         "/system/comms/queue",
         { method: "POST", body: JSON.stringify({ op_kind, payload, actor }) },
-        false,
       ),
     adminTelemetry: () => jsonFetch<AdminTelemetry>("/system/admin/telemetry"),
     adminOutcomes: (limit = 50, kind?: string) => {
@@ -71,12 +94,14 @@ export const api = {
       jsonFetch<SyncConflict>(`/system/sync/resolve/${encodeURIComponent(conflictId)}`, {
         method: "POST",
         body: JSON.stringify({ winner, actor }),
-      }, false),
-    syncSeedConflict: (actor: string) =>
+      }),
+    // actor is bearer-resolved server-side; the parameter is kept for API
+    // compatibility with the existing call sites but no longer trusted.
+    syncSeedConflict: (_actor?: string) =>
       jsonFetch<SyncConflict>("/system/sync/seed-conflict", {
         method: "POST",
-        body: JSON.stringify({ actor_role: actor }),
-      }, false),
+        body: JSON.stringify({}),
+      }),
   },
   pulse: {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
@@ -142,7 +167,7 @@ export const api = {
     coalitionRelease: (profileKey: string) =>
       jsonFetch<CoalitionReleaseResult>(`/sentry/coalition/${encodeURIComponent(profileKey)}/release`, {
         method: "POST",
-        body: JSON.stringify({ actor_role: _getRole() }),
+        body: JSON.stringify({}),
       }),
     // Walkthrough #31 — per-subject audit-chain viewer.
     auditFor: (subjectId: string, limit = 50) =>
@@ -176,7 +201,7 @@ export const api = {
     nlQuery: (text: string) =>
       jsonFetch<NLQueryResult>(`/bastion/nl-query`, {
         method: "POST",
-        body: JSON.stringify({ text, role: _getRole() }),
+        body: JSON.stringify({ text }),
       }),
   },
   llm: {

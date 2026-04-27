@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 
+from ..auth import current_role, current_role_optional
 from ..persistence import (
     DATA_DIR as PERSIST_DIR,
     decisions_for_batch,
@@ -23,6 +24,10 @@ from ..persistence import (
     log as audit_log,
     record_sentry_decision,
     store_uploaded_batch,
+)
+from ..scoping import (
+    require_role,
+    AUDIT_READ_ROLES, COALITION_RELEASE_ROLES, SENTRY_VIEW_ROLES,
 )
 from ..state import get_dataset
 
@@ -236,20 +241,23 @@ def _sr_to_record(sr) -> dict:
 
 
 @router.get("/demo-batch")
-async def demo_batch(limit: int = 500):
+async def demo_batch(limit: int = 500, role: str = Depends(current_role)):
     """Seed a batch from the canonical dataset. Called by the SENTRY view when
-    the user clicks "Use canonical dataset" instead of uploading a file."""
+    the user clicks "Use canonical dataset" instead of uploading a file.
+    Sentry surfaces are gated to data_custodian / security_manager."""
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.view")
     records = _records_from_canonical(limit=limit)
     batch = _new_batch(record_source="canonical_demo", records=records)
     return _public_batch(batch)
 
 
 @router.post("/upload")
-async def upload(file: UploadFile = File(...)):
+async def upload(file: UploadFile = File(...), role: str = Depends(current_role)):
     """Accept a CSV/XLSX/JSON upload, parse with pandas/openpyxl, detect schema,
     and stage as a batch. Schema mapping runs a fuzzy match from user columns
     onto SPIRE's canonical SR schema. Raw bytes persist to SQLite so a rerun
     after restart works without re-upload."""
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.upload")
     raw = await file.read()
     filename = file.filename or "upload.bin"
     try:
@@ -344,12 +352,14 @@ def _parse_upload(raw: bytes, filename: str) -> tuple[list[dict], dict]:
 
 
 @router.post("/mark")
-async def mark_text(payload: dict):
+async def mark_text(payload: dict = Body(default={}),
+                    role: str = Depends(current_role)):
     """Upstream marking recommender. Accepts a free-text paragraph, returns
     the recommended classification + explanation without any LLM.
 
     Payload: {"text": "...", "release_authority": "US_ONLY"}.
     """
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.mark")
     text = payload.get("text", "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
@@ -435,7 +445,8 @@ async def mark_text(payload: dict):
 # ---------------------------------------------------------------------------
 
 @router.post("/process/{batch_id}")
-async def start_processing(batch_id: str):
+async def start_processing(batch_id: str, role: str = Depends(current_role)):
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.process")
     batch = _BATCHES.get(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="batch not found")
@@ -639,7 +650,8 @@ async def start_processing(batch_id: str):
 
 
 @router.get("/jobs/{job_id}")
-async def job_status(job_id: str):
+async def job_status(job_id: str, role: str = Depends(current_role)):
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.jobs")
     for batch in _BATCHES.values():
         if job_id in batch["jobs"]:
             j = batch["jobs"][job_id]
@@ -664,7 +676,8 @@ async def job_status(job_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/review-queue/{batch_id}")
-async def review_queue(batch_id: str):
+async def review_queue(batch_id: str, role: str = Depends(current_role)):
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.review_queue")
     batch = _BATCHES.get(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="batch not found")
@@ -704,12 +717,15 @@ async def review_queue(batch_id: str):
 
 
 @router.post("/review/{sr_number}/{action}")
-async def review_action(sr_number: str, action: str, payload: Optional[dict] = None):
+async def review_action(sr_number: str, action: str,
+                        payload: Optional[dict] = Body(default=None),
+                        role: str = Depends(current_role)):
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.review")
     if action not in ("approve", "reject", "modify"):
         raise HTTPException(status_code=400, detail="action must be approve|reject|modify")
     payload = payload or {}
-    role = payload.get("role", "data_custodian")
     note = payload.get("note", "")
+    # actor_role is bearer-resolved; payload role claim is ignored.
     record_sentry_decision(sr_number, action, actor_role=role, note=note)
     return {"ok": True, "sr_number": sr_number, "action": action}
 
@@ -718,10 +734,12 @@ _EXPORTS: dict = {}  # export_id -> zip bytes + metadata
 
 
 @router.post("/export")
-async def export_sanitized(payload: dict):
+async def export_sanitized(payload: dict = Body(default={}),
+                           role: str = Depends(current_role)):
     """Build a real downloadable zip: sanitized dataset XLSX + redaction
     report + audit trail snapshot. Stored in-memory under an export_id;
     GET /download/{export_id} streams the bytes."""
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.export")
     release = payload.get("release_authority", "US_ONLY")
     format_ = payload.get("format", "xlsx")
     include_audit = bool(payload.get("include_audit", True))
@@ -937,7 +955,7 @@ async def export_sanitized(payload: dict):
 
     audit_log(
         "sentry_export",
-        actor=payload.get("actor_role", "data_custodian"),
+        actor=role,
         subject_id=export_id,
         payload={"release": release, "records": applied, "rejected": len(records) - applied},
     )
@@ -958,15 +976,16 @@ async def export_sanitized(payload: dict):
 # ---------------------------------------------------------------------------
 
 @router.get("/coalition/profiles")
-async def coalition_profiles():
+async def coalition_profiles(role: str = Depends(current_role)):
     """Return summaries of every coalition release profile for the partner picker."""
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.coalition.profiles")
     if not _COALITION_AVAILABLE:
         raise HTTPException(status_code=503, detail="coalition profiles unavailable")
     return {"profiles": list_profiles()}
 
 
 @router.get("/coalition/{profile_key}")
-async def coalition_view(profile_key: str, role: Optional[str] = None):
+async def coalition_view(profile_key: str, role: str = Depends(current_role)):
     """Live partner-scoped view of the canonical dataset.
 
     Walks units, assets, SRs, requisitions, and cannibalization events,
@@ -977,6 +996,7 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
 
     This is the GC-5 demo: 'show me what JSDF sees right now' — the
     output is what we'd send across the wire on a coalition release."""
+    require_role(role, SENTRY_VIEW_ROLES, "sentry.coalition.view")
     if not _COALITION_AVAILABLE:
         raise HTTPException(status_code=503, detail="coalition profiles unavailable")
     profile_data = _coalition_profiles().get("profiles", {}).get(profile_key)
@@ -1074,27 +1094,26 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
 
 
 @router.post("/coalition/{profile_key}/release")
-async def coalition_release(profile_key: str, payload: Optional[dict] = None):
+async def coalition_release(profile_key: str,
+                            payload: Optional[dict] = Body(default=None),
+                            role: str = Depends(current_role)):
     """Generate a release-package event for the selected coalition profile.
     Hashes a manifest of what would ship and writes the event to the audit
     chain so a security manager can later inspect every coalition release.
 
     Server-side gate: only data_custodian or security_manager may release.
-    Without this, any role could execute an FVEY release on the live deploy
-    (verified during adversarial audit, fileable as bug #6)."""
-    from ..scoping import require_role, COALITION_RELEASE_ROLES
+    Actor is bearer-resolved (signed session token) — payload `actor_role`
+    is no longer trusted."""
+    require_role(role, COALITION_RELEASE_ROLES, "sentry.coalition.release")
     if not _COALITION_AVAILABLE:
         raise HTTPException(status_code=503, detail="coalition profiles unavailable")
-    payload = payload or {}
-    actor = payload.get("actor_role")
-    require_role(actor, COALITION_RELEASE_ROLES, "sentry.coalition.release")
     profile_data = _coalition_profiles().get("profiles", {}).get(profile_key)
     if not profile_data:
         raise HTTPException(status_code=404, detail=f"unknown profile {profile_key}")
     release_id = f"REL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     audit_log(
         "sentry_coalition_release",
-        actor=actor,
+        actor=role,
         subject_id=release_id,
         payload={
             "profile": profile_key,
@@ -1115,12 +1134,14 @@ async def coalition_release(profile_key: str, payload: Optional[dict] = None):
 
 
 @router.get("/audit/{subject_id}")
-async def audit_for_subject(subject_id: str, limit: int = 50):
+async def audit_for_subject(subject_id: str, limit: int = 50,
+                            role: str = Depends(current_role)):
     """Walkthrough #31 — per-record audit-entry viewer. Returns the chain
     entries (hash, prev_hash, ts, actor, payload) for the requested
     subject so operators can verify the audit trail without leaving
     the inspector pane.
     """
+    require_role(role, AUDIT_READ_ROLES, "sentry.audit.read")
     rows = entries_for_subject(subject_id, limit=limit)
     return {
         "subject_id": subject_id,

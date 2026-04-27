@@ -26,7 +26,7 @@ import { ScopeGuard } from "./components/ScopeGuard";
 // ClassificationBand is rendered once in App.tsx (the app shell) — see
 // Walkthrough #JOB-F. Importing it here would invite a second instance
 // in the Suspense fallback, the exact duplication this fix eliminates.
-import { registerRoleSource } from "./api";
+import { mintSession } from "./api";
 import { useSpireStore, ROLE_DEFAULT_VIEW } from "./state/store";
 import "./index.css";
 
@@ -69,9 +69,18 @@ const PulseView   = lazyWithRecovery(() => import("./views/PulseView").then((m) 
 const BastionView = lazyWithRecovery(() => import("./views/BastionView").then((m) => ({ default: m.BastionView })));
 const AdminView   = lazyWithRecovery(() => import("./views/AdminView").then((m) => ({ default: m.AdminView })));
 
-// Expose the active role to the API layer. Every GET/POST now splices it as
-// `?role=...` so the backend's scoping filter applies per-call.
-registerRoleSource(() => useSpireStore.getState().role);
+// Bootstrap a signed session bearer for whichever role we initialized
+// with. Every API call after this resolves picks up the bearer header
+// automatically. Subsequent role swaps re-mint via store.setRole().
+//
+// We fire-and-forget here: the React tree paints immediately, and any
+// API call that fires before the mint resolves is just an unauthenticated
+// request that will surface as a 401 (handled by the panel's error UI)
+// rather than silently using a stale identity. In practice the mint
+// completes well before any post-mount fetch.
+void mintSession(useSpireStore.getState().role).catch((err) => {
+  console.warn("[SPIRE] initial session mint failed", err);
+});
 
 // Send users to their role-appropriate home view on first load.
 function HomeRoute() {

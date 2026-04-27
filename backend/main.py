@@ -22,6 +22,7 @@ from .state import load_dataset
 from .network_monitor import install as install_netmon
 from .model_hooks import STATE as MODEL_STATE
 
+from .auth import router as auth_router
 from .routes.system import router as system_router
 from .routes.pulse import router as pulse_router
 from .routes.sentry import router as sentry_router
@@ -73,6 +74,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router,   prefix="/api/auth",   tags=["auth"])
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(pulse_router,  prefix="/api/pulse",  tags=["pulse"])
 app.include_router(sentry_router, prefix="/api/sentry", tags=["sentry"])
