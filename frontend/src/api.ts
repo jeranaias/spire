@@ -299,6 +299,8 @@ export interface RiskBoardAsset {
   current_miles?: number;
   days_since_maintenance?: number;
   open_sr_count?: number;
+  fault_count_30d?: number;
+  fault_buckets_30d?: number[];
 }
 
 export interface RiskBoard {

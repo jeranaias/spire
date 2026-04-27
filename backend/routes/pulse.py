@@ -250,6 +250,10 @@ async def risk_board(top: int = Query(20, ge=1, le=100), role: Optional[str] = N
     ds = get_dataset()
     allowed = allowed_units(ds, role)
     scored = top_risk(ds, n=top * 3)  # oversample then filter
+    # Walkthrough audit: precompute per-asset 30-day fault buckets so the
+    # frontend sparkline reads from real SR data instead of a hash-derived
+    # synth. Each bucket is one day; the sparkline collapses to weekly later.
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
     out = []
     for s in scored:
         asset = ds.asset(s["asset_id"])
@@ -259,6 +263,22 @@ async def risk_board(top: int = Query(20, ge=1, le=100), role: Optional[str] = N
             continue
         if len(out) >= top:
             break
+        # Real 30-day daily fault buckets, derived from CM SRs only.
+        buckets = [0] * 30
+        fault_count_30d = 0
+        if last_day is not None:
+            cutoff = last_day - timedelta(days=30)
+            for sr in ds.srs:
+                if sr.asset_id != asset.asset_id:
+                    continue
+                if sr.is_pmcs:
+                    continue
+                if sr.open_date < cutoff:
+                    continue
+                offset = (sr.open_date - cutoff).days
+                if 0 <= offset < 30:
+                    buckets[offset] += 1
+                    fault_count_30d += 1
         out.append({
             **s,
             "serial_number": asset.serial_number,
@@ -267,6 +287,8 @@ async def risk_board(top: int = Query(20, ge=1, le=100), role: Optional[str] = N
             "current_miles": asset.current_miles,
             "days_since_maintenance": asset.days_since_last_maintenance,
             "open_sr_count": len(asset.open_srs),
+            "fault_count_30d": fault_count_30d,
+            "fault_buckets_30d": buckets,
         })
     return {"assets": out}
 
