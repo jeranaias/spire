@@ -347,15 +347,22 @@ def _predict_one(asset, recent_faults: dict[str, int]) -> list[dict]:
         pm_bump = min(0.10, pm_overdue * 0.20)
         variance = _asset_variance(asset.asset_id, component)
         offset = _asset_offset(asset.asset_id, component)
-        # Walkthrough audit (round 2): the 0.92 hard cap was clipping
-        # high-hour assets to identical values — the screenshot showed
-        # six JLTVs at 4000+ hours all displayed as 92% because variance
-        # and offset weren't enough to differentiate from the cap. Apply
-        # the offset AFTER the cap so saturated assets still get distinct
-        # numbers, and lift the cap a hair so the spread is visible.
+        # Walkthrough audit (round 3): the prior fix capped at 0.95 then
+        # added offset, but the FINAL cap at 0.97 still flattened every
+        # saturated asset to 0.97 because the offset + cap_capped >= 0.97
+        # for half the offset distribution. Live PULSE risk board showed
+        # 10/10 assets at exactly 0.97 — same problem in a different
+        # outfit. Treat 'saturated' as a distinct band: when prob_raw
+        # exceeds 0.85, distribute output across the [0.86, 0.96] range
+        # using the per-asset offset as a position within the band so
+        # six assets all in the saturated zone display six distinct
+        # numbers (0.88, 0.90, 0.93, 0.95, 0.96, 0.91, etc).
         prob_raw = (base + history_bump + pm_bump) * variance
-        prob_capped = min(0.95, max(0.05, prob_raw))
-        prob = round(min(0.97, max(0.05, prob_capped + offset)), 3)
+        if prob_raw >= 0.85:
+            # Saturated zone — distribute around 0.91 with ±0.05 offset.
+            prob = round(0.91 + offset, 3)
+        else:
+            prob = round(max(0.05, prob_raw + offset * 0.5), 3)
         if prob < 0.20:
             continue
         window_base = (1.0 - prob) * 26 + 3
