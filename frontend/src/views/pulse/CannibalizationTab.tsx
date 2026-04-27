@@ -59,7 +59,12 @@ export function CannibalizationTab() {
     setData(null);
     setSelectedNeed(null);
     setProposedLocal([]);
-    api.pulse.cannibalization().then(setData);
+    // Walkthrough audit: prior code had no .catch — transient 502s
+    // logged 'Uncaught (in promise)' instead of letting the empty
+    // state render naturally.
+    api.pulse.cannibalization()
+      .then(setData)
+      .catch(() => { /* tolerate; empty-state copy explains 'no needs' */ });
   }, [role]);
 
   // Walkthrough #9 — Donor candidates with cause-of-fault overlap exclusion.
