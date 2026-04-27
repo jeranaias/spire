@@ -41,6 +41,7 @@ export function CoalitionTab() {
   const [selected, setSelected] = useState<string>("FVEY_BASE");
   const [view, setView] = useState<CoalitionView | null>(null);
   const [loading, setLoading] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
   // Per-session list of releases prepared in this tab. Reviewer caught the
   // celebratory toast disappearing with no destination — so we surface a
@@ -67,10 +68,19 @@ export function CoalitionTab() {
   useEffect(() => {
     setLoading(true);
     setView(null);
+    setViewError(null);
     api.sentry
       .coalitionView(selected)
       .then(setView)
-      .catch((e) => pushToast({ tone: "error", text: `Coalition view failed: ${e}` }))
+      .catch((e) => {
+        // Walkthrough audit: prior code only surfaced the toast and left
+        // the page rendering nothing below the chip row, which looked
+        // exactly like 'no data for this profile' rather than 'fetch
+        // failed during deploy churn'. Set viewError so the empty state
+        // names the actual problem.
+        setViewError(String(e).slice(0, 200));
+        pushToast({ tone: "error", text: `Coalition view failed: ${e}` });
+      })
       .finally(() => setLoading(false));
   }, [selected, pushToast]);
 
@@ -184,6 +194,21 @@ export function CoalitionTab() {
         <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-6 font-mono text-sm text-[var(--color-text-muted)] tracking-wider">
           <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
           Scoping dataset for {selected} …
+        </div>
+      )}
+      {!loading && !view && viewError && (
+        <div className="rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 font-mono text-sm tracking-wider">
+          <div className="font-semibold uppercase text-[var(--color-danger)]">
+            Coalition view unavailable
+          </div>
+          <div className="mt-1 text-[var(--color-text-secondary)]">
+            Backend returned an error fetching <span className="font-semibold">{selected}</span>.
+            The map and other views can still render — coalition redaction may be cycling
+            during a deploy. Click the profile chip again to retry.
+          </div>
+          <div className="mt-2 break-all text-xs text-[var(--color-text-muted)]">
+            {viewError}
+          </div>
         </div>
       )}
 
