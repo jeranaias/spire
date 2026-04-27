@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
-import { withRetry, pollWithBackoff } from "../api-retry";
+import { withRetry, pollWithBackoff, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
@@ -111,7 +111,7 @@ export function BastionView() {
         setWaking(false);
       } catch (e) {
         if (cancelled) return;
-        setCopError(String(e));
+        setCopError(formatApiError(e));
         setWaking(false);
         pushToast({
           tone: "error",
@@ -232,7 +232,7 @@ export function BastionView() {
       await api.bastion.alertAction(id, action);
       refreshAlerts();
     } catch (e) {
-      pushToast({ tone: "error", text: `Alert action failed — ${String(e).slice(0, 80)}` });
+      pushToast({ tone: "error", text: `Alert action failed — ${formatApiError(e)}` });
       refreshAlerts();
     }
   }
@@ -413,7 +413,7 @@ export function BastionView() {
                   setWaking(false);
                 })
                 .catch((e) => {
-                  setCopError(String(e));
+                  setCopError(formatApiError(e));
                   setWaking(false);
                 });
             }}
