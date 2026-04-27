@@ -24,15 +24,29 @@ primary_region = "iad"
 [http_service]
   internal_port = 8080
   force_https = true
+  # Walkthrough audit (CRITICAL): prior config had
+  # auto_stop_machines=stop + min_machines_running=0. Every cold
+  # request sat behind a ~30s machine boot, and Fly's 60s upstream
+  # cap surfaced as 504s in the operator's tab. FeedbackDrawer +
+  # Forecast form submissions both timed out under that pressure
+  # (form submit is a POST that doesn't auto-retry on the frontend).
+  # Keep ONE machine warm so demo traffic always lands in <500ms.
+  # Cost: ~$2/mo for a shared-1x-1gb idle machine vs. the demo
+  # being broken under load.
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ["app"]
 
   [[http_service.checks]]
     interval = "30s"
-    timeout  = "5s"
-    grace_period = "30s"
+    # Bumped timeout 5 → 10s; grace 30 → 60s. The dataset bootstraps
+    # ~6,000 SRs + 350 assets at startup; the prior 30s grace
+    # occasionally tripped the health check during a fresh boot,
+    # which Fly read as a crashloop and restarted the machine —
+    # cascading into the disconnect symptom the operator saw.
+    timeout  = "10s"
+    grace_period = "60s"
     method = "GET"
     path = "/healthz"
 
@@ -43,4 +57,8 @@ primary_region = "iad"
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory = "1gb"
+  # Bumped 1gb → 2gb. The dataset + canonical state holds ~150MB at
+  # rest, but cold-start spikes during boot (snapshot replay, scoring
+  # warmup) hit ~700MB. Under 1gb, an OOM-kill mid-boot looks
+  # identical to 'backend disconnecting' from the operator's seat.
+  memory = "2gb"

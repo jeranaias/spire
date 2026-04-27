@@ -54,12 +54,27 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
       // Cannibalization is the only action with a real backend endpoint today;
       // expedite and cross-level surface their artifact and toast — production
       // wires them up to TMR/MILSTRIP submission paths.
+      // Walkthrough audit (CRITICAL): the POST didn't have a client-side
+      // timeout. Approve clicked during a Fly cold-start sat in
+      // 'Approval pending' for ~60s before nginx 502'd, freezing the row.
+      // 15s AbortController guarantees the button releases.
       if (action.kind === "cannibalize" && (action.artifact as any).recipient_sr) {
-        await fetch("/api/pulse/cannibalization/propose", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(action.artifact),
-        });
+        const ctrl = new AbortController();
+        const timer = window.setTimeout(() => ctrl.abort(), 15_000);
+        try {
+          const r = await fetch("/api/pulse/cannibalization/propose", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(action.artifact),
+            signal: ctrl.signal,
+          });
+          if (!r.ok) {
+            const body = await r.text().catch(() => "");
+            throw new Error(`${r.status} ${r.statusText}: ${body.slice(0, 120)}`);
+          }
+        } finally {
+          window.clearTimeout(timer);
+        }
       }
       pushToast({
         tone: "ok",

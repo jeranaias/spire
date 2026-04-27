@@ -4,10 +4,9 @@ pydantic>=2.9.0
 cryptography>=43.0.0
 httpx>=0.27.0
 python-multipart>=0.0.20
-# Live model inference — ThermalHawk (1.13M params, val mAP 82.12%
-# on Anti-UAV410) loads when SPIRE_THERMALHAWK_WEIGHTS points at the
-# checkpoint. torch + opencv-python-headless are required for the
-# forward pass and thermal frame preprocessing.
-torch>=2.0
-opencv-python-headless>=4.8
-numpy>=1.26
+# torch + opencv-python-headless are needed ONLY for the live
+# ThermalHawk inference path. They live in requirements-ml.txt so the
+# default Fly deploy stays small (~150MB image) and cold starts fast.
+# Install them on the deploy box that needs the live feed:
+#   pip install -r backend/requirements-ml.txt
+# model_hooks degrades gracefully when torch isn't importable.

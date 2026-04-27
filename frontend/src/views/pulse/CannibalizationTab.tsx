@@ -125,6 +125,14 @@ export function CannibalizationTab() {
         impact: `Proposed by operator · recipient ${confirmDonor.need.unit} gains ${confirmDonor.need.needed_part.nomenclature} from ${confirmDonor.donor.unit}.`,
       };
       setProposedLocal((prev) => [optimistic, ...prev]);
+      // Walkthrough audit (CRITICAL): prior code had no client-side timeout
+      // on the POST. When the backend cold-started, the request sat for
+      // ~30s before nginx returned 502, freezing the modal in 'Committing…'
+      // with no operator feedback. 15s AbortController gives a definitive
+      // ceiling — the optimistic row is already on screen so the operator
+      // never blocks on the network.
+      const ctrl = new AbortController();
+      const timer = window.setTimeout(() => ctrl.abort(), 15_000);
       try {
         await fetch("/api/pulse/cannibalization/propose", {
           method: "POST",
@@ -134,9 +142,14 @@ export function CannibalizationTab() {
             donor_sr: confirmDonor.donor.sr_number,
             nsn: confirmDonor.need.needed_part.nsn,
           }),
+          signal: ctrl.signal,
         });
       } catch {
-        /* Backend may not implement this endpoint yet; keep the optimistic row. */
+        /* Backend may not implement this endpoint yet OR cold-start
+         * timeout — keep the optimistic row visible so the operator's
+         * action isn't lost. The next poll resolves ground truth. */
+      } finally {
+        window.clearTimeout(timer);
       }
       pushToast({
         tone: "ok",
