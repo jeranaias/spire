@@ -109,46 +109,52 @@ class ModelState:
         try:
             self.thermalhawk_path = str(p)
             self.thermalhawk_size_bytes = p.stat().st_size
-            # Tag with the canonical model card pulled from the dataset
-            # (these are the published numbers for the capability-tier v2).
+            # Public model card — capability + outcome only. Mechanism
+            # details (backbone family, training protocol, head design)
+            # stay with Thornveil's private ML package per LICENSE.md §2
+            # and are not disclosed in the public SPIRE repo.
             self.thermalhawk_metadata = {
-                "model": "ThermalHawk-Nano v2 (v2)",
-                "parameters": 1_770_000,
-                "architecture": "Thornveil proprietary architecture + Thornveil neck + Thornveil detection head",
-                "training": "Thornveil training protocol on Anti-UAV410",
-                "deployment_target": "Hailo-8 edge accelerator (~$80 USD per node)",
-                "validation_map_50_95": 0.8295,  # 82.95% — paper figure
+                "model": "ThermalHawk (Thornveil)",
+                "capability": "thermal infrared drone detection",
+                "deployment_target": "edge accelerator",
+                "license": "Thornveil proprietary — see LICENSE.md §2",
+                "contact": "jesse@thornveil.ai",
             }
         except Exception as e:  # noqa: BLE001
             self.errors.append(f"ThermalHawk presence-detect failed: {e}")
 
     def _maybe_eager_thermalhawk(self) -> None:
-        """Eager-load the Thornveil proprietary architecture ThermalHawk detector when weights are
-        on disk and SPIRE_THERMALHAWK_EAGER!=0. The architecture lives in
-        backend.ml.thermalhawk_wem so we don't depend on the external repo
-        at runtime — only torch + opencv.
+        """Eager-load the ThermalHawk detector when the Thornveil-licensed
+        private ML package is installed AND weights are on disk. The
+        architecture, training methodology, and inference helpers live
+        in a Thornveil-managed private package; SPIRE only knows how to
+        ask it to load + infer.
 
-        Default is eager-load (SPIRE_THERMALHAWK_EAGER!=0) because the
-        whole point of advertising weights is to actually run them. Set
-        SPIRE_THERMALHAWK_EAGER=0 to suppress (e.g. for a CPU-starved
-        deploy that just wants the metadata badge)."""
+        Without the private package installed, this is a no-op — the
+        sim alert advertises 'weights present, inference disabled' or
+        falls through to scripted-sim mode."""
         if os.environ.get("SPIRE_THERMALHAWK_EAGER", "1") == "0":
             return
         if not self.thermalhawk_path:
             return
         try:
-            from .ml.thermalhawk_wem import load_thermalhawk_wem
+            # Thornveil private package — installed only on licensed deploys.
+            from thornveil_ml.thermalhawk import load_detector  # type: ignore
         except Exception as e:  # noqa: BLE001
-            self.errors.append(f"ThermalHawk vendored arch import failed: {e}")
+            self.errors.append(
+                f"ThermalHawk live inference unavailable in this build "
+                f"(Thornveil private package not installed): {type(e).__name__}"
+            )
             return
         try:
-            model = load_thermalhawk_wem(self.thermalhawk_path, device="cpu")
+            model = load_detector(self.thermalhawk_path, device="cpu")
             self.thermalhawk_model = model
-            # Augment metadata with the validated values from the loaded
-            # checkpoint — supersedes the static card if they disagree.
             meta = getattr(model, "ckpt_meta", {}) or {}
+            # Live-checkpoint metadata can override the static card
+            # ONLY for capability-level signals (params count, val
+            # accuracy figures the licensee already publishes).
             if meta.get("val_map") is not None:
-                self.thermalhawk_metadata["validation_map_50_95"] = float(meta["val_map"])
+                self.thermalhawk_metadata["validation_accuracy"] = float(meta["val_map"])
             if meta.get("params_reported") is not None:
                 self.thermalhawk_metadata["parameters"] = int(meta["params_reported"])
         except Exception as e:  # noqa: BLE001

@@ -98,17 +98,17 @@ the configured RigRun host.
 - `main.py` — Orchestrator CLI
 - `tests/` — pytest suite: consistency, determinism, realism, SENTRY labels
 
-### Models (`models/`)
-- `sentry_classifier/build_corpus.py` — 15K labeled remark corpus builder
-- `sentry_classifier/train.py` — **TODO** Tier-1 SGDR training script
-- `pulse_predictor/train.py` — **TODO** 1D-temporal CNN with CWRU option
-- `thermalhawk/` — **TODO** HIT-UAV benchmark + fine-tune
+### Models
+Trained model weights, training scripts, and methodology specifics
+are Thornveil-licensed and live outside this repo. See LICENSE.md §2.
+For licensed deploys, the Thornveil ML package provides the inference
+helpers SPIRE imports at runtime; for public builds, SPIRE runs in
+scripted-sim mode.
 
 ### Docs (`docs/`)
-- `SPIRE_SPEC_FINAL.md` — product + UI + Q&A
-- `MDM_Hackathon_Technical_Specs_v3_FINAL.md` — HawkStack-centric technical
 - `ARCHITECTURE.md` — this file
 - `API.md` — backend endpoint contract
+- `DEMO_SCRIPT.md` — operator-facing walkthrough
 
 ## Invariants
 

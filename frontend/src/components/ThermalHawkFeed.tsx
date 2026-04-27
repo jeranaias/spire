@@ -1,6 +1,6 @@
 /**
  * ThermalHawkFeed — live thermal video feed with bounding-box overlays
- * driven by the trained ThermalHawk detector running inside SPIRE.
+ * driven by the trained ThermalHawk (Thornveil) detector running inside SPIRE.
  *
  * Polls /bastion/thermalhawk/feed at ~5 FPS, draws each frame to an
  * `<img>` (server-rendered with bboxes already burned in), and shows a
@@ -179,7 +179,7 @@ export function ThermalHawkFeed() {
       <div className="border-t border-[var(--color-border)] px-2 py-1.5 font-mono text-[10px] tracking-wide">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-[var(--color-text-muted)] uppercase tracking-widest">
-            ThermalHawk
+            ThermalHawk (Thornveil)
             {params != null && <span> · {(params / 1e6).toFixed(2)}M params</span>}
             {valMap != null && <span> · val mAP {(valMap * 100).toFixed(1)}%</span>}
           </span>

@@ -545,49 +545,39 @@ SIM_TTL = timedelta(minutes=30)
 
 
 def _build_thermalhawk_model_info() -> dict:
-    """Return the model card the BASTION sim alert advertises.
+    """Public model card for the BASTION sim alert.
 
-    Reads from model_hooks.STATE so the alert reflects whichever model
-    the deploy actually has loaded. Three states:
-      - eager-loaded model:    'live · 1.77M params'
-      - weights present only:  'weights present (size_mb), inference disabled'
-      - no weights:            'rule-based sim — weights not deployed'
+    Capability + outcome only — no architecture mechanism, no training
+    methodology, no internal codenames. Mechanism details stay with
+    Thornveil's private ML package per LICENSE.md §2 / §4.
 
-    The published model card (architecture, training, val mAP, target
-    accelerator) is constant across all three so the operator-facing
-    pitch reads identically; the load_state field carries the truth.
+    Three load states the chrome reflects honestly:
+      - live              — Thornveil-licensed inference active
+      - weights_present   — proprietary weights deployed; inference
+                            disabled in this public build
+      - rule_based_sim    — no weights; scripted alert path
     """
     from ..model_hooks import STATE as MS
     base = {
-        "model": "ThermalHawk-Nano v2 (v2)",
-        "parameters": 1_770_000,
-        "architecture": "Thornveil proprietary architecture + Thornveil neck + Thornveil detection head",
-        "training": "Thornveil training protocol on Anti-UAV410",
-        "deployment_target": "Hailo-8 edge accelerator (~$80 USD per node)",
-        "validation_map_50_95": 0.8295,
+        "model": "ThermalHawk (Thornveil)",
+        "capability": "thermal infrared drone detection",
+        "deployment_target": "edge accelerator",
+        "license": "Thornveil proprietary — see LICENSE.md §2",
+        "contact": "jesse@thornveil.ai",
     }
     if MS.thermalhawk_model is not None:
         base["load_state"] = "live"
-        base["weights_path"] = MS.thermalhawk_path
-        base["weights_size_mb"] = (
-            round(MS.thermalhawk_size_bytes / (1024 * 1024), 2)
-            if MS.thermalhawk_size_bytes else None
-        )
     elif MS.thermalhawk_path:
         base["load_state"] = "weights_present"
-        base["weights_path"] = MS.thermalhawk_path
-        base["weights_size_mb"] = (
-            round(MS.thermalhawk_size_bytes / (1024 * 1024), 2)
-            if MS.thermalhawk_size_bytes else None
-        )
         base["note"] = (
-            "Trained weights deployed; live inference disabled in this build."
+            "Thornveil-licensed weights deployed; "
+            "live inference disabled in this public build."
         )
     else:
         base["load_state"] = "rule_based_sim"
         base["note"] = (
-            "Sim alert — trained weights not deployed in this build. "
-            "Set SPIRE_THERMALHAWK_WEIGHTS to advertise the real model."
+            "Scripted sim — Thornveil ThermalHawk inference is "
+            "available under separate license (jesse@thornveil.ai)."
         )
     return base
 
@@ -698,21 +688,10 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
         "started": now,
     }
 
-    # When the trained ThermalHawk model is loaded, run a real forward
-    # pass on a synthetic thermal frame so the demo's wow moment carries
-    # an honest 'LIVE INFERENCE' signal — bbox count, confidence, and
-    # latency are all measured, not scripted.
-    inference_payload = _run_thermalhawk_live_inference()
-    if inference_payload:
-        alert["live_inference"] = inference_payload
-        # Surface the boxes count + latency in the body so an operator
-        # who doesn't open the side panel still reads them.
-        n_boxes = len(inference_payload["boxes"])
-        latency_ms = inference_payload["latency_ms"]
-        alert["body"] += (
-            f"\n\nThermalHawk (1.13M params) inferred in {latency_ms:.1f}ms · "
-            f"{n_boxes} target track{'' if n_boxes == 1 else 's'} returned."
-        )
+    # When Thornveil-licensed inference is enabled (private package
+    # installed + weights deployed), the alert advertises the real
+    # outcome via load_state="live". Public builds always run the
+    # scripted alert path — no mechanism disclosure.
 
     return {
         "sim_id": sim_id,
@@ -725,67 +704,6 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
         ],
         "response_forces_dispatched": ["WATCHDOG-3", "RAIDER-1", "IRONHORSE-2 (standby)"],
     }
-
-
-def _run_thermalhawk_live_inference() -> Optional[dict]:
-    """Run the trained ThermalHawk detector on a deterministic
-    synthetic thermal frame and return the decoded boxes + timing.
-
-    Returns None if the model isn't loaded (sim falls back to its
-    scripted card). Returns a structured payload otherwise:
-        {
-          "boxes": [{x1,y1,x2,y2,score}],
-          "latency_ms": float,
-          "input_size": int,
-          "source_size": [H, W],
-          "frame_kind": "synthetic_thermal_v1",
-        }
-
-    The frame is a deterministically-seeded grayscale field — gradient
-    sky + a small bright UAS blob over the lower-left quadrant. We seed
-    via the python random module so each sim emits a fresh-but-
-    reproducible scene.
-    """
-    from ..model_hooks import STATE as MS
-    if MS.thermalhawk_model is None:
-        return None
-    try:
-        import numpy as np
-        from ..ml.thermalhawk_wem import infer_thermal_image
-        rng = np.random.default_rng(42)
-        H, W = 480, 640
-        # Sky gradient (cool top, warmer ground)
-        ys = np.linspace(60, 130, H)[:, None]
-        frame = np.tile(ys, (1, W)).astype(np.float32)
-        # Sensor noise
-        frame += rng.normal(0, 6, size=(H, W)).astype(np.float32)
-        # Hot UAS blob — small bright Gaussian
-        cy, cx = int(H * 0.55), int(W * 0.42)
-        yy, xx = np.mgrid[0:H, 0:W]
-        blob = 200.0 * np.exp(-(((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * 4.0 ** 2)))
-        frame += blob
-        # Secondary fainter target (to give the head a multi-detection example)
-        cy2, cx2 = int(H * 0.30), int(W * 0.70)
-        blob2 = 110.0 * np.exp(-(((xx - cx2) ** 2 + (yy - cy2) ** 2) / (2 * 3.0 ** 2)))
-        frame += blob2
-        frame = np.clip(frame, 0, 255).astype(np.uint8)
-
-        t0 = _time.perf_counter()
-        result = infer_thermal_image(MS.thermalhawk_model, frame, image_size=640, score_thresh=0.20)
-        latency_ms = (_time.perf_counter() - t0) * 1000.0
-        return {
-            "boxes": result["boxes"],
-            "latency_ms": round(latency_ms, 2),
-            "input_size": result["input_size"],
-            "source_size": result["source_size"],
-            "frame_kind": "synthetic_thermal_v1",
-            "score_threshold": 0.20,
-        }
-    except Exception as e:  # noqa: BLE001
-        return {
-            "error": f"{type(e).__name__}: {e}",
-            "frame_kind": "synthetic_thermal_v1",
-        }
 
 
 @router.post("/simulate/clear/{sim_id}")
@@ -801,52 +719,48 @@ async def clear_simulation(sim_id: str):
 
 @router.get("/thermalhawk/feed")
 async def thermalhawk_feed(frame: int = 0):
-    """Single-frame endpoint for the BASTION live thermal feed.
+    """Live thermal feed endpoint — gated behind a Thornveil license.
 
-    Returns one PNG-encoded frame (base64) plus the boxes the live
-    ThermalHawk model produced + measured latency. Frontend polls
-    this at ~5 FPS via incrementing `frame` so the canvas plays the
-    sequence as a video with bounding-box overlays.
-
-    Frame source priority:
-      1. SPIRE_THERMALHAWK_FRAMES dir (preferred, real Anti-UAV410)
-      2. SPIRE_THERMALHAWK_VIDEO file
-      3. Bundled Roboflow Thermal-Drone (Zenodo CC-BY-4.0, on disk)
-      4. Procedural fallback (only if no frames bundled)
-
-    Returns 503 when the model isn't loaded — frontend should advertise
-    'sim only' in that case rather than rendering noise."""
-    from ..ml.thermal_feed import get_thermal_frame_with_detections
-    payload = get_thermal_frame_with_detections(frame_idx=int(frame))
-    if payload is None:
+    Public builds return 503. Production deploys with Thornveil's
+    private ML package installed serve a per-frame inference payload.
+    Mechanism is not exposed in this repo."""
+    try:
+        from thornveil_ml.thermal_feed import get_thermal_frame_with_detections  # type: ignore
+    except Exception:
         raise HTTPException(
             status_code=503,
-            detail="ThermalHawk model not loaded — set SPIRE_THERMALHAWK_WEIGHTS to enable the live feed",
+            detail="ThermalHawk live feed requires the Thornveil ML package (license: jesse@thornveil.ai).",
         )
+    payload = get_thermal_frame_with_detections(frame_idx=int(frame))
+    if payload is None:
+        raise HTTPException(status_code=503, detail="ThermalHawk model not loaded.")
     return payload
 
 
 @router.get("/thermalhawk/feed/info")
 async def thermalhawk_feed_info():
-    """Static metadata about the live feed source — surfaced in the
-    operator-facing 'live feed' panel header so the source/license/
-    threshold reads honestly."""
+    """Public-facing live-feed metadata. Capability + license boundary
+    only — no source-dataset specifics, no threshold tuning, no model
+    architecture. Production deploys with the Thornveil ML package
+    installed surface the richer detail privately."""
     from ..model_hooks import STATE as MS
-    from ..ml.thermal_feed import _list_antiuav_frames, _BUNDLED_FRAMES_DIR  # noqa
+    try:
+        from thornveil_ml.thermal_feed import (  # type: ignore
+            list_frames as _list_antiuav_frames,
+            BUNDLED_FRAMES_DIR as _BUNDLED_FRAMES_DIR,
+        )
+    except Exception:
+        return {
+            "model_loaded": False,
+            "available": False,
+            "license": "Thornveil proprietary — see LICENSE.md §2",
+            "contact": "jesse@thornveil.ai",
+        }
     frames = _list_antiuav_frames()
-    using_bundled = bool(frames) and str(_BUNDLED_FRAMES_DIR) in str(frames[0])
     return {
         "model_loaded": MS.thermalhawk_model is not None,
-        "frame_count_in_loop": len(frames) if frames else 240,
-        "source": (
-            "Roboflow Thermal-Drone (Zenodo 15633051, CC-BY-4.0)"
-            if using_bundled
-            else "Anti-UAV410" if frames
-            else "procedural"
-        ),
-        "default_score_threshold": (
-            0.05 if using_bundled else 0.30 if frames else 0.20
-        ),
+        "available": True,
+        "frame_count_in_loop": len(frames) if frames else None,
         "model_metadata": MS.thermalhawk_metadata,
     }
 
