@@ -56,7 +56,11 @@ primary_region = "iad"
 
 [[vm]]
   cpu_kind = "shared"
-  cpus = 1
+  # Walkthrough audit: shared-cpu-1x caps at 2gb on Fly. Bumped to
+  # shared-cpu-2x so 4gb is allowed. The 2nd CPU is also useful — the
+  # ResponseForces auto-correlation + Monte Carlo path generation are
+  # CPU-bound and benefited from the second core in local benchmarks.
+  cpus = 2
   # Bumped 1gb → 4gb. The dataset + canonical state holds ~150MB at
   # rest, but cold-start spikes during boot (snapshot replay, scoring
   # warmup) hit ~700MB, and Monte Carlo forecast paths + the audit
