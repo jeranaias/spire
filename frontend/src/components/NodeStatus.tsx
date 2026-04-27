@@ -322,7 +322,18 @@ function ConflictRow({
           {conflict.op_kind} · {conflict.record_id}
         </div>
         <div className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-          {(conflict.detected_at || "").slice(11, 19)}Z detected
+          {/* Walkthrough audit: prior format showed only HH:MM:SS without
+           * date — a conflict logged yesterday read identical to one logged
+           * 30s ago. Render full DD MMM YYYY HHMMz Zulu so audit reviews
+           * disambiguate by date. */}
+          {(() => {
+            const iso = conflict.detected_at || "";
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return iso;
+            const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+            const z = (n: number) => String(n).padStart(2, "0");
+            return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
+          })()} detected
         </div>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">

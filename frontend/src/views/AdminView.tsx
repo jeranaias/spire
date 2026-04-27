@@ -242,7 +242,20 @@ export function AdminView() {
               {outcomes.slice(-30).reverse().map((o) => (
                 <tr key={o.id} className="border-t border-[var(--color-border)]">
                   <td className="px-1 py-1 tabular-nums text-[var(--color-text-secondary)]">
-                    {o.observed_at.slice(5, 16).replace("T", " ")}
+                    {/* Walkthrough audit: prior slice(5, 16) stripped the
+                     * year ('2026-04-27T15:30' → '04-27 15:30'). Show
+                     * 'DD MMM HHMMz' so the row's date is parseable
+                     * without context, and the full year remains
+                     * recoverable via the row's title attribute. */}
+                    <span title={o.observed_at}>
+                      {(() => {
+                        const d = new Date(o.observed_at);
+                        if (Number.isNaN(d.getTime())) return o.observed_at;
+                        const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+                        const z = (n: number) => String(n).padStart(2, "0");
+                        return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
+                      })()}
+                    </span>
                   </td>
                   <td className="px-1 py-1 text-[var(--color-text)]">{o.decision_kind.replace(/_/g, " ")}</td>
                   <td className="px-1 py-1 text-[var(--color-text-secondary)]">{o.scoring_engine}</td>
