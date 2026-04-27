@@ -438,7 +438,7 @@ export function BastionView() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden" data-tour-id="bastion-content">
       {/* Left sidebar: alert stream */}
       <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
         <AlertStreamHeader

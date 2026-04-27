@@ -131,7 +131,7 @@ export function AdminView() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
+    <div className="flex h-full flex-col overflow-y-auto p-6" data-tour-id="admin-content">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           {/* Promoted from h2 to h1 — this view is the document, not a

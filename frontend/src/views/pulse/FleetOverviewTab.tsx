@@ -93,7 +93,7 @@ export function FleetOverviewTab() {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full" data-tour-id="pulse-overview-content">
       {/* Walkthrough #14 — outer container scrolls so KPI + narrative + heatmap
        * all stay reachable. Inner heatmap retains its own scroll for cols. */}
       <div className="flex flex-1 flex-col overflow-y-auto p-4">
