@@ -554,19 +554,63 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
     ds = get_dataset()
     inst = _load_installation()
 
-    # Find the target motor pool building
+    # Find the target motor pool building. Walkthrough audit: prior fallback
+    # was inst['buildings'][3] (positional, brittle). If buildings get
+    # reordered the fallback could land on a barracks. Look up by the
+    # canonical unit -> home_building edge from the dataset, then by any
+    # motor_pool, and only fall back to the first building if neither
+    # exists (dataset would be malformed).
     motor_pool = next(
         (b for b in inst["buildings"] if target_unit in b.get("name", "") and b["type"] == "motor_pool"),
         None,
     )
     if motor_pool is None:
-        motor_pool = inst["buildings"][3]  # fallback to CLB-6 MP
+        unit_obj = next((u for u in ds.units if u.name == target_unit), None)
+        home_id = unit_obj.home_building if unit_obj else None
+        if home_id:
+            motor_pool = next((b for b in inst["buildings"] if b.get("id") == home_id), None)
+    if motor_pool is None:
+        motor_pool = next((b for b in inst["buildings"] if b.get("type") == "motor_pool"), None)
+    if motor_pool is None:
+        motor_pool = inst["buildings"][0]
 
-    # PULSE correlation: what % of unit's operational vehicles are in this facility?
-    asset_count_in_unit = sum(
-        1 for a in ds.assets if a.unit_name == target_unit
-    )
-    asset_pct_in_mp = 0.60  # spec states 60%
+    # PULSE correlation: read the unit's actual end-of-day MC state so the
+    # 'amber readiness prior to detection' note is honest. Walkthrough
+    # audit: prior text claimed amber regardless of the unit's real state
+    # — would read 'amber' for a unit running 96% MC.
+    from collections import Counter as _C
+    last = last_day_snapshots(ds)
+    unit_snaps = [s for s in last if s.unit_name == target_unit]
+    unit_counts = _C(s.readiness_code for s in unit_snaps)
+    unit_total = sum(unit_counts.values())
+    unit_mc = unit_counts.get("MC", 0)
+    unit_mc_rate = (unit_mc / unit_total) if unit_total else None
+    if unit_mc_rate is None:
+        readiness_note = (
+            f"{target_unit} readiness prior to detection: dataset has no end-of-day snapshot."
+        )
+    elif unit_mc_rate < 0.60:
+        readiness_note = (
+            f"{target_unit} was already RED ({unit_mc_rate*100:.1f}% MC, below the 60% floor) "
+            f"prior to detection — UAS over the motor pool compounds an existing readiness gap."
+        )
+    elif unit_mc_rate < 0.75:
+        readiness_note = (
+            f"{target_unit} was AMBER ({unit_mc_rate*100:.1f}% MC, below the 75% threshold) "
+            f"prior to detection."
+        )
+    else:
+        readiness_note = (
+            f"{target_unit} was GREEN ({unit_mc_rate*100:.1f}% MC) prior to detection — "
+            f"a UAS strike on the motor pool would directly degrade an otherwise nominal unit."
+        )
+
+    # Walkthrough audit: prior body said 'operational vehicles' but the
+    # count multiplied total fleet (including NMC) by 60%, which over-
+    # counts. Use MC + PMC for the 'operational' base so the number
+    # actually maps to vehicles that could roll out tonight.
+    operational_count = sum(unit_counts.get(k, 0) for k in ("MC", "PMC"))
+    asset_pct_in_mp = 0.60  # spec states 60% of an MTVR-sized unit's fleet stages in the motor pool
 
     sim_id = f"SIM-{uuid.uuid4().hex[:8]}"
     now = datetime.utcnow()
@@ -581,13 +625,13 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
             f"Small UAS detected by ThermalHawk-Nano over {motor_pool['name']} "
             f"({motor_pool['grid']}). Altitude ~200ft AGL, heading east. "
             f"Auto-correlated: facility contains ~{asset_pct_in_mp*100:.0f}% of {target_unit}'s "
-            f"operational vehicles ({int(asset_count_in_unit * asset_pct_in_mp)} assets)."
+            f"operational vehicles ({int(operational_count * asset_pct_in_mp)} assets)."
         ),
         "unit": target_unit,
         "location": motor_pool["name"],
         "grid": motor_pool["grid"],
         "correlated_with": [
-            {"source": "PULSE", "note": f"{target_unit} was already at amber readiness prior to detection"},
+            {"source": "PULSE", "note": readiness_note},
         ],
         "fpcon_recommended": "CHARLIE",
         "model_info": {
