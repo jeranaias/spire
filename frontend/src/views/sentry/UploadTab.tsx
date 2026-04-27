@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { api, type SentryBatch } from "../../api";
+import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
 
 export function UploadTab({ ctx }: { ctx: SentryContext }) {
@@ -19,7 +20,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
       setBatch(b);
       ctx.setBatch(b.batch_id);
     } catch (e) {
-      setError(String(e));
+      setError(formatApiError(e));
     } finally {
       setLoading(false);
     }
@@ -61,7 +62,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
       setBatch(b);
       ctx.setBatch(b.batch_id);
     } catch (e) {
-      setError(String(e));
+      setError(formatApiError(e));
     } finally {
       setLoading(false);
     }
@@ -204,7 +205,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
                   ctx.setJob(job.job_id);
                   nav("/sentry/processing");
                 } catch (e) {
-                  setError(String(e));
+                  setError(formatApiError(e));
                 } finally {
                   setLoading(false);
                 }

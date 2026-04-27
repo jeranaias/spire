@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type SentryReviewQueue } from "../../api";
+import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
 import { useSpireStore } from "../../state/store";
 import type { Role } from "../../state/store";
@@ -62,7 +63,7 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
       })
       .catch((e) => {
         if (cancelled) return;
-        setLoadError(String(e));
+        setLoadError(formatApiError(e));
       });
     return () => {
       cancelled = true;
@@ -827,7 +828,7 @@ function AuditChainModal({ subjectId, onClose }: { subjectId: string; onClose: (
     let cancelled = false;
     api.sentry.auditFor(subjectId)
       .then((r) => { if (!cancelled) setData(r); })
-      .catch((e) => { if (!cancelled) setError(String(e)); });
+      .catch((e) => { if (!cancelled) setError(formatApiError(e)); });
     return () => { cancelled = true; };
   }, [subjectId]);
   return (

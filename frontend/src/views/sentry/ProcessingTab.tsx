@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { api, type SentryJob, type SentryReviewQueue } from "../../api";
+import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
 
 const FLAG_COLORS: Record<string, string> = {
@@ -37,7 +38,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
         if (!alive) return;
         // Surface the failure instead of leaving the spinner up forever.
         // Backend down or the batch was wiped between Upload and Processing.
-        setError(String(e));
+        setError(formatApiError(e));
       }
     })();
     return () => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type MarkResult } from "../../api";
+import { formatApiError } from "../../api-retry";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
@@ -99,7 +100,7 @@ export function MarkTab() {
         const r = await api.sentry.mark(latestTextRef.current, release);
         setResult(r);
       } catch (e) {
-        setError(String(e));
+        setError(formatApiError(e));
       } finally {
         setLoading(false);
       }
