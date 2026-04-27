@@ -132,11 +132,17 @@ export function CoalitionTab() {
             {(() => {
               // Template the partner name from the active profile so the
               // intro doesn't keep saying "what JSDF sees" while the operator
-              // is on Philippines · AFP. Falls back to the profile display
-              // name when no `partners` came back (rare).
-              const partnerName =
-                view?.partners?.[0]
-                ?? profiles.find((p) => p.key === selected)?.partners?.[0]
+              // is on Philippines · AFP. Walkthrough audit: prior version
+              // picked partners[0] which is USA on every FVEY profile —
+              // 'Show me what USA sees' is meaningless to a US operator.
+              // Pick the first non-USA partner instead so the prompt names
+              // a foreign partner (the actual point of the view).
+              const partners =
+                view?.partners
+                ?? profiles.find((p) => p.key === selected)?.partners
+                ?? [];
+              const foreign = partners.find((p) => p.toUpperCase() !== "USA");
+              const partnerName = foreign
                 ?? profiles.find((p) => p.key === selected)?.display_name
                 ?? "this partner";
               return `"Show me what ${partnerName} sees right now."`;
