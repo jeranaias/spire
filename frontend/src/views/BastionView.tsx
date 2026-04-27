@@ -5,6 +5,7 @@ import { withRetry, pollWithBackoff, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
+import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
 
 const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: "#ef4444",
@@ -1281,6 +1282,17 @@ function ResponsePanel({
                 {alert.model_info.note}
               </div>
             )}
+          </section>
+        )}
+
+        {/* Live ThermalHawk feed — mounts when the sim alert is selected
+         * and the trained model is loaded (load_state === 'live'). The
+         * component handles its own polling, pause control, and graceful
+         * degradation when the model isn't loaded. */}
+        {sim && sim.alert.id === alert.id
+          && alert.model_info?.load_state === "live" && (
+          <section>
+            <ThermalHawkFeed />
           </section>
         )}
 

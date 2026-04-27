@@ -169,6 +169,10 @@ export const api = {
       }),
     clearSim: (id: string) =>
       jsonFetch<{ ok: boolean }>(`/bastion/simulate/clear/${id}`, { method: "POST" }),
+    thermalhawkFeedFrame: (frame: number) =>
+      jsonFetch<ThermalHawkFeedFrame>(`/bastion/thermalhawk/feed?frame=${frame}`),
+    thermalhawkFeedInfo: () =>
+      jsonFetch<ThermalHawkFeedInfo>(`/bastion/thermalhawk/feed/info`),
     nlQuery: (text: string) =>
       jsonFetch<NLQueryResult>(`/bastion/nl-query`, {
         method: "POST",
@@ -773,6 +777,42 @@ export interface ThermalHawkSim {
   checklist: IncidentResponse["checklist"];
   cordon_zones: { radius_m: number; label: string }[];
   response_forces_dispatched: string[];
+}
+
+export interface ThermalHawkFeedBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  score: number;
+}
+
+export interface ThermalHawkFeedFrame {
+  frame_idx: number;
+  frame_png_b64: string;
+  boxes: ThermalHawkFeedBox[];
+  latency_ms: number;
+  source: string;
+  source_path: string | null;
+  score_threshold: number;
+  frame_count_in_loop: number;
+  input_size: number;
+  source_size: [number, number];
+}
+
+export interface ThermalHawkFeedInfo {
+  model_loaded: boolean;
+  frame_count_in_loop: number;
+  source: string;
+  default_score_threshold: number;
+  model_metadata: {
+    model?: string;
+    parameters?: number;
+    architecture?: string;
+    training?: string;
+    deployment_target?: string;
+    validation_map_50_95?: number;
+  };
 }
 
 export interface NLQueryResult {
