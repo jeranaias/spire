@@ -1109,10 +1109,24 @@ function filterChecklistForRole(
   role: string,
 ): string[] {
   if (role === "maintenance_chief") {
-    return items.filter((it) => /equipment|facility|unit|update|motor|MEL|parts|shop/i.test(it));
+    // Walkthrough audit: prior allowlist was 8 keywords and dropped the
+    // Maintenance Chief's primary action — 'Execute cannibalization if
+    // match available' — because 'cannib' wasn't in the regex. Broaden
+    // to cover everything a maintenance chief acts on directly: parts,
+    // assets, equipment, repair, motor pool, and unit-internal admin.
+    return items.filter((it) =>
+      /equipment|facility|unit|update|motor|MEL|parts|shop|cannib|asset|nmcs|nmcm|repair|maintain|service|TM|TAMCN|secure|protect|expedite|priority/i.test(it)
+    );
   }
   if (role === "g4") {
-    return items.filter((it) => /notify|dispatch|coordinate|MLG|convoy|TMR|expedite|response/i.test(it));
+    // Walkthrough audit: prior allowlist was 8 keywords and excluded
+    // 'restrict', 'protect', 'secure', 'cannibalize', 'parts', 'asset'
+    // — every UAS_INCURSION item that touches logistics impact.
+    // Broaden to cover the G-4 mandate: assets/parts/units/facilities,
+    // movement, supply chain, and notification of higher.
+    return items.filter((it) =>
+      /notify|dispatch|coordinate|MLG|G-4|convoy|TMR|expedite|response|restrict|protect|secure|asset|parts|facility|equipment|cannib|MEL|escalate|brief|ETA|SSA|DLA/i.test(it)
+    );
   }
   if (role === "mef_commander") {
     // Commander view: keep only 3-5 decision-critical lines
