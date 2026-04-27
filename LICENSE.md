@@ -214,7 +214,7 @@ HACKATHON PRODUCTS (Gov't owned)          THORNVEIL DEPENDENCIES (Thornveil owne
 ─────────────────────────────────         ────────────────────────────────────────
 
 SENTRY Frontend ──────────────────────►   RigRun (classification routing, safety proxy)
-SENTRY Text Classifier* ──────────────►   HawkStack (training methodology, Thornveil training methodology)
+SENTRY Text Classifier* ──────────────►   HawkStack (Thornveil training methodology)
 SENTRY Regex Library ─────────────────►   (no dependency — standalone)
 SENTRY Sanitization Engine ───────────►   (no dependency — standalone)
 SENTRY Coalition Release Engine ──────►   (no dependency — standalone)
@@ -222,7 +222,7 @@ SENTRY Coalition Release Engine ──────►   (no dependency — stand
 PULSE Dashboard ──────────────────────►   (no dependency — standalone)
 PULSE Risk Scoring (rule-based) ──────►   (no dependency — standalone)
 PULSE Monte Carlo Forecast ───────────►   (no dependency — standalone)
-PULSE Failure Predictor* ─────────────►   HawkStack (training methodology, Thornveil training methodology)
+PULSE Failure Predictor* ─────────────►   HawkStack (Thornveil training methodology)
 PULSE Cannibalization Engine ─────────►   (no dependency — standalone)
 PULSE Recommend-Actions (GC-1) ───────►   (no dependency — standalone; reads
                                            Thornveil-authored
