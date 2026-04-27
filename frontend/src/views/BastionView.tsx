@@ -1235,18 +1235,52 @@ function ResponsePanel({
 
         {alert.model_info && (
           <section className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
-            <div
-              className="mb-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
-            >
-              Detection Model
+            <div className="mb-1 flex items-baseline justify-between font-mono text-xs uppercase tracking-widest">
+              <span className="font-semibold text-[var(--color-text-muted)]">Detection Model</span>
+              {/* Walkthrough audit: load_state badge so the operator can see
+               * whether the alert came from a deployed model, present-but-
+               * idle weights, or the rule-based sim. Reads as
+               * 'LIVE' / 'WEIGHTS PRESENT' / 'SIM' with a matched colour. */}
+              {alert.model_info.load_state && (
+                <span
+                  className="rounded-sm border px-1 font-mono text-[10px] font-semibold tracking-widest"
+                  style={(() => {
+                    const s = alert.model_info.load_state;
+                    if (s === "live")             return { color: "var(--color-success)", borderColor: "color-mix(in oklab, var(--color-success) 40%, var(--color-border))" };
+                    if (s === "weights_present")  return { color: "var(--color-warning)", borderColor: "color-mix(in oklab, var(--color-warning) 40%, var(--color-border))" };
+                    return { color: "var(--color-text-muted)", borderColor: "var(--color-border)" };
+                  })()}
+                >
+                  {alert.model_info.load_state === "live"
+                    ? "LIVE"
+                    : alert.model_info.load_state === "weights_present"
+                    ? "WEIGHTS PRESENT"
+                    : "SIM"}
+                </span>
+              )}
             </div>
             <div className="font-mono text-[var(--color-text)]">{alert.model_info.model}</div>
             <div className="text-[var(--color-text-secondary)]">
               {alert.model_info.parameters.toLocaleString("en-US")} parameters · {alert.model_info.architecture}
+              {alert.model_info.validation_map_50_95 != null && (
+                <span className="ml-1 text-[var(--color-text-muted)]">
+                  · val mAP {(alert.model_info.validation_map_50_95 * 100).toFixed(1)}%
+                </span>
+              )}
             </div>
             <div className="mt-1 break-words text-xs text-[var(--color-text-muted)]">
               {alert.model_info.training} · target: {alert.model_info.deployment_target}
             </div>
+            {alert.model_info.weights_size_mb != null && (
+              <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)]">
+                Weights on disk: {alert.model_info.weights_size_mb} MB
+              </div>
+            )}
+            {alert.model_info.note && (
+              <div className="mt-1 font-mono text-xs italic text-[var(--color-text-muted)]">
+                {alert.model_info.note}
+              </div>
+            )}
           </section>
         )}
 

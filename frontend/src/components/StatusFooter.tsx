@@ -92,6 +92,10 @@ export function StatusFooter() {
   const encrypted = status?.security?.encrypted_at_rest;
   const sentryLoaded = status?.models?.sentry_loaded ?? false;
   const pulseLoaded = status?.models?.pulse_loaded ?? false;
+  // ThermalHawk has three states: model_loaded > weights_present > sim.
+  const thermalLive = (status?.models as any)?.thermalhawk_model_loaded ?? false;
+  const thermalWeights = (status?.models as any)?.thermalhawk_weights_present ?? false;
+  const thermalSizeMb = (status?.models as any)?.thermalhawk_size_mb;
   const tickerItems: { label: string; value: string; tone?: "ok" | "warn" | "muted" }[] = [
     {
       label: "NETWORK",
@@ -115,6 +119,15 @@ export function StatusFooter() {
       label: "PULSE·RISK",
       value: pulseLoaded ? "online" : "rule-based fallback",
       tone: pulseLoaded ? "ok" : "muted",
+    },
+    {
+      label: "THERMALHAWK",
+      value: thermalLive
+        ? `live · Thornveil-licensed${thermalSizeMb ? ` · ${thermalSizeMb}MB` : ""}`
+        : thermalWeights
+        ? `weights present${thermalSizeMb ? ` (${thermalSizeMb}MB)` : ""} · sim only`
+        : "rule-based sim",
+      tone: thermalLive ? "ok" : thermalWeights ? "ok" : "muted",
     },
   ];
 
