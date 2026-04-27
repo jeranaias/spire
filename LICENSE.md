@@ -64,10 +64,14 @@ The following components are the sole property of Thornveil LLC, developed indep
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| **RigRun** | Local-first sovereign AI inference platform including classification-aware routing engine, 5-layer safety proxy, cascade router, and Go backend | Thornveil proprietary; provisional patent pending |
-| **HawkStack** | Neural architecture methodology, recipe generator CLI (`Thornveil recipe tools`), Thornveil training methodology, and 15-checkpoint model zoo | Thornveil proprietary; provisional patent pending |
-| **ThermalHawk-Nano v2** | Thermal drone detection model family (Thornveil proprietary architecture architecture, Thornveil training protocol-trained) with trained weights. Original Thornveil-licensed v2 variant (val mAP (accuracy) on Anti-UAV410) and Thornveil-licensed Thornveil proprietary architecture variant (val mAP (accuracy)) — the variant currently deployed in SPIRE BASTION live inference. | Thornveil proprietary; provisional patent pending |
-| **Harakat** | Arabic diacritization engine (BiLSTM+Attention, 6.7MB) | Thornveil proprietary |
+| **RigRun** | Sovereign AI inference platform — local-first, classification-aware, multi-pillar safety governance, OpenAI-compatible | Thornveil proprietary; provisional patent applications |
+| **PYROS** | Multi-pillar LLM safety enforcement stack with HMAC-chained audit trail and live policy controls | Thornveil proprietary; provisional patent applications |
+| **Mycelium** | Distributed AI inference mesh — peer capability advertisement, classification-tiered routing, mesh-attestation primitive | Thornveil proprietary; provisional patent applications (mesh-attestation primitive patent-pending) |
+| **HawkStack** | Cross-domain micro-architecture methodology and recipe generator; reference checkpoints validated across multiple computer-vision benchmarks | Thornveil proprietary; provisional patent applications |
+| **ThermalHawk** | Thermal infrared drone detection model family (multiple variants) with trained weights, deployed in SPIRE BASTION | Thornveil proprietary; provisional patent applications |
+| **RigRun Desktop** | Native desktop chat client (Windows/macOS) with embedded backend for air-gap deployment | Thornveil proprietary |
+| **Navigator** | Autonomous engineering operations center | Thornveil proprietary |
+| **Harakat** | Arabic diacritization engine | Thornveil proprietary |
 
 ### 2.2 Trained Model Weights
 
@@ -79,10 +83,15 @@ All neural network weights for the following models are Thornveil LLC property:
 
 ### 2.3 Methodologies and Research
 
-- HawkStack Thornveil topology methodology framework (Thornveil topology axes)
-- Thornveil training protocol evaluation protocol (Fresh and Std variants)
+- HawkStack cross-domain micro-architecture methodology
+- Thornveil proprietary training protocols
 - Domain-calibrated recipe generation methodology
-- HawkStack Technical Report (33 pages) and Policy Brief (2 pages)
+- HawkStack Technical Report and Policy Brief
+
+(Methodology mechanism details — architectural primitives, training
+protocol specifics, recipe generator internals — are Thornveil
+trade secrets and patent-pending claims, not disclosed in this repo.
+Licensing inquiries: jesse@thornveil.ai.)
 
 ### 2.4 Patent Portfolio
 

@@ -1,9 +1,19 @@
 """
-backend.ml — vendored model architectures for live inference inside SPIRE.
+backend.ml — bridge to Thornveil's proprietary ML packages.
 
-Each module here ships a self-contained PyTorch model class plus the
-inference glue needed to run it from a route handler. Weights live
-outside the repo (set via SPIRE_<MODEL>_WEIGHTS env vars); the
-architectures live here so the module imports without touching the
-external HawkStack/ThermalHawk training repos at runtime.
+The actual model architectures, training methodologies, and inference
+glue used in production deploys live in separate Thornveil-managed
+private packages and are loaded at deploy time on Thornveil-managed
+boxes only. This subpackage is the public bridge that exposes
+capability availability without disclosing the underlying mechanism.
+
+When Thornveil-licensed inference is enabled (by setting the
+SPIRE_THORNVEIL_ML env var to point at the private package install),
+SPIRE imports the model loaders / inference helpers from there and
+the BASTION live-feed surface activates. Without that, SPIRE runs
+in scripted-sim mode and the model card displays the Thornveil
+product name + capability without architecture details.
+
+For licensing inquiries (production deploy, real inference, model
+weights): jesse@thornveil.ai. See LICENSE.md §2 and §4.
 """
