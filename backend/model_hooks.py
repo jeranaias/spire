@@ -123,26 +123,34 @@ class ModelState:
             self.errors.append(f"ThermalHawk presence-detect failed: {e}")
 
     def _maybe_eager_thermalhawk(self) -> None:
-        """Optional eager load — only when SPIRE_THERMALHAWK_EAGER=1 AND the
-        thermalhawk package is importable. Safe no-op otherwise."""
-        if os.environ.get("SPIRE_THERMALHAWK_EAGER") != "1":
+        """Eager-load the Thornveil proprietary architecture ThermalHawk detector when weights are
+        on disk and SPIRE_THERMALHAWK_EAGER!=0. The architecture lives in
+        backend.ml.thermalhawk_wem so we don't depend on the external repo
+        at runtime — only torch + opencv.
+
+        Default is eager-load (SPIRE_THERMALHAWK_EAGER!=0) because the
+        whole point of advertising weights is to actually run them. Set
+        SPIRE_THERMALHAWK_EAGER=0 to suppress (e.g. for a CPU-starved
+        deploy that just wants the metadata badge)."""
+        if os.environ.get("SPIRE_THERMALHAWK_EAGER", "1") == "0":
             return
         if not self.thermalhawk_path:
             return
         try:
-            import torch  # noqa: F401
-            from thermalhawk.models import ThermalHawk  # type: ignore
+            from .ml.thermalhawk_wem import load_thermalhawk_wem
         except Exception as e:  # noqa: BLE001
-            self.errors.append(f"ThermalHawk eager-load skipped (import): {e}")
+            self.errors.append(f"ThermalHawk vendored arch import failed: {e}")
             return
         try:
-            import torch
-            ckpt = torch.load(self.thermalhawk_path, map_location="cpu", weights_only=False)
-            model = ThermalHawk(**ckpt.get("model_args", {}))
-            state = ckpt.get("state_dict") or ckpt.get("model") or ckpt
-            model.load_state_dict(state, strict=False)
-            model.eval()
+            model = load_thermalhawk_wem(self.thermalhawk_path, device="cpu")
             self.thermalhawk_model = model
+            # Augment metadata with the validated values from the loaded
+            # checkpoint — supersedes the static card if they disagree.
+            meta = getattr(model, "ckpt_meta", {}) or {}
+            if meta.get("val_map") is not None:
+                self.thermalhawk_metadata["validation_map_50_95"] = float(meta["val_map"])
+            if meta.get("params_reported") is not None:
+                self.thermalhawk_metadata["parameters"] = int(meta["params_reported"])
         except Exception as e:  # noqa: BLE001
             self.errors.append(f"ThermalHawk eager-load failed: {e}")
 
