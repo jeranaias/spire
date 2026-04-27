@@ -21,7 +21,7 @@ import {
   type DecisionOutcome,
   type FeedbackRecord,
 } from "../api";
-import { withRetry } from "../api-retry";
+import { withRetry, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { InsufficientPrivilege } from "../components/InsufficientPrivilege";
 
@@ -83,7 +83,7 @@ export function AdminView() {
         // First-load failure is loud; poll-failure is silent (the existing
         // data stays on screen).
         if (firstLoad) {
-          setError(String(e));
+          setError(formatApiError(e));
           setWaking(false);
         } else {
           console.warn("Admin telemetry poll failed:", e);
