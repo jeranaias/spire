@@ -16,13 +16,11 @@ Loading semantics:
   - SENTRY / PULSE: lazy `torch.load` of the checkpoint dict. The
     inference glue (model class, tokenizer, head) ships separately and
     consumes `STATE.sentry_model` / `STATE.pulse_model` directly.
-  - ThermalHawk: presence-only by default — we record that the weights
-    file exists and report metadata, but do NOT instantiate the model
-    on boot (the architecture lives in the thermalhawk repo and the
-    Thornveil-licensed-param model would dominate cold-start). When SPIRE_THERMALHAWK_EAGER=1
-    is set we also try to import `thermalhawk.models.ThermalHawk` and
-    load the weights into it; this requires the thermalhawk package to
-    be importable (pip install -e /d/projects/thermalhawk).
+  - ThermalHawk: presence-only by default — we record that the
+    weights file exists and report capability metadata, but do NOT
+    instantiate the detector on boot. When SPIRE_THERMALHAWK_EAGER=1
+    AND the Thornveil ML package is installed, the detector is
+    eager-loaded via `thornveil_ml.thermalhawk.load_detector`.
 """
 from __future__ import annotations
 

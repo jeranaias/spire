@@ -126,7 +126,7 @@ export function StatusFooter() {
         ? `live · Thornveil-licensed${thermalSizeMb ? ` · ${thermalSizeMb}MB` : ""}`
         : thermalWeights
         ? `weights present${thermalSizeMb ? ` (${thermalSizeMb}MB)` : ""} · sim only`
-        : "rule-based sim",
+        : "scripted sim",
       tone: thermalLive ? "ok" : thermalWeights ? "ok" : "muted",
     },
   ];

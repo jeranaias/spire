@@ -231,9 +231,10 @@ PULSE Recommend-Actions (GC-1) ───────►   (no dependency — sta
 
 BASTION Frontend ─────────────────────►   RigRun (SPIRO copilot via NL query)
 BASTION Incident Response Engine ─────►   (no dependency — standalone)
-BASTION ThermalHawk Live Inference ───►   ThermalHawk (Thornveil-licensed weights;
-                                           vendored architecture loaded by
-                                           backend/ml/thermalhawk.py)
+BASTION ThermalHawk Live Inference ───►   ThermalHawk (Thornveil-licensed
+                                           detector + weights, loaded
+                                           via the Thornveil ML package
+                                           on licensed deploys only)
 BASTION Sensor Fusion ────────────────►   (no dependency — standalone)
 BASTION Air-Gap Mode (GC-7) ──────────►   (no dependency — standalone)
 BASTION Distributed Sync (GC-2) ──────►   (no dependency — standalone)
@@ -251,7 +252,7 @@ SPIRO Operator Copilot ───────────────►   RigRun
 
 ## 6. Models Trained During the Event
 
-Any neural network model **trained during the hackathon** (27–30 April 2026) is government-owned work product, regardless of whether Thornveil training methodology (HawkStack, Thornveil training protocol) was used to produce it. This includes:
+Any neural network model **trained during the hackathon** (27–30 April 2026) is government-owned work product, regardless of whether Thornveil training methodology was used to produce it. This includes:
 
 - SENTRY text sensitivity classifier (~100K parameters)
 - PULSE equipment failure predictor (~8K parameters)
