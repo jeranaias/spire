@@ -282,6 +282,19 @@ export function ForecastTab() {
         className="relative shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
         style={{ height: CHART_HEIGHT, minHeight: CHART_HEIGHT }}
       >
+        {/* Issues #19–#22 (review polish): when refreshing over already-
+         * rendered data, a tiny in-chart pill makes it obvious the chart
+         * is being re-fit, so the operator doesn't read stale-looking
+         * lines as fresh. */}
+        {loading && dataLoaded && !showError && (
+          <div
+            className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)]/90 px-2 py-1 font-mono text-[10px] uppercase text-[var(--color-text-secondary)] tracking-widest shadow"
+            aria-live="polite"
+          >
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-primary)]" />
+            Refreshing
+          </div>
+        )}
         {showError ? (
           // Issues #19–#22 — explicit error pane with retry. Replaces the
           // prior silent skeleton-forever behavior on transient failures.
