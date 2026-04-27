@@ -63,7 +63,10 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
       }
       pushToast({
         tone: "ok",
-        text: `${KIND_LABEL[action.kind]} approved for ${asset.asset_id} · MC +${action.mc_delta_pct.toFixed(1)}%`,
+        // Walkthrough audit: mc_delta_pct is a 0..1 fraction in the API
+        // (0.6 → +60%, not 0.6%). Prior format printed "MC +0.6%" which
+        // misread the impact as a rounding error.
+        text: `${KIND_LABEL[action.kind]} approved for ${asset.asset_id} · MC +${(action.mc_delta_pct * 100).toFixed(0)}%`,
       });
       setExecuted((prev) => {
         const n = new Set(prev);
@@ -211,7 +214,8 @@ function AssetActionGroup({
                 </div>
               </div>
               <div className="flex items-center gap-3 font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide">
-                <Stat label="MC%" value={`+${action.mc_delta_pct.toFixed(1)}`} tone="ok" />
+                {/* mc_delta_pct is 0..1; render as "+NN" percentage points. */}
+                <Stat label="MC%" value={`+${(action.mc_delta_pct * 100).toFixed(0)}`} tone="ok" />
                 <Stat label="Cost" value={`$${action.cost_usd.toLocaleString("en-US")}`} />
                 <Stat label="ETA" value={`${action.time_to_effect_hours}h`} />
                 <Stat label="Conf" value={`${(action.confidence * 100).toFixed(0)}%`} />
