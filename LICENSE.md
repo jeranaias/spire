@@ -17,10 +17,15 @@ work product (the SENTRY / PULSE / BASTION / SPIRO surfaces, the
 synthetic dataset engine, the role-shaped UI, the operational workflows,
 the audit chain integration, the air-gap mode, the GCSS-MC schema
 isomorphism, the live-feed scaffolding) was designed, built, and shipped
-by SSgt Jesse Morgan, USMC — an active-duty Marine — on duty time
-during the MDM 2026 hackathon period. The design choices reflect what a
-Marine actually needs at the workbench, not what a contractor guesses
-they need.
+by a team of active-duty Marines on duty time during the MDM 2026
+hackathon period. The design choices reflect what Marines actually
+need at the workbench, not what a contractor guesses they need.
+
+**Marine team:** SSgt Jesse Morgan, USMC (lead) and the Marine
+teammates listed in the project's CONTRIBUTORS.md (or below as the
+team is finalized). The team retains authorship credit for the
+hackathon work product even though the work product is U.S.
+Government-owned per Section 3.
 
 Per Section 3, that hackathon work product is U.S. Government-owned. It
 is also unambiguously Marine-authored.
