@@ -312,7 +312,13 @@ export function Spiro() {
 
   return (
     <aside
-      className="pointer-events-auto fixed right-0 top-0 bottom-0 z-[8400] flex w-full max-w-[26rem] flex-col border-l border-[var(--color-primary)] bg-[var(--color-surface)] shadow-2xl"
+      // Walkthrough audit: SPIRO panel was top-0 → it covered the TopBar
+      // role selector + alert badge at viewports ≥ ~1024px (where the
+      // panel's 26rem max-width still leaves the role chrome on screen).
+      // Start the panel BELOW the 56px TopBar so chrome stays accessible
+      // while SPIRO is open.
+      className="pointer-events-auto fixed right-0 bottom-0 z-[8400] flex w-full max-w-[26rem] flex-col border-l border-[var(--color-primary)] bg-[var(--color-surface)] shadow-2xl"
+      style={{ top: "3.5rem" }}
       role="complementary"
       aria-label="SPIRO"
     >
