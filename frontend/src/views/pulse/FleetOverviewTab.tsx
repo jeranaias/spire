@@ -252,14 +252,15 @@ function extractUnit(title: string): string | null {
 function formatAsOf(iso: string): string {
   if (!iso) return "—";
   // Parse as date-only to avoid TZ-shifted display ("2026-04-26" must read
-  // as 26 APR 26 regardless of operator's local zone).
+  // Walkthrough audit: same as StatusStrip — '26 APR 26' was readable
+  // as 'April 26th' instead of 'April 2026'. Show the full year.
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   if (!m) return iso;
   const [, y, mo, d] = m;
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
   const monIdx = parseInt(mo, 10) - 1;
   if (monIdx < 0 || monIdx > 11) return iso;
-  return `${d} ${months[monIdx]} ${y.slice(2)}`;
+  return `${d} ${months[monIdx]} ${y}`;
 }
 
 // Walkthrough #16, #46 — proper tab semantics with arrow-key nav for the
