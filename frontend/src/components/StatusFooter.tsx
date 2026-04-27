@@ -206,7 +206,7 @@ export function StatusFooter() {
         <span className="text-[var(--color-border-active)]">│</span>
         <span
           className="text-[var(--color-text-muted)]"
-          title="Designed and built by an active-duty Marine (SSgt Jesse Morgan, USMC). See LICENSE.md for IP attribution."
+          title="Designed and built by a team of active-duty Marines, on duty time. See LICENSE.md §0 for full attribution."
         >
           MARINE MADE
         </span>

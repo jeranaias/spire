@@ -5,10 +5,10 @@ Sanitization, Prediction, Intelligence, Readiness Engine.
 Local Intelligence · No Cloud · IL5-Fit
 
 > **Marine Made.** SPIRE itself — every surface, every workflow, every
-> role-mapping — is designed and built by an active-duty Marine
-> (SSgt Jesse Morgan, USMC) for the operators it's actually for.
-> Built on duty time, by somebody who's been the Maint Chief filling out
-> the spreadsheets — not by a contractor guessing what a Marine needs.
+> role-mapping — is designed and built by a team of active-duty
+> Marines, on duty time, for the operators it's actually for.
+> Built by Marines who've been the Maint Chiefs filling out the
+> spreadsheets — not by a contractor guessing what a Marine needs.
 
 **Live demo**: <https://spire-mdm.fly.dev> (synthetic data, public during pilot)
 
