@@ -83,20 +83,25 @@ export function StatusFooter() {
   // /system/status payload. When the backend doesn't have torch loaded
   // (sentry_loaded / pulse_loaded false), the model chips read
   // 'rule-based fallback' instead of pretending fake validation values.
+  // Walkthrough audit: pre-status-load flash showed 'ENCRYPTION off'
+  // (warn) and 'MODE LOCAL'. Distinguish 'status not yet loaded' from
+  // 'status loaded with bad value' so the ticker doesn't shout false
+  // alarms during the first poll cycle.
+  const statusLoaded = status != null;
   const egressAttempts = status?.network_egress?.unapproved_attempts ?? 0;
-  const encrypted = status?.security?.encrypted_at_rest ?? false;
+  const encrypted = status?.security?.encrypted_at_rest;
   const sentryLoaded = status?.models?.sentry_loaded ?? false;
   const pulseLoaded = status?.models?.pulse_loaded ?? false;
   const tickerItems: { label: string; value: string; tone?: "ok" | "warn" | "muted" }[] = [
     {
       label: "NETWORK",
-      value: egressAttempts === 0 ? "0 egress" : `${egressAttempts} unauthorised`,
-      tone: egressAttempts === 0 ? "ok" : "warn",
+      value: !statusLoaded ? "—" : egressAttempts === 0 ? "0 egress" : `${egressAttempts} unauthorised`,
+      tone: !statusLoaded ? "muted" : egressAttempts === 0 ? "ok" : "warn",
     },
     {
       label: "ENCRYPTION",
-      value: encrypted ? "AES-256-GCM" : "off",
-      tone: encrypted ? "ok" : "warn",
+      value: !statusLoaded ? "—" : encrypted ? "AES-256-GCM" : "off",
+      tone: !statusLoaded ? "muted" : encrypted ? "ok" : "warn",
     },
     { label: "DATASET", value: `${assets.toLocaleString("en-US")} assets · ${srs.toLocaleString("en-US")} SR`, tone: "muted" },
     { label: "INTEGRITY", value: errs === 0 ? "0 errors" : `${errs} errors`, tone: errs === 0 ? "ok" : "warn" },
@@ -183,7 +188,7 @@ export function StatusFooter() {
          * read as a status flag — operators didn't know it meant the
          * operating mode (full-feature vs lite). Prefix with MODE. */}
         <span className="text-[var(--color-text-muted)]" title="Operating mode (full-feature vs lite)">
-          MODE {status?.mode?.toUpperCase() || "LOCAL"}
+          MODE {status?.mode?.toUpperCase() || "—"}
         </span>
         <span className="text-[var(--color-border-active)]">│</span>
         <span className="text-[var(--color-brand)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
