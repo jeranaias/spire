@@ -158,7 +158,12 @@ export function CannibalizationTab() {
       const candidates = (data.open_needs as NeedRow[]).filter((n) =>
         n.sr_number !== need.sr_number &&
         n.needed_part.nsn === need.needed_part.nsn &&
-        (!sameClassOnly || (n.fault_class && need.fault_class && n.fault_class !== need.fault_class)) &&
+        // Walkthrough audit: the 'sameClassOnly' checkbox label was
+        // 'Cross-unit, different fault class' but the prior code only
+        // restricted by fault class — same-unit candidates still passed.
+        // Add the cross-unit predicate when the toggle is on so the
+        // checkbox label and filter behavior actually agree.
+        (!sameClassOnly || (n.unit !== need.unit && n.fault_class && need.fault_class && n.fault_class !== need.fault_class)) &&
         (n.fault_class !== need.fault_class)
       );
       if (candidates.length === 0) continue;
