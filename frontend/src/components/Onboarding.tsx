@@ -71,6 +71,10 @@ export function Onboarding() {
   function dismiss() {
     setOpen(false);
     try { localStorage.setItem(SEEN_KEY, "1"); } catch {}
+    // Notify GuidedTour so it can autostart in the same session — without
+    // this signal, the tour's autostart effect (which only ran at mount
+    // time and saw an empty seen key) wouldn't fire on a true first run.
+    try { window.dispatchEvent(new CustomEvent("spire:onboarding-seen")); } catch {}
   }
 
   function next() {

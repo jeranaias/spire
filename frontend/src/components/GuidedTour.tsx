@@ -153,27 +153,49 @@ export function GuidedTour() {
     return true;
   });
 
-  // First-run autostart — kicked off ~1.2s after the Onboarding modal would
-  // have already been dismissed (Onboarding sets its own seen key on close).
-  // We only autostart if both the onboarding-seen flag AND the tour-seen
-  // flag agree it's a fresh seat.
+  // First-run autostart. Two independent triggers, both gated by the
+  // tour-seen flag:
+  //   1. On mount, if onboarding-seen is already set (refresh on a seat
+  //      that's seen onboarding but not the tour) — autostart with a
+  //      short delay so the chrome paints first.
+  //   2. Mid-session, when the Onboarding modal dispatches
+  //      `spire:onboarding-seen` on dismiss — autostart with the same
+  //      delay so the modal's unmount finishes before the spotlight cuts.
+  // Without (2), a true first-run session (onboarding-seen unset at
+  // mount → operator dismisses modal → flag set after our mount effect
+  // already ran) never auto-starts the tour. Caught in code review.
   useEffect(() => {
     let cancelled = false;
+    let timer: number | undefined;
+
+    function scheduleAutostart(delayMs: number) {
+      try {
+        if (localStorage.getItem(SEEN_KEY)) return;
+      } catch { /* tolerant */ }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (!cancelled) setActive(true);
+      }, delayMs);
+    }
+
+    // Trigger 1: mount-time check.
     try {
-      const tourSeen = localStorage.getItem(SEEN_KEY);
       const onboardingSeen = localStorage.getItem("spire.onboarding.v1.seen");
-      // Autostart only if onboarding has been seen (so the modal isn't on
-      // top of the spotlight) and the tour itself hasn't been seen yet.
-      if (!tourSeen && onboardingSeen) {
-        const t = window.setTimeout(() => {
-          if (!cancelled) setActive(true);
-        }, 600);
-        return () => {
-          cancelled = true;
-          window.clearTimeout(t);
-        };
-      }
+      if (onboardingSeen) scheduleAutostart(600);
     } catch { /* tolerant */ }
+
+    // Trigger 2: mid-session, after Onboarding fires its seen event.
+    function onOnboardingSeen() {
+      // Slightly longer delay than (1) to let the modal animation finish.
+      scheduleAutostart(900);
+    }
+    window.addEventListener("spire:onboarding-seen", onOnboardingSeen);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("spire:onboarding-seen", onOnboardingSeen);
+    };
   }, []);
 
   // External trigger (HelpOverlay button, Onboarding final-slide CTA).
