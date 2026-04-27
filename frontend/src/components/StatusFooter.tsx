@@ -204,6 +204,13 @@ export function StatusFooter() {
           MODE {status?.mode?.toUpperCase() || "—"}
         </span>
         <span className="text-[var(--color-border-active)]">│</span>
+        <span
+          className="text-[var(--color-text-muted)]"
+          title="Designed and built by an active-duty Marine (SSgt Jesse Morgan, USMC). See LICENSE.md for IP attribution."
+        >
+          MARINE MADE
+        </span>
+        <span className="text-[var(--color-border-active)]">│</span>
         <span className="text-[var(--color-brand)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
       </div>
 
