@@ -597,7 +597,12 @@ export function BastionView() {
          * collides with the centered G-4 command summary card. Neutral
          * dashed border + ▶ glyph + "Simulate" prefix so it reads as a
          * sandbox control and never gets confused with a HIGH alert. */}
-        {(role === "mef_commander" || role === "security_manager" || role === "g4") && (
+        {/* Walkthrough audit: when a sim is active the response panel
+         * opens on the right and the map shrinks, leaving Sim Controls
+         * (left-3) and Mission Clock (right-3) overlapping. The button
+         * is also disabled during an active sim, so hiding the whole
+         * pill removes the overlap and the dead control simultaneously. */}
+        {(role === "mef_commander" || role === "security_manager" || role === "g4") && !sim && (
           <div
             className="pointer-events-auto absolute left-3 top-3 z-[7] flex items-center gap-1.5"
             role="region"
