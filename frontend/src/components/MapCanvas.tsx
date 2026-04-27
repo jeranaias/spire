@@ -594,13 +594,18 @@ export function MapCanvas({
     } catch {
       /* tolerant — best-effort cache */
     }
+    // Walkthrough audit: passing padding: undefined here crashed
+    // MapLibre's `equals` (TypeError reading 'top') in some 4.x
+    // builds when the prior camera state had a non-zero padding
+    // and the new state nulled it. Always pass a fully-specified
+    // padding object — when the drawer is closed, all zeros.
     map.flyTo({
       center: [b.lon, b.lat],
       zoom: 17,
       duration: 1200,
-      // Right-padding so the response drawer (400px) doesn't bury the
-      // target reticle behind the panel.
-      padding: drawerOpen ? { top: 0, bottom: 0, left: 0, right: 400 } : undefined,
+      padding: drawerOpen
+        ? { top: 0, bottom: 0, left: 0, right: 400 }
+        : { top: 0, bottom: 0, left: 0, right: 0 },
     });
   }, [simActive, simTargetBuilding, buildingById, drawerOpen]);
 
