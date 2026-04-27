@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type FleetOverview, type BastionCOPUnit } from "../../api";
+import { withRetry } from "../../api-retry";
 import { MetricCard } from "../../components/MetricCard";
 import { Heatmap } from "../../components/Heatmap";
 import { AlertCard } from "../../components/AlertCard";
@@ -22,10 +23,23 @@ export function FleetOverviewTab() {
 
   useEffect(() => {
     setData(null);
-    api.pulse
-      .fleetOverview()
+    setError(null);
+    // Walkthrough audit: prior code surfaced raw 502 HTML body
+    // ('<html>...502 Bad Gateway...</html>') as the error string,
+    // which dumped HTML markup straight into the UI. Use withRetry so
+    // transient deploy 5xx self-heal, and on terminal failure show a
+    // human-readable message instead of the upstream HTML.
+    withRetry(() => api.pulse.fleetOverview())
       .then(setData)
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        const raw = String(e);
+        // If the upstream is HTML (502/504 from nginx), don't surface
+        // tags; show a posture line instead.
+        const friendly = /<html|Bad Gateway|Gateway Time-?out/i.test(raw)
+          ? "Backend reconnecting — fleet overview will refresh shortly."
+          : raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
+        setError(friendly);
+      });
     api.bastion.cop().then((c) => setCopUnits(c.units)).catch(() => setCopUnits([]));
   }, [role]);
 
