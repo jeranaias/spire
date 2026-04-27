@@ -507,7 +507,9 @@ export interface RecommendedAction {
   description: string;
   cost_usd: number;
   time_to_effect_hours: number;
+  /** Expected MC-rate delta as a 0..1 fraction (0.6 = +60 percentage points). */
   mc_delta_pct: number;
+  /** Confidence as a 0..1 fraction. */
   confidence: number;
   score: number;
   artifact: Record<string, unknown>;

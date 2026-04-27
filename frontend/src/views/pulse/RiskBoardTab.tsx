@@ -404,7 +404,8 @@ function DraftActionModal({
                     {act.kind?.toUpperCase()}
                   </div>
                   <div className="font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide">
-                    +{act.mc_delta_pct?.toFixed(1)}% MC · ${act.cost_usd?.toLocaleString("en-US")} · {act.time_to_effect_hours}h
+                    {/* mc_delta_pct is 0..1; render as percentage points. */}
+                    +{((act.mc_delta_pct ?? 0) * 100).toFixed(0)}% MC · ${act.cost_usd?.toLocaleString("en-US")} · {act.time_to_effect_hours}h
                   </div>
                 </div>
                 <div className="mt-1 font-mono text-sm text-[var(--color-text)] tracking-wide">
