@@ -1013,16 +1013,21 @@ function MissionHUD() {
   }, []);
 
   const z = (n: number, w = 2) => String(n).padStart(w, "0");
-  // Walkthrough audit: prior format split DTG across two lines
-  // ('162123Z' + '26 APR 26'), which buries the day. Marines read
-  // DTG canonically as DDHHMMZ MMM YY ('262123Z APR 26'). Display the
-  // canonical day-prefixed form on the primary line; keep MMM YY on the
-  // secondary line so the year stays glanceable.
+  // Walkthrough audit (round 2): the prior layout was 'DDHHMMZ' on the
+  // top line and 'MMM YY · NNs' on the bottom. At 270034Z (e.g. 12:34am
+  // on the 27th UTC), the bottom line still showed 'APR 26 · 23s' —
+  // operators could misread that as 'April 26th' (the wrong day) when
+  // it's actually the year-suffix '26' (i.e. 2026). Show the full
+  // 'DD MMM YYYY · NNs' on line 2 so the day is unambiguous and the
+  // year is the full four digits.
   const dtg = `${z(now.getUTCDate())}${z(now.getUTCHours())}${z(now.getUTCMinutes())}Z`;
   const seconds = z(now.getUTCSeconds());
-  const datestamp = `${now
+  const dd = z(now.getUTCDate());
+  const month = now
     .toLocaleString("en-US", { month: "short", timeZone: "UTC" })
-    .toUpperCase()} ${now.getUTCFullYear().toString().slice(2)} · ${seconds}s`;
+    .toUpperCase();
+  const yyyy = String(now.getUTCFullYear());
+  const datestamp = `${dd} ${month} ${yyyy} · ${seconds}s`;
 
   return (
     <div
