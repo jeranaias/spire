@@ -986,12 +986,17 @@ async def cannibalization(role: Optional[str] = None):
         if donor_candidates:
             no_donor_reason = None
         else:
+            # Reviewer note (Task #3): the prior copy referenced "sufficient
+            # remaining hours" but the matcher does not enforce a remaining-
+            # hours predicate. Restate the empty-state in terms of what is
+            # actually checked: same equipment type, intact needed part, no
+            # cause-of-fault overlap, in-scope unit.
             no_donor_reason = (
                 f"No in-scope {sr.equipment_type.replace('_', ' ').lower()} "
-                f"donor has a compatible {pending_req.nomenclature.lower()} "
-                "with sufficient remaining hours. Try widening the role "
-                "scope or checking the expedite/cross-level options on "
-                "Forecast · Recommended Actions."
+                f"peer has an intact {pending_req.nomenclature.lower()} "
+                "(deadlined-on-other-fault donors and operational peers both "
+                "exhausted). Try widening the role scope or checking the "
+                "expedite/cross-level options on Forecast · Recommended Actions."
             )
 
         needs.append({
