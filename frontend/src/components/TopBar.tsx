@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_DEFAULT_VIEW, ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role } from "../state/store";
 import { api } from "../api";
+import { formatApiError } from "../api-retry";
 import { NodeStatus } from "./NodeStatus";
 
 const tabs = [
@@ -348,7 +349,7 @@ function AirGapToggle() {
         setQueueDepth(0);
       }
     } catch (e) {
-      pushToast({ tone: "error", text: `Air-gap toggle failed: ${e}` });
+      pushToast({ tone: "error", text: `Air-gap toggle failed: ${formatApiError(e)}` });
     }
   }
 

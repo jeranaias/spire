@@ -15,7 +15,7 @@ import {
   type SyncStateResponse,
   type SyncConflict,
 } from "../api";
-import { pollWithBackoff } from "../api-retry";
+import { pollWithBackoff, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 
 const CMP_COLOR: Record<string, string> = {
@@ -135,7 +135,7 @@ export function NodeStatus() {
       // resolved state immediately, not on the next poll tick.
       await refreshState();
     } catch (e) {
-      pushToast({ tone: "error", text: `Resolve failed: ${e}` });
+      pushToast({ tone: "error", text: `Resolve failed: ${formatApiError(e)}` });
     }
   }
 
@@ -158,7 +158,7 @@ export function NodeStatus() {
       await refreshState();
       pushToast({ tone: "info", text: "Demo conflict seeded · vector clocks refreshed", ttlMs: 4500 });
     } catch (e) {
-      pushToast({ tone: "error", text: `Seed failed: ${e}` });
+      pushToast({ tone: "error", text: `Seed failed: ${formatApiError(e)}` });
     }
   }
 
