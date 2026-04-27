@@ -52,6 +52,15 @@ export function CannibalizationTab() {
   // instead, mirroring the Forecast tab's behaviour.
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Task #3 follow-on: timestamp of last successful response so the
+  // operator can see how fresh the donor list is at a glance. Same
+  // pattern as ForecastTab.
+  const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
+  // Task #3 follow-on: AbortController + generation guard, mirroring the
+  // ForecastTab fix. Without this, a fast role swap or post-propose
+  // refetch can land its response after a newer one and leave the donor
+  // pane out of sync.
+  const reqGenRef = useRef(0);
   const [selectedNeed, setSelectedNeed] = useState<NeedRow | null>(null);
   const [proposedLocal, setProposedLocal] = useState<MatchRow[]>([]);
   const [confirmDonor, setConfirmDonor] = useState<{ need: NeedRow; donor: DonorCandidate } | null>(null);
@@ -69,16 +78,27 @@ export function CannibalizationTab() {
     setSelectedNeed(null);
     setProposedLocal([]);
     setError(null);
-    let cancelled = false;
     // Walkthrough audit: prior code had no .catch — transient 502s
     // logged 'Uncaught (in promise)' instead of letting the empty
     // state render naturally. Review feedback: a silent failure also
     // pinned the loading overlay forever; capture the error so the UI
     // can surface a retry pane.
-    api.pulse.cannibalization()
-      .then((d) => { if (!cancelled) setData(d); })
-      .catch((e) => { if (!cancelled) setError(formatApiError(e, "Cannibalization data unavailable.")); });
-    return () => { cancelled = true; };
+    // Task #3 follow-on: AbortController + generation guard so a fast
+    // role swap or post-propose refetch can't land a stale response.
+    const myGen = ++reqGenRef.current;
+    const ctrl = new AbortController();
+    api.pulse.cannibalization(ctrl.signal)
+      .then((d) => {
+        if (myGen !== reqGenRef.current) return;
+        setData(d);
+        setLastRefreshed(Date.now());
+      })
+      .catch((e) => {
+        if (myGen !== reqGenRef.current) return;
+        if (e?.name === "AbortError") return;
+        setError(formatApiError(e, "Cannibalization data unavailable."));
+      });
+    return () => ctrl.abort();
   }, [role, reloadKey]);
 
   // Issue #17 — Donor candidates are now computed server-side. Previous
@@ -184,6 +204,12 @@ export function CannibalizationTab() {
       });
       setConfirmDonor(null);
       setSelectedNeed(null);
+      // Task #3 follow-on: bump reloadKey so the open-needs and matches
+      // lists pick up the proposal from the server (not just the
+      // optimistic row). The optimistic row is fine for instant feedback,
+      // but server truth resolves moments later — and any newly-deadlined
+      // donor is reflected in donor_candidates for sibling needs.
+      setReloadKey((k) => k + 1);
     } finally {
       setCommitting(false);
     }
@@ -231,14 +257,37 @@ export function CannibalizationTab() {
   return (
     <div className="flex h-full overflow-hidden">
       <section className="flex w-5/12 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
-        <div className="mb-3">
-          <h3
-            className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
-          >
-            Needs · Open NMCS Assets ({needs.length}{filteredNeeds.length !== allNeeds.length ? ` of ${allNeeds.length}` : ""})
-          </h3>
-          <div className="mt-0.5 spire-body-muted">
-            Deadlined assets with un-received parts. Click a need to find compatible donors.
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3
+              className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
+            >
+              Needs · Open NMCS Assets ({needs.length}{filteredNeeds.length !== allNeeds.length ? ` of ${allNeeds.length}` : ""})
+            </h3>
+            <div className="mt-0.5 spire-body-muted">
+              Deadlined assets with un-received parts. Click a need to find compatible donors.
+            </div>
+          </div>
+          {/* Task #3 follow-on: manual reload + last-refreshed timestamp,
+           * matching the ForecastTab affordance so operators have a
+           * consistent way to re-pull server truth on both PULSE tabs. */}
+          <div className="flex shrink-0 flex-col items-end gap-0.5">
+            <button
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="rounded-sm border border-[var(--color-border-active)] px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] tracking-widest"
+              title="Re-fetch open needs and donor candidates"
+              aria-label="Reload cannibalization data"
+            >
+              Reload
+            </button>
+            {lastRefreshed != null && (
+              <span
+                className="font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest tabular-nums"
+                title={new Date(lastRefreshed).toString()}
+              >
+                refreshed {new Date(lastRefreshed).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+              </span>
+            )}
           </div>
         </div>
 

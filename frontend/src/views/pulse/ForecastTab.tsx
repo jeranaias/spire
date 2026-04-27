@@ -51,14 +51,42 @@ import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 
 type Horizon = "7" | "14" | "30";
 
+// Task #3 follow-on (PR polish): persist the operator's last-used unit and
+// horizon so a fresh tab re-entry restores the prior selection. Watch-floor
+// sessions tend to stay on a single unit and re-open the tab repeatedly;
+// resetting to FLEET on every load is friction.
+const FORECAST_PREFS_KEY = "spire.pulse.forecast.v1";
+function readForecastPrefs(): { unit?: string; horizon?: Horizon } {
+  try {
+    const raw = localStorage.getItem(FORECAST_PREFS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    const horizon = ["7", "14", "30"].includes(parsed?.horizon) ? (parsed.horizon as Horizon) : undefined;
+    const unit = typeof parsed?.unit === "string" && parsed.unit.length > 0 ? parsed.unit : undefined;
+    return { unit, horizon };
+  } catch {
+    return {};
+  }
+}
+function writeForecastPrefs(unit: string, horizon: Horizon): void {
+  try {
+    localStorage.setItem(FORECAST_PREFS_KEY, JSON.stringify({ unit, horizon }));
+  } catch {
+    /* localStorage may be unavailable (private browsing); fail silent. */
+  }
+}
+
 export function ForecastTab() {
   const role = useSpireStore((s) => s.role);
   const [params] = useSearchParams();
   // Honor an inbound ?unit=… deep link (e.g. from PredictedFailurePanel's
-  // Draft Action button). Defaults to FLEET if no param.
-  const initialUnit = params.get("unit") ?? "FLEET";
+  // Draft Action button). URL param wins over persisted prefs (deep links
+  // are explicit operator intent), then persisted, then FLEET default.
+  const persistedRef = useRef(readForecastPrefs());
+  const initialUnit = params.get("unit") ?? persistedRef.current.unit ?? "FLEET";
+  const initialHorizon = persistedRef.current.horizon ?? "14";
   const [unit, setUnit] = useState<string>(initialUnit);
-  const [horizon, setHorizon] = useState<Horizon>("14");
+  const [horizon, setHorizon] = useState<Horizon>(initialHorizon);
   const [data, setData] = useState<Forecast | null>(null);
   const [units, setUnits] = useState<string[]>([]);
   // Issues #19, #20, #21, #22 — explicit error + loading state. The prior
@@ -75,6 +103,10 @@ export function ForecastTab() {
   // Bumped on every manual retry so the fetch effect re-runs even when
   // unit/horizon haven't changed.
   const [reloadKey, setReloadKey] = useState(0);
+  // Task #3 follow-on: timestamp of the last successful response so the
+  // operator can see how stale the displayed projection is. Wall-clock
+  // time avoids the complexity of an interval-driven "X seconds ago".
+  const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
   // Generation token guards against late-arriving stale responses
   // overwriting fresh ones (race when the user toggles unit/horizon
   // faster than the network resolves).
@@ -99,6 +131,23 @@ export function ForecastTab() {
       .catch(() => { /* tolerate; dropdown stays at FLEET */ });
   }, [role]);
 
+  // Task #3 follow-on: if a persisted unit isn't in the role-scoped unit
+  // list (e.g. the operator switched from MEF Commander to Maintenance
+  // Chief, whose persisted MWSS-271 isn't visible), fall back to FLEET so
+  // the dropdown isn't showing a value that isn't an option.
+  useEffect(() => {
+    if (unit !== "FLEET" && units.length > 0 && !units.includes(unit)) {
+      setUnit("FLEET");
+    }
+  }, [units, unit]);
+
+  // Task #3 follow-on: write current selection to localStorage whenever
+  // it changes. Persist-on-change rather than persist-on-unmount so an
+  // unexpected reload still preserves the operator's choice.
+  useEffect(() => {
+    writeForecastPrefs(unit, horizon);
+  }, [unit, horizon]);
+
   useEffect(() => {
     const targetUnit = unit === "FLEET" ? undefined : unit;
     const myGen = ++reqGenRef.current;
@@ -115,6 +164,7 @@ export function ForecastTab() {
         if (myGen !== reqGenRef.current) return;
         setData(d);
         setError(null);
+        setLastRefreshed(Date.now());
       })
       .catch((e) => {
         if (myGen !== reqGenRef.current) return;
@@ -257,15 +307,27 @@ export function ForecastTab() {
           {/* Issues #19–#22 — manual reload control. The chart is cached
            * across nav-aways, but the operator can force a fresh fit on
            * the latest snapshot without changing unit/horizon. */}
-          <button
-            onClick={reload}
-            disabled={loading}
-            className="rounded-sm border border-[var(--color-border-active)] px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:opacity-50 tracking-widest"
-            title="Re-fit Monte Carlo on latest data"
-            aria-label="Reload forecast"
-          >
-            {loading && dataLoaded ? "Refreshing…" : "Reload"}
-          </button>
+          <div className="flex flex-col items-end gap-0.5">
+            <button
+              onClick={reload}
+              disabled={loading}
+              className="rounded-sm border border-[var(--color-border-active)] px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:opacity-50 tracking-widest"
+              title="Re-fit Monte Carlo on latest data"
+              aria-label="Reload forecast"
+            >
+              {loading && dataLoaded ? "Refreshing…" : "Reload"}
+            </button>
+            {/* Task #3 follow-on: timestamp of last successful response so
+             * the operator can tell at a glance how stale the chart is. */}
+            {lastRefreshed != null && (
+              <span
+                className="font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest tabular-nums"
+                title={new Date(lastRefreshed).toString()}
+              >
+                refreshed {new Date(lastRefreshed).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

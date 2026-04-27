@@ -82,7 +82,8 @@ export const api = {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
     riskBoard: (top = 20) => jsonFetch<RiskBoard>(`/pulse/risk-board?top=${top}`),
     assetDeepDive: (assetId: string) => jsonFetch<AssetDeepDive>(`/pulse/assets/${encodeURIComponent(assetId)}`),
-    cannibalization: () => jsonFetch<Cannibalization>("/pulse/cannibalization"),
+    cannibalization: (signal?: AbortSignal) =>
+      jsonFetch<Cannibalization>("/pulse/cannibalization", { signal }),
     // Issues #19–#22 — accept an AbortSignal so callers can cancel
     // in-flight requests when navigating away or changing inputs. Without
     // this, late-arriving responses overwrite fresh ones (race) and the
