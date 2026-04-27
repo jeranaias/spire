@@ -307,7 +307,7 @@ function SequenceGapHints({ assets }: { assets: RiskBoardAsset[] }) {
           <div
             key={i}
             className="flex items-center gap-3 rounded-sm border border-dashed border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2"
-            title={`${id} not flagged: probability below threshold (~0.31). Surfaced so the gap in the sequence is auditable.`}
+            title={`${id} not flagged: risk score below the moderate band cutoff (26). Surfaced so the gap in the sequence is auditable.`}
           >
             <span className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider">
               {id}
@@ -444,22 +444,14 @@ function DraftActionModal({
   );
 }
 
-// Deterministic sparkline data for a given asset — based on asset_id hash so
-// it's stable across re-renders but varies per asset. In a production build
-// this would query a real /assets/{id}/faults?window=30d endpoint; the shape
-// here reads as a 30-day fault count trend.
-function sparklineFor(assetId: string, riskScore: number): { v: number }[] {
-  let h = 0;
-  for (let i = 0; i < assetId.length; i++) h = (h * 31 + assetId.charCodeAt(i)) | 0;
-  const pts: { v: number }[] = [];
-  const bias = Math.min(3, riskScore / 35);
-  for (let i = 0; i < 30; i++) {
-    h = (h * 1103515245 + 12345) | 0;
-    const rand = ((h >>> 16) & 0x7fff) / 0x7fff;
-    const trend = (i / 30) * bias;
-    pts.push({ v: Math.max(0, Math.round(rand * 3 + trend - 0.5)) });
-  }
-  return pts;
+// Walkthrough audit: prior version synthesized the sparkline from a hash of
+// asset_id. Real 30-day fault buckets ship on the risk-board response now;
+// this helper just maps them into the shape Recharts wants. If the backend
+// hasn't backfilled buckets yet, fall back to a flat zero series so the
+// chart still renders without leaking a fake trend.
+function sparklineFor(buckets: number[] | undefined): { v: number }[] {
+  const src = buckets && buckets.length === 30 ? buckets : new Array(30).fill(0);
+  return src.map((v) => ({ v }));
 }
 
 function RiskRow({
@@ -481,8 +473,13 @@ function RiskRow({
   isTop?: boolean;
 }) {
   const riskScore = asset.risk_score ?? 0;
-  const spark = useMemo(() => sparklineFor(asset.asset_id, riskScore), [asset.asset_id, riskScore]);
-  const trendUp = spark[spark.length - 1].v > spark[0].v;
+  const spark = useMemo(() => sparklineFor(asset.fault_buckets_30d), [asset.fault_buckets_30d]);
+  const totalFaults = asset.fault_count_30d ?? spark.reduce((a, b) => a + b.v, 0);
+  // Compare last-7d vs prior-23d daily averages so a trend reads from the
+  // most recent week, not an arbitrary first-vs-last comparison.
+  const last7 = spark.slice(-7).reduce((a, b) => a + b.v, 0) / 7;
+  const prior23 = spark.slice(0, 23).reduce((a, b) => a + b.v, 0) / 23;
+  const trendUp = last7 > prior23;
   const sparkColor = riskScore >= 76 ? "var(--color-danger)"
     : riskScore >= 51 ? "#fb923c"
     : riskScore >= 26 ? "var(--color-warning)"
@@ -543,9 +540,9 @@ function RiskRow({
         </div>
         <div
           className="font-mono text-xs tabular-nums"
-          style={{ color: trendUp ? sparkColor : "var(--color-text-muted)" }}
+          style={{ color: totalFaults > 0 ? (trendUp ? sparkColor : "var(--color-text-muted)") : "var(--color-text-muted)" }}
         >
-          {trendUp ? "↑" : "↓"} {spark.reduce((a, b) => a + b.v, 0)} faults
+          {totalFaults === 0 ? "—" : `${trendUp ? "↑" : "↓"} ${totalFaults} faults`}
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3 text-right font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
