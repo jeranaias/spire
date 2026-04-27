@@ -901,6 +901,13 @@ async def cannibalization(role: Optional[str] = None):
                 continue
             if d_sr.equipment_type != sr.equipment_type:
                 continue
+            # Role scoping: a scoped operator must not see donor candidates
+            # belonging to units outside their authorization. Tier 2 below
+            # already enforces this against ``allowed``; Tier 1 must too,
+            # otherwise out-of-scope donor asset/unit/fault data leaks
+            # through the donor card response.
+            if allowed is not None and d_sr.unit_name not in allowed:
+                continue
             d_fault_class = _normalize_component(d_sr.fault_component or "")
             # Donor's own failure must not be on the recipient's needed
             # part class (otherwise their copy is also broken) and must
