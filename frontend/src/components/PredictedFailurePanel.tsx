@@ -176,7 +176,18 @@ function PredictedRow({
   asset: PredictedFailureAsset;
   onDraftRequisition: () => void;
 }) {
-  const top: FailurePrediction = asset.predictions[0];
+  // Walkthrough audit: backend filters out assets with zero predictions
+  // before responding, but if a future caller passes a row with an empty
+  // predictions array we don't want to crash on top.probability — render
+  // an empty placeholder instead.
+  const top: FailurePrediction | undefined = asset.predictions[0];
+  if (!top) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-2.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+        {asset.asset_id} · {asset.equipment_type} · no predictions in horizon
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
       <div className="min-w-0 flex-1">
