@@ -365,9 +365,19 @@ _UNIT_CANON = {
     "7th esb": "7th ESB", "7 esb": "7th ESB",
 }
 
-_PROFILE_CANON = {"japan": "JPN", "jsdf": "JPN", "jpn": "JPN", "australia": "AUS", "aus": "AUS",
-                  "philippines": "PHL", "phl": "PHL", "fvey": "FVEY_BASE", "fvey-log": "FVEY_LOG",
-                  "fvey log": "FVEY_LOG", "five eyes": "FVEY_BASE"}
+# Walkthrough audit: prior values were 'JPN' / 'AUS' / 'PHL' (short
+# country codes), but the backend's coalition_view endpoint expects
+# the full profile key 'JPN_COALITION' / 'AUS_COALITION' /
+# 'PHL_COALITION'. SPIRO's 'what does Japan see?' planning step then
+# returned 'unknown profile JPN'. Keys now match the dataset's
+# coalition_profiles.json.
+_PROFILE_CANON = {
+    "japan": "JPN_COALITION", "jsdf": "JPN_COALITION", "jpn": "JPN_COALITION",
+    "australia": "AUS_COALITION", "aus": "AUS_COALITION", "adf": "AUS_COALITION",
+    "philippines": "PHL_COALITION", "phl": "PHL_COALITION", "afp": "PHL_COALITION",
+    "fvey-log": "FVEY_LOG", "fvey log": "FVEY_LOG",
+    "fvey": "FVEY_BASE", "five eyes": "FVEY_BASE",
+}
 
 
 def _extract_unit(text: str, role: str) -> Optional[str]:
