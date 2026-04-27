@@ -277,7 +277,23 @@ export function MarkTab() {
               </h4>
               <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm text-[var(--color-text-secondary)]">
                 <div>Engine: {result.audit.engine}</div>
-                <div>Timestamp: <span className="font-mono">{result.audit.timestamp}</span></div>
+                <div title={result.audit.timestamp}>
+                  Timestamp:{" "}
+                  <span className="font-mono">
+                    {/* Walkthrough audit: prior render dumped raw ISO
+                     * ('2026-04-27T15:30:42Z') into the audit panel. Format
+                     * as DD MMM YYYY · HHMMz so the line reads as audit
+                     * prose; raw ISO stays available via the title attr. */}
+                    {(() => {
+                      const iso = result.audit.timestamp;
+                      const d = new Date(iso);
+                      if (Number.isNaN(d.getTime())) return iso;
+                      const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+                      const z = (n: number) => String(n).padStart(2, "0");
+                      return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
+                    })()}
+                  </span>
+                </div>
                 <div className="mt-1 italic">
                   Every marking is logged to the hash-chained audit trail per LICENSE §Security Architecture.
                 </div>
