@@ -1048,9 +1048,27 @@ export function MapCanvas({
          * the existing reticle so the hostile "unit" is symbol-correct rather
          * than just a target indicator. The reticle remains as the targeting
          * cue; this is the hostile unit symbol per 2525C spec.
-         * Offset slightly NE of the target so it doesn't overlap the reticle. */}
-        {simActive && simTarget && simTarget.lat != null && simTarget.lon != null && (
-          <Marker longitude={simTarget.lon + 0.0009} latitude={simTarget.lat + 0.0006} anchor="bottom">
+         *
+         * Walkthrough audit: prior offset (lon + 0.0009, lat + 0.0006)
+         * was a raw degree shift. At Camp Henderson (34.66°N) that's
+         * ~82m east + 67m north — reads fine. But for a future deploy
+         * at higher latitudes (Camp Pendleton 33.4°, MCAS Yuma 32.7°
+         * are similar; an Okinawa or Norway base would diverge) the
+         * lon offset shrinks visually because cos(lat) compresses it.
+         * Cos-correct so the hostile marker stays a consistent ~70m NE
+         * of the target regardless of latitude. */}
+        {simActive && simTarget && simTarget.lat != null && simTarget.lon != null && (() => {
+          const stLat = simTarget.lat;
+          const stLon = simTarget.lon;
+          const NE_M = 70;                              // metres from target
+          const latPerM = 1 / 111000;                   // ~constant 111 km / deg
+          const lonPerM = latPerM / Math.cos((stLat * Math.PI) / 180);
+          return (
+          <Marker
+            longitude={stLon + NE_M * lonPerM}
+            latitude={stLat + NE_M * latPerM}
+            anchor="bottom"
+          >
             <div className="relative flex flex-col items-center" style={{ pointerEvents: "none" }}>
               <UnitMarkerSVG unit="UAS" color="#ef4444" selected={false} affiliation="hostile" />
               <div
@@ -1061,7 +1079,8 @@ export function MapCanvas({
               </div>
             </div>
           </Marker>
-        )}
+          );
+        })()}
 
         {/* Sim target reticle */}
         {simActive && simTarget && simTarget.lat != null && simTarget.lon != null && (
