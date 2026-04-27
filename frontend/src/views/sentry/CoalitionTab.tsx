@@ -460,12 +460,15 @@ export function CoalitionTab() {
                   title={`Local: ${new Date(r.created_at).toLocaleString("en-US")}`}
                 >
                   {(() => {
+                    // Walkthrough audit: prior format was 'MM/DD HH:MMZ' —
+                    // no year. A coalition release log read 'in Aug or
+                    // Sept some year'. Use 'DD MMM YYYY · HHMMz' to match
+                    // the rest of the audit timestamps in this view.
                     const d = new Date(r.created_at);
-                    const m = d.getUTCMonth() + 1;
-                    const day = d.getUTCDate();
-                    const hh = String(d.getUTCHours()).padStart(2, "0");
-                    const mm = String(d.getUTCMinutes()).padStart(2, "0");
-                    return `${String(m).padStart(2, "0")}/${String(day).padStart(2, "0")} ${hh}:${mm}Z`;
+                    if (Number.isNaN(d.getTime())) return r.created_at;
+                    const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+                    const z = (n: number) => String(n).padStart(2, "0");
+                    return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
                   })()}
                 </span>
                 <span className="rounded-sm border border-[var(--color-success-muted)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-success)] tracking-wider">
