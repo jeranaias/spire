@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time as _time
 import uuid
 from collections import Counter
 from datetime import datetime, time, timedelta
@@ -697,6 +698,22 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
         "started": now,
     }
 
+    # When the trained ThermalHawk model is loaded, run a real forward
+    # pass on a synthetic thermal frame so the demo's wow moment carries
+    # an honest 'LIVE INFERENCE' signal — bbox count, confidence, and
+    # latency are all measured, not scripted.
+    inference_payload = _run_thermalhawk_live_inference()
+    if inference_payload:
+        alert["live_inference"] = inference_payload
+        # Surface the boxes count + latency in the body so an operator
+        # who doesn't open the side panel still reads them.
+        n_boxes = len(inference_payload["boxes"])
+        latency_ms = inference_payload["latency_ms"]
+        alert["body"] += (
+            f"\n\nThermalHawk (Thornveil-licensed) inferred in {latency_ms:.1f}ms · "
+            f"{n_boxes} target track{'' if n_boxes == 1 else 's'} returned."
+        )
+
     return {
         "sim_id": sim_id,
         "alert": alert,
@@ -708,6 +725,67 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
         ],
         "response_forces_dispatched": ["WATCHDOG-3", "RAIDER-1", "IRONHORSE-2 (standby)"],
     }
+
+
+def _run_thermalhawk_live_inference() -> Optional[dict]:
+    """Run the trained ThermalHawk detector on a deterministic
+    synthetic thermal frame and return the decoded boxes + timing.
+
+    Returns None if the model isn't loaded (sim falls back to its
+    scripted card). Returns a structured payload otherwise:
+        {
+          "boxes": [{x1,y1,x2,y2,score}],
+          "latency_ms": float,
+          "input_size": int,
+          "source_size": [H, W],
+          "frame_kind": "synthetic_thermal_v1",
+        }
+
+    The frame is a deterministically-seeded grayscale field — gradient
+    sky + a small bright UAS blob over the lower-left quadrant. We seed
+    via the python random module so each sim emits a fresh-but-
+    reproducible scene.
+    """
+    from ..model_hooks import STATE as MS
+    if MS.thermalhawk_model is None:
+        return None
+    try:
+        import numpy as np
+        from ..ml.thermalhawk import run_inference
+        rng = np.random.default_rng(42)
+        H, W = 480, 640
+        # Sky gradient (cool top, warmer ground)
+        ys = np.linspace(60, 130, H)[:, None]
+        frame = np.tile(ys, (1, W)).astype(np.float32)
+        # Sensor noise
+        frame += rng.normal(0, 6, size=(H, W)).astype(np.float32)
+        # Hot UAS blob — small bright Gaussian
+        cy, cx = int(H * 0.55), int(W * 0.42)
+        yy, xx = np.mgrid[0:H, 0:W]
+        blob = 200.0 * np.exp(-(((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * 4.0 ** 2)))
+        frame += blob
+        # Secondary fainter target (to give the head a multi-detection example)
+        cy2, cx2 = int(H * 0.30), int(W * 0.70)
+        blob2 = 110.0 * np.exp(-(((xx - cx2) ** 2 + (yy - cy2) ** 2) / (2 * 3.0 ** 2)))
+        frame += blob2
+        frame = np.clip(frame, 0, 255).astype(np.uint8)
+
+        t0 = _time.perf_counter()
+        result = run_inference(MS.thermalhawk_model, frame, image_size=640, score_thresh=0.20)
+        latency_ms = (_time.perf_counter() - t0) * 1000.0
+        return {
+            "boxes": result["boxes"],
+            "latency_ms": round(latency_ms, 2),
+            "input_size": result["input_size"],
+            "source_size": result["source_size"],
+            "frame_kind": "synthetic_thermal_v1",
+            "score_threshold": 0.20,
+        }
+    except Exception as e:  # noqa: BLE001
+        return {
+            "error": f"{type(e).__name__}: {e}",
+            "frame_kind": "synthetic_thermal_v1",
+        }
 
 
 @router.post("/simulate/clear/{sim_id}")
