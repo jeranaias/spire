@@ -113,10 +113,14 @@ export const ROLE_DEFAULT_VIEW: Record<Role, string> = {
 
 // Roles expected to have authority on each view. If a role visits a view
 // outside this set, the frontend renders an "Out-of-scope" overlay.
+// Walkthrough audit: /admin was missing from this map, so the Help
+// overlay's role-scope panel didn't list it as a view at all (the row
+// for ADMIN never rendered, even for the role that owns it).
 export const VIEW_SCOPE: Record<string, Role[]> = {
   "/sentry":  ["data_custodian", "security_manager"],
   "/pulse":   ["maintenance_chief", "g4", "mef_commander"],
   "/bastion": ["mef_commander", "g4", "security_manager", "maintenance_chief"],
+  "/admin":   ["security_manager"],
 };
 
 function uid(): string {
