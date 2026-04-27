@@ -402,7 +402,19 @@ export function CoalitionTab() {
               affordance to inspect the 200-record sample. */}
           <div className="flex items-center justify-between font-mono text-xs text-[var(--color-text-muted)] tracking-widest">
             <span>
-              Profile: {view.display_name} · loaded {view.as_of}
+              {/* Walkthrough audit: prior format was raw ISO
+                 ('2026-04-27T03:53:27Z') which read like a debug
+                 timestamp. Format as 'DD MMM YYYY · HHMMz' so the
+                 line reads as natural prose. */}
+              Profile: {view.display_name} · loaded {(() => {
+                try {
+                  const d = new Date(view.as_of);
+                  if (Number.isNaN(d.getTime())) return view.as_of;
+                  const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+                  const z = (n: number) => String(n).padStart(2, "0");
+                  return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}Z`;
+                } catch { return view.as_of; }
+              })()}
             </span>
             <span>
               Sample inspected: {view.scope.sample_srs_total_inspected} records ·{" "}
