@@ -540,7 +540,14 @@ async def recommend_actions(
             raise HTTPException(status_code=403, detail="asset out of scope")
         candidates.append({"asset_id": asset_id, "asset": a})
     else:
-        scored = top_risk(ds, n=20)
+        # Walkthrough audit: prior code asked top_risk for 20 fleet-wide and
+        # then filtered by role/unit. A Maintenance Chief whose unit didn't
+        # hit the fleet top-20 got zero recommendations. Oversample by an
+        # adaptive factor so the post-filter result still has `top` entries
+        # for any reasonable scope; cap so we don't score the entire fleet
+        # when the operator is fleet-wide.
+        oversample = max(20, top * 8)
+        scored = top_risk(ds, n=min(oversample, 200))
         for s in scored:
             a = ds.asset(s["asset_id"])
             if a is None:
