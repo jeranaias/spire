@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
@@ -40,12 +40,31 @@ export function RiskBoardTab() {
   const [detailLoading, setDetailLoading] = useState(false);
   // Walkthrough #20 — Draft Action surfaces a modal of recommend_actions.
   const [draftActionFor, setDraftActionFor] = useState<RiskBoardAsset | null>(null);
+  // Race-guard parity: monotonic generation tokens guard against late-
+  // arriving stale responses overwriting fresh ones — e.g. an operator
+  // toggling roles faster than the network resolves, or the deep-dive
+  // detail fetch outliving a switch to a different asset.
+  const boardGenRef = useRef(0);
+  const detailGenRef = useRef(0);
 
   useEffect(() => {
     setBoard(null);
     setSelected(null);
     setDetail(null);
-    api.pulse.riskBoard(30).then(setBoard).catch((e) => setError(formatApiError(e)));
+    setError(null);
+    const myGen = ++boardGenRef.current;
+    const ctrl = new AbortController();
+    api.pulse.riskBoard(30, ctrl.signal)
+      .then((b) => {
+        if (myGen !== boardGenRef.current) return;
+        setBoard(b);
+      })
+      .catch((e) => {
+        if (myGen !== boardGenRef.current) return;
+        if (e?.name === "AbortError") return;
+        setError(formatApiError(e));
+      });
+    return () => ctrl.abort();
   }, [role]);
 
   const filteredAssets = useMemo(() => {
@@ -72,11 +91,24 @@ export function RiskBoardTab() {
     if (!selected) return;
     setDetailLoading(true);
     setDetail(null);
+    const myGen = ++detailGenRef.current;
+    const ctrl = new AbortController();
     api.pulse
-      .assetDeepDive(selected)
-      .then(setDetail)
-      .catch((e) => setError(formatApiError(e)))
-      .finally(() => setDetailLoading(false));
+      .assetDeepDive(selected, ctrl.signal)
+      .then((d) => {
+        if (myGen !== detailGenRef.current) return;
+        setDetail(d);
+      })
+      .catch((e) => {
+        if (myGen !== detailGenRef.current) return;
+        if (e?.name === "AbortError") return;
+        setError(formatApiError(e));
+      })
+      .finally(() => {
+        if (myGen !== detailGenRef.current) return;
+        setDetailLoading(false);
+      });
+    return () => ctrl.abort();
   }, [selected]);
 
   if (error) return <ErrorPanel msg={error} />;

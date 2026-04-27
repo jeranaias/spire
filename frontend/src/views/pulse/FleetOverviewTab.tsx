@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type FleetOverview, type BastionCOPUnit } from "../../api";
 import { withRetry } from "../../api-retry";
@@ -20,18 +20,32 @@ export function FleetOverviewTab() {
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("heatmap");
   const [hideEmptyColumns, setHideEmptyColumns] = useState(true);
+  // Race-guard parity: monotonic generation tokens guard against late-
+  // arriving stale responses overwriting fresh ones when role swaps
+  // faster than the network resolves. Two refs because the fleet and
+  // BASTION COP fetches run in parallel and resolve independently.
+  const overviewGenRef = useRef(0);
+  const copGenRef = useRef(0);
 
   useEffect(() => {
     setData(null);
     setError(null);
+    const myOverviewGen = ++overviewGenRef.current;
+    const myCopGen = ++copGenRef.current;
+    const ctrl = new AbortController();
     // Walkthrough audit: prior code surfaced raw 502 HTML body
     // ('<html>...502 Bad Gateway...</html>') as the error string,
     // which dumped HTML markup straight into the UI. Use withRetry so
     // transient deploy 5xx self-heal, and on terminal failure show a
     // human-readable message instead of the upstream HTML.
-    withRetry(() => api.pulse.fleetOverview())
-      .then(setData)
+    withRetry(() => api.pulse.fleetOverview(ctrl.signal))
+      .then((d) => {
+        if (myOverviewGen !== overviewGenRef.current) return;
+        setData(d);
+      })
       .catch((e) => {
+        if (myOverviewGen !== overviewGenRef.current) return;
+        if (e?.name === "AbortError") return;
         const raw = String(e);
         // If the upstream is HTML (502/504 from nginx), don't surface
         // tags; show a posture line instead.
@@ -40,7 +54,17 @@ export function FleetOverviewTab() {
           : raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
         setError(friendly);
       });
-    api.bastion.cop().then((c) => setCopUnits(c.units)).catch(() => setCopUnits([]));
+    api.bastion.cop(ctrl.signal)
+      .then((c) => {
+        if (myCopGen !== copGenRef.current) return;
+        setCopUnits(c.units);
+      })
+      .catch((e) => {
+        if (myCopGen !== copGenRef.current) return;
+        if (e?.name === "AbortError") return;
+        setCopUnits([]);
+      });
+    return () => ctrl.abort();
   }, [role]);
 
   // Walkthrough #3, #51 — canonical MC rate by unit name from BASTION COP.
