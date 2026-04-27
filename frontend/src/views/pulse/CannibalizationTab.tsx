@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type Cannibalization, type DonorCandidate } from "../../api";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
+import { formatApiError } from "../../api-retry";
 
 type NeedRow = {
   sr_number: string;
@@ -46,6 +47,11 @@ export function CannibalizationTab() {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
   const [data, setData] = useState<Cannibalization | null>(null);
+  // Issue #17 follow-on (review feedback): a swallowed fetch error left
+  // the loading overlay up forever; surface a retryable error pane
+  // instead, mirroring the Forecast tab's behaviour.
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [selectedNeed, setSelectedNeed] = useState<NeedRow | null>(null);
   const [proposedLocal, setProposedLocal] = useState<MatchRow[]>([]);
   const [confirmDonor, setConfirmDonor] = useState<{ need: NeedRow; donor: DonorCandidate } | null>(null);
@@ -62,13 +68,18 @@ export function CannibalizationTab() {
     setData(null);
     setSelectedNeed(null);
     setProposedLocal([]);
+    setError(null);
+    let cancelled = false;
     // Walkthrough audit: prior code had no .catch — transient 502s
     // logged 'Uncaught (in promise)' instead of letting the empty
-    // state render naturally.
+    // state render naturally. Review feedback: a silent failure also
+    // pinned the loading overlay forever; capture the error so the UI
+    // can surface a retry pane.
     api.pulse.cannibalization()
-      .then(setData)
-      .catch(() => { /* tolerate; empty-state copy explains 'no needs' */ });
-  }, [role]);
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(formatApiError(e, "Cannibalization data unavailable.")); });
+    return () => { cancelled = true; };
+  }, [role, reloadKey]);
 
   // Issue #17 — Donor candidates are now computed server-side. Previous
   // client-side matcher required donors to be open SRs with the same NSN
@@ -80,6 +91,24 @@ export function CannibalizationTab() {
   const donors: DonorCandidate[] = selectedNeed?.donor_candidates ?? [];
   const noDonorReason: string | null = selectedNeed?.no_donor_reason ?? null;
 
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <div className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
+          Cannibalization Unavailable
+        </div>
+        <div className="max-w-md font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
+          {error}
+        </div>
+        <button
+          onClick={() => setReloadKey((k) => k + 1)}
+          className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (!data) return <LoadingOverlay message="Matching needs with donors …" />;
 
   const allNeeds = data.open_needs as NeedRow[];
