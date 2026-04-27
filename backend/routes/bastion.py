@@ -29,7 +29,11 @@ def _jittered_timestamp(base_date, key: str) -> str:
     minutes_offset = h % (12 * 60)  # 0..719 minutes into the last 12 hours
     t = time(hour=5, minute=0)      # last-12h window starts at 05:00 on base_date
     dt = datetime.combine(base_date, t) + timedelta(minutes=minutes_offset)
-    return dt.isoformat(timespec="seconds")
+    # Walkthrough audit: append 'Z' so the frontend parses as UTC. Without
+    # it, `new Date('2026-04-27T02:52:00')` reads as LOCAL time — operators
+    # in UTC-7 saw alert timestamps parse 7 hours in the future and the
+    # AlertCard mis-flagged them as 'SYNTH'.
+    return dt.isoformat(timespec="seconds") + "Z"
 
 
 # Pool of varied readiness-alert title templates so every row doesn't read
