@@ -543,6 +543,54 @@ _ACTIVE_SIMS: dict = {}
 SIM_TTL = timedelta(minutes=30)
 
 
+def _build_thermalhawk_model_info() -> dict:
+    """Return the model card the BASTION sim alert advertises.
+
+    Reads from model_hooks.STATE so the alert reflects whichever model
+    the deploy actually has loaded. Three states:
+      - eager-loaded model:    'live · 1.77M params'
+      - weights present only:  'weights present (size_mb), inference disabled'
+      - no weights:            'rule-based sim — weights not deployed'
+
+    The published model card (architecture, training, val mAP, target
+    accelerator) is constant across all three so the operator-facing
+    pitch reads identically; the load_state field carries the truth.
+    """
+    from ..model_hooks import STATE as MS
+    base = {
+        "model": "ThermalHawk-Nano v2 (v2)",
+        "parameters": 1_770_000,
+        "architecture": "Thornveil proprietary architecture + Thornveil neck + Thornveil detection head",
+        "training": "Thornveil training protocol on Anti-UAV410",
+        "deployment_target": "Hailo-8 edge accelerator (~$80 USD per node)",
+        "validation_map_50_95": 0.8295,
+    }
+    if MS.thermalhawk_model is not None:
+        base["load_state"] = "live"
+        base["weights_path"] = MS.thermalhawk_path
+        base["weights_size_mb"] = (
+            round(MS.thermalhawk_size_bytes / (1024 * 1024), 2)
+            if MS.thermalhawk_size_bytes else None
+        )
+    elif MS.thermalhawk_path:
+        base["load_state"] = "weights_present"
+        base["weights_path"] = MS.thermalhawk_path
+        base["weights_size_mb"] = (
+            round(MS.thermalhawk_size_bytes / (1024 * 1024), 2)
+            if MS.thermalhawk_size_bytes else None
+        )
+        base["note"] = (
+            "Trained weights deployed; live inference disabled in this build."
+        )
+    else:
+        base["load_state"] = "rule_based_sim"
+        base["note"] = (
+            "Sim alert — trained weights not deployed in this build. "
+            "Set SPIRE_THERMALHAWK_WEIGHTS to advertise the real model."
+        )
+    return base
+
+
 @router.post("/simulate/thermalhawk-detection")
 async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
     """Kicks off the scripted demo beat: drone detected over CLB-6 motor pool
@@ -634,13 +682,12 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
             {"source": "PULSE", "note": readiness_note},
         ],
         "fpcon_recommended": "CHARLIE",
-        "model_info": {
-            "model": "ThermalHawk-Nano v2 (v2)",
-            "parameters": 1_770_000,
-            "architecture": "Thornveil proprietary architecture + Thornveil neck + Thornveil detection head",
-            "training": "Thornveil training protocol on Anti-UAV410",
-            "deployment_target": "Hailo-8 edge accelerator (~$80 USD per node)",
-        },
+        # Walkthrough audit: model_info was hardcoded prose. When
+        # SPIRE_THERMALHAWK_WEIGHTS is set and the .pt file is on disk,
+        # source the metadata from model_hooks.STATE so the alert
+        # advertises whichever model the deploy actually has —
+        # 'rule-based fallback' otherwise.
+        "model_info": _build_thermalhawk_model_info(),
         "response_available": True,
     }
 
