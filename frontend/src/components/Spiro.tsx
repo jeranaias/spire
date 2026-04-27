@@ -312,13 +312,13 @@ export function Spiro() {
 
   return (
     <aside
-      // Walkthrough audit: SPIRO panel was top-0 → it covered the TopBar
-      // role selector + alert badge at viewports ≥ ~1024px (where the
-      // panel's 26rem max-width still leaves the role chrome on screen).
-      // Start the panel BELOW the 56px TopBar so chrome stays accessible
-      // while SPIRO is open.
+      // Walkthrough audit (round 2): SPIRO at top: 56px (just below
+      // TopBar) covered the classification banner (the legal/audit
+      // 'UNCLASSIFIED // SYNTHETIC DATA' green strip that sits between
+      // TopBar and main content). Push SPIRO below the banner so the
+      // banner stays visible end-to-end. 88px = 56px TopBar + 32px band.
       className="pointer-events-auto fixed right-0 bottom-0 z-[8400] flex w-full max-w-[26rem] flex-col border-l border-[var(--color-primary)] bg-[var(--color-surface)] shadow-2xl"
-      style={{ top: "3.5rem" }}
+      style={{ top: "5.5rem" }}
       role="complementary"
       aria-label="SPIRO"
     >
