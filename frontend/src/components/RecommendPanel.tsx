@@ -13,6 +13,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, type RecommendActionsAsset, type RecommendedAction } from "../api";
+import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 
 const KIND_COLOR: Record<string, string> = {
@@ -43,7 +44,7 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
     api.pulse
       .recommendActions({ unit, top: 5 })
       .then((r) => setData(r.assets))
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(formatApiError(e)));
   }, [unit, role]);
 
   async function approve(asset: RecommendActionsAsset, action: RecommendedAction) {
