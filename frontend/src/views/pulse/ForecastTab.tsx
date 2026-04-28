@@ -182,6 +182,38 @@ export function ForecastTab() {
     ? data.projection[data.projection.length - 1].cross_probability
     : 0;
 
+  // Task #71 — direction-aware color ladder. The `cross_probability`
+  // is *bad* news when we're projecting a downward cross of the
+  // threshold (high % of paths break), but *good* news when we're
+  // already below threshold and the metric is P(recovery to ≥75%)
+  // (high % of paths recover). Without this flip the KPI card lit up
+  // green at 9% recovery — i.e. screamed "all good" when 91% of
+  // simulated futures stayed broken.
+  const startsBelow = !!(data as any)?.starts_below_threshold;
+  // `goodness` ∈ [0,1]: 1 = great, 0 = dire — independent of which
+  // direction the underlying probability points.
+  const goodness = startsBelow ? endCross : 1 - endCross;
+  const kpiTone: "danger" | "warning" | "success" =
+    goodness < 0.5 ? "danger" : goodness < 0.8 ? "warning" : "success";
+  const kpiColorVar =
+    kpiTone === "danger"
+      ? "var(--color-danger)"
+      : kpiTone === "warning"
+      ? "var(--color-warning)"
+      : "var(--color-success)";
+  const kpiBorderMix =
+    kpiTone === "danger"
+      ? "color-mix(in oklab, var(--color-danger) 40%, var(--color-border))"
+      : kpiTone === "warning"
+      ? "color-mix(in oklab, var(--color-warning) 40%, var(--color-border))"
+      : "color-mix(in oklab, var(--color-success) 40%, var(--color-border))";
+  const kpiBackgroundMix =
+    kpiTone === "danger"
+      ? "color-mix(in oklab, var(--color-danger-muted) 15%, var(--color-surface))"
+      : kpiTone === "warning"
+      ? "var(--color-surface)"
+      : "color-mix(in oklab, var(--color-success-muted, var(--color-success)) 12%, var(--color-surface))";
+
   // Walkthrough #50 — render the sample paths, not just an envelope. Bump
   // sample count and opacity so the spaghetti is visible.
   const visiblePaths = (data?.paths || []).slice(0, 60);
@@ -314,15 +346,20 @@ export function ForecastTab() {
             />
             {/* Walkthrough #35 — move threshold label to the right margin
              * so it doesn't sit on top of the projected line. `right`
-             * position renders outside the plot area. */}
+             * position renders outside the plot area.
+             * Task #71 — line + label adopt the same direction-aware
+             * tone as the KPI card so the visual story matches the
+             * number: when we're already below threshold and recovery
+             * is unlikely, the threshold (the goal we won't reach) reads
+             * red; when recovery is likely, it reads green. */}
             <ReferenceLine
               y={thresholdSafe}
-              stroke="var(--color-danger)"
+              stroke={dataLoaded ? kpiColorVar : "var(--color-danger)"}
               strokeDasharray="6 4"
               label={{
                 value: `${(thresholdSafe * 100).toFixed(0)}%`,
                 position: "right",
-                fill: "var(--color-danger)",
+                fill: dataLoaded ? kpiColorVar : "var(--color-danger)",
                 fontSize: 10,
                 fontFamily: "var(--font-mono)",
               }}
@@ -427,32 +464,25 @@ export function ForecastTab() {
         <div
           className="rounded-md border p-3"
           style={{
-            borderColor: endCross > 0.5
-              ? "color-mix(in oklab, var(--color-danger) 40%, var(--color-border))"
-              : endCross > 0.2
-              ? "color-mix(in oklab, var(--color-warning) 40%, var(--color-border))"
-              : "var(--color-border)",
-            background: endCross > 0.5
-              ? "color-mix(in oklab, var(--color-danger-muted) 15%, var(--color-surface))"
-              : "var(--color-surface)",
+            borderColor: dataLoaded ? kpiBorderMix : "var(--color-border)",
+            background: dataLoaded ? kpiBackgroundMix : "var(--color-surface)",
           }}
         >
           {/* Walkthrough #4 — semantic label honors cross direction
            * (recovery vs decline). starts_below_threshold flips the
-           * meaning to "P(recovery to ≥75%)" for already-below units. */}
+           * meaning to "P(recovery to ≥75%)" for already-below units.
+           * Task #71 — color ladder is direction-aware (see kpiTone
+           * derivation above): when starts_below, low recovery prob =
+           * RED; otherwise high downward-cross prob = RED. */}
           <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
-            {dataLoaded && (data as any).starts_below_threshold
+            {dataLoaded && startsBelow
               ? `P(recovery to ≥${(data!.threshold * 100).toFixed(0)}%)`
               : `P(cross ${(thresholdSafe * 100).toFixed(0)}% threshold)`}
           </div>
           <div
             className="mt-1 font-mono text-xl font-semibold tabular-nums"
             style={{
-              color: endCross > 0.5
-                ? "var(--color-danger)"
-                : endCross > 0.2
-                ? "var(--color-warning)"
-                : "var(--color-success)",
+              color: dataLoaded ? kpiColorVar : "var(--color-text)",
               lineHeight: 1,
             }}
           >
@@ -484,7 +514,7 @@ export function ForecastTab() {
         <LegendDot color="var(--color-primary)" label="mean projection" dashed />
         <LegendDot color="var(--color-primary)" label="p10 / p90 envelope" opacity={0.55} />
         <LegendDot color="var(--color-primary)" label="sample paths" opacity={0.18} />
-        <LegendDot color="var(--color-danger)" label={`${(thresholdSafe * 100).toFixed(0)}% threshold`} dashed />
+        <LegendDot color={dataLoaded ? kpiColorVar : "var(--color-danger)"} label={`${(thresholdSafe * 100).toFixed(0)}% threshold`} dashed />
         <span className="ml-auto">
           {dataLoaded ? `${visiblePaths.length} of ${data!.paths.length} sample paths summarized` : ""}
         </span>
