@@ -33,6 +33,18 @@ import {
 import { useFailsafe } from "../state/failsafe";
 import { Pressable, LoadingState, ErrorState, Button } from "../components/ui";
 
+// Mirror of `backend/scoping.py SCENARIO_CONTROL_ROLES`. The mission-clock
+// control endpoint (play / pause / seek / reset) returns 403 for any
+// other role. Disabling Reset locally for those roles avoids the FE
+// snapping back to beat 0 while the backend mission clock keeps the
+// previous `fired_events` set — i.e. the cockpit pretending it ran a
+// reset that the backend rejected.
+const SCENARIO_CONTROL_ROLES = new Set([
+  "security_manager",
+  "mef_commander",
+  "g4",
+]);
+
 // Static catalogue of available scenarios. Today only the blood vignette
 // ships; the picker is still rendered so a follow-on lane can drop a new
 // scenario in by extending this list and routing the loader.
@@ -52,6 +64,20 @@ export function DemoView() {
   const [pickerScenarioId, setPickerScenarioId] = useState<string>("blood-h72");
   const [loading, setLoading] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  // Bumped when the operator clicks Retry on a failed scenario load. The
+  // load `useEffect` below depends on this so a Retry click triggers a
+  // fresh fetch even when `pickerScenarioId` hasn't changed (the bug was
+  // that `setPickerScenarioId(id => id)` is a no-op for React — same
+  // reference, no re-run).
+  const [retryNonce, setRetryNonce] = useState(0);
+
+  const role = useSpireStore((s) => s.role);
+  const canControlScenario = SCENARIO_CONTROL_ROLES.has(role);
+  // Reset error surfaces inline next to the transport row when the
+  // backend rejects the reset (or any other control round-trip the
+  // operator initiates from the cockpit). Sticky until the next
+  // successful action.
+  const [resetError, setResetError] = useState<string | null>(null);
 
   // W2 Task #39 — failsafe affordances. Two distinct calls: fullscreen
   // is the panic key (confirm gated); rehearsal is a non-destructive
@@ -90,6 +116,8 @@ export function DemoView() {
   // Lazy-load on mount (or on picker change). The store's loadScenario
   // is idempotent — re-loading the same scenario re-uses the persisted
   // beat index, so a refresh resumes where the presenter left off.
+  // `retryNonce` is in deps so a Retry click forces a fresh fetch even
+  // when the picker selection hasn't changed.
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -117,7 +145,7 @@ export function DemoView() {
     return () => {
       alive = false;
     };
-  }, [pickerScenarioId, loadScenario, setLoadError]);
+  }, [pickerScenarioId, retryNonce, loadScenario, setLoadError]);
 
   // After Play, send the operator out to the first beat's view so they
   // land on the demo content immediately.
@@ -128,16 +156,33 @@ export function DemoView() {
   }
 
   // Reset wipes the backend mission-clock too — gives a clean run with no
-  // residual fired events. Tolerant of a 403 for non-operator roles.
+  // residual fired events. Issues the backend call FIRST so the FE only
+  // claims a reset that actually landed; on rejection the FE state stays
+  // put and a sticky inline error names the failure. The Reset button is
+  // additionally disabled in render for roles outside SCENARIO_CONTROL_ROLES,
+  // so the only way into this catch block is a transient backend / DDIL
+  // failure for an authorized operator.
   async function handleReset() {
-    reset();
+    setResetError(null);
     try {
       await api.system.scenarioControl("reset");
     } catch (e) {
-      if (e instanceof ApiError && e.status !== 403 && e.status !== 401) {
-        pushToast({ tone: "warn", text: `Mission clock reset: ${formatApiError(e)}` });
+      const msg = formatApiError(e);
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        setResetError(
+          `Reset blocked by backend (${e.status}). This role can't drive the mission clock — switch to MEF Commander, G4, or Security Manager to reset.`,
+        );
+      } else {
+        setResetError(`Reset failed: ${msg}`);
+        pushToast({ tone: "warn", text: `Mission clock reset: ${msg}` });
       }
+      return;
     }
+    // Backend confirmed the reset — only now is it safe to snap the FE
+    // back to beat 0. Otherwise the cockpit would say "READY @ beat 0"
+    // while the backend kept the previous beat's fired_events on the
+    // alert / forecast / audit feeds.
+    reset();
   }
 
   const totalDwellSeconds = useMemo(() => {
@@ -249,7 +294,7 @@ export function DemoView() {
                 title="Scenario load failed"
                 description="The scripted scenario metadata could not be retrieved from the backend."
                 detail={loadErr}
-                onRetry={() => setPickerScenarioId((id) => id)}
+                onRetry={() => setRetryNonce((n) => n + 1)}
                 variant="inline"
               />
             ) : scenario ? (
@@ -322,10 +367,18 @@ export function DemoView() {
               <Pressable
                 onClick={handleReset}
                 block={false}
-                disabled={!beats.length}
-                aria-label="Reset to first beat"
-                title="Reset to first beat"
-                className="!min-h-0 flex h-9 items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-40"
+                disabled={!beats.length || !canControlScenario}
+                aria-label={
+                  canControlScenario
+                    ? "Reset to first beat"
+                    : "Reset disabled — this role can't drive the mission clock"
+                }
+                title={
+                  canControlScenario
+                    ? "Reset to first beat (also resets the backend mission clock)"
+                    : "Reset disabled — only MEF Commander, G4, or Security Manager can reset the mission clock"
+                }
+                className="!min-h-0 flex h-9 items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-40 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-secondary)]"
               >
                 ⟲ Reset
               </Pressable>
@@ -374,6 +427,17 @@ export function DemoView() {
               hint={narrationVisible ? "Visible (bottom of viewport)" : "Hidden"}
             />
           </div>
+          {resetError && (
+            <div className="mt-3" role="alert">
+              <ErrorState
+                title="Mission clock reset rejected"
+                description={resetError}
+                onRetry={() => setResetError(null)}
+                retryLabel="Dismiss"
+                variant="inline"
+              />
+            </div>
+          )}
         </section>
 
         {/* ---- Beat list ------------------------------------------------ */}

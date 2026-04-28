@@ -7,6 +7,7 @@ import { ClassificationBand } from "./components/ClassificationBand";
 import { ToastLane } from "./components/ToastLane";
 import { NarrationOverlay } from "./components/NarrationOverlay";
 import { ScenarioPlayerHost } from "./components/ScenarioPlayerHost";
+import { ScenarioSyncBanner } from "./components/ScenarioSyncBanner";
 import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
@@ -187,6 +188,7 @@ export default function App() {
        * narration strip pinned to the bottom of the viewport. Both
        * mounted at the shell so they survive route changes. */}
       <ScenarioPlayerHost />
+      <ScenarioSyncBanner />
       <NarrationOverlay />
       <FeedbackDrawer />
       <HelpOverlay />
