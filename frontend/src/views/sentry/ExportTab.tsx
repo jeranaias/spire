@@ -30,6 +30,16 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   const [includeAudit, setIncludeAudit] = useState(true);
   const [result, setResult] = useState<(ExportResult & { sample_diffs?: DiffSample[] }) | null>(null);
   const [loading, setLoading] = useState(false);
+  // Task-69 — surface a hard error on the result panel when the doctrinal
+  // release-compatibility gate at /api/sentry/export rejects the requested
+  // (classification, release_authority, caveats) combo. The build is refused
+  // and `result` stays null; the operator sees the issues + a fix path.
+  const [releaseBlock, setReleaseBlock] = useState<{
+    classification: string;
+    release_authority: string;
+    caveats: string[];
+    issues: string[];
+  } | null>(null);
   const pushToast = useSpireStore((s) => s.pushToast);
 
   if (role !== "data_custodian" && role !== "security_manager") {
@@ -54,6 +64,8 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         // the operator just processed.
         const r = await api.sentry.export(authority, format, ctx.batchId);
         setResult(r);
+        // Task-69 — clear any prior block once the build succeeds.
+        setReleaseBlock(null);
         const cls = r.classification ?? "CUI";
         // Toast carries a click-through link so the operator never wonders
         // "where did the file go?" after a successful export. Reviewer caught
@@ -66,11 +78,39 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         });
       } catch (err: unknown) {
         // Surface the spillage event distinctly when the backend gate fires.
-        const detail = err instanceof ApiError && err.body && typeof err.body === "object" ? (err.body as { detail?: Record<string, string> }).detail : undefined;
+        const detail = err instanceof ApiError && err.body && typeof err.body === "object" ? (err.body as { detail?: Record<string, unknown> }).detail : undefined;
         if (detail && detail.error === "InsufficientClearance") {
           pushToast({
             tone: "error",
             text: `Spillage prevented · backend blocked ${detail.action} (need ${detail.required_classification}, you have ${detail.user_clearance}).`,
+            ttlMs: 7000,
+          });
+        } else if (detail && detail.error === "release_blocked") {
+          // Task-69 — doctrinal release-compatibility hard block. Stamp the
+          // result panel with a hard error and refuse the build.
+          const issues = Array.isArray(detail.issues) ? (detail.issues as string[]) : [];
+          setResult(null);
+          setReleaseBlock({
+            classification: String(detail.classification ?? ""),
+            release_authority: String(detail.release_authority ?? authority),
+            caveats: Array.isArray(detail.caveats) ? (detail.caveats as string[]) : [],
+            issues,
+          });
+          pushToast({
+            tone: "error",
+            text: `Release blocked · ${detail.classification} → ${detail.release_authority} is doctrinally incompatible. ${issues[0] ?? ""}`.trim(),
+            ttlMs: 8000,
+          });
+        } else if (detail && detail.error === "batch_not_found") {
+          pushToast({
+            tone: "error",
+            text: `Batch ${detail.batch_id} not found. Re-run processing or pick a current batch.`,
+            ttlMs: 7000,
+          });
+        } else if (detail && detail.error === "invalid_release_authority") {
+          pushToast({
+            tone: "error",
+            text: `Unknown release authority "${detail.release_authority}". Allowed: ${(detail.allowed as string[] | undefined)?.join(", ")}.`,
             ttlMs: 7000,
           });
         } else {
@@ -162,6 +202,77 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
           Bundle classification auto-inherits from source · {expectedBundleClass}
         </span>
       </div>
+
+      {/* Task-69 — yellow warn banner ABOVE the result panel when the
+          server returned status="warn" (e.g. SECRET → FVEY without an
+          explicit downgrade caveat). The bundle is built but the operator
+          must confirm release authority before forwarding. */}
+      {result && result.release_warnings && result.release_warnings.length > 0 && (
+        <div
+          role="status"
+          className="mt-6 rounded-md border p-3 font-mono text-sm"
+          style={{
+            background: "color-mix(in oklab, var(--color-warning) 14%, var(--color-surface))",
+            borderColor: "color-mix(in oklab, var(--color-warning) 50%, var(--color-border))",
+            color: "var(--color-text)",
+          }}
+        >
+          <div
+            className="mb-1 font-semibold uppercase tracking-widest text-[var(--color-warning)]"
+          >
+            Release Warning · {result.classification ?? expectedBundleClass} → {result.release_authority}
+          </div>
+          <ul className="list-disc pl-5">
+            {result.release_warnings.map((msg, i) => (
+              <li key={i}>{msg}</li>
+            ))}
+          </ul>
+          <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
+            Bundle was built. Confirm explicit release authority before forwarding to the partner.
+          </div>
+        </div>
+      )}
+
+      {/* Task-69 — hard error panel when the doctrinal release-compatibility
+          gate refused the build. Mirrors the success panel's prominence so
+          the operator can't mistake a refusal for "build prepared". */}
+      {releaseBlock && (
+        <div
+          role="alert"
+          className="mt-6 rounded-md border p-4 font-mono text-sm"
+          style={{
+            background: "color-mix(in oklab, var(--color-danger) 14%, var(--color-surface))",
+            borderColor: "color-mix(in oklab, var(--color-danger) 50%, var(--color-border))",
+            color: "var(--color-text)",
+          }}
+        >
+          <div
+            className="mb-2 font-semibold uppercase tracking-widest text-[var(--color-danger)]"
+          >
+            Release Blocked · doctrinally incompatible
+          </div>
+          <div className="mb-2">
+            Refusing to build a <span className="font-semibold">{releaseBlock.classification}</span>
+            {" "}bundle for release authority{" "}
+            <span className="font-semibold">{releaseBlock.release_authority}</span>.
+            {releaseBlock.caveats.length > 0 && (
+              <>
+                {" "}Aggregated caveats: <span className="font-semibold">{releaseBlock.caveats.join(", ")}</span>.
+              </>
+            )}
+          </div>
+          <ul className="list-disc pl-5">
+            {releaseBlock.issues.map((msg, i) => (
+              <li key={i}>{msg}</li>
+            ))}
+          </ul>
+          <div className="mt-2 text-xs text-[var(--color-text-secondary)]">
+            Logged to the audit chain as <code>release_blocked</code>. Pick a compatible release
+            authority (typically <code>US_ONLY</code>), or remove the offending records from the
+            batch, and re-export.
+          </div>
+        </div>
+      )}
 
       {result && (
         <div className="mt-6 rounded-md border border-[var(--color-success-muted)] bg-[color-mix(in_oklab,var(--color-success-muted)_15%,var(--color-surface))] p-4">
