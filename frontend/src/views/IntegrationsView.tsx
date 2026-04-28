@@ -31,7 +31,17 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ErrorState, LoadingState, Pressable } from "../components/ui";
-import { api, ApiError, type DdilMode, type GcssMcSamplePayload } from "../api";
+import {
+  api,
+  ApiError,
+  type DdilMode,
+  type GcssMcSamplePayload,
+  type GcssMcCoverageSummary,
+  type GcssMcDictionary,
+  type GcssMcDictionarySection,
+  type GcssMcDictionaryColumn,
+  type GcssMcDictionaryTopValue,
+} from "../api";
 import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 

@@ -453,6 +453,20 @@ export const api = {
         undefined,
         false,
       ),
+    // WP-7 — published GCSS-MC field dictionary + coverage summary. Backend
+    // routes live at /api/integrations/gcss-mc/{coverage-summary,dictionary}.
+    gcssMcCoverageSummary: () =>
+      jsonFetch<GcssMcCoverageSummary>(
+        "/integrations/gcss-mc/coverage-summary",
+        undefined,
+        false,
+      ),
+    gcssMcDictionary: () =>
+      jsonFetch<GcssMcDictionary>(
+        "/integrations/gcss-mc/dictionary",
+        undefined,
+        false,
+      ),
     // Task #25 — return SPIRE to a clean t=0 demo state. Gated server-side
     // to the demo operator (g4); the topbar reset button is hidden for
     // every other role so this client method is never reachable from the
