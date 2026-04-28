@@ -34,6 +34,7 @@ export function RefreshAge({
   ts,
   label = "Stream last refreshed",
   className,
+  tightened = false,
 }: {
   /** Last-success timestamp from the poller (Date.now()), or null while
    * the first response is in flight. */
@@ -42,6 +43,16 @@ export function RefreshAge({
   label?: string;
   /** Extra classes for layout / margin tuning. */
   className?: string;
+  /** Task #140 — when the operator's link is known-yellow (SATCOM
+   * degraded, or the presenter has engaged the drill override) the
+   * recency thresholds tighten so the operator gets earlier warning
+   * on a link that is *expected* to silently slow alert deliveries.
+   *   - default ladder:  amber 30s / red 90s
+   *   - tightened ladder: amber 15s / red 45s
+   * The leading dot still pulses on red, and the label appends a
+   * "(link yellow)" suffix so a hover/screen reader knows the
+   * threshold isn't the steady-state default. */
+  tightened?: boolean;
 }) {
   // Re-render every second so the displayed age advances even when
   // the poller is silent. setInterval is cheap; the work it triggers
@@ -55,17 +66,26 @@ export function RefreshAge({
   const ageMs = ts == null ? null : Math.max(0, Date.now() - ts);
   // Threshold ladder is centralised so the alert sidebar header,
   // the fused-threats card, and any future poll-driven panel paint
-  // staleness with the same colour at the same age.
+  // staleness with the same colour at the same age. When `tightened`
+  // is set (operator's link is yellow), halve the windows so amber
+  // shows at 15s and red at 45s — gives the operator earlier warning
+  // on a link that's already known to be lossy.
+  const warnAt = tightened ? 15_000 : 30_000;
+  const dangerAt = tightened ? 45_000 : 90_000;
   let tone: "muted" | "warn" | "danger" = "muted";
   if (ageMs != null) {
-    if (ageMs >= 90_000) tone = "danger";
-    else if (ageMs >= 30_000) tone = "warn";
+    if (ageMs >= dangerAt) tone = "danger";
+    else if (ageMs >= warnAt) tone = "warn";
   }
   const color =
     tone === "danger" ? "var(--color-danger)" :
     tone === "warn"   ? "var(--color-warning)" :
                         "var(--color-text-muted)";
   const ageText = ageMs == null ? "awaiting first refresh…" : formatAge(ageMs);
+  // Suffix is operator-facing ("link yellow"), matching the SATCOM
+  // chip in the StatusStrip — same wording across the chrome so the
+  // operator pattern-matches without translating jargon.
+  const suffix = tightened ? " · link yellow" : "";
 
   return (
     <div
@@ -78,8 +98,12 @@ export function RefreshAge({
       aria-live="polite"
       title={
         ts == null
-          ? "Awaiting first refresh"
-          : `Last successful refresh at ${new Date(ts).toISOString()}`
+          ? `Awaiting first refresh${tightened ? " · thresholds tightened (link yellow)" : ""}`
+          : `Last successful refresh at ${new Date(ts).toISOString()}${
+              tightened
+                ? " · thresholds tightened to 15s amber / 45s red while the link is yellow"
+                : ""
+            }`
       }
     >
       <span
@@ -91,7 +115,7 @@ export function RefreshAge({
         style={{ background: color, boxShadow: `0 0 4px ${color}` }}
       />
       <span>
-        {label} {ageText}
+        {label} {ageText}{suffix}
       </span>
     </div>
   );

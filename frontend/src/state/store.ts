@@ -162,6 +162,15 @@ export interface SpireState {
   airGapActive: boolean;
   queueDepth: number;
 
+  // Task #140 — operator-/presenter-engaged "SATCOM yellow" override.
+  // The backend timeline drives `commsState`; this flag forces the
+  // effective state to DEGRADED on top of it so a demo or drill can
+  // surface the yellow indicator without waiting for the seeded
+  // timeline to flip. Cleared by the same hotkey (`g y`) that engaged
+  // it. The stamp is local-only — never persisted, never sent server-
+  // side — so it can't accidentally outlive a single session.
+  commsDegradedOverride: boolean;
+
   // B4 Mission clock + scenario timeline. Single source of truth for "what
   // time is it in the war game" — every view that wants to render a
   // phase-aware overlay reads from here. Hydrated by `<MissionClock>` at
@@ -250,6 +259,7 @@ export interface SpireState {
   setCommsState: (s: CommsState) => void;
   setAirGap: (active: boolean) => void;
   setQueueDepth: (n: number) => void;
+  setCommsDegradedOverride: (b: boolean) => void;
   setScenario: (s: {
     running: boolean;
     rate: number;
@@ -588,6 +598,7 @@ export const useSpireStore = create<SpireState>((set) => ({
   commsState: "CONNECTED",
   airGapActive: false,
   queueDepth: 0,
+  commsDegradedOverride: false,
   scenarioRunning: false,
   scenarioRate: 1,
   scenarioOffsetMin: 0,
@@ -659,6 +670,7 @@ export const useSpireStore = create<SpireState>((set) => ({
   setCommsState: (commsState) => set({ commsState }),
   setAirGap: (airGapActive) => set({ airGapActive }),
   setQueueDepth: (queueDepth) => set({ queueDepth }),
+  setCommsDegradedOverride: (commsDegradedOverride) => set({ commsDegradedOverride }),
   setScenario: (s) =>
     set({
       scenarioRunning: s.running,

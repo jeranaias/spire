@@ -141,6 +141,21 @@ export function BastionView() {
   // Threshold lives in `consecutiveErrorTracker` and is unit-tested in
   // `tests/unit/api-retry.test.ts` so it can't silently regress.
   const [alertsFeedOffline, setAlertsFeedOffline] = useState(false);
+  // Task #140 — derived "the link is yellow" flag. True when the
+  // effective Comms posture (the same one the StatusStrip chip shows)
+  // is DEGRADED. Air-gap and DISCONNECTED are their own postures and
+  // are intentionally NOT counted here — the chip says AIRGAP / Link
+  // down, not "SATCOM yellow", in those states, and the recency stamps
+  // already paint red on a dead feed. Precedence matches StatusStrip +
+  // StatusFooter: the override only PROMOTES a green link to yellow
+  // (it never downgrades a more-severe live state).
+  const commsStateLive = useSpireStore((s) => s.commsState);
+  const commsOverride = useSpireStore((s) => s.commsDegradedOverride);
+  const airGapActive = useSpireStore((s) => s.airGapActive);
+  const recencyTightened =
+    !airGapActive &&
+    (commsStateLive === "DEGRADED" ||
+      (commsStateLive === "CONNECTED" && commsOverride));
   // Counters bumped by intent — MapCanvas listens for changes and acts.
   // simResolveSignal: restore the cached pre-sim viewport (cordon overlays
   // already drop because `simActive` flips false). resetViewSignal: refit
@@ -826,6 +841,12 @@ export function BastionView() {
           onSearchQuery={setSearchQuery}
           lastRefreshedAt={alertsLastRefreshedAt}
           feedOffline={alertsFeedOffline}
+          // Task #140 — tighten the recency thresholds when the SATCOM
+          // chip is yellow. Live timeline OR presenter drill override
+          // both trip this; the chip and the stamp speak the same
+          // posture so an operator never sees the chip yellow with the
+          // stamp still using the steady-state ladder.
+          recencyTightened={recencyTightened}
           // Walkthrough audit: prior code passed alertSeverityCounts
           // (raw API counts including acked rows). After an ACK the
           // 'ALL N' chip stayed at 30 while the stream rendered 29.
@@ -1435,6 +1456,7 @@ function AlertStreamHeader({
   severityCounts,
   lastRefreshedAt,
   feedOffline,
+  recencyTightened,
 }: {
   activeCount: number;
   ackedCount: number;
@@ -1453,6 +1475,11 @@ function AlertStreamHeader({
    * offline · retrying" banner — replaces the prior dev-console-only
    * console.warn. */
   feedOffline: boolean;
+  /** Task #140 — true when the SATCOM chip in the StatusStrip is
+   * showing yellow (live timeline OR a presenter drill override).
+   * Halves the recency thresholds so the operator sees amber at 15s
+   * instead of 30s on a known-degraded link. */
+  recencyTightened?: boolean;
 }) {
   return (
     <div className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -1477,7 +1504,7 @@ function AlertStreamHeader({
        * sidebar means "nothing is happening" or "the link went yellow
        * a minute ago and we're sitting on stale data". */}
       <div className="px-3 pb-2">
-        <RefreshAge ts={lastRefreshedAt} />
+        <RefreshAge ts={lastRefreshedAt} tightened={recencyTightened} />
         {/* Sustained-outage banner. Persistent (not a toast) so it
          * stays visible while polling retries — the RefreshAge stamp
          * tells the operator how stale the displayed list is, this

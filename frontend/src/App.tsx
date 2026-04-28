@@ -96,6 +96,29 @@ function useGoToShortcuts() {
           case "f":
             window.dispatchEvent(new CustomEvent("spire:open-feedback"));
             break;
+          // Task #140 — `g y` toggles the operator-engaged "SATCOM yellow"
+          // drill override. The chord re-uses the existing two-key window
+          // (no new modifier-key footguns to typed characters) and is
+          // gated through the SAME store flag the StatusStrip chip and
+          // RefreshAge components read, so the chip flips to yellow and
+          // the recency stamps tighten in lockstep. A toast confirms the
+          // direction so the presenter / operator never wonders whether
+          // the press registered. Always available (operators benefit
+          // outside stage too — running a comms-degraded drill at the
+          // motor pool, for instance).
+          case "y": {
+            const s = useSpireStore.getState();
+            const next = !s.commsDegradedOverride;
+            s.setCommsDegradedOverride(next);
+            s.pushToast({
+              tone: next ? "warn" : "ok",
+              text: next
+                ? "SATCOM yellow engaged · alert recency stamps tightened to 15s amber / 45s red · g·y to release"
+                : "SATCOM yellow released · recency stamps back to 30s amber / 90s red",
+              ttlMs: 3500,
+            });
+            break;
+          }
           default:
             consumed = false;
         }

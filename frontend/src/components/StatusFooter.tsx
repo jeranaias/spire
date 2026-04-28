@@ -25,6 +25,11 @@ export function StatusFooter() {
   const commsState = useSpireStore((s) => s.commsState);
   const airGap = useSpireStore((s) => s.airGapActive);
   const queueDepth = useSpireStore((s) => s.queueDepth);
+  // Task #140 — operator-engaged "SATCOM yellow" drill override. Mirror
+  // it into the footer pulse so the bottom indicator agrees with the
+  // top StatusStrip Comms chip (otherwise the chrome would say two
+  // different things about the same link).
+  const commsOverride = useSpireStore((s) => s.commsDegradedOverride);
   const setCommsState = useSpireStore((s) => s.setCommsState);
   const setAirGap = useSpireStore((s) => s.setAirGap);
   const setQueueDepth = useSpireStore((s) => s.setQueueDepth);
@@ -166,7 +171,11 @@ export function StatusFooter() {
         <span className="mx-1 text-[var(--color-border-active)]">│</span>
         <span className="tabular-nums text-[var(--color-text-secondary)]">{localTime}</span>
         <span className="mx-1 text-[var(--color-border-active)]">│</span>
-        <CommsIndicator state={commsState} airGap={airGap} queueDepth={queueDepth} />
+        <CommsIndicator
+          state={commsOverride && commsState === "CONNECTED" ? "DEGRADED" : commsState}
+          airGap={airGap}
+          queueDepth={queueDepth}
+        />
         <span className="mx-1 hidden text-[var(--color-border-active)] lg:inline">│</span>
         {/* Walkthrough audit: AUDIT chip showed only the chain
          * fingerprint, never the chain integrity status. The backend

@@ -36,6 +36,20 @@ export function FusedThreatsPanel({
   // alongside the bridge / view pollers when the lane is lossy.
   const ddilMode = useSpireStore((s) => s.ddilMode);
   const cadenceMult = commsCadenceMultiplier(ddilMode);
+  // Task #140 — mirror BastionView's "link yellow" derivation so the
+  // fused-threats card's recency stamp paints amber at 15s on a
+  // degraded link, matching the alert sidebar header. Air-gap and
+  // DISCONNECTED are their own postures (chip says AIRGAP / Link down)
+  // and are intentionally NOT counted as yellow here. Precedence
+  // matches StatusStrip + StatusFooter: the override only PROMOTES a
+  // green link to yellow (it never downgrades a more-severe live state).
+  const commsStateLive = useSpireStore((s) => s.commsState);
+  const commsOverride = useSpireStore((s) => s.commsDegradedOverride);
+  const airGapActive = useSpireStore((s) => s.airGapActive);
+  const recencyTightened =
+    !airGapActive &&
+    (commsStateLive === "DEGRADED" ||
+      (commsStateLive === "CONNECTED" && commsOverride));
   const [threats, setThreats] = useState<FusedThreat[]>(initialThreats ?? []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Wall-clock ms timestamp of the last successful /fused-threats poll.
@@ -137,7 +151,7 @@ export function FusedThreatsPanel({
         {/* Refresh-age stamp on the empty state so the operator can see
          * the fusion engine is reporting "all clear" recently, vs. a
          * stale link parked at zero. */}
-        <RefreshAge ts={lastRefreshedAt} className="mt-1" />
+        <RefreshAge ts={lastRefreshedAt} className="mt-1" tightened={recencyTightened} />
         {offlineBanner}
       </div>
     );
@@ -161,7 +175,7 @@ export function FusedThreatsPanel({
         {/* Stream-age stamp under the count so the operator can see at
          * a glance whether the active threat list is current truth or
          * a snapshot from a minute ago on a degraded link. */}
-        <RefreshAge ts={lastRefreshedAt} className="mt-1" />
+        <RefreshAge ts={lastRefreshedAt} className="mt-1" tightened={recencyTightened} />
         {offlineBanner}
       </div>
       <div className="flex flex-col">

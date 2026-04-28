@@ -19,6 +19,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import clsx from "clsx";
 import { api, type DatasetInfo } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
@@ -37,6 +38,12 @@ export function StatusStrip() {
   const fpcon = useSpireStore((s) => s.fpcon);
   const commsState = useSpireStore((s) => s.commsState);
   const airGap = useSpireStore((s) => s.airGapActive);
+  // Task #140 — operator/presenter override that forces the comms chip
+  // (and any RefreshAge consumer that tightens on a yellow link) to
+  // read DEGRADED on top of whatever the backend timeline says. The
+  // chip below renders an extra "drill" badge so the operator knows
+  // the yellow they're seeing was hand-engaged, not telemetry.
+  const commsOverride = useSpireStore((s) => s.commsDegradedOverride);
   const alertCount = useSpireStore((s) => s.alertCount);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
 
@@ -113,11 +120,33 @@ export function StatusStrip() {
     : overallMc >= 0.65 ? "var(--color-warning)"
     : "var(--color-danger)";
 
-  const commsEffective = airGap ? "AIRGAP" : commsState;
+  // Effective comms posture for the chip. Air-gap wins (operator-engaged
+  // server-side). Then the live timeline — if it's already saying
+  // DEGRADED or DISCONNECTED, the override never *downgrades* the
+  // posture (we don't want a presenter drill masking a real outage).
+  // The override only PROMOTES a green link to yellow for the demo.
+  // Code review #140 — same precedence as StatusFooter so the top chip
+  // and the bottom indicator never disagree.
+  const commsEffective = airGap
+    ? "AIRGAP"
+    : commsOverride && commsState === "CONNECTED"
+      ? "DEGRADED"
+      : commsState;
   const commsTone =
     commsEffective === "CONNECTED" ? "var(--color-success)"
     : commsEffective === "DEGRADED" ? "var(--color-warning)"
     : "var(--color-danger)";
+  // Task #140 — operator-copy label. Operators on the floor recognise
+  // "SATCOM yellow" as the link-degraded ground truth call; the older
+  // bare "DEGRADED" pill read as vendor jargon and didn't tell the
+  // operator *what* was degraded. Same tone as the recency stamp on
+  // the alert sidebar / fused-threats card so the chrome speaks one
+  // language about a yellow link.
+  const commsValueLabel =
+    commsEffective === "AIRGAP"   ? "AIRGAP"
+    : commsEffective === "DEGRADED"  ? "SATCOM yellow"
+    : commsEffective === "DISCONNECTED" ? "Link down"
+    : "Link green";
 
   const fp = FPCON_TONE[fpcon] ?? FPCON_TONE.BRAVO;
 
@@ -254,18 +283,57 @@ export function StatusStrip() {
         />
         <Chip
           label="Comms"
-          value={commsEffective}
+          value={
+            <span className="flex items-center gap-1.5">
+              {/* Pulsing dot on a yellow / down link so the chip catches
+               * peripheral vision the same way the recency stamp does
+               * once it crosses its amber threshold. Steady when CONNECTED. */}
+              <span
+                aria-hidden
+                className={clsx(
+                  "inline-block h-1.5 w-1.5 rounded-full",
+                  commsEffective !== "CONNECTED" && "animate-pulse",
+                )}
+                style={{ background: commsTone, boxShadow: `0 0 4px ${commsTone}` }}
+              />
+              <span>{commsValueLabel}</span>
+              {commsOverride && !airGap && (
+                <span
+                  className="rounded-sm border px-1 font-mono text-[10px] uppercase tracking-widest"
+                  style={{
+                    color: "var(--color-text-muted)",
+                    borderColor: "color-mix(in oklab, var(--color-warning) 50%, var(--color-border))",
+                  }}
+                  title="Drill — yellow indicator engaged from the stage hotkey, not the live timeline"
+                >
+                  drill
+                </span>
+              )}
+            </span>
+          }
           tone={commsTone}
           onClick={() => {
             // No dedicated comms view; tooltip explains and click jumps to
             // BASTION where the AIR-GAP toggle + queue chip live.
             nav("/bastion");
           }}
-          ariaLabel={`Communications ${commsEffective.toLowerCase()}. Click to open BASTION.`}
+          ariaLabel={
+            airGap
+              ? "Air-gap mode engaged — local writes are being queued. Click to open BASTION."
+              : commsEffective === "DEGRADED"
+                ? `SATCOM yellow${commsOverride ? " (drill)" : ""} — link degraded; alert recency stamps tighten while engaged. Click to open BASTION.`
+                : commsEffective === "DISCONNECTED"
+                  ? "Comms link down — click to open BASTION."
+                  : "Comms link green — click to open BASTION."
+          }
           title={
             airGap
               ? "Air-gap mode engaged — local writes queued · open BASTION to release"
-              : `Comms ${commsEffective.toLowerCase()}`
+              : commsEffective === "DEGRADED"
+                ? `SATCOM yellow${commsOverride ? " · drill (engaged via g·y)" : " · live timeline"} — recency stamps tighten to 15s amber / 45s red while the link is yellow`
+                : commsEffective === "DISCONNECTED"
+                  ? "Comms link down — alert + telemetry feeds may be stalled"
+                  : "Comms link green"
           }
         />
         <Chip
