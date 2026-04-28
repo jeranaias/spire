@@ -147,6 +147,74 @@ export function pollWithBackoff<T>(
 }
 
 /**
+ * consecutiveErrorTracker — fail-visibly helper for "feed offline" UX.
+ *
+ * `pollWithBackoff` swallows individual errors (toast-spam during a quiet
+ * loop is worse than silence on a single transient blip), but on a
+ * sustained outage the operator gets no signal at all — the only cue is
+ * the "Stream last refreshed" age stamp climbing red, with no statement
+ * of cause. This tracker counts consecutive errors and flips an offline
+ * state once `threshold` is reached; a single successful response resets
+ * the counter and flips the state back to online.
+ *
+ * Usage with pollWithBackoff:
+ *   const tracker = consecutiveErrorTracker(3, setFeedOffline);
+ *   pollWithBackoff(fn, {
+ *     onResult: (r) => { tracker.onResult(); apply(r); },
+ *     onError:  ()  => tracker.onError(),
+ *   });
+ *
+ * `onChange` only fires on transitions (online → offline, offline →
+ * online), so consumers don't need to dedupe banner / toast renders.
+ *
+ * The threshold lives here (not at each call site) so the unit test in
+ * `tests/unit/api-retry.test.ts` can pin the behaviour and prevent it
+ * from quietly regressing.
+ */
+export interface ConsecutiveErrorTracker {
+  /** Call on every successful poll response. */
+  onResult: () => void;
+  /** Call on every failed poll. */
+  onError: () => void;
+  /** True once `threshold` consecutive errors have been observed. */
+  isOffline: () => boolean;
+  /** Reset to online without firing onChange — useful on remount. */
+  reset: () => void;
+}
+
+export function consecutiveErrorTracker(
+  threshold: number,
+  onChange: (offline: boolean) => void,
+): ConsecutiveErrorTracker {
+  if (!Number.isInteger(threshold) || threshold < 1) {
+    throw new Error("consecutiveErrorTracker: threshold must be a positive integer");
+  }
+  let consecutive = 0;
+  let offline = false;
+  return {
+    onResult: () => {
+      consecutive = 0;
+      if (offline) {
+        offline = false;
+        onChange(false);
+      }
+    },
+    onError: () => {
+      consecutive += 1;
+      if (!offline && consecutive >= threshold) {
+        offline = true;
+        onChange(true);
+      }
+    },
+    isOffline: () => offline,
+    reset: () => {
+      consecutive = 0;
+      offline = false;
+    },
+  };
+}
+
+/**
  * formatApiError — turn a thrown api error into operator-readable copy.
  *
  * Walkthrough audit: setError(String(e)) was leaking raw nginx 502 HTML

@@ -8,9 +8,9 @@
  * boundaries — e.g. PACS gate event + ThermalHawk UAS), and the auto-
  * generated response taskings.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type FusedThreat } from "../api";
-import { pollWithBackoff } from "../api-retry";
+import { pollWithBackoff, consecutiveErrorTracker } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { commsCadenceMultiplier } from "./LinkStatusStrip";
 import { Pressable } from "./ui";
@@ -46,6 +46,15 @@ export function FusedThreatsPanel({
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(
     initialThreats ? Date.now() : null,
   );
+  // Sustained-outage signal — same pattern as the alert sidebar. The
+  // /fused-threats poll previously had no `onError` handler at all, so
+  // a sustained outage left the panel sitting on the most recent good
+  // payload (or the empty-state line) with zero indication that the
+  // engine was unreachable. After 3 consecutive failed polls we surface
+  // a persistent "fusion feed offline · retrying" banner; a single good
+  // response collapses it. Threshold lives in `consecutiveErrorTracker`
+  // and is unit-tested in `tests/unit/api-retry.test.ts`.
+  const [feedOffline, setFeedOffline] = useState(false);
 
   useEffect(() => {
     if (initialThreats && initialThreats.length > 0) {
@@ -53,6 +62,9 @@ export function FusedThreatsPanel({
       setLastRefreshedAt(Date.now());
       return;
     }
+    // Tracker is local to this effect — recreated on remount, which
+    // matches the lifecycle of the polling loop itself.
+    const tracker = consecutiveErrorTracker(3, setFeedOffline);
     // Walkthrough audit: 5s setInterval hammered /fused-threats with no
     // backoff, contributing to 502 storms during Fly deploy churn.
     // Switch to pollWithBackoff: 5s base, drops to 60s when nothing
@@ -63,12 +75,41 @@ export function FusedThreatsPanel({
       fingerprint: (r) =>
         (r.fused_threats || []).map((t) => `${t.id}:${t.severity}`).join(","),
       onResult: (r) => {
+        tracker.onResult();
         setThreats(r.fused_threats || []);
         setLastRefreshedAt(Date.now());
+      },
+      // Previously absent — a steadily-failing fusion endpoint was
+      // completely silent. Hand the failure to the tracker so the
+      // banner surfaces after N consecutive misses, and console.warn
+      // for the dev tools breadcrumb.
+      onError: (e) => {
+        tracker.onError();
+        console.warn("FUSED THREATS poll failed:", e);
       },
     });
     return () => ctrl.stop();
   }, [initialThreats, role, cadenceMult]);
+
+  // Banner element shared between the empty-state "all clear" card and
+  // the active-threats card so the offline cue surfaces in either mode.
+  const offlineBanner = useMemo(() => {
+    if (!feedOffline) return null;
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="mt-1 flex items-center gap-1.5 rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger)_15%,var(--color-bg))] px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-danger)]"
+      >
+        <span
+          aria-hidden
+          className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-danger)]"
+          style={{ boxShadow: "0 0 4px var(--color-danger)" }}
+        />
+        <span>Fusion feed offline · retrying</span>
+      </div>
+    );
+  }, [feedOffline]);
 
   if (threats.length === 0) {
     // Quiet "all clear" line. The empty-state audit flagged the silent return
@@ -97,6 +138,7 @@ export function FusedThreatsPanel({
          * the fusion engine is reporting "all clear" recently, vs. a
          * stale link parked at zero. */}
         <RefreshAge ts={lastRefreshedAt} className="mt-1" />
+        {offlineBanner}
       </div>
     );
   }
@@ -120,6 +162,7 @@ export function FusedThreatsPanel({
          * a glance whether the active threat list is current truth or
          * a snapshot from a minute ago on a degraded link. */}
         <RefreshAge ts={lastRefreshedAt} className="mt-1" />
+        {offlineBanner}
       </div>
       <div className="flex flex-col">
         {threats.map((t) => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
-import { withRetry, pollWithBackoff, formatApiError } from "../api-retry";
+import { withRetry, pollWithBackoff, formatApiError, consecutiveErrorTracker } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
@@ -127,6 +127,18 @@ export function BastionView() {
   // without this stamp the operator can't tell if the silent stream is
   // current truth or a degraded link sitting on stale data.
   const [alertsLastRefreshedAt, setAlertsLastRefreshedAt] = useState<number | null>(null);
+  // Sustained-outage signal for the alert sidebar. `pollWithBackoff` plus
+  // `withRetry` already swallow individual blips so a one-off 5xx during
+  // Fly machine spin-up doesn't toast-spam the operator. But a sustained
+  // outage previously left the operator with no signal at all — only the
+  // RefreshAge stamp climbing red, with no statement of cause. Once
+  // ALERTS_OFFLINE_THRESHOLD consecutive polls fail, we surface a
+  // persistent "alerts feed offline · retrying" banner inside the
+  // sidebar header. Banner stays up until polling recovers (a single
+  // success flips the tracker back to online and clears the banner).
+  // Threshold lives in `consecutiveErrorTracker` and is unit-tested in
+  // `tests/unit/api-retry.test.ts` so it can't silently regress.
+  const [alertsFeedOffline, setAlertsFeedOffline] = useState(false);
   // Counters bumped by intent — MapCanvas listens for changes and acts.
   // simResolveSignal: restore the cached pre-sim viewport (cordon overlays
   // already drop because `simActive` flips false). resetViewSignal: refit
@@ -293,6 +305,15 @@ export function BastionView() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Single tracker instance shared by the initial refresh + the poll loop
+  // so a one-off blip on either path doesn't flip the offline banner. 3
+  // consecutive failures = sustained outage by our standard. The tracker
+  // keeps its own counter; React state only sees the on/off transition.
+  const alertsFeedTracker = useMemo(
+    () => consecutiveErrorTracker(3, setAlertsFeedOffline),
+    [],
+  );
+
   // Apply backend response to local + global state in one place. Both the
   // initial fetch and the poll converge on this so the TopBar badge,
   // severity tooltip, and any future cross-view consumer always see the
@@ -310,8 +331,11 @@ export function BastionView() {
       // Only successful responses bump the stamp; failed polls leave the
       // age ticking up so amber/red tones surface honestly.
       setAlertsLastRefreshedAt(Date.now());
+      // Reset the consecutive-error counter — a single good response
+      // collapses any "alerts feed offline" banner that was up.
+      alertsFeedTracker.onResult();
     },
-    [setAlertCount, setAlertSeverityCounts],
+    [setAlertCount, setAlertSeverityCounts, alertsFeedTracker],
   );
 
   async function refreshAlerts() {
@@ -321,7 +345,10 @@ export function BastionView() {
     } catch (e) {
       // Toast once per session-ish: a steady poll that's failing should not
       // pop a toast every 5 seconds. We log to console so it's visible in
-      // dev tools without spamming the operator.
+      // dev tools without spamming the operator. The tracker upgrades the
+      // signal to a persistent sidebar banner once N consecutive polls
+      // have failed, so a sustained outage isn't silent.
+      alertsFeedTracker.onError();
       console.warn("BASTION alert refresh failed:", e);
     }
   }
@@ -340,11 +367,16 @@ export function BastionView() {
         fingerprint: (r) =>
           `${r.alerts.length}|${r.alerts.map((a) => a.id).join(",")}`,
         onResult: (r) => applyAlertsResponse(r),
-        onError: (e) => console.warn("BASTION alert refresh failed:", e),
+        onError: (e) => {
+          // Same fail-visibly path as `refreshAlerts` — the tracker is
+          // shared so the banner reflects the worst-case across both.
+          alertsFeedTracker.onError();
+          console.warn("BASTION alert refresh failed:", e);
+        },
       },
     );
     return () => ctrl.stop();
-  }, [applyAlertsResponse, cadenceMult]);
+  }, [applyAlertsResponse, alertsFeedTracker, cadenceMult]);
 
   // Per-alert action — ack / snooze / resolve. Optimistic update so the
   // operator sees the row move (or vanish) immediately; if the backend
@@ -786,6 +818,7 @@ export function BastionView() {
           searchQuery={searchQuery}
           onSearchQuery={setSearchQuery}
           lastRefreshedAt={alertsLastRefreshedAt}
+          feedOffline={alertsFeedOffline}
           // Walkthrough audit: prior code passed alertSeverityCounts
           // (raw API counts including acked rows). After an ACK the
           // 'ALL N' chip stayed at 30 while the stream rendered 29.
@@ -933,6 +966,7 @@ export function BastionView() {
               searchQuery={searchQuery}
               onSearchQuery={setSearchQuery}
               lastRefreshedAt={alertsLastRefreshedAt}
+              feedOffline={alertsFeedOffline}
               severityCounts={(() => {
                 const c: Record<string, number> = { CRITICAL: 0, HIGH: 0, MODERATE: 0, LOW: 0, INFO: 0 };
                 for (const a of alerts) {
@@ -1387,6 +1421,7 @@ function AlertStreamHeader({
   onSearchQuery,
   severityCounts,
   lastRefreshedAt,
+  feedOffline,
 }: {
   activeCount: number;
   ackedCount: number;
@@ -1400,6 +1435,11 @@ function AlertStreamHeader({
    * "Stream last refreshed Nm Ns ago" indicator that goes amber after
    * 30s and red after 90s — see findings F6/F9. */
   lastRefreshedAt: number | null;
+  /** True once the consecutive-error tracker (api-retry) has decided
+   * the alerts feed is offline. Drives the persistent "alerts feed
+   * offline · retrying" banner — replaces the prior dev-console-only
+   * console.warn. */
+  feedOffline: boolean;
 }) {
   return (
     <div className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -1425,6 +1465,25 @@ function AlertStreamHeader({
        * a minute ago and we're sitting on stale data". */}
       <div className="px-3 pb-2">
         <RefreshAge ts={lastRefreshedAt} />
+        {/* Sustained-outage banner. Persistent (not a toast) so it
+         * stays visible while polling retries — the RefreshAge stamp
+         * tells the operator how stale the displayed list is, this
+         * banner names the cause. Clears automatically on the next
+         * successful poll via consecutiveErrorTracker.onResult(). */}
+        {feedOffline && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-1.5 flex items-center gap-1.5 rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger)_15%,var(--color-bg))] px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-danger)]"
+          >
+            <span
+              aria-hidden
+              className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-danger)]"
+              style={{ boxShadow: "0 0 4px var(--color-danger)" }}
+            />
+            <span>Alerts feed offline · retrying</span>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-1 px-2 pb-1.5">
         {SEV_FILTER_OPTIONS.map((opt) => {
