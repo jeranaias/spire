@@ -9,7 +9,9 @@ hydrates `request.state.user` on every call and rejects unauthenticated
 
 The four mocked Marines exist in `MOCK_USERS` and represent the role
 spectrum SPIRE currently scopes against: operator (G-4), maintenance chief,
-security manager, MEF commander. Identity payload is the contract every
+security manager, MEF commander. All four are assigned to the pilot
+customer named by slide 2 / AboutTeamView / TransitionView (3d MLR ·
+CLB-Det · III MEF · MARFORPAC). Identity payload is the contract every
 downstream lane reads — additions only, no renames.
 """
 from __future__ import annotations
@@ -110,10 +112,14 @@ def verify_session(token: str) -> Optional[dict[str, Any]]:
 
 # ---------------------------------------------------------------------------
 # Mock identities — the four cert "smartcards" the operator picks from.
+# Field shape is the load-bearing contract for downstream lanes; additions
+# are safe, renames break the world. Keep this in sync with
+# `frontend/src/state/store.ts` `User`.
 #
-# Field shape is the load-bearing contract for downstream lanes. Once shipped
-# every Wave 1 lane reads from this; additions are safe, renames break the
-# world. Keep this in sync with `frontend/src/state/store.ts` `User`.
+# Unit / parent_command values are constrained to the pilot-customer chain
+# (CLB-Det → 3d MLR → 3d MarDiv → III MEF → MARFORPAC) that slide 2 names.
+# `tests/test_identity_persona_alignment.py` enforces the chain; update
+# both ends together when changing the customer.
 # ---------------------------------------------------------------------------
 
 MOCK_USERS: list[dict[str, Any]] = [
@@ -125,8 +131,8 @@ MOCK_USERS: list[dict[str, Any]] = [
         "rank": "GySgt",
         "rank_long": "Gunnery Sergeant",
         "billet": "Logistics Operator",
-        "unit": "CLB-6",
-        "parent_command": "2d MLG",
+        "unit": "CLB-Det",
+        "parent_command": "3d MLR",
         "branch": "USMC",
         "clearance": "SECRET",
         "role": "g4",
@@ -145,8 +151,8 @@ MOCK_USERS: list[dict[str, Any]] = [
         "rank": "MSgt",
         "rank_long": "Master Sergeant",
         "billet": "Maintenance Chief",
-        "unit": "CLB-6",
-        "parent_command": "2d MLG",
+        "unit": "CLB-Det",
+        "parent_command": "3d MLR",
         "branch": "USMC",
         "clearance": "SECRET",
         "role": "maintenance_chief",
@@ -163,8 +169,8 @@ MOCK_USERS: list[dict[str, Any]] = [
         "rank": "CWO3",
         "rank_long": "Chief Warrant Officer 3",
         "billet": "Security Manager",
-        "unit": "2d MLG",
-        "parent_command": "II MEF",
+        "unit": "3d MLR",
+        "parent_command": "3d MarDiv",
         "branch": "USMC",
         "clearance": "TS//SCI",
         "role": "security_manager",
@@ -181,8 +187,8 @@ MOCK_USERS: list[dict[str, Any]] = [
         "rank": "MajGen",
         "rank_long": "Major General",
         "billet": "Commanding General",
-        "unit": "II MEF",
-        "parent_command": "MARFORCOM",
+        "unit": "III MEF",
+        "parent_command": "MARFORPAC",
         "branch": "USMC",
         "clearance": "TS//SCI",
         "role": "mef_commander",
