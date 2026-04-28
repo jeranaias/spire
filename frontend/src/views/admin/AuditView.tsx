@@ -516,12 +516,7 @@ function AuditRow({
         {fmtUtc(row.ts)}
       </td>
       <td className="px-2 py-1.5">
-        <div className="text-[var(--color-text)]">
-          {row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name}
-        </div>
-        <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
-          {row.identity.dodid ? `DODID ${row.identity.dodid} · ` : ""}{row.identity.role || row.actor}
-        </div>
+        <IdentityCell row={row} />
       </td>
       <td className="px-2 py-1.5 text-[var(--color-text)]">
         <div className="flex items-center gap-1.5">
@@ -584,6 +579,121 @@ function AuditRow({
         </span>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Classify an audit row's identity as one of:
+ *   - "person":      DODID is bound to a real Marine in MOCK_USERS.
+ *   - "system":      actor is a non-person process (e.g. `system_boot`,
+ *                    backfill jobs).
+ *   - "role_only":   actor is a role string (`data_custodian`, etc.) that
+ *                    does not currently map to any seeded Marine, so the
+ *                    backend fallback returned an identity-shaped stub
+ *                    with no DODID/rank/name.
+ *
+ * Both non-person classes get an explicit badge so a CDAO judge can tell
+ * "we logged a role-bound action without a person" apart from "we logged
+ * a real Marine" — preserving the demo claim that every action with a
+ * DODID is CAC-anchored.
+ */
+type IdentityKind = "person" | "system" | "role_only";
+
+// Known non-person actor labels emitted by backend automations
+// (`backend/persistence.py`, `backend/network_monitor.py`,
+// `backend/scenario_blood.py`, scheduled jobs). Anything that starts
+// with `system`, `scheduler`, `cron`, `monitor`, `scenario.`, or `batch.`
+// is treated as a system process so it doesn't get tagged as a missing
+// identity. Match is lowercase + prefix to stay defensive against new
+// automation actor names that follow the same shape.
+const SYSTEM_ACTOR_PREFIXES = [
+  "system",
+  "scheduler",
+  "cron",
+  "network_monitor",
+  "scenario.",
+  "batch.",
+] as const;
+
+function classifyIdentity(row: AuditEntry): IdentityKind {
+  if (row.identity.dodid) return "person";
+  const a = (row.actor || "").trim().toLowerCase();
+  const r = (row.identity.role || "").trim().toLowerCase();
+  if (!a) return "system";
+  for (const p of SYSTEM_ACTOR_PREFIXES) {
+    if (a === p || a.startsWith(p)) return "system";
+    if (r === p || r.startsWith(p)) return "system";
+  }
+  return "role_only";
+}
+
+function IdentityCell({ row }: { row: AuditEntry }) {
+  const kind = classifyIdentity(row);
+  if (kind === "person") {
+    return (
+      <>
+        <div className="text-[var(--color-text)]">
+          {row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name}
+        </div>
+        <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
+          DODID {row.identity.dodid} · {row.identity.role || row.actor}
+        </div>
+      </>
+    );
+  }
+  if (kind === "system") {
+    return (
+      <>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[var(--color-text-secondary)]">System process</span>
+          <IdentityBadge tone="muted" label="NON-PERSON" title="Logged by an automated process — no human DODID is bound to this row." />
+        </div>
+        <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
+          {row.actor || "system"}
+        </div>
+      </>
+    );
+  }
+  // role_only
+  return (
+    <>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[var(--color-text-secondary)]">{row.identity.role || row.actor}</span>
+        <IdentityBadge
+          tone="warn"
+          label="ROLE-ONLY · NO DODID"
+          title="Action recorded against a role (no Marine in the seeded roster currently holds this role) — no DODID was bound to this row."
+        />
+      </div>
+      <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
+        no person bound to this action
+      </div>
+    </>
+  );
+}
+
+function IdentityBadge({
+  tone,
+  label,
+  title,
+}: {
+  tone: "warn" | "muted";
+  label: string;
+  title: string;
+}) {
+  const color = tone === "warn" ? "var(--color-warning)" : "var(--color-text-muted)";
+  return (
+    <span
+      title={title}
+      className="rounded-sm border px-1 py-[1px] font-mono text-[9px] uppercase tracking-wider"
+      style={{
+        color,
+        borderColor: "color-mix(in oklab, currentColor 50%, transparent)",
+        background: "color-mix(in oklab, currentColor 12%, transparent)",
+      }}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -668,10 +778,7 @@ function RowDrawer({
         <div className="flex-1 overflow-y-auto p-4">
           {/* Identity + outcome card */}
           <Section label="Identity">
-            <KV k="Name"  v={row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name} />
-            <KV k="DODID" v={row.identity.dodid || "(not captured)"} />
-            <KV k="Role"  v={row.identity.role || row.actor} />
-            <KV k="Unit"  v={row.identity.unit || "—"} />
+            <DrawerIdentity row={row} />
           </Section>
 
           <Section label="Action">
@@ -743,6 +850,59 @@ function RowDrawer({
           )}
         </div>
       </aside>
+    </>
+  );
+}
+
+function DrawerIdentity({ row }: { row: AuditEntry }) {
+  const kind = classifyIdentity(row);
+  if (kind === "person") {
+    return (
+      <>
+        <KV k="Name"  v={row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name} />
+        <KV k="DODID" v={row.identity.dodid} />
+        <KV k="Role"  v={row.identity.role || row.actor} />
+        <KV k="Unit"  v={row.identity.unit || "—"} />
+      </>
+    );
+  }
+  if (kind === "system") {
+    return (
+      <>
+        <KV
+          k="Name"
+          v={
+            <span className="flex items-center gap-1.5">
+              <span>System process</span>
+              <IdentityBadge tone="muted" label="NON-PERSON" title="Logged by an automated process — no human DODID is bound to this row." />
+            </span>
+          }
+        />
+        <KV k="DODID" v={<span className="text-[var(--color-text-muted)]">— (no person)</span>} />
+        <KV k="Role"  v={row.actor || "system"} />
+        <KV k="Unit"  v="—" />
+      </>
+    );
+  }
+  // role_only
+  return (
+    <>
+      <KV
+        k="Name"
+        v={
+          <span className="flex items-center gap-1.5">
+            <span className="text-[var(--color-text-secondary)]">{row.identity.role || row.actor}</span>
+            <IdentityBadge
+              tone="warn"
+              label="ROLE-ONLY · NO DODID"
+              title="Action recorded against a role (no Marine in the seeded roster currently holds this role) — no DODID was bound to this row."
+            />
+          </span>
+        }
+      />
+      <KV k="DODID" v={<span className="text-[var(--color-warning)]">— (no DODID captured)</span>} />
+      <KV k="Role"  v={row.identity.role || row.actor} />
+      <KV k="Unit"  v={row.identity.unit || "—"} />
     </>
   );
 }
