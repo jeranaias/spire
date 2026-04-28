@@ -453,23 +453,6 @@ export const api = {
         undefined,
         false,
       ),
-    // Task #177 — GCSS-MC schema-fidelity work. Backs the Field Dictionary
-    // section that proves SPIRE's coverage against the real 163-column
-    // schema. Pulled once on the Integrations page, no polling needed.
-    gcssMcCoverageSummary: () =>
-      jsonFetch<GcssMcCoverageSummary>(
-        "/integrations/gcss-mc/coverage-summary",
-        undefined,
-        false,
-      ),
-    gcssMcDictionary: (section?: "header" | "parts" | "due_in") =>
-      jsonFetch<GcssMcDictionary>(
-        section
-          ? `/integrations/gcss-mc/dictionary?section=${section}`
-          : "/integrations/gcss-mc/dictionary",
-        undefined,
-        false,
-      ),
     // Task #25 — return SPIRE to a clean t=0 demo state. Gated server-side
     // to the demo operator (g4); the topbar reset button is hidden for
     // every other role so this client method is never reachable from the
@@ -1706,6 +1689,18 @@ export interface GcssIngestReport {
   adapter: string;
   // "enforced" when no clear (non-hashed) UICs were accepted.
   sanitization_gate: "enforced" | string;
+}
+
+// Task #67 — `scope` is the role-scoping descriptor SENTRY routes return
+// so the FE can render an honest "Showing N of M (CLB-6 only)" footer.
+// `unrestricted=true` means the caller's role sees the entire batch.
+export interface SentryScope {
+  role: string;
+  unrestricted: boolean;
+  allowed_units: string[];
+  total_records: number;
+  scoped_records: number;
+  label: string;
 }
 
 // Task #67 — `scope` is the role-scoping descriptor SENTRY routes return

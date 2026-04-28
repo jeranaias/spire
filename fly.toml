@@ -14,6 +14,15 @@
 app = "spire-mdm"
 primary_region = "iad"
 
+# Bluegreen deploy strategy: the new machine has to pass its health
+# checks before traffic switches. Eliminates the ~30s window during
+# rolling deploys where the old machine is draining and the new one
+# isn't ready yet — that window surfaced as a 502 to operators mid-
+# demo. The trade-off is ~30s longer deploys; not deploy-in-the-last-
+# 30-min-before-stage is the operator-side mitigation.
+[deploy]
+  strategy = "bluegreen"
+
 [build]
   dockerfile = "Dockerfile.web"
 
