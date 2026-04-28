@@ -229,3 +229,145 @@ def test_distribution_reason_names_dominant_evidence():
     assert "SECRET" in _distribution_reason("SECRET", set())
     assert "TOP SECRET" in _distribution_reason("TOP_SECRET", set())
     assert "public release" in _distribution_reason("UNCLASSIFIED", set())
+
+
+# ---------------------------------------------------------------------------
+# Task #109 — sample-diff diversity
+#
+# Pre-Task-109 the export's "Before / After · 3 Sample Records" panel just
+# took the first three records with any sensitive flag. The canonical dataset
+# is heavily PII-skewed (128 PII spans vs. 7 geo / 2 classified / 1
+# controlled), so reviewers always saw three PII redactions and assumed the
+# rest of the sanitizer's rules had been exercised when in fact they couldn't
+# tell. The picker now prefers one representative per rule category before
+# backfilling, and the response surfaces missing categories so the panel can
+# render an explicit "no <category> redactions in this batch" note.
+# ---------------------------------------------------------------------------
+
+CANONICAL_CATEGORY_ORDER = ["pii", "geo", "comms", "classified", "controlled"]
+
+
+def test_sample_diffs_cover_every_category_present_in_canonical_dataset(client):
+    """The sample picker must surface one diff per rule category that
+    actually fired in the batch — not three PII redactions in a row.
+
+    The full canonical dataset (≈6.3k SRs) exercises every sanitizer
+    rule (pii / geo / comms / classified / controlled). The picked diffs
+    must therefore collectively expose all five so a reviewer scanning
+    the panel can see the rules actually ran. Pre-Task-109 the picker
+    just took the first three flagged records, which on this dataset
+    were all PII.
+    """
+    _login(client, "3456789012")
+    body, _ = _export_and_download(client, "json")
+
+    sample_diffs = body.get("sample_diffs") or []
+    assert sample_diffs, "expected at least one sample diff on the canonical dataset"
+
+    # Coverage metadata must be present and well-formed.
+    cats = body.get("sample_categories")
+    assert cats is not None, "response must surface sample_categories for FE coverage notes"
+    assert cats["all"] == CANONICAL_CATEGORY_ORDER
+    # present + missing must partition `all` exactly — no overlap, no gaps,
+    # so the FE can trust the lists without re-deriving them.
+    assert set(cats["present"]).isdisjoint(cats["missing"])
+    assert set(cats["present"]) | set(cats["missing"]) == set(cats["all"])
+
+    # On the full canonical dataset every sanitizer rule fires at least
+    # once, so the picker is expected to surface all five categories.
+    for cat in CANONICAL_CATEGORY_ORDER:
+        assert cat in cats["present"], (cat, cats)
+    assert cats["missing"] == [], cats
+
+    # Every category reported "present" must actually be backed by a span
+    # in one of the picked diffs — otherwise the panel's coverage badges
+    # would lie about what the sanitizer did.
+    span_categories = {
+        sp.get("category")
+        for d in sample_diffs
+        for sp in (d.get("removed_spans") or [])
+    }
+    for cat in cats["present"]:
+        assert cat in span_categories, (cat, span_categories)
+
+    # Diversity floor: pre-Task-109 the panel surfaced exactly one
+    # category (pii). Now we expect every sanitizer rule that fired in
+    # the batch to be represented across the picked diffs.
+    assert span_categories.issuperset(set(CANONICAL_CATEGORY_ORDER)), span_categories
+
+
+def test_sample_diffs_emit_missing_note_when_a_category_does_not_fire(client):
+    """When a rule category never fires in the batch, the response must
+    list it under `sample_categories.missing` so the FE can render an
+    explicit "No <category> redactions in this batch" note instead of
+    silently omitting it. We force this by exporting from a synthetic
+    batch whose remarks only trigger PII patterns.
+    """
+    from backend.routes.sentry import _BATCHES, _new_batch
+
+    _login(client, "3456789012")
+
+    # PII-only synthetic batch: EDIPI patterns trigger `pii_edipi`, and
+    # nothing in these remarks matches the geo / comms / classified /
+    # controlled regexes.
+    pii_only = [
+        {
+            "sr_number": f"SR-T109-{i:03d}",
+            "asset_id": f"AST-{i:03d}",
+            "unit_name": "1st Bn",
+            "equipment_type": "MTV",
+            "remark": f"POC EDIPI 12345678{i % 10:02d} for parts request.",
+            "source_classification": "UNCLASSIFIED",
+            "detected_classification_oracle": "UNCLASSIFIED",
+            "sensitive_flags_oracle": ["pii"],
+            "condition": "Operational",
+        }
+        for i in range(5)
+    ]
+    batch = _new_batch(record_source="task109_test", records=pii_only)
+    batch_id = batch["batch_id"]
+    try:
+        r = client.post(
+            "/api/sentry/export",
+            json={
+                "release_authority": "US_ONLY",
+                "format": "json",
+                "include_audit": True,
+                "batch_id": batch_id,
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        cats = body["sample_categories"]
+        # Only pii fires; everything else must show up as missing.
+        assert cats["present"] == ["pii"], cats
+        assert set(cats["missing"]) == {"geo", "comms", "classified", "controlled"}, cats
+        # Order is preserved per CATEGORY_ORDER so the FE renders the
+        # notes in a stable, doctrinal sequence.
+        assert cats["missing"] == ["geo", "comms", "classified", "controlled"]
+    finally:
+        _BATCHES.pop(batch_id, None)
+
+
+def test_sample_diffs_backfill_when_few_categories_fire(client):
+    """When fewer than 3 categories fire we still want at least 3 sample
+    rows so the panel doesn't shrink to a single line. The picker should
+    backfill with additional flagged records (PII-heavy on the canonical
+    dataset) rather than silently emit a one-row panel."""
+    _login(client, "3456789012")
+    body, _ = _export_and_download(client, "json")
+    diffs = body.get("sample_diffs") or []
+    # At minimum the SAMPLE_MIN floor (3) — never the pre-Task-109 single
+    # row that a category-only picker would degrade to on a dataset with
+    # only one firing category.
+    assert len(diffs) >= 3, diffs
+
+
+def test_sample_diff_sr_numbers_are_unique(client):
+    """Belt-and-suspenders: the categorical pass and the backfill pass
+    must not pick the same record twice. Duplicate sr_numbers would
+    blow up the React `key` and confuse a reviewer comparing rows."""
+    _login(client, "3456789012")
+    body, _ = _export_and_download(client, "json")
+    srs = [d["sr_number"] for d in (body.get("sample_diffs") or [])]
+    assert len(srs) == len(set(srs)), srs

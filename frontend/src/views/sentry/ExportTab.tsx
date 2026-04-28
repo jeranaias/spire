@@ -52,7 +52,17 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   // the system-derived behavior (UNCLASSIFIED → A, CUI → B, SECRET+ → C).
   const [distributionOverride, setDistributionOverride] = useState<DistributionOverride>("AUTO");
   const [includeAudit, setIncludeAudit] = useState(true);
-  const [result, setResult] = useState<(ExportResult & { sample_diffs?: DiffSample[] }) | null>(null);
+  const [result, setResult] = useState<
+    | (ExportResult & {
+        sample_diffs?: DiffSample[];
+        // Task #109 — categorical coverage of the sample picker, so the
+        // panel can call out rule categories (geo / comms / classified /
+        // controlled) that didn't fire in this batch instead of silently
+        // omitting them.
+        sample_categories?: SampleCategories;
+      })
+    | null
+  >(null);
   const [loading, setLoading] = useState(false);
   // Task-69 — surface a hard error on the result panel when the doctrinal
   // release-compatibility gate at /api/sentry/export rejects the requested
@@ -506,6 +516,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
               diffs={result.sample_diffs}
               recordClass={result.classification ?? "SECRET"}
               exportId={result.export_id}
+              categories={result.sample_categories}
             />
           )}
         </div>
@@ -538,6 +549,24 @@ type DiffSample = {
   }[];
 };
 
+// Task #109 — categorical coverage of the sample picker. `all` is the
+// canonical category order, `present` is the subset that fired in at
+// least one picked sample, and `missing` is what we render an explicit
+// "No <category> redactions in this batch" note for.
+type SampleCategories = {
+  all: string[];
+  present: string[];
+  missing: string[];
+};
+
+const CATEGORY_LABEL: Record<string, string> = {
+  pii: "PII",
+  geo: "Geo",
+  comms: "Comms",
+  classified: "Classified-marker",
+  controlled: "Controlled item",
+};
+
 const FLAG_COLOR: Record<string, string> = {
   pii: "var(--color-info)",
   geo: "var(--color-primary)",
@@ -550,10 +579,12 @@ function SampleDiffPanel({
   diffs,
   recordClass,
   exportId,
+  categories,
 }: {
   diffs: DiffSample[];
   recordClass: string;
   exportId?: string;
+  categories?: SampleCategories;
 }) {
   const [expanded, setExpanded] = useState<string | null>(diffs[0]?.sr_number ?? null);
   // Task #169 — same click-to-reveal PII gate the Review Queue inspector
@@ -568,6 +599,10 @@ function SampleDiffPanel({
   useEffect(() => {
     piiRedaction.resetRevealed();
   }, [exportId, piiRedaction.resetRevealed]);
+  // Task #109 — only render the missing list if the backend told us
+  // about category coverage; older payloads (or non-export callers)
+  // omit the field, in which case we keep the legacy behavior.
+  const missing = categories?.missing ?? [];
   return (
     <div className="mt-4 border-t border-[var(--color-border)] pt-4">
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -648,6 +683,33 @@ function SampleDiffPanel({
             </div>
           );
         })}
+        {/* Task #109 — explicit "no <category> redactions" notes for
+            rule categories the sanitizer didn't exercise on this batch.
+            Pre-Task-109 these were silently omitted, so a reviewer
+            staring at three PII redactions had no signal that geo /
+            comms / classified / controlled rules were even live. */}
+        {missing.map((cat) => (
+          <div
+            key={`missing-${cat}`}
+            className="rounded-sm border border-dashed border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2"
+            data-testid={`sample-missing-${cat}`}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="rounded-sm border px-1 py-[1px] font-mono text-xs font-semibold uppercase tracking-wider"
+                style={{
+                  color: FLAG_COLOR[cat] || "var(--color-text-muted)",
+                  borderColor: `color-mix(in oklab, ${FLAG_COLOR[cat] || "#666"} 40%, var(--color-border))`,
+                }}
+              >
+                {cat}
+              </span>
+              <span className="font-mono text-xs text-[var(--color-text-muted)]">
+                No {CATEGORY_LABEL[cat] ?? cat} redactions in this batch.
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

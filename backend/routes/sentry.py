@@ -2347,17 +2347,23 @@ async def export_sanitized(request: Request, payload: dict):
     # both an actual sanitized string AND a per-span removed list so the UI
     # can render strike-through on the original AND highlight the replacement
     # token on the sanitized side.
-    sample_diffs: list[dict] = []
-    seen_flags: set = set()
+    #
+    # Task #109 — categorical diversity. Pre-Task-109 the picker just took
+    # the first three records with any sensitive flag; the canonical dataset
+    # is heavily PII-skewed so reviewers saw three PII redactions and could
+    # not tell whether geo / comms / classified / controlled rules had even
+    # fired. The picker now prefers one representative per rule category
+    # (in CATEGORY_ORDER) before backfilling to a 3-sample minimum, and the
+    # response surfaces which categories had no firing record so the FE can
+    # show "No <category> redactions in this batch" rather than silently
+    # omitting the row.
+    CATEGORY_ORDER = ("pii", "geo", "comms", "classified", "controlled")
+    SAMPLE_MIN = 3
+
+    candidates: list[dict] = []
     for r in records:
         decision = decisions.get(r.get("sr_number", ""), {})
         if decision.get("action") == "reject":
-            continue
-        flags = r.get("sensitive_flags_oracle") or []
-        if not flags:
-            continue
-        new_flags = [f for f in flags if f not in seen_flags]
-        if not new_flags and len(sample_diffs) >= 3:
             continue
         original = r.get("remark", "")
         if not original:
@@ -2393,18 +2399,52 @@ async def export_sanitized(request: Request, payload: dict):
             out_chunks.append(original[cursor:])
         sanitized = "".join(out_chunks)
 
-        sample_diffs.append({
+        cats_in_record = {h.get("category") for h in highlights if h.get("category")}
+        candidates.append({
             "sr_number": r.get("sr_number", ""),
             "unit_name": r.get("unit_name", ""),
             "equipment_type": r.get("equipment_type", ""),
-            "flags": flags,
+            "flags": r.get("sensitive_flags_oracle") or sorted(cats_in_record),
             "original": original,
             "sanitized": sanitized,
             "removed_spans": removed_spans,
+            "_cats": cats_in_record,
         })
-        seen_flags.update(flags)
-        if len(sample_diffs) >= 3:
+
+    sample_diffs: list[dict] = []
+    picked_srs: set = set()
+    covered: set = set()
+    # First pass: one record per rule category, in stable doctrinal order,
+    # so the panel exercises every sanitizer rule that fired in this batch.
+    for cat in CATEGORY_ORDER:
+        for c in candidates:
+            if c["sr_number"] in picked_srs:
+                continue
+            if cat in c["_cats"]:
+                sample_diffs.append(c)
+                picked_srs.add(c["sr_number"])
+                covered.update(c["_cats"])
+                break
+    # Second pass: backfill to the SAMPLE_MIN floor with whatever flagged
+    # records remain (PII-heavy in the canonical dataset, which is fine —
+    # the categorical pass already proved coverage above the fold).
+    for c in candidates:
+        if len(sample_diffs) >= SAMPLE_MIN:
             break
+        if c["sr_number"] in picked_srs:
+            continue
+        sample_diffs.append(c)
+        picked_srs.add(c["sr_number"])
+        covered.update(c["_cats"])
+
+    for c in sample_diffs:
+        c.pop("_cats", None)
+
+    sample_categories = {
+        "all": list(CATEGORY_ORDER),
+        "present": [c for c in CATEGORY_ORDER if c in covered],
+        "missing": [c for c in CATEGORY_ORDER if c not in covered],
+    }
 
     # Bundle as zip
     export_id = f"EXP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
@@ -2536,6 +2576,12 @@ async def export_sanitized(request: Request, payload: dict):
         "classification_banner": f"// CLASSIFICATION: {cls_banner_text} //",
         "download_url": f"/api/sentry/download/{export_id}",
         "sample_diffs": sample_diffs,
+        # Task #109 — surfaces which sanitizer rule categories actually
+        # fired (and which did not) so the SampleDiffPanel can render
+        # explicit "No <category> redactions in this batch" notes
+        # instead of silently omitting categories the operator expects
+        # to see exercised.
+        "sample_categories": sample_categories,
         # Task-69 — surface release-compatibility warnings (status="warn")
         # so the FE can render a yellow banner above the result panel.
         # `release_blocked` cases never reach this return — they raise 403
