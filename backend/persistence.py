@@ -397,6 +397,7 @@ def query_audit(
     kinds: Optional[list[str]] = None,
     resource_prefixes: Optional[list[str]] = None,
     classification: Optional[str] = None,
+    subject_id: Optional[str] = None,
     after_ts: Optional[str] = None,
     before_ts: Optional[str] = None,
     q: Optional[str] = None,
@@ -449,6 +450,14 @@ def query_audit(
         sql_clauses.append(f"({ors})")
         for p in resource_prefixes:
             sql_params.append(f"{p}%")
+    if subject_id:
+        # Exact-match scope on subject_id — drives the "jump from a Mark
+        # recommendation to its audit row" deep-link from the Mark Draft
+        # surface. Distinct from `q` (free-text LIKE) so the filter narrows
+        # to the single chain row that the operator just produced rather
+        # than every row whose payload happens to contain the same string.
+        sql_clauses.append("subject_id = ?")
+        sql_params.append(subject_id)
     if after_ts:
         sql_clauses.append("ts >= ?")
         sql_params.append(after_ts)

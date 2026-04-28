@@ -18,6 +18,7 @@
  * a fallback identity so the column never renders blank.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   api,
   type AuditEntry,
@@ -155,7 +156,20 @@ export function AuditView() {
   // show the hash-chained record, regardless of which mock identity
   // is currently signed in. Outside stage mode the wall is unchanged.
   const stageMode = useSpireStore((s) => s.stageMode);
-  if (role !== "security_manager" && !stageMode) {
+
+  // Task #91 — subject-scoped deep-link from MarkTab. The "Chain entry #N"
+  // in the Mark Draft right-pane links here with `?subject_id=mark_<hash>`
+  // so the operator who just produced the marking can see the full
+  // hash-chained audit row. The role check below admits data_custodian
+  // when the URL is subject-scoped (the backend mirrors this narrow
+  // bypass — see `_subject_scoped_data_custodian` in
+  // `backend/routes/system.py`). Without a subject_id in the URL, the
+  // viewer stays gated to security_manager as before.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSubjectId = searchParams.get("subject_id") || "";
+  const subjectScopedDataCustodian = role === "data_custodian" && !!urlSubjectId;
+
+  if (role !== "security_manager" && !stageMode && !subjectScopedDataCustodian) {
     return (
       <InsufficientPrivilege
         feature="Audit · SOC View"
@@ -169,6 +183,10 @@ export function AuditView() {
   const [kinds, setKinds]         = useState<string[]>([]);
   const [resource, setResource]   = useState<string[]>([]);
   const [classification, setClassification] = useState<string>("");
+  // Task #91 — seeded from `?subject_id=...` so a deep-link from
+  // MarkTab lands with the filter already applied. Operator-clearable
+  // via the chip rendered above the table.
+  const [subjectId, setSubjectId] = useState<string>(urlSubjectId);
   // MDM 2026 stage-pivot — when the host opens AUDIT from the stage
   // pill it should land on the closing-beat reveal: every operator
   // decision across the four use cases in the last 15 minutes,
@@ -222,7 +240,14 @@ export function AuditView() {
   // Reset to page 0 whenever a filter changes — otherwise a narrowed result
   // set leaves the operator on an empty trailing page. Use the *debounced*
   // search value so the page doesn't reset on every keystroke.
-  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms, onlyRoleOnly]);
+  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, subjectId, tw, customAfter, customBefore, debouncedQ, onlyAnoms, onlyRoleOnly]);
+
+  // Task #91 — keep local subjectId state in lockstep with the URL.
+  // Hydrating off `urlSubjectId` directly in the filterParams memo would
+  // re-fetch on every render of the parent route (Router rewrites the
+  // location object); routing through state lets the operator clear the
+  // chip without losing the URL altogether.
+  useEffect(() => { setSubjectId(urlSubjectId); }, [urlSubjectId]);
 
   // Filter signature *without* pagination — drives both the page query
   // (joined with limit/offset) and the export-set fetch (limit 500).
@@ -238,13 +263,14 @@ export function AuditView() {
       kinds:          kinds.length  ? kinds  : undefined,
       resource:       resource.length ? resource : undefined,
       classification: classification || undefined,
+      subject_id:     subjectId || undefined,
       after:          range.after,
       before:         range.before,
       q:              debouncedQ.trim() || undefined,
       only_anomalies: onlyAnoms || undefined,
       only_role_only: onlyRoleOnly || undefined,
     };
-  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms, onlyRoleOnly]);
+  }, [actors, kinds, resource, classification, subjectId, tw, customAfter, customBefore, debouncedQ, onlyAnoms, onlyRoleOnly]);
 
   const queryParams = useMemo<AuditQueryParams>(() => ({
     ...filterParams,
@@ -665,11 +691,51 @@ export function AuditView() {
                 setActors([]); setKinds([]); setResource([]); setClassification("");
                 setTw("any"); setCustomAfter(""); setCustomBefore(""); setQ("");
                 setOnlyAnoms(false); setOnlyRoleOnly(false);
+                // Task #91 — clearing filters also drops the deep-link
+                // subject scope so the operator goes back to the full
+                // SOC view (security_manager only — data_custodian who
+                // came in via subject deep-link will land back on the
+                // InsufficientPrivilege overlay, which is correct).
+                setSubjectId("");
+                if (searchParams.has("subject_id")) {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete("subject_id");
+                  setSearchParams(next, { replace: true });
+                }
               }}
             >
               Clear filters
             </Button>
           </div>
+
+          {/* Task #91 — subject_id deep-link chip. Renders only when the
+              filter is active so the SOC analyst's normal workflow is
+              undisturbed. The chip name carries the literal subject_id
+              (e.g. mark_<hash[:12]>) so the investigator can read the
+              same id back to a curl call against `/api/system/admin/audit`. */}
+          {subjectId && (
+            <div className="col-span-12">
+              <FilterLabel>Resource subject</FilterLabel>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Chip
+                  active
+                  onClick={() => {
+                    setSubjectId("");
+                    if (searchParams.has("subject_id")) {
+                      const next = new URLSearchParams(searchParams);
+                      next.delete("subject_id");
+                      setSearchParams(next, { replace: true });
+                    }
+                  }}
+                  label={`SUBJECT ${subjectId} ✕`}
+                  tone="warn"
+                />
+                <span className="font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-wider">
+                  Linked from Mark Draft · click ✕ to clear scope
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Actors */}
           <div className="col-span-12 lg:col-span-4">
@@ -757,7 +823,16 @@ export function AuditView() {
             <EmptyState
               title="No audit entries match these filters"
               description="Loosen the time window or clear a chip; the chain itself is intact."
-              action={<Button size="sm" variant="secondary" onClick={() => { setActors([]); setKinds([]); setResource([]); setClassification(""); setTw("any"); setQ(""); setOnlyAnoms(false); setOnlyRoleOnly(false); }}>Clear filters</Button>}
+              action={<Button size="sm" variant="secondary" onClick={() => {
+                setActors([]); setKinds([]); setResource([]); setClassification("");
+                setTw("any"); setQ(""); setOnlyAnoms(false); setOnlyRoleOnly(false);
+                setSubjectId("");
+                if (searchParams.has("subject_id")) {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete("subject_id");
+                  setSearchParams(next, { replace: true });
+                }
+              }}>Clear filters</Button>}
             />
           </div>
         ) : (

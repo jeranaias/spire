@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { api, type MarkResult } from "../../api";
 import { formatApiError } from "../../api-retry";
@@ -52,6 +53,7 @@ const SAMPLES = [
 
 export function MarkTab() {
   const role = useSpireStore((s) => s.role);
+  const navigate = useNavigate();
   // Walkthrough #3 — uncontrolled textarea so fast typing doesn't drop
   // characters through React's controlled-input round-trip.
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -215,6 +217,7 @@ function MarkResultPanel({
   pushToast: ReturnType<typeof useSpireStore.getState>["pushToast"];
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
+  const navigate = useNavigate();
   const piiRedaction = usePiiRedaction(result.recommended_classification);
   // Reset reveals when a fresh marking lands so revealed evidence from a
   // prior input doesn't bleed onto the next sample. Projection mode is
@@ -360,13 +363,39 @@ function MarkResultPanel({
           {/* Chain index returned by the backend audit table. Same
            * row id an investigator pulls in the audit-log viewer —
            * proves the marking actually wrote to the chain instead
-           * of just being claimed in the UI. */}
+           * of just being claimed in the UI.
+           *
+           * Task #91 — render as a button that deep-links to the SOC
+           * audit viewer pre-filtered to this exact subject_id
+           * (`mark_<input_hash[:12]>`, returned as `chain_subject` by
+           * the Mark endpoint). Closes the loop a judge or
+           * investigator used to walk by hand: no more leaving the
+           * page to copy/paste a subject id into the audit viewer's
+           * free-text search. The destination route's role gate
+           * admits both data_custodian (subject-scoped narrow bypass)
+           * and security_manager — see the `subjectScopedDataCustodian`
+           * branch in AuditView.tsx. */}
           {typeof result.audit.chain_index === "number" && (
             <div>
               Chain entry:{" "}
-              <span className="font-mono text-[var(--color-text)]">
-                #{result.audit.chain_index}
-              </span>
+              {result.audit.chain_subject ? (
+                <Pressable
+                  block={false}
+                  onClick={() => {
+                    const sid = result.audit.chain_subject!;
+                    navigate(`/admin/audit?subject_id=${encodeURIComponent(sid)}`);
+                  }}
+                  className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-[1px] font-mono text-sm font-semibold text-[var(--color-primary)] underline-offset-2 hover:border-[var(--color-primary)] hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-primary)]"
+                  title={`Open the audit-log viewer pre-filtered to subject ${result.audit.chain_subject}`}
+                  aria-label={`Open chain entry ${result.audit.chain_index} in the audit-log viewer`}
+                >
+                  #{result.audit.chain_index} ↗
+                </Pressable>
+              ) : (
+                <span className="font-mono text-[var(--color-text)]">
+                  #{result.audit.chain_index}
+                </span>
+              )}
               {result.audit.input_hash && (
                 <span
                   className="ml-2 font-mono text-xs text-[var(--color-text-muted)]"

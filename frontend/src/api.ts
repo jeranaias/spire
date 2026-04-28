@@ -385,6 +385,7 @@ export const api = {
       if (params.kinds?.length)   sp.set("kinds",   params.kinds.join(","));
       if (params.resource?.length) sp.set("resource", params.resource.join(","));
       if (params.classification)  sp.set("classification", params.classification);
+      if (params.subject_id)      sp.set("subject_id", params.subject_id);
       if (params.after)           sp.set("after",  params.after);
       if (params.before)          sp.set("before", params.before);
       if (params.q)               sp.set("q",      params.q);
@@ -1474,6 +1475,10 @@ export interface AuditQueryParams {
   kinds?: string[];
   resource?: string[];
   classification?: string;
+  // Task #91 — exact-match scope on a single chain subject. Drives the
+  // "jump from a Mark recommendation to its audit row" deep-link from
+  // MarkTab.tsx (subject format `mark_<input_hash[:12]>`).
+  subject_id?: string;
   after?: string;
   before?: string;
   q?: string;

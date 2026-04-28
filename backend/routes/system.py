@@ -740,6 +740,7 @@ async def admin_audit(
     kinds: str | None = None,
     resource: str | None = None,
     classification: str | None = None,
+    subject_id: str | None = None,
     after: str | None = None,
     before: str | None = None,
     q: str | None = None,
@@ -754,6 +755,9 @@ async def admin_audit(
       - resource: comma-separated kind-prefix list (e.g. 'sentry,pulse').
       - classification: exact match against payload.classification|
         required_classification|_classification (case-insensitive).
+      - subject_id: exact-match scope on a single chain subject (drives
+        the "jump from a Mark recommendation to its audit row" deep-link
+        from `frontend/src/views/sentry/MarkTab.tsx`).
       - after / before: ISO8601 timestamp window.
       - q: free-text LIKE across actor/kind/subject/payload.
       - only_anomalies: filter to broken-chain + spillage + downgrade rows.
@@ -779,8 +783,22 @@ async def admin_audit(
     MDM 2026 stage-pivot — same stage-demo bypass as `/audit` so the
     AUDIT-pill closing beat works for any signed-in presenter when
     `SPIRE_DEMO_QUICK_SWITCH=1`.
+
+    Task #91 — narrow subject-scoped bypass for data_custodian. The Mark
+    Draft surface (data_custodian + security_manager) needs an
+    operator-clickable jump from "Chain entry #N" to the audit row of
+    the marking they just produced. Granting data_custodian *full* SOC
+    audit read access would broaden cross-role decision-history visibility
+    well beyond what they need; instead, when `subject_id` is supplied
+    AND the caller is signed in as data_custodian, we let the read
+    through but only for that single subject. Other filter params are
+    still honoured but the subject_id clause keeps the result set scoped.
     """
-    if not _stage_demo_open(request):
+    user = getattr(request.state, "user", None)
+    subject_scoped_data_custodian = bool(
+        subject_id and user is not None and (role or "") == "data_custodian"
+    )
+    if not _stage_demo_open(request) and not subject_scoped_data_custodian:
         require_role(role, AUDIT_READ_ROLES, "audit.soc_view")
 
     actor_list = [a for a in (actors or "").split(",") if a]
@@ -797,6 +815,7 @@ async def admin_audit(
         kinds=kind_list or None,
         resource_prefixes=resource_list or None,
         classification=classification,
+        subject_id=subject_id,
         after_ts=after,
         before_ts=before,
         q=q,
