@@ -37,10 +37,12 @@ import { ClassificationBadge } from "../components/classification/Classification
 
 // Mirror of `backend/scoping.py SCENARIO_CONTROL_ROLES`. The mission-clock
 // control endpoint (play / pause / seek / reset) returns 403 for any
-// other role. Disabling Reset locally for those roles avoids the FE
-// snapping back to beat 0 while the backend mission clock keeps the
-// previous `fired_events` set — i.e. the cockpit pretending it ran a
-// reset that the backend rejected.
+// other role. Hiding Reset locally for those roles avoids the FE snapping
+// back to beat 0 while the backend mission clock keeps the previous
+// `fired_events` set — i.e. the cockpit pretending it ran a reset that
+// the backend rejected. We hide rather than disable to match the
+// SENTRY release / secure-wipe convention of dropping the affordance
+// entirely for unauthorized roles instead of leaving dangling UI.
 const SCENARIO_CONTROL_ROLES = new Set([
   "security_manager",
   "mef_commander",
@@ -161,9 +163,13 @@ export function DemoView() {
   // residual fired events. Issues the backend call FIRST so the FE only
   // claims a reset that actually landed; on rejection the FE state stays
   // put and a sticky inline error names the failure. The Reset button is
-  // additionally disabled in render for roles outside SCENARIO_CONTROL_ROLES,
-  // so the only way into this catch block is a transient backend / DDIL
-  // failure for an authorized operator.
+  // not rendered at all for roles outside SCENARIO_CONTROL_ROLES, so the
+  // only way into this catch block is a transient backend / DDIL failure
+  // for an authorized operator.
+  //
+  // The `R` cockpit hotkey below mirrors the same role gate — non-operator
+  // roles never bind the listener, so the affordance (button + hotkey +
+  // legend row) is hidden as a single coherent unit.
   async function handleReset() {
     setResetError(null);
     try {
@@ -186,6 +192,35 @@ export function DemoView() {
     // alert / forecast / audit feeds.
     reset();
   }
+
+  // Cockpit-local `R` hotkey for Reset. Bound only when the role is
+  // operator-class so the affordance stays role-gated as a unit (button
+  // + hotkey + legend row all appear / disappear together). Bubble-phase
+  // listener so it sits below the global ScenarioPlayerHost capture
+  // listener that owns Space / arrows / P / N.
+  useEffect(() => {
+    if (!canControlScenario) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement ||
+        (t instanceof HTMLElement && t.isContentEditable)
+      ) return;
+      if (e.key.toLowerCase() !== "r") return;
+      if (!useScenarioPlayer.getState().beats.length) return;
+      e.preventDefault();
+      void handleReset();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // handleReset is stable for the life of the component (closure over
+    // setResetError/pushToast/reset which are zustand-stable selectors),
+    // so we don't list it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canControlScenario]);
 
   const totalDwellSeconds = useMemo(() => {
     if (!beats.length) return 0;
@@ -355,24 +390,18 @@ export function DemoView() {
               >
                 Next ▶▶
               </Pressable>
-              <Pressable
-                onClick={handleReset}
-                block={false}
-                disabled={!beats.length || !canControlScenario}
-                aria-label={
-                  canControlScenario
-                    ? "Reset to first beat"
-                    : "Reset disabled — this role can't drive the mission clock"
-                }
-                title={
-                  canControlScenario
-                    ? "Reset to first beat (also resets the backend mission clock)"
-                    : "Reset disabled — only MEF Commander, G4, or Security Manager can reset the mission clock"
-                }
-                className="!min-h-0 flex h-9 items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-40 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-secondary)]"
-              >
-                ⟲ Reset
-              </Pressable>
+              {canControlScenario && (
+                <Pressable
+                  onClick={handleReset}
+                  block={false}
+                  disabled={!beats.length}
+                  aria-label="Reset to first beat"
+                  title="Reset to first beat (also resets the backend mission clock)"
+                  className="!min-h-0 flex h-9 items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)] disabled:opacity-40 disabled:hover:border-[var(--color-border)] disabled:hover:text-[var(--color-text-secondary)]"
+                >
+                  ⟲ Reset
+                </Pressable>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <fieldset className="flex items-center gap-1.5">
@@ -514,6 +543,14 @@ export function DemoView() {
             <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">←</kbd> · previous beat</li>
             <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">P</kbd> · play / pause</li>
             <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">N</kbd> · narration on / off</li>
+            {/* Reset row mirrors the toolbar Reset button — both are
+              * gated on canControlScenario so non-operator roles
+              * (data_custodian, maintenance_chief) never see the
+              * affordance. The `R` hotkey is wired in a sibling
+              * useEffect with the same role gate. */}
+            {canControlScenario && (
+              <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">R</kbd> · reset to first beat</li>
+            )}
             <li><kbd className="rounded-sm border border-[var(--color-warning)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-warning)]">F9</kbd> · failsafe (recorded backup)</li>
             <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">Esc</kbd> · close failsafe</li>
           </ul>
