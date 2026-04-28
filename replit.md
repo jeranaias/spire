@@ -2,20 +2,17 @@
 
 ## Overview
 
-SPIRE (Sanitization, Prediction, Intelligence, Readiness Engine) is a contested-logistics operating system designed to provide sanitization, prediction, intelligence, and readiness capabilities, originally built for USMC pilots. The project aims to offer a robust operating system for contested logistics environments.
+SPIRE (Sanitization, Prediction, Intelligence, Readiness Engine) is a contested-logistics operating system designed to provide sanitization, prediction, intelligence, and readiness capabilities. Originally built for USMC pilots, its primary purpose is to offer a robust operating system for contested logistics environments.
 
 Key capabilities include:
 - Generating synthetic canonical datasets.
-- Serving a REST API.
-- Providing a dynamic frontend for user interaction.
+- Providing a REST API and a dynamic frontend.
 - Implementing a comprehensive authentication system with role-based access control.
 - Managing classification and export controls for sensitive data.
-- Integrating with external logistics systems (GCSS-MC, OMS-UCI, MIL-STD-6016).
-- Simulating various communication states for disaster preparedness drills.
+- Integrating with external logistics systems and simulating communication states.
 - Maintaining a model registry for AI/ML supply chain transparency.
 - Offering a "Decision Bridge" dashboard for critical decision-making.
-- Supporting scenario-based vignettes for training and demonstration purposes.
-- Providing an in-app pitch deck and live-demo failsafe mechanisms for presentations.
+- Supporting scenario-based vignettes for training and demonstration.
 
 ## User Preferences
 
@@ -27,21 +24,15 @@ Key capabilities include:
 
 ## System Architecture
 
-The SPIRE application is built with a clear separation between its backend and frontend components, designed for scalability and maintainability.
+The SPIRE application features a clear separation between its backend and frontend components, designed for scalability and maintainability.
 
 ### UI/UX Decisions
-- **Frontend Framework**: React 19 with Vite 8 and TypeScript.
-- **Styling**: Tailwind 4 for utility-first CSS.
-- **Mapping**: MapLibre for geographical data visualization.
-- **Charting**: Recharts for data representation.
-- **State Management**: Zustand for reactive state management.
-- **Routing**: React Router for navigation.
-- **Authentication UI**: CAC cert-selection splash at `/#/auth` with mocked Marine roles.
-- **TopBar**: Features identity pill, role badge, sign-out, and specific operational indicators like `GcssMcSyncPill` and `MissionClock`.
-- **Classification Display**: `ClassificationBadge.tsx` for visual representation of data classification levels.
-- **Joint COP Preview**: Faux Navy/Joint "JLTC" shell (`JointPreviewView`) with a distinct steel-blue palette and fouled-anchor mark. Hardened for the contested fight (Task #79): JLTC topbar surfaces a 4-state SPIRE comms control (CONN/LIM/INT/DISC) wired to `useSpireStore.ddilMode` so the shared API interceptor's latency / packet-loss / cache effects apply to this tab too. Auto-refreshes the OMS/UCI export on a comms-aware cadence (30s default, 60s on LIMITED, polling suspended on DISCONNECTED with the cached payload still rendered behind a red "STALE — DISCONNECTED · last good pull T-Ns" stripe). A fixed "what's hot now" 4-cell strip (worst alert, worst MC unit, C3/C4 unit count, active alert count) sits between topbar and tables for ≤5-second glance reads. Pulled/Published pills now show relative `T-Ns` ages that tick at 1Hz. Projection legibility pass: classification banner 18px bold; field values and table cells 14px. ErrorPanel hint corrected — any SECRET-cleared operator can pull (no longer claims only Security Manager / MEF Commander), and a 401 surfaces an actionable "Sign in to SPIRE" link instead of the generic clearance hint.
-- **Decision Bridge**: 6x2 grid layout designed to fit without vertical scroll at 1920x1080 resolution.
-- **Stage Mode (MDM 2026 pivot)**: `?stage=1` query param activates an 8-minute demo UI that collapses SPIRE to four hero use-case tiles (SENTRY, PULSE, BASTION, DHA RESCUE). Persists in `sessionStorage`, hydrated in `main.tsx` before first paint, gated throughout TopBar/DecisionBridge/AuditView. Adds `/dha-rescue` route, AUDIT pill, and an additive `POST /api/auth/quick-switch` endpoint (env-gated by `SPIRE_DEMO_QUICK_SWITCH=1`) for presenter role-hopping without PIN re-entry. Presenter rehearsal aid at `scripts/demo_rehearsal.ts`.
+- **Frontend Technologies**: React 19, Vite 8, TypeScript, Tailwind 4, MapLibre, Recharts, Zustand, React Router.
+- **Authentication UI**: CAC cert-selection splash with mocked Marine roles, identity pill, and role badges in the TopBar.
+- **Classification Display**: Visual representation of data classification levels.
+- **Joint COP Preview**: A simulated Navy/Joint "JLTC" shell with distinct styling and communication control for disaster preparedness drills.
+- **Decision Bridge**: A 6x2 grid layout optimized for 1920x1080 resolution.
+- **Stage Mode**: An 8-minute demo UI (`?stage=1`) collapsing SPIRE to four hero use-case tiles (SENTRY, PULSE, BASTION, DHA RESCUE), with presenter role-hopping capabilities.
 
 ### Technical Implementations
 - **Backend Framework**: FastAPI (Python 3.12) for high-performance API services.
@@ -72,25 +63,25 @@ The SPIRE application is built with a clear separation between its backend and f
 - **Per-asset Bill of Materials (Task #161)**: `backend/bom.py` augments canonical Asset records at runtime with an installed-component list (NSN + slot + serviceable state) derived from `dataset/data/equipment_profiles.json`. Core fault parts (the lead NSN of each fault block) are installed on every hull; sub-variant optional parts are present on ~80% of hulls keyed deterministically by `sha256(asset_id|nsn)`, so two JLTVs of different sub-variants no longer report identical BOMs. The PULSE `/cannibalization` endpoint filters strippable donors via `asset_carries_nsn_serviceable(donor, recipient_nsn, donor_open_classes)` instead of the old equipment-type proxy, and surfaces a `slot` label (e.g. "Right rear hub assembly") on each donor card. The `/cannibalization/propose` endpoint applies the same gate so a hand-rolled POST cannot smuggle a logically impossible donor into the audit chain (rejects with `DonorBomMismatch`). Augmentation lives outside `dataset/` to honor the canonical-fixtures rule.
 
 ### System Design Choices
-- **Development Environment Setup**: Frontend (Vite dev server) listens on `0.0.0.0:5000` and proxies `/api/*` to the backend. Backend (FastAPI) listens on `127.0.0.1:8000`. Two Replit workflows run side by side: `Frontend` (webview, port 5000) and `Backend` (console, port 8000). `vite.config.ts` already sets `server.allowedHosts: true` so the proxied iframe origin is trusted.
-- **Production / Deploy**: `vm` deployment target; build step runs `npm install && npm run build` inside `frontend/`, and the run command starts `uvicorn backend.main:app --host 0.0.0.0 --port 5000` — FastAPI then serves `frontend/dist/` from `/` and the API from `/api/*` on the same origin.
-- **CORS Configuration**: Widened (`allow_origin_regex=".*"`, `allow_credentials=False`) for Replit's proxied iframe origin.
-- **Single Source of Truth**: Backend serves as the truth source for authentication, classification, and scenario state.
-- **Modularity**: Design system primitives for classification, dedicated modules for scenario management, and separate routes for different functionalities.
-- **Determinism**: Canonical seeded dataset ensures bit-identical content across boots; runtime artifacts are deterministic in structure but anchored to the H+0 pin moment.
-- **Security**: Strict role-based gating for sensitive actions and views, audit logging for all critical operations, and classification enforcement for data handling.
+- **Development Environment**: Frontend (Vite dev server on `0.0.0.0:5000`) proxies API requests to Backend (FastAPI on `127.0.0.1:8000`).
+- **Production Deployment**: `uvicorn backend.main:app --host 0.0.0.0 --port 5000` serves the frontend from `/` and API from `/api/*`.
+- **CORS Configuration**: Widened for Replit's proxied iframe origin.
+- **Single Source of Truth**: Backend serves as the truth source for core application states.
+- **Modularity**: Design system primitives, dedicated modules, and separate routes for various functionalities.
+- **Determinism**: Canonical seeded dataset ensures consistent content across boots.
+- **Security**: Role-based gating, audit logging, and classification enforcement.
 
 ## External Dependencies
 
 - **Vite**: Frontend build tool.
 - **Tailwind CSS**: Utility-first CSS framework.
 - **MapLibre**: Open-source library for interactive maps.
-- **Recharts**: Composable charting library built with React.
-- **Zustand**: Small, fast, and scalable bearbones state-management solution.
-- **React Router**: Declarative routing for React.
-- **Uvicorn**: ASGI server for FastAPI.
-- **GCSS-MC**: External logistics system integrated for data exchange (reference implementation only).
+- **Recharts**: React charting library.
+- **Zustand**: State-management solution.
+- **React Router**: Routing for React.
+- **Uvicorn**: ASGI server.
+- **GCSS-MC**: External logistics system (reference implementation).
 - **OMS-UCI**: External system for Joint COP export.
 - **MIL-STD-6016 (Link 16)**: External standard for Joint COP export.
-- **Gemma 4 26B FP8**: Self-hosted LLM model (`copilot-llm`) as part of the model registry.
-- **Thornveil proprietary**: Proprietary model (`thermalhawk-detector`) listed in the model registry.
+- **Gemma 4 26B FP8**: Self-hosted LLM model.
+- **Thornveil proprietary**: Proprietary model (`thermalhawk-detector`).
