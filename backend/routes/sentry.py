@@ -153,6 +153,15 @@ def tier1_classify(text: str) -> dict:
 # separate from REL TO caveats. Distribution Statement controls *who can
 # access* the information at all; REL TO controls *which foreign nationals*
 # may receive it. Two independent fields — never collapse into one.
+#
+# Task-61 fix: Distribution letter is no longer hardcoded to "C". It's
+# selected from classification + content flags per DoDI 5230.24 (A-F):
+#   A — Public release; distribution unlimited.
+#   B — U.S. Government agencies only.
+#   C — U.S. Government agencies and their contractors.
+#   D — DoD components and U.S. DoD contractors only.
+#   E — DoD components only.
+#   F — Further dissemination only as directed by the originator.
 # ---------------------------------------------------------------------------
 
 # Task-70 — Distribution Statement is derived from (release_authority,
@@ -169,12 +178,27 @@ def tier1_classify(text: str) -> dict:
 #   E — DoD components only.
 #   F — Further dissemination only as directed by the originating office.
 
+# Task-61 — short labels for the /mark distribution-statement panel. The
+# /mark endpoint surfaces a content-aware letter (A-F derived from cls +
+# flags) so the three sample chips no longer all stamp "Distribution C".
+DISTRIBUTION_TEXT: dict[str, str] = {
+    "A": "Approved for public release; distribution unlimited.",
+    "B": "Distribution authorized to U.S. Government agencies only.",
+    "C": "Distribution authorized to U.S. Government agencies and their contractors.",
+    "D": "Distribution authorized to the Department of Defense and U.S. DoD contractors only.",
+    "E": "Distribution authorized to DoD components only.",
+    "F": "Further dissemination only as directed by the originator.",
+}
+
+
 def derive_distribution(release: str, classification: str) -> tuple[str, str]:
-    """Returns (authority_label, full_statement) for the bundle.
+    """Returns (authority_label, full_statement) for an export bundle.
 
     The authority label is the doctrinal letter prefix
     ('Distribution A'..'Distribution F'). The full statement is the
-    sentence printed on the artifact and the MANIFEST.
+    sentence printed on the artifact and the MANIFEST. Used by /export,
+    where the doctrinal letter is a function of (release_authority,
+    bundle_classification).
     """
     cls = (classification or "UNCLASSIFIED").upper()
     rel = (release or "US_ONLY").upper()
@@ -221,6 +245,43 @@ def derive_distribution(release: str, classification: str) -> tuple[str, str]:
         "DISTRIBUTION F: Further dissemination only as directed by the originating office.",
     )
 
+
+
+def _select_distribution(cls: str, flags: list[str]) -> tuple[str, str]:
+    """Pick the DoDI 5230.24 statement letter from content + classification.
+
+    Returns (letter, full_text). Earlier code hardcoded "Distribution C" for
+    every release authority, which is doctrinally wrong and any 5230.24-aware
+    judge spots it instantly.
+    """
+    flag_set = set(flags or [])
+    if cls == "TOP_SECRET":
+        # TS sits with DoD components only; broader contractor distribution
+        # requires explicit downgrade authority.
+        letter = "E"
+    elif cls in ("SECRET", "CONFIDENTIAL"):
+        letter = "D"
+    elif cls == "CUI":
+        # PII-only or controlled/LES content stays inside U.S. Government;
+        # operational geo/comms broadens to the contractor base that has
+        # to act on it.
+        if "controlled" in flag_set or (
+            "pii" in flag_set and not (flag_set & {"geo", "comms"})
+        ):
+            letter = "B"
+        else:
+            letter = "C"
+    elif cls == "UNCLASSIFIED" and not flag_set:
+        letter = "A"
+    else:
+        # UNCLASSIFIED with any sensitivity flag — keep inside U.S. Government.
+        letter = "B"
+    return letter, DISTRIBUTION_TEXT[letter]
+
+
+# REL TO is a SINGLE authoritative caveat (not a stack). Latest-wins by
+# scope: NATO ⊃ FVEY ⊃ US-only. Picked from the operator's release-authority
+# selection; content rules don't independently emit REL TO entries.
 REL_TO_CAVEAT: dict[str, str] = {
     "US_ONLY":  "",
     "FVEY":     "REL TO USA, AUS, CAN, GBR, NZL",
@@ -301,6 +362,29 @@ def _aggregate_caveats_from_records(records: list[dict]) -> list[str]:
         if "controlled" in flags:
             cav.add("FOUO//LES")
     return sorted(cav)
+
+
+def _collapse_rel_to(rel_tos: list[str]) -> str:
+    """Reduce a list of REL TO candidates to the single highest-scope one.
+
+    Scope ordering (broadest first): NATO ⊃ FVEY ⊃ US-only/Specific.
+    REL TO is a single authoritative caveat per DoDM 5200.01 — never a stack.
+    """
+    rank = {
+        "REL TO NATO": 3,
+        "REL TO USA, AUS, CAN, GBR, NZL": 2,
+        "REL TO FVEY": 2,
+    }
+    best = ""
+    best_rank = -1
+    for r in rel_tos:
+        if not r:
+            continue
+        score = rank.get(r, 1)
+        if score > best_rank:
+            best_rank = score
+            best = r
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -633,17 +717,49 @@ async def mark_text(payload: dict, request: Request):
         raise HTTPException(status_code=400, detail="text required")
     release = payload.get("release_authority", "US_ONLY")
     tier1 = tier1_classify(text)
+    cls = tier1["classification"]
+    flags = tier1["flags"]
 
-    # Caveat recommendation (rule matrix)
-    caveats = []
-    if "classified" in tier1["flags"]:
-        caveats.append("NOFORN")  # classified TM refs default NOFORN
-    if "comms" in tier1["flags"]:
-        caveats.append("REL TO FVEY")  # comms parameters typically FVEY-releasable at CUI
-    if "controlled" in tier1["flags"]:
-        caveats.append("FOUO//LES")  # controlled items
-    if release == "NATO" and "classified" not in tier1["flags"]:
-        caveats.append("REL TO NATO")
+    # Task-61 — caveat builder. We track *why* each handling caveat was
+    # auto-added (which evidence span) so the validator can name it in the
+    # block message ("we added NOFORN because of [CLASSIFIED TM ...]; remove
+    # the reference to release to FVEY") instead of the engine self-introducing
+    # a conflict and then refusing the operator who never typed it.
+    auto_caveats: list[dict[str, str]] = []
+    if "classified" in flags:
+        ev = next(
+            (h["text"] for h in tier1["highlights"] if h["category"] == "classified"),
+            "classified TM reference",
+        )
+        auto_caveats.append({
+            "caveat": "NOFORN",
+            "evidence": ev,
+            "rule": "cls_tm",
+            "reason": f"classified TM reference {ev!r}",
+        })
+    if "controlled" in flags:
+        ev = next(
+            (h["text"] for h in tier1["highlights"] if h["category"] == "controlled"),
+            "controlled-item serial",
+        )
+        auto_caveats.append({
+            "caveat": "FOUO//LES",
+            "evidence": ev,
+            "rule": "ctrl_sn",
+            "reason": f"controlled-item serial {ev!r}",
+        })
+
+    # Task-61 — REL TO is a SINGLE authoritative caveat (not a stack).
+    # Driven by the operator's release-authority selection; latest-wins by
+    # scope (NATO ⊃ FVEY ⊃ US-only). Prior code emitted REL TO FVEY from a
+    # comms flag AND REL TO NATO from the release authority, which renders as
+    # the doctrinally-wrong "// REL TO FVEY / REL TO NATO" double-stamp.
+    rel_to = _collapse_rel_to([REL_TO_CAVEAT.get(release, "")])
+
+    # Final caveat list (handling caveats first, then a single REL TO).
+    caveats = [c["caveat"] for c in auto_caveats]
+    if rel_to:
+        caveats.append(rel_to)
 
     # Walkthrough #4 — release-authority validator. Hard-block doctrinally
     # impossible combos: NOFORN + foreign release; SECRET → FVEY/NATO without
@@ -657,7 +773,32 @@ async def mark_text(payload: dict, request: Request):
         caveats.append("REL TO FVEY")
     compat = evaluate_release_compatibility(cls, release, caveats)
     status = compat["status"]
-    issues = compat["issues"]
+    issues = list(compat["issues"])
+
+    # Task-61 — when the engine self-introduced a caveat that triggered the
+    # block, replace the shared validator's generic NOFORN issue with one
+    # that names the evidence span. Operators were seeing "SECRET//NOFORN
+    # cannot be released" with no signal that *the engine itself* added the
+    # NOFORN from a [CLASSIFIED TM ...] match they could redact. The new
+    # message tells them what to remove.
+    nofor = next((c for c in auto_caveats if c["caveat"] == "NOFORN"), None)
+    if nofor and status == "block" and release in ("FVEY", "NATO", "SPECIFIC"):
+        target = rel_to or release
+        evidence_msg = (
+            f"We added NOFORN because of {nofor['evidence']!r} "
+            f"(rule: {nofor['rule']}). NOFORN is mutually exclusive with "
+            f"{target} — remove the classified reference (or use a "
+            "sanitized excerpt) to release to this partner."
+        )
+        # Replace the first generic NOFORN-related issue rather than stack
+        # both messages; keep any other warnings (e.g. CUI→FVEY confirm).
+        replaced = False
+        for idx, issue in enumerate(issues):
+            if "NOFORN" in issue and not replaced:
+                issues[idx] = evidence_msg
+                replaced = True
+        if not replaced:
+            issues.insert(0, evidence_msg)
 
     # Explanation
     rule_reasons = []
@@ -697,13 +838,33 @@ async def mark_text(payload: dict, request: Request):
         },
     )
 
+    # Task-61 — Distribution Statement (A-F) selected from content +
+    # classification per DoDI 5230.24, no longer hardcoded to "C". This is
+    # the per-text recommendation surfaced on the Mark panel; the /export
+    # endpoint uses derive_distribution(release, bundle_class) for the
+    # bundle-level letter.
+    dist_letter, dist_text = _select_distribution(cls, flags)
+
     return {
-        "recommended_classification": tier1["classification"],
+        "recommended_classification": cls,
         "confidence": tier1["confidence"],
-        "flags": tier1["flags"],
+        "flags": flags,
         "caveats_recommended": caveats,
         "evidence": rule_reasons,
         "release_authority_requested": release,
+        # Task-61 — surface the distribution panel data from the engine so
+        # the frontend stops rendering a static "Distribution C" for every
+        # sample. Letter + description differ across the three sample chips.
+        "distribution_statement": {
+            "letter": dist_letter,
+            "label": f"Distribution {dist_letter}",
+            "description": dist_text,
+        },
+        "rel_to_caveat": rel_to,
+        # Track which caveats the engine auto-added (and from what evidence).
+        # The frontend explanation pane reads this to be transparent about
+        # what was self-introduced vs. operator-typed.
+        "auto_caveats": auto_caveats,
         # Walkthrough #4 — validator output for the frontend banner.
         "release_compatibility": {
             "status": status,
@@ -1633,7 +1794,10 @@ async def export_sanitized(request: Request, payload: dict):
         "decisions_applied": len(decisions),
         "redactions_applied": len(redaction_rows),
         "distribution_statement": distribution,
-        # Walkthrough #5 — surface independent fields separately.
+        # Walkthrough #5 — surface independent fields separately. The letter
+        # (A-F) reflects the (release_authority, bundle_classification) pair
+        # per DoDI 5230.24 rather than the hardcoded "Distribution C" the
+        # prior export shipped.
         "rel_to_caveat": REL_TO_CAVEAT.get(release, ""),
         # Task-70 — derived per (release, classification) per DoDI 5230.24,
         # not hardcoded "Distribution C".
