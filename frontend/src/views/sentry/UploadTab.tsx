@@ -12,6 +12,14 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
   const [hovering, setHovering] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // WP-6 DDIL UX: per-byte upload progress for the SENTRY GCSS-MC ingest
+  // path. The 103,686-row real sanitized SR header file is ~46 MB; on a
+  // contested-link laptop the operator must see streaming feedback rather
+  // than a frozen "loading" spinner. `progress` is a 0..1 fraction of
+  // bytes uploaded; `progressLabel` carries the human-readable transferred /
+  // total + filename for the bar's accessible label.
+  const [progress, setProgress] = useState<number>(0);
+  const [progressLabel, setProgressLabel] = useState<string>("");
 
   async function loadCanonical() {
     setLoading(true);
@@ -47,26 +55,58 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
     if (!batch && !loading && !seedOff) loadCanonical();
   }, [ctx.batchId]);
 
-  async function onDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setHovering(false);
-    const file = e.dataTransfer.files?.[0];
+  // 100 MB hard cap matches the backend `UPLOAD_MAX_BYTES` guard so the
+  // user gets an immediate front-end rejection on oversized files instead
+  // of waiting for a 413 round-trip on the GCSS-MC sanitized SR header
+  // (~46 MB at 103,686 rows; with comfort headroom we cap at 100 MB).
+  const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+  async function uploadFile(file: File) {
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      setError(
+        `${file.name} is ${mb} MB — over the 100 MB SENTRY ingest cap. Split the file or use the streaming GCSS-MC pull endpoint.`,
+      );
+      return;
+    }
     setLoading(true);
     setError(null);
+    setProgress(0);
+    setProgressLabel(`${file.name} · 0%`);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const resp = await fetch("/api/sentry/upload", { method: "POST", body: form });
-      if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
-      const b = await resp.json();
+      const b = await uploadWithProgress(file, (loaded, total) => {
+        const frac = total > 0 ? loaded / total : 0;
+        setProgress(frac);
+        setProgressLabel(
+          `${file.name} · ${formatMb(loaded)} / ${formatMb(total)} (${Math.round(
+            frac * 100,
+          )}%)`,
+        );
+      });
       setBatch(b);
       ctx.setBatch(b.batch_id);
+      setProgress(1);
+      setProgressLabel(`${file.name} · upload complete`);
     } catch (e) {
       setError(formatApiError(e));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setHovering(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) await uploadFile(file);
+  }
+
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) await uploadFile(file);
+    // Reset so picking the same file twice still fires onChange.
+    e.target.value = "";
   }
 
   return (
@@ -99,16 +139,140 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
           Drop a file, or use the canonical dataset →
         </div>
         <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-          Accepted: .csv, .xlsx, .json, .txt
+          Accepted: .csv, .xlsx, .json, .txt · 100 MB max · GCSS-MC SR header auto-detected
         </div>
-        <Button onClick={loadCanonical} disabled={loading} pending={loading} size="sm" className="mt-3">
-          Load canonical dataset
-        </Button>
-        {error && <div className="mt-2 text-xs text-[var(--color-danger)]">{error}</div>}
+        <div className="mt-3 flex items-center gap-2">
+          <Button onClick={loadCanonical} disabled={loading} pending={loading} size="sm">
+            Load canonical dataset
+          </Button>
+          <label
+            className={clsx(
+              "inline-flex cursor-pointer items-center rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] transition-colors",
+              loading && "pointer-events-none opacity-50",
+            )}
+          >
+            Pick a file…
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls,.json,.txt,.tsv"
+              className="hidden"
+              onChange={onPickFile}
+              disabled={loading}
+            />
+          </label>
+        </div>
+        {error && (
+          <div className="mt-2 max-w-xl text-center text-xs text-[var(--color-danger)]">
+            {error}
+          </div>
+        )}
       </div>
+
+      {progressLabel && (
+        <div
+          className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+          data-testid="upload-progress"
+        >
+          <div className="mb-1 flex items-center justify-between font-mono text-[11px] uppercase tracking-wider text-[var(--color-text-secondary)]">
+            <span>Streaming to SENTRY ingest</span>
+            <span>{Math.round(progress * 100)}%</span>
+          </div>
+          <div
+            className="h-2 w-full overflow-hidden rounded-sm bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-bg))]"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress * 100)}
+            aria-label={progressLabel}
+          >
+            <div
+              className="h-full bg-[var(--color-primary)] transition-[width] duration-150 ease-linear"
+              style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+            />
+          </div>
+          <div className="mt-1 truncate font-mono text-[11px] text-[var(--color-text-muted)]">
+            {progressLabel}
+          </div>
+        </div>
+      )}
 
       {batch && (
         <div className="flex flex-col gap-4">
+          {batch.gcss_ingest_report && (
+            <section className="rounded-md border border-[var(--color-success-muted)] bg-[color-mix(in_oklab,var(--color-success-muted)_20%,var(--color-surface))] p-4">
+              <div className="mb-2 flex items-baseline justify-between">
+                <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-success)]">
+                  GCSS-MC schema detected
+                </div>
+                <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                  {batch.gcss_ingest_report.adapter}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs sm:grid-cols-4">
+                <KV
+                  label="Rows total"
+                  value={batch.gcss_ingest_report.rows_total.toLocaleString()}
+                  mono
+                />
+                <KV
+                  label="Rows kept (CM)"
+                  value={batch.gcss_ingest_report.rows_kept.toLocaleString()}
+                  mono
+                />
+                <KV
+                  label="Unique SRs"
+                  value={batch.gcss_ingest_report.unique_sr_numbers.toLocaleString()}
+                  mono
+                />
+                <KV
+                  label="Filtered (PMCS)"
+                  value={batch.gcss_ingest_report.rows_filtered_pmcs.toLocaleString()}
+                  mono
+                />
+                <KV
+                  label="Trailing-period defects normalized"
+                  value={batch.gcss_ingest_report.defect_code_trailing_period_normalized.toLocaleString()}
+                  mono
+                />
+                <KV
+                  label="Date parse failures"
+                  value={batch.gcss_ingest_report.date_parse_failures.toLocaleString()}
+                  mono
+                />
+                <KV
+                  label="Rows with warnings"
+                  value={batch.gcss_ingest_report.rows_with_warnings.toLocaleString()}
+                  mono
+                />
+                <KV
+                  label="Sanitization gate"
+                  value={batch.gcss_ingest_report.sanitization_gate}
+                  mono
+                />
+              </div>
+              {batch.gcss_ingest_report.schema_warnings.length > 0 && (
+                <div className="mt-3 rounded-sm border border-[var(--color-warning-muted)] bg-[var(--color-surface)] p-2 text-xs">
+                  <div className="mb-1 font-semibold text-[var(--color-warning)]">
+                    Schema warnings
+                  </div>
+                  <ul className="ml-3 list-disc font-mono text-[var(--color-text-muted)]">
+                    {batch.gcss_ingest_report.schema_warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="mt-3 text-xs text-[var(--color-text-muted)]">
+                Hashing-gate PASS: <code className="font-mono">SR_NUMBER</code>,{" "}
+                <code className="font-mono">SERIAL_NUMBER</code>, <code className="font-mono">TAMCN</code>, and{" "}
+                <code className="font-mono">OWNER_UNIT_ADDRESS_CODE</code> all arrived in canonical pre-hashed form;
+                clear values would have been rejected at upload. Trailing-period defect codes (e.g.{" "}
+                <code className="font-mono">FCON.</code>) are normalized to their primary form. Oracle{" "}
+                <code className="font-mono">DD-MON-YY</code> dates parse with the same sliding window the live
+                export uses.
+              </div>
+            </section>
+          )}
           <section className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
               Batch
@@ -239,6 +403,61 @@ function KV({ label, value, mono }: { label: string; value: any; mono?: boolean 
       <div className={clsx(mono && "font-mono", "text-[var(--color-text)]")}>{String(value)}</div>
     </div>
   );
+}
+
+function formatMb(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Upload via XHR so we get per-byte progress events. fetch() in browsers
+ * does not surface upload-side progress (the streams API is request-side
+ * and not yet broadly supported), so the SENTRY upload tab uses XHR for
+ * the multipart POST. This preserves the FastAPI route contract — the
+ * server still sees a standard multipart/form-data body — while giving
+ * the operator a streaming progress bar instead of a frozen spinner on
+ * the 46-MB real GCSS-MC sanitized SR header file.
+ */
+function uploadWithProgress(
+  file: File,
+  onProgress: (loaded: number, total: number) => void,
+): Promise<SentryBatch> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/sentry/upload", true);
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded, e.total);
+    };
+    xhr.onload = () => {
+      const status = xhr.status;
+      const text = typeof xhr.response === "string" ? xhr.response : "";
+      if (status >= 200 && status < 300) {
+        try {
+          resolve(JSON.parse(text) as SentryBatch);
+        } catch (e) {
+          reject(new Error(`Malformed upload response: ${(e as Error).message}`));
+        }
+        return;
+      }
+      let detail = `${status} ${xhr.statusText}`;
+      try {
+        const body = JSON.parse(text);
+        if (body && body.detail) detail = body.detail;
+      } catch {
+        /* keep status text */
+      }
+      reject(new Error(detail));
+    };
+    xhr.onerror = () =>
+      reject(new Error("Network error during upload — check the link to SPIRE backend."));
+    xhr.onabort = () => reject(new Error("Upload aborted."));
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
 }
 
 function fmtBatchTimestamp(iso: string | undefined | null): string {

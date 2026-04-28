@@ -71,12 +71,18 @@ SUPPLY_PATHS = {
 # ---------------------------------------------------------------------------
 # Condition → priority mapping (per GCSS-MC rules)
 # ---------------------------------------------------------------------------
+# GCSS-MC priority strings: "NN B-Label" (full form). The consistency check
+# accepts any priority whose A/B/C band matches the SR condition.
 CONDITION_PRIORITY_MAP = {
-    "Deadlined": ["02", "03"],
-    "Degraded":  ["05", "06"],
-    "Minor":     ["10", "13"],
-    "Supply":    ["10"],
-    "Service":   ["10", "13"],
+    "Deadlined": ["01 A-Critical", "02 A-Critical", "03 A-Critical"],
+    "Degraded":  ["04 B-Urgent", "05 B-Urgent", "06 B-Urgent", "07 B-Urgent",
+                  "08 B-Urgent", "09 B-Urgent"],
+    "Minor":     ["10 C-Routine", "11 C-Routine", "12 C-Routine",
+                  "13 C-Routine", "14 C-Routine", "15 C-Routine"],
+    "Supply":    ["10 C-Routine", "11 C-Routine", "12 C-Routine",
+                  "13 C-Routine"],
+    "Service":   ["10 C-Routine", "11 C-Routine", "12 C-Routine",
+                  "13 C-Routine"],
 }
 
 # ---------------------------------------------------------------------------
