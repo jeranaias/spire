@@ -205,7 +205,7 @@ function useStageResetHotkey() {
     // Capture phase so we beat any view-level keydown handlers.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [pushToast, nav]);
+  }, [pushToast]);
 }
 
 function useFailsafeHotkey() {

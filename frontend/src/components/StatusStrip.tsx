@@ -21,7 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { api, type DatasetInfo } from "../api";
-import { pollWithBackoff } from "../api-retry";
+import { isPermissionDenied, pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { Pressable } from "./ui";
 
@@ -60,36 +60,67 @@ export function StatusStrip() {
   // Pull fleet MC + alert mix on a 30s/120s back-off cadence. Strip values
   // change slowly during steady-state operations; aggressive polling here
   // would be redundant with the per-view polls already running.
+  //
+  // Task #196 — split pulse and bastion into independent pollers so a
+  // permission-denied response on one (e.g. security_manager hitting
+  // /pulse/fleet-overview) lets `pollWithBackoff` stop that side
+  // permanently without taking down the other. Previously both calls
+  // shared a single tick wrapped in `.catch(() => null)`, which both
+  // (a) hid the 403 from `pollWithBackoff` so it kept ticking every
+  // 30s and (b) re-issued the network call each tick — producing the
+  // 11+ "Failed to load resource: 403" lines per page load that
+  // originally motivated this task. Each poll's first tick still
+  // hits the wire so backend `require_view_scope` audits the denial
+  // (Done criterion #3), then `pollWithBackoff` stops on the 403.
   useEffect(() => {
     const ctrl = pollWithBackoff(
-      async () => {
-        const [overview, alerts] = await Promise.all([
-          api.pulse.fleetOverview().catch(() => null),
-          api.bastion.alerts(40).catch(() => null),
-        ]);
-        return { overview, alerts };
-      },
+      () => api.pulse.fleetOverview(),
       {
         baseMs: 30000,
         maxMs: 120000,
-        fingerprint: ({ overview, alerts }) => {
-          const mc = overview?.hero_metrics.fleet_mc_rate ?? -1;
+        fingerprint: (overview) =>
+          `${overview?.hero_metrics.fleet_mc_rate.toFixed(3) ?? "-1"}`,
+        onResult: (overview) => {
+          if (overview) setOverallMc(overview.hero_metrics.fleet_mc_rate);
+        },
+        onError: (err) => {
+          // Silent on permission-denied — the role gate is doing its
+          // job and the poller is now stopped (see pollWithBackoff).
+          // Other errors (5xx, network) still warn so a real backend
+          // outage isn't hidden behind the same code path.
+          if (isPermissionDenied(err)) return;
+          console.warn("StatusStrip fleet overview unavailable:", err);
+        },
+      },
+    );
+    return () => ctrl.stop();
+  }, []);
+
+  useEffect(() => {
+    const ctrl = pollWithBackoff(
+      () => api.bastion.alerts(40),
+      {
+        baseMs: 30000,
+        maxMs: 120000,
+        fingerprint: (alerts) => {
           const high = (alerts?.alerts ?? []).filter(
             (a) => a.severity === "HIGH" || a.severity === "CRITICAL",
           ).length;
           const total = alerts?.alerts.length ?? -1;
-          return `${mc.toFixed(3)}|${total}|${high}`;
+          return `${total}|${high}`;
         },
-        onResult: ({ overview, alerts }) => {
-          if (overview) setOverallMc(overview.hero_metrics.fleet_mc_rate);
-          if (alerts) {
-            setAlertCount(alerts.alerts.length);
-            setHighCount(
-              alerts.alerts.filter(
-                (a) => a.severity === "HIGH" || a.severity === "CRITICAL",
-              ).length,
-            );
-          }
+        onResult: (alerts) => {
+          if (!alerts) return;
+          setAlertCount(alerts.alerts.length);
+          setHighCount(
+            alerts.alerts.filter(
+              (a) => a.severity === "HIGH" || a.severity === "CRITICAL",
+            ).length,
+          );
+        },
+        onError: (err) => {
+          if (isPermissionDenied(err)) return;
+          console.warn("StatusStrip alerts unavailable:", err);
         },
       },
     );

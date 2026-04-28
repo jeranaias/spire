@@ -14,7 +14,26 @@
  * surface a "Waking up — one moment" state instead of an indefinite spinner.
  */
 
+import { ApiError } from "./api";
+
 const DEFAULT_BACKOFFS_MS = [1000, 3000, 5000];
+
+/**
+ * Task #196 — true on a 403 Forbidden response from the role gate.
+ * Pollers and console-warning callsites use this to recognise the role
+ * gate working as designed (Park (security_manager) hitting PULSE chrome
+ * polls, etc.) so we don't keep retrying or print noise on every tick.
+ *
+ * Recognises both the typed `ApiError` thrown by `jsonFetch` and the
+ * legacy `<status> <statusText>: …` message shape so it works for any
+ * caller still on the older error contract.
+ */
+export function isPermissionDenied(err: unknown): boolean {
+  if (err instanceof ApiError) return err.status === 403;
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /^403\b/.test(msg);
+}
 
 export interface RetryOptions {
   backoffsMs?: number[];
@@ -123,6 +142,18 @@ export function pollWithBackoff<T>(
       lastFp = f;
       opts.onResult?.(v);
     } catch (err) {
+      // Task #196 — a 403 from the role gate is not transient. The role
+      // doesn't have scope and won't acquire it on the next tick, so
+      // continuing to poll just spams the audit log + browser console
+      // with the same denial. Stop the poller permanently; the operator
+      // can re-mount the surface (or sign in as a different identity) to
+      // re-arm. The single onError fires once so the caller can record /
+      // surface the denial if they choose, but no further ticks run.
+      if (isPermissionDenied(err)) {
+        opts.onError?.(err);
+        stopped = true;
+        return;
+      }
       // Errors don't reset the back-off — a steadily-failing endpoint should
       // back off too, not hammer.
       interval = Math.min(Math.round(interval * mult), cap);
