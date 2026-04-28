@@ -64,7 +64,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
+    <div className="flex h-full flex-col overflow-y-auto p-6" data-tour-id="sentry-export-content">
       <div className="mb-4">
         <h2
           className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
