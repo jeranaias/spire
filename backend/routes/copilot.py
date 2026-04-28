@@ -11,8 +11,9 @@ co-pilot can never escalate scope.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
+from ..auth import current_role
 from ..copilot import plan as copilot_plan
 from ..copilot import execute as copilot_execute
 from ..copilot import summarize as copilot_summarize
@@ -23,30 +24,32 @@ router = APIRouter()
 
 
 @router.post("/plan")
-async def make_plan(payload: dict = Body(default={})):
+async def make_plan(payload: dict = Body(default={}),
+                    role: str = Depends(current_role)):
     text = (payload.get("text") or "").strip()
-    role = payload.get("role") or "mef_commander"
     view = payload.get("view") or ""
     current_data = payload.get("current_data")
     if not text:
         raise HTTPException(status_code=400, detail="text required")
+    # Role is bearer-resolved (signed token) — payload claim is ignored so
+    # the co-pilot can never escalate scope by spoofing a different role.
     return await copilot_plan(text, role=role, view=view, current_data=current_data)
 
 
 @router.post("/execute")
-async def execute_plan(payload: dict = Body(default={})):
+async def execute_plan(payload: dict = Body(default={}),
+                       role: str = Depends(current_role)):
     plan_id = payload.get("plan_id") or "PL-AD-HOC"
     steps = payload.get("steps") or []
-    role = payload.get("role") or "mef_commander"
     if not isinstance(steps, list) or not steps:
         raise HTTPException(status_code=400, detail="steps required")
     return await copilot_execute(plan_id=plan_id, steps=steps, role=role)
 
 
 @router.post("/summarize")
-async def summarize_panel(payload: dict = Body(default={})):
+async def summarize_panel(payload: dict = Body(default={}),
+                          role: str = Depends(current_role)):
     panel = payload.get("panel") or "unspecified"
-    role = payload.get("role") or "mef_commander"
     data = payload.get("data") or {}
     summary = await copilot_summarize(panel=panel, data=data, role=role)
     return {"summary": summary, "panel": panel}
