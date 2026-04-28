@@ -59,28 +59,49 @@ EXPECTED_VIEW_SCOPE: dict[str, frozenset[str]] = {
 
 
 # Sample of routes per view that the test sweeps. Each entry is
-# (view_key, http_method, path, gate_kind) where gate_kind is the audit
-# row kind expected when a role outside the allowlist hits the endpoint.
-PROTECTED_ENDPOINTS: list[tuple[str, str, str, str]] = [
+# (view_key, http_method, path, gate_kind, ok_status_codes) where:
+#   - gate_kind: the audit row kind expected when a role outside the
+#     allowlist hits the endpoint.
+#   - ok_status_codes: the set of non-403 statuses an *allowed* role may
+#     legitimately receive. Most endpoints return 200; routes with a
+#     path-bound resource that the test fixtures don't seed (e.g.
+#     `/sentry/review-queue/{batch_id}` with a synthetic batch ID) can
+#     legitimately return 404. The test still asserts the response is
+#     never 403 from a role gate — that is the security invariant.
+PROTECTED_ENDPOINTS: list[tuple[str, str, str, str, frozenset[int]]] = [
     # PULSE — router-level gate, emits view_scope_denied.
-    ("/pulse",   "GET",  "/api/pulse/fleet-overview",       "view_scope_denied"),
-    ("/pulse",   "GET",  "/api/pulse/risk-board",           "view_scope_denied"),
-    ("/pulse",   "GET",  "/api/pulse/cannibalization",      "view_scope_denied"),
-    ("/pulse",   "GET",  "/api/pulse/forecast",             "view_scope_denied"),
-    ("/pulse",   "GET",  "/api/pulse/model-card",           "view_scope_denied"),
+    ("/pulse",   "GET",  "/api/pulse/fleet-overview",       "view_scope_denied", frozenset({200, 503})),
+    ("/pulse",   "GET",  "/api/pulse/risk-board",           "view_scope_denied", frozenset({200, 503})),
+    ("/pulse",   "GET",  "/api/pulse/cannibalization",      "view_scope_denied", frozenset({200, 503})),
+    ("/pulse",   "GET",  "/api/pulse/forecast",             "view_scope_denied", frozenset({200, 503})),
+    ("/pulse",   "GET",  "/api/pulse/model-card",           "view_scope_denied", frozenset({200, 503})),
     # BASTION — router-level gate, emits view_scope_denied.
-    ("/bastion", "GET",  "/api/bastion/cop",                "view_scope_denied"),
-    ("/bastion", "GET",  "/api/bastion/alerts",             "view_scope_denied"),
-    ("/bastion", "GET",  "/api/bastion/fused-threats",      "view_scope_denied"),
-    ("/bastion", "GET",  "/api/bastion/incidents",          "view_scope_denied"),
-    ("/bastion", "GET",  "/api/bastion/tmrs",               "view_scope_denied"),
+    ("/bastion", "GET",  "/api/bastion/cop",                "view_scope_denied", frozenset({200, 503})),
+    ("/bastion", "GET",  "/api/bastion/alerts",             "view_scope_denied", frozenset({200, 503})),
+    ("/bastion", "GET",  "/api/bastion/fused-threats",      "view_scope_denied", frozenset({200, 503})),
+    ("/bastion", "GET",  "/api/bastion/incidents",          "view_scope_denied", frozenset({200, 503})),
+    ("/bastion", "GET",  "/api/bastion/tmrs",               "view_scope_denied", frozenset({200, 503})),
+    # SENTRY — router-level gate (Task #111), emits view_scope_denied.
+    # Coverage matches the task's "at least" list:
+    #   /sentry/coalition/profiles, /sentry/review-queue/..., /sentry/audit/...
+    # Plus a couple of sibling reads to make sure the include-level dep
+    # actually wraps the whole sub-tree, not just the called endpoint.
+    # `/review-queue/__test_no_batch__` is intentionally a synthetic ID:
+    # for an allowed role it must 404 (batch not found) — proof that the
+    # role gate ran *before* the existence check, exactly the same
+    # ordering the export/download endpoints rely on so a denied role
+    # can't enumerate valid IDs by diffing 403 vs 404.
+    ("/sentry",  "GET",  "/api/sentry/coalition/profiles",                "view_scope_denied", frozenset({200, 503})),
+    ("/sentry",  "GET",  "/api/sentry/review-queue/__test_no_batch__",    "view_scope_denied", frozenset({200, 404})),
+    ("/sentry",  "GET",  "/api/sentry/audit/__test_subject_id__",         "view_scope_denied", frozenset({200})),
+    ("/sentry",  "GET",  "/api/sentry/jobs/__test_no_job__",              "view_scope_denied", frozenset({200, 404})),
     # Admin — per-route gates inside system.py, emit role_denied.
-    ("/admin",   "GET",  "/api/system/audit",               "role_denied"),
-    ("/admin",   "GET",  "/api/system/admin/audit",         "role_denied"),
-    ("/admin",   "GET",  "/api/system/admin/telemetry",     "role_denied"),
-    ("/admin",   "GET",  "/api/system/admin/outcomes",      "role_denied"),
-    ("/admin",   "GET",  "/api/system/admin/models",        "role_denied"),
-    ("/admin",   "GET",  "/api/system/admin/inference-economics", "role_denied"),
+    ("/admin",   "GET",  "/api/system/audit",               "role_denied", frozenset({200, 503})),
+    ("/admin",   "GET",  "/api/system/admin/audit",         "role_denied", frozenset({200, 503})),
+    ("/admin",   "GET",  "/api/system/admin/telemetry",     "role_denied", frozenset({200, 503})),
+    ("/admin",   "GET",  "/api/system/admin/outcomes",      "role_denied", frozenset({200, 503})),
+    ("/admin",   "GET",  "/api/system/admin/models",        "role_denied", frozenset({200, 503})),
+    ("/admin",   "GET",  "/api/system/admin/inference-economics", "role_denied", frozenset({200, 503})),
 ]
 
 
@@ -146,7 +167,7 @@ def test_backend_view_role_constants_match_frontend_table():
 
 @pytest.mark.parametrize("user", MOCK_USERS, ids=lambda u: u["role"])
 @pytest.mark.parametrize(
-    "view,method,path,gate_kind",
+    "view,method,path,gate_kind,ok_codes",
     PROTECTED_ENDPOINTS,
     ids=lambda v: v if isinstance(v, str) else "",
 )
@@ -157,6 +178,7 @@ def test_role_gate_matches_frontend_scope_guard(
     method: str,
     path: str,
     gate_kind: str,
+    ok_codes: frozenset,
 ) -> None:
     """For every (CAC × endpoint) combo: BE allow/deny must match FE
     ScopeGuard, and a deny must leave a structured 403 + audit row."""
@@ -177,11 +199,15 @@ def test_role_gate_matches_frontend_scope_guard(
             f"{user['role']} expected ALLOW for {path}; "
             f"got 403 with body {r.text!r}"
         )
-        # Most of these return 200; the few that don't (e.g. 503 on empty
-        # dataset) are still a non-gate signal.
-        assert r.status_code in (200, 503), (
-            f"{user['role']} unexpected non-200/503 for {path}: "
-            f"{r.status_code} {r.text!r}"
+        # Endpoint-specific allowed non-403 statuses. Most read endpoints
+        # 200; some path-bound resources (e.g. /sentry/review-queue/{id})
+        # legitimately 404 when the test doesn't seed the resource — that's
+        # still a non-gate signal and proves the role gate ran *before*
+        # the existence check (so a denied role can't enumerate IDs).
+        assert r.status_code in ok_codes, (
+            f"{user['role']} unexpected status for {path}: "
+            f"{r.status_code} (expected one of {sorted(ok_codes)}) "
+            f"body={r.text!r}"
         )
         return
 

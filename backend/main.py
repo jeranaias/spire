@@ -39,6 +39,7 @@ from .routes.stage_ingest import router as stage_ingest_router
 from .scoping import (
     BASTION_VIEW_ROLES,
     PULSE_VIEW_ROLES,
+    SENTRY_VIEW_ROLES,
     require_view_scope,
 )
 
@@ -118,18 +119,30 @@ app.include_router(stage_ingest_router, prefix="/api/system", tags=["stage-inges
 # View-level role gates (Task #77). Mounted at the router include so every
 # route under the prefix is gated without per-handler edits. Mirrors
 # `VIEW_SCOPE` in `frontend/src/state/store.ts`; drift is caught by
-# `backend/tests/test_role_gates.py`. SENTRY-wide and Admin-wide gates
-# are not applied as include-level deps because those routers carry
-# routes whose role permissions vary by endpoint (per-route `require_role`
-# already covers them); the broad PULSE / BASTION surfaces have uniform
-# view-level role lists, so the cleanest enforcement is here.
+# `backend/tests/test_role_gates.py`. The Admin surface is not gated at
+# include time because every admin route already carries a per-handler
+# `require_role` against `ADMIN_VIEW_ROLES`; the PULSE / BASTION / SENTRY
+# surfaces have uniform view-level allowlists, so the cleanest enforcement
+# is here. Task #111 mirrored the SENTRY gate the same way: the existing
+# narrower per-route gates on `/sentry/export`, `/sentry/download/{id}`,
+# `/sentry/coalition/{key}/release`, and `/sentry/review/...` are subsets
+# of `SENTRY_VIEW_ROLES`, so applying the include-level dep can't widen
+# any per-route allowlist — it only blocks roles outside the FE
+# ScopeGuard (e.g. `mef_commander` or future roles) from reaching SENTRY
+# bulk reads (`/coalition/profiles`, `/review-queue/...`, `/audit/...`)
+# at all, which previously returned full payloads to a curl past the FE.
 app.include_router(
     pulse_router,
     prefix="/api/pulse",
     tags=["pulse"],
     dependencies=[Depends(require_view_scope("/pulse", PULSE_VIEW_ROLES))],
 )
-app.include_router(sentry_router, prefix="/api/sentry", tags=["sentry"])
+app.include_router(
+    sentry_router,
+    prefix="/api/sentry",
+    tags=["sentry"],
+    dependencies=[Depends(require_view_scope("/sentry", SENTRY_VIEW_ROLES))],
+)
 app.include_router(
     bastion_router,
     prefix="/api/bastion",

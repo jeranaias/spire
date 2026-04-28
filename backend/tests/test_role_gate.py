@@ -12,13 +12,24 @@ This test pins the four mock CACs to the right verdict on both endpoints:
 
   Park (security_manager, TS//SCI)  → 200 on /export AND /download
   Reyes (g4, SECRET)                → 403 InsufficientRole on both
+                                       (in /sentry view, off-role for export)
   Kowalski (maintenance_chief)      → 403 InsufficientRole on both
-  Hayes (mef_commander, TS//SCI)    → 403 InsufficientRole on both
-                                       (clearance covers it; role does not)
+                                       (in /sentry view, off-role for export)
+  Hayes (mef_commander, TS//SCI)    → 403 OutOfScope on both
+                                       (Task #111: the SENTRY view-scope
+                                       gate fires first because mef_commander
+                                       isn't in `SENTRY_VIEW_ROLES`; the
+                                       per-route `InsufficientRole` gate is
+                                       never reached. Both responses still
+                                       403, just with the router-level
+                                       `OutOfScope` signature.)
 
 It also asserts the gate writes a `role_denied` audit row distinct from
 `spillage_prevented`, so the SOC view can split "tried to act outside
-their role" from "tried to read over their clearance".
+their role" from "tried to read over their clearance". For mef_commander
+the audit row is `view_scope_denied` rather than `role_denied` — same
+403 wire status, different audit kind so SOC tooling can tell "wrong tab
+entirely" from "right tab, wrong action".
 """
 from __future__ import annotations
 
@@ -155,16 +166,17 @@ def test_export_security_manager_park_returns_200(client):
 @pytest.mark.parametrize(
     "dodid,role_label",
     [
+        # In /sentry view-scope, off-role for export → per-route gate fires
+        # → wire error `InsufficientRole`.
         (DODID_REYES,    "g4"),
         (DODID_KOWALSKI, "maintenance_chief"),
-        (DODID_HAYES,    "mef_commander"),
     ],
 )
 def test_export_off_role_users_get_403_insufficient_role(client, dodid, role_label):
-    """The three non-custodian roles must be blocked — even Hayes whose
-    TS//SCI clearance is high enough for the bundle. The role gate runs
-    before require_clearance, so the wire error is `InsufficientRole`,
-    not `InsufficientClearance`.
+    """In-scope, off-role users must be blocked — they reach SENTRY (so
+    the view-scope gate passes) but the per-route role gate fires before
+    require_clearance, so the wire error is `InsufficientRole`, not
+    `InsufficientClearance`.
     """
     _login(client, dodid)
     r = _post_export(client)
@@ -178,18 +190,38 @@ def test_export_off_role_users_get_403_insufficient_role(client, dodid, role_lab
     _logout(client)
 
 
+def test_export_out_of_scope_user_gets_403_outofscope(client):
+    """Hayes (mef_commander) is outside `SENTRY_VIEW_ROLES`, so the
+    Task-#111 router-level view-scope gate fires *before* the per-route
+    `InsufficientRole` gate. The wire still 403s — that is the
+    security-relevant invariant — but the error shape is `OutOfScope`
+    and the audit kind is `view_scope_denied`. SOC tooling can split
+    "wrong tab entirely" from "right tab, wrong action" cleanly.
+    """
+    _login(client, DODID_HAYES)
+    r = _post_export(client)
+    assert r.status_code == 403, r.text
+    detail = r.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail["error"] == "OutOfScope"
+    assert detail["view"] == "/sentry"
+    assert detail["user_role"] == "mef_commander"
+    _logout(client)
+
+
 @pytest.mark.parametrize(
     "dodid,role_label",
     [
         (DODID_REYES,    "g4"),
         (DODID_KOWALSKI, "maintenance_chief"),
-        (DODID_HAYES,    "mef_commander"),
     ],
 )
 def test_download_off_role_users_get_403_even_with_leaked_export_id(client, dodid, role_label):
-    """Park builds a bundle, then a non-custodian CAC tries to redeem the
-    EXP-ID. The download gate must block the same way as /export — a
-    leaked or guessed ID can't be used to bypass the role check.
+    """Park builds a bundle, then an in-scope, off-role CAC tries to
+    redeem the EXP-ID. The download gate must block the same way as
+    /export — a leaked or guessed ID can't be used to bypass the role
+    check. Mef_commander is covered separately because the SENTRY
+    view-scope gate gives them an OutOfScope shape, not InsufficientRole.
     """
     # Park builds the bundle so we have a real EXP-... to attempt.
     _login(client, DODID_PARK)
@@ -207,6 +239,32 @@ def test_download_off_role_users_get_403_even_with_leaked_export_id(client, dodi
     assert detail["error"] == "InsufficientRole"
     assert detail["action"] == "sentry.download"
     assert detail["user_role"] == role_label
+    _logout(client)
+
+
+def test_download_out_of_scope_user_gets_403_outofscope(client):
+    """Out-of-scope mef_commander redeeming a leaked EXP-ID hits the
+    /sentry view-scope gate first — same 403, different signature.
+    The fabricated-ID enumeration test is preserved by
+    `test_download_off_role_user_cannot_enumerate_export_ids` below
+    (using an in-scope role); here we only need to verify the
+    view-scope gate is the one firing for an out-of-scope role.
+    """
+    # Park builds the bundle so we have a real EXP-... to redeem.
+    _login(client, DODID_PARK)
+    built = _post_export(client)
+    assert built.status_code == 200, built.text
+    download_url = built.json()["download_url"]
+    _logout(client)
+
+    _login(client, DODID_HAYES)
+    r = client.get(download_url)
+    assert r.status_code == 403, r.text
+    detail = r.json().get("detail")
+    assert isinstance(detail, dict)
+    assert detail["error"] == "OutOfScope"
+    assert detail["view"] == "/sentry"
+    assert detail["user_role"] == "mef_commander"
     _logout(client)
 
 
