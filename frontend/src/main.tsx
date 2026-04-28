@@ -297,6 +297,25 @@ createRoot(document.getElementById("root")!).render(
               </RequireAuth>
             }
           >
+            {/* QA-pass routing aliases (Task #195). The QA pilot typed
+             * legacy / shorthand URLs that didn't match any registered
+             * route, producing an apparent "blank view" pattern across
+             * five surfaces. Each `Navigate` here redirects the
+             * shorthand to the canonical path so a typed URL recovers
+             * gracefully instead of falling through. Replace = true so
+             * the bad URL doesn't pollute browser history.
+             *   /integrations            → /integrations/gcss-mc  (#123, #124)
+             *   /transition              → /about/transition       (#125)
+             *   /admin/inference-economics → /admin/economics      (#128)
+             *   /ui-docs                 → /__ui-docs              (#132)
+             *   /joint                   → /joint/preview          (#136)
+             *   /jltc                    → /joint/preview          (#137 discoverability) */}
+            <Route path="integrations" element={<Navigate to="/integrations/gcss-mc" replace />} />
+            <Route path="transition" element={<Navigate to="/about/transition" replace />} />
+            <Route path="admin/inference-economics" element={<Navigate to="/admin/economics" replace />} />
+            <Route path="ui-docs" element={<Navigate to="/__ui-docs" replace />} />
+            <Route path="joint" element={<Navigate to="/joint/preview" replace />} />
+            <Route path="jltc" element={<Navigate to="/joint/preview" replace />} />
             <Route index element={<ViewSuspense><DecisionBridgeView /></ViewSuspense>} />
             {/* Role-default fallback — preserved for operators who prefer
              * landing on their scoped surface instead of the bridge. */}

@@ -800,6 +800,42 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
               <span>Open demo cockpit</span>
               <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">/#/demo</span>
             </Pressable>
+            {/* QA #122 / #137 — discoverability fix. The Joint Logistics
+             * & Tracks Console (JLTC) at /joint/preview was unreachable
+             * from chrome; the colleague-built MARLOG Express+React app
+             * at /marlog/ was completely unwired. Surface both as
+             * presenter affordances so a typed URL is no longer the
+             * only way in. */}
+            <Pressable
+              role="menuitem"
+              onClick={() => openPresenterRoute("/joint/preview")}
+              aria-label="Open the Joint Logistics & Tracks Console"
+              title="JLTC — sister-service partner viewer (OMS/UCI)"
+              className="flex w-full items-center justify-between gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,transparent)] hover:text-[var(--color-text)]"
+            >
+              <span>Open Joint Console (JLTC)</span>
+              <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">/#/joint/preview</span>
+            </Pressable>
+            <Pressable
+              role="menuitem"
+              onClick={() => window.open("/marlog/", "_blank", "noopener,noreferrer")}
+              aria-label="Open the MARLOG Marine Logistics Calculator"
+              title="MARLOG — sister Express + React calculator (PR #35)"
+              className="flex w-full items-center justify-between gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,transparent)] hover:text-[var(--color-text)]"
+            >
+              <span>Open MARLOG calculator</span>
+              <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">/marlog/</span>
+            </Pressable>
+            <Pressable
+              role="menuitem"
+              onClick={() => openPresenterRoute("/about/team")}
+              aria-label="Open the About / Team page"
+              title="About SPIRE — team, transition pathway, customer"
+              className="flex w-full items-center justify-between gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,transparent)] hover:text-[var(--color-text)]"
+            >
+              <span>About / Team</span>
+              <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">/#/about/team</span>
+            </Pressable>
           </div>}
 
           <Pressable
