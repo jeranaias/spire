@@ -123,7 +123,7 @@ def _count_csv_rows(text: str) -> int:
 def _parse_csv_dicts(text: str, *, label: str) -> list[dict]:
     """Parse a CSV body into a list of dicts keyed by header column.
 
-    Strict mode (Task #183 round-5): malformed input must surface as a
+    Strict mode: malformed input must surface as a
     422 — the previous silent-fallback to ``[]`` masked corruption and
     let the route return 200 with a partial dataset, breaking the
     "same files → same dashboards" determinism guarantee. We re-raise
@@ -289,11 +289,8 @@ def _build_dataset_from_report(
     # synthesize the today-only DailySnapshot block below.
     asset_meta: dict = {}
     latest_open: Optional[date] = None
-    # Round-7 review fix: explicit skip counters surfaced in the
-    # ingest_report so the operator-facing UI (and any CI assertion
-    # gate) can detect silent row-drop drift instead of trusting the
-    # broad fallbacks below to be unreachable. Each counter increments
-    # only inside its own except branch; a clean ingest reports zeros.
+    # Per-bucket counters surface lift-step row drops in the response
+    # so operators see schema drift instead of a silent partial dataset.
     skip_counts = {"srs": 0, "units": 0, "snapshots": 0}
     for r in report.rows:
         unit_uic = r.unit_uic_hashed or "OWNER_UNIT_unknown"
@@ -335,9 +332,8 @@ def _build_dataset_from_report(
                 is_pmcs="PM" in (r.service_request_type or "").upper(),
             )
         except Exception:
-            # Skip rows the dataclass can't accept rather than 500ing
-            # the entire ingest. Provenance still lives on the report,
-            # and the count is surfaced in ingest_report.skipped_rows.
+            # Skip rather than 500 the entire ingest; surfaced in
+            # ingest_report.skipped_rows.
             skip_counts["srs"] += 1
             continue
         srs.append(sr_obj)
@@ -519,10 +515,8 @@ def _build_dataset_from_report(
         generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
         seed=seed,
     )
-    # Stash skip_counts on the dataset object so the route layer can
-    # surface it without changing the CanonicalDataset dataclass shape
-    # (which other consumers depend on). Attribute access is safe
-    # because CanonicalDataset is a regular dataclass instance.
+    # Stash counters on the dataset object so the route layer can
+    # surface them without altering the shared CanonicalDataset shape.
     setattr(ds, "_stage_ingest_skip_counts", skip_counts)
     return ds
 
@@ -743,10 +737,7 @@ async def stage_ingest(
             "defect_code_trailing_period_normalized":
                 report.defect_code_trailing_period_normalized,
             "date_parse_failures": report.date_parse_failures,
-            # Round-7: explicit skip counters for the lift step
-            # (SR/Unit/DailySnapshot dataclass coercion). All zeros on
-            # a clean ingest; non-zero indicates schema drift the
-            # operator should investigate.
+            # Per-bucket lift-step drops; zeros on a clean ingest.
             "skipped_rows": getattr(new_ds, "_stage_ingest_skip_counts", {
                 "srs": 0, "units": 0, "snapshots": 0,
             }),

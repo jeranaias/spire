@@ -162,13 +162,15 @@ async function jsonFetch<T>(path: string, init?: RequestInit, injectRole = true)
     }
   }
 
+  const isFormData =
+    typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const baseHeaders: Record<string, string> = isFormData
+    ? {}
+    : { "Content-Type": "application/json" };
   const resp = await fetch(`${BASE}${url}`, {
-    // `include` so the HttpOnly session cookie travels even when SPIRE is
-    // run cross-origin (Docker / Fly path). Same-origin Replit path works
-    // either way; this is the defensive default.
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: { ...baseHeaders, ...((init?.headers as Record<string, string>) || {}) },
   });
   if (resp.status === 401 && !path.startsWith("/auth/")) {
     // Auth gate took over — surface a clean, recognizable error so callers

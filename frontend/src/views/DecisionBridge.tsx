@@ -1140,28 +1140,19 @@ export function DecisionBridgeView() {
     return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
-  // BASTION COP — drives alert→building resolution. Cheap to keep cached.
-  // Task #183 round-6: skip the fetch while datasetStatus.empty and refetch
-  // when emptiness flips false. Without this guard the cop state would
-  // hold an EmptyEnvelope object across the empty→hydrated transition,
-  // and a later resolveAlertTarget(cop) call would dereference cop.units
-  // on the envelope and throw. The deps array on datasetStatus.empty
-  // ensures the fetch re-runs exactly once when the dataset hydrates.
+  // BASTION COP — drives alert→building resolution. Skip while empty
+  // so cop never holds the {empty:true,...} envelope (which has no
+  // .units and would throw inside resolveAlertTarget). Re-runs once
+  // when the dataset hydrates.
   useEffect(() => {
     if (datasetStatus?.empty) {
-      // While the dataset singleton is empty the COP envelope is
-      // {empty:true,...}; clear any stale cop and don't fetch.
       setCop(null);
       return;
     }
     let cancelled = false;
     api.bastion.cop()
       .then((v) => {
-        if (cancelled) return;
-        // Defense-in-depth: even with the empty-state guard above, the
-        // dataset-status poll has a 5s window where it could lag a
-        // hydrate; ignore an envelope payload rather than caching it.
-        if (isEmptyEnvelope(v)) return;
+        if (cancelled || isEmptyEnvelope(v)) return;
         setCop(v);
       })
       .catch(() => { /* drill-through tolerantly falls back to /bastion sans focus */ });
