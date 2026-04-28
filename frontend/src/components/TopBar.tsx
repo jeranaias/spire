@@ -157,7 +157,12 @@ export function TopBar() {
          * selector. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
           <span className="hidden xl:contents"><NodeStatus /></span>
-          <span className="hidden xl:contents"><GcssMcSyncPill /></span>
+          {/* GcssMcSyncPill must stay visible at every breakpoint — it is the
+           * only chrome-level "this connection is mocked" signal, and hiding
+           * it under 1280px would let the rest of the app keep reading
+           * "GCSS-MC" data sources without the operator ever seeing the REF
+           * disclosure. See .local/critiques/integrations-gcss-mc.md (P0-3). */}
+          <GcssMcSyncPill />
           <CommsControl />
           <span className="hidden xl:contents"><AirGapToggle /></span>
           <span className="hidden xl:contents"><DensityToggle /></span>
@@ -1050,6 +1055,7 @@ function AirGapToggle() {
 function GcssMcSyncPill() {
   const nav = useNavigate();
   const [age, setAge] = useState<number | null>(null);
+  const [environment, setEnvironment] = useState<string | null>(null);
   const [unreachable, setUnreachable] = useState(false);
 
   useEffect(() => {
@@ -1061,6 +1067,7 @@ function GcssMcSyncPill() {
         const r = await api.system.gcssMcLastSync();
         if (cancelled) return;
         setAge(r.age_seconds);
+        setEnvironment(r.environment);
         setUnreachable(false);
       } catch {
         if (cancelled) return;
@@ -1082,8 +1089,21 @@ function GcssMcSyncPill() {
       ? "GCSS-MC · syncing…"
       : `GCSS-MC · ${formatAge(age)}`;
 
-  const tone = unreachable ? "var(--color-warning)" : "var(--color-text-secondary)";
-  const dot = unreachable ? "var(--color-warning)" : "var(--color-success)";
+  // Honesty rules for the dot (see .local/critiques/integrations-gcss-mc.md
+  // P0-2). Green is reserved for a real, healthy upstream link. While the
+  // backend reports REFERENCE_IMPLEMENTATION the dot is amber to match the
+  // REF chip — the SPIRE backend being reachable does NOT mean GCSS-MC is
+  // connected. Red is reserved for the SPIRE backend itself being
+  // unreachable, where we cannot vouch for sync freshness at all.
+  const isReference = environment === "REFERENCE_IMPLEMENTATION";
+  const dot = unreachable
+    ? "var(--color-danger)"
+    : isReference
+      ? "var(--color-warning)"
+      : "var(--color-success)";
+  const tone = unreachable
+    ? "var(--color-danger)"
+    : "var(--color-text-secondary)";
 
   return (
     <Pressable
