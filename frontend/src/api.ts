@@ -473,6 +473,22 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ note, role: "data_custodian" }),
       }),
+    // Bulk review — N records, one chained audit entry. Replaces the
+    // earlier client-side fan-out that emitted N independent review POSTs
+    // (and N independent audit rows) for a single operator click.
+    reviewBulk: (
+      action: "approve" | "reject",
+      srNumbers: string[],
+      column = "",
+      note = "",
+    ) =>
+      jsonFetch<{ ok: boolean; count: number; sr_numbers: string[]; audit_kind: string }>(
+        "/sentry/review/bulk",
+        {
+          method: "POST",
+          body: JSON.stringify({ action, sr_numbers: srNumbers, column, note }),
+        },
+      ),
     mark: (text: string, release_authority = "US_ONLY") =>
       jsonFetch<MarkResult>("/sentry/mark", {
         method: "POST",

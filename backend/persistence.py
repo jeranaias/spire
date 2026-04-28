@@ -607,6 +607,46 @@ def record_sentry_decision(
     )
 
 
+def record_sentry_bulk_decision(
+    sr_numbers: list[str],
+    action: str,
+    *,
+    actor_role: str,
+    column: str = "",
+    note: str = "",
+) -> dict:
+    """Persist N review decisions and write **one** chained audit entry.
+
+    The previous flow looped `record_sentry_decision` per SR which produced
+    N independent audit rows for a single operator click — making "Approve
+    all 357" indistinguishable from 357 deliberate one-by-one approvals
+    in the chain. This helper writes one `sentry_bulk_review` entry that
+    names every SR it touched, so a judge or IG can audit the bulk action
+    as a single intent.
+    """
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    if not sr_numbers:
+        return {"count": 0}
+    with conn() as c:
+        c.executemany(
+            "INSERT OR REPLACE INTO sentry_decisions(sr_number, action, actor_role, note, ts) VALUES (?,?,?,?,?)",
+            [(sr, action, actor_role, note, ts) for sr in sr_numbers],
+        )
+    entry = log(
+        "sentry_bulk_review",
+        actor=actor_role,
+        subject_id=f"bulk:{action}:{len(sr_numbers)}",
+        payload={
+            "action": action,
+            "column": column,
+            "count": len(sr_numbers),
+            "sr_numbers": list(sr_numbers),
+            "note": note,
+        },
+    )
+    return {"count": len(sr_numbers), "entry": entry}
+
+
 def record_pulse_feedback(asset_id: str, correct: bool, note: str = "") -> None:
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:

@@ -25,6 +25,7 @@ from ..persistence import (
     decisions_for_batch,
     entries_for_subject,
     log as audit_log,
+    record_sentry_bulk_decision,
     record_sentry_decision,
     store_uploaded_batch,
 )
@@ -1048,6 +1049,49 @@ async def review_action(
         note=note,
     )
     return {"ok": True, "sr_number": sr_number, "action": action}
+
+
+# Bulk review — clears N records in **one** chained audit entry rather than
+# emitting N independent rows. Per-record decisions still land in the
+# `sentry_decisions` table so downstream gates (export, decisions_for_batch)
+# behave identically. The audit chain entry carries the SR list in payload
+# so an IG can reproduce exactly which records the operator's single click
+# touched. ≥50 records at the FE require a typed confirmation; the BE caps
+# at 500/click defensively to keep a runaway request from chaining a 5k row
+# payload that would blow the audit reader.
+_BULK_REVIEW_MAX = 500
+
+
+@router.post("/review/bulk")
+async def review_bulk(request: Request, payload: dict):
+    action = (payload or {}).get("action", "")
+    if action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="action must be approve|reject")
+    sr_numbers = list((payload or {}).get("sr_numbers", []) or [])
+    if not sr_numbers:
+        raise HTTPException(status_code=400, detail="sr_numbers must be a non-empty list")
+    if len(sr_numbers) > _BULK_REVIEW_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"bulk size {len(sr_numbers)} exceeds cap of {_BULK_REVIEW_MAX}",
+        )
+    column = str((payload or {}).get("column", "") or "")
+    note = str((payload or {}).get("note", "") or "")
+    role = session_role(request) or "data_custodian"
+    result = record_sentry_bulk_decision(
+        sr_numbers,
+        action,
+        actor_role=role,
+        column=column,
+        note=note,
+    )
+    return {
+        "ok": True,
+        "action": action,
+        "count": result.get("count", 0),
+        "sr_numbers": sr_numbers,
+        "audit_kind": "sentry_bulk_review",
+    }
 
 
 _EXPORTS: dict = {}  # export_id -> zip bytes + metadata
