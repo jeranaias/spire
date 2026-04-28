@@ -379,7 +379,35 @@ async def audit(request: Request, limit: int = 50, role: str | None = None):
 # roles, the BE rejects with 403 if anyone forges the call.
 # ---------------------------------------------------------------------------
 
-RESET_DEMO_ROLES = frozenset({"g4"})
+RESET_DEMO_ROLES = frozenset({"g4", "data_custodian", "security_manager"})
+
+
+@router.post("/admin/force-empty")
+async def force_empty_dataset(request: Request) -> dict:
+    """Test-only hook (Task #183): atomically reset the dataset
+    singleton to an empty state so the Playwright stage-ingest spec
+    can drive the empty → ingest → hydrated lifecycle deterministically
+    against any backend (including a dev backend that booted with the
+    seed-42 baseline).
+
+    Gated on ``SPIRE_TEST_HOOKS=1`` — without that env var the route
+    returns 404 so production deploys never expose it. The route is
+    intentionally not added to OpenAPI tags or the integrations docs.
+    """
+    if os.environ.get("SPIRE_TEST_HOOKS", "0").lower() not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=404, detail="Not Found")
+    # Defense-in-depth: env-gate alone would let any anon caller reset
+    # the dataset if SPIRE_TEST_HOOKS leaks into a non-test context.
+    user = getattr(request.state, "user", None) or {}
+    actor = user.get("role") or session_role(request)
+    require_role(actor, RESET_DEMO_ROLES, "system.force_empty")
+    from .. import state as _state_mod
+    _state_mod.init_empty_dataset()
+    return {
+        "ok": True,
+        "source": "force-empty",
+        "note": "test-only hook; gated on SPIRE_TEST_HOOKS=1 + role check",
+    }
 
 
 @router.post("/admin/reset-demo")
@@ -445,6 +473,25 @@ async def reset_demo(request: Request):
     feedback_cleared = len(_FEEDBACK_LOG)
     _FEEDBACK_LOG.clear()
 
+    # 7. Task #183 — stage live-ingest mode. The Shift+F8 failsafe lands
+    #    here, and a presenter who hits it after a stage-ingest needs the
+    #    dataset singleton itself rebuilt back to the seed-42 baseline.
+    #    Rehydrate by loading the canonical dataset and atomically
+    #    swapping it into the singleton with source="seed-42". On a normal
+    #    reset (dataset already populated and identical) this is a cheap
+    #    rebuild; on a stage-ingest reset it flips ``is_dataset_empty()``
+    #    back to False and the empty-state placeholders disappear.
+    dataset_rehydrated = False
+    try:
+        from .. import state as _state_mod
+        fresh = _state_mod.load_dataset()
+        _state_mod.swap_dataset(
+            fresh, source="seed-42", ingested_by=actor or "failsafe"
+        )
+        dataset_rehydrated = True
+    except Exception as e:  # noqa: BLE001
+        failed_steps.append({"step": "dataset_rehydrate", "error": str(e)[:160]})
+
     finished = datetime.utcnow()
     duration_ms = int((finished - started).total_seconds() * 1000)
     overall_ok = not failed_steps
@@ -457,6 +504,7 @@ async def reset_demo(request: Request):
         "decision_outcomes_cleared": outcomes_cleared,
         "feedback_log_cleared": feedback_cleared,
         "mission_clock": clock_state,
+        "dataset_rehydrated": dataset_rehydrated,
         "duration_ms": duration_ms,
     }
 

@@ -17,6 +17,7 @@ import { FailsafePlayer } from "./components/FailsafePlayer";
 import { useFailsafe } from "./state/failsafe";
 import { useScenarioPlayer } from "./state/scenarioPlayer";
 import { ROLE_DEFAULT_VIEW, useSpireStore, VIEW_SCOPE } from "./state/store";
+import { api } from "./api";
 
 // Vimium-style two-key chord routing. `g s` → SENTRY, `g p` → PULSE,
 // `g b` → BASTION, `g a` → ADMIN. Chord window is 1500ms — operators on
@@ -130,6 +131,60 @@ function useGoToShortcuts() {
 //
 // We always confirm before activating (the failsafe overrides the live
 // surface and judges should never see it unless the live demo died).
+// Shift+F8 stage failsafe — restores the seed-42 baseline. F8 alone
+// can mean "debugger pause" in some browsers, so the hotkey requires
+// shift; ctrl/alt/meta combinations bypass it for browser-shortcut
+// safety. Fires in the capture phase so view-level keydown listeners
+// can't shadow it.
+function useStageResetHotkey() {
+  const pushToast = useSpireStore((s) => s.pushToast);
+  useEffect(() => {
+    function inField(target: EventTarget | null): boolean {
+      return (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      );
+    }
+    async function onKey(e: KeyboardEvent) {
+      // Hard match: Shift+F8 only. Don't fire on F8 alone (some
+      // browsers map F8 to a debugger pause) and don't fire on
+      // Ctrl/Alt/Meta combos (those are reserved for browser
+      // shortcuts on most platforms).
+      if (e.key !== "F8" || !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+      if (inField(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        await api.system.resetDemo();
+        pushToast({
+          tone: "ok",
+          text: "Failsafe — restored seed-42 baseline.",
+          ttlMs: 4000,
+        });
+        // Refresh the active surface in place. The dataset-status
+        // poll (5s) will tick downstream views off their empty-state
+        // placeholders; broadcasting an explicit reset event lets
+        // surfaces opt in to an immediate refetch without a route
+        // change that would yank the operator out of context.
+        try {
+          window.dispatchEvent(new CustomEvent("spire:dataset-reset"));
+        } catch { /* tolerant */ }
+      } catch (err) {
+        pushToast({
+          tone: "error",
+          text: `Failsafe reset failed: ${err instanceof Error ? err.message : String(err)}`,
+          ttlMs: 6000,
+        });
+      }
+    }
+    // Capture phase so we beat any view-level keydown handlers.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [pushToast]);
+}
+
 function useFailsafeHotkey() {
   // We intentionally subscribe to `scenarioId` (not `status`) so the
   // hotkey stays armed across the full lifecycle — ready / playing /
@@ -202,6 +257,7 @@ export default function App() {
 
   useGoToShortcuts();
   useFailsafeHotkey();
+  useStageResetHotkey();
 
   return (
     <div className="flex h-full flex-col overflow-x-hidden">

@@ -10,6 +10,7 @@ Run:
 """
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .state import load_dataset
+from .state import init_empty_dataset, load_dataset
 from .network_monitor import install as install_netmon
 from .model_hooks import STATE as MODEL_STATE
 
@@ -34,11 +35,18 @@ from .routes.gcss import router as gcss_router
 from .routes.gcss_export import router as gcss_export_router
 from .routes.joint import router as joint_router
 from .routes.decision_bridge import router as decision_bridge_router
+from .routes.stage_ingest import router as stage_ingest_router
 from .scoping import (
     BASTION_VIEW_ROLES,
     PULSE_VIEW_ROLES,
     require_view_scope,
 )
+
+
+def _truthy_env(name: str) -> bool:
+    """Read a boolean-shaped env var. Treat 1 / true / yes / on as True."""
+    raw = (os.environ.get(name) or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 @asynccontextmanager
@@ -47,15 +55,26 @@ async def lifespan(app: FastAPI):
     install_netmon()
     print("[SPIRE] Network egress monitor armed.")
 
-    # Generate the canonical dataset once at boot. ~30-60 seconds.
-    print("[SPIRE] Generating canonical dataset under seed 42 ...")
-    ds = load_dataset()
-    print(f"[SPIRE]   {len(ds.units)} units, {len(ds.assets)} assets")
-    print(f"[SPIRE]   {len(ds.srs):,} SRs, {len(ds.snapshots):,} snapshots, {len(ds.reqs):,} requisitions")
-    print(f"[SPIRE]   {len(ds.incidents)} incidents, {len(ds.cannib_events)} cannib events")
-    err = sum(1 for v in ds.violations if v.severity == "error")
-    warn = len(ds.violations) - err
-    print(f"[SPIRE]   consistency: {err} errors, {warn} warnings")
+    # Task #183 — stage live-ingest mode. When SPIRE_BOOT_EMPTY=1 the
+    # demo presenter wants a blank-slate boot: no synthetic seed-42
+    # data, every dashboard renders the "awaiting GCSS-MC ingest" empty
+    # state until the three-CSV sanitized export gets dropped on the
+    # DECISION BRIDGE hero card. Default behaviour (no flag) is the
+    # existing seed-42 boot — local dev and the SENTRY upload→batch
+    # path stay untouched.
+    if _truthy_env("SPIRE_BOOT_EMPTY"):
+        init_empty_dataset()
+        print("[SPIRE] Blank-slate boot — awaiting stage ingest.")
+        print("[SPIRE]   POST /api/system/stage-ingest with the 3 GCSS-MC CSVs to hydrate.")
+    else:
+        print("[SPIRE] Generating canonical dataset under seed 42 ...")
+        ds = load_dataset()
+        print(f"[SPIRE]   {len(ds.units)} units, {len(ds.assets)} assets")
+        print(f"[SPIRE]   {len(ds.srs):,} SRs, {len(ds.snapshots):,} snapshots, {len(ds.reqs):,} requisitions")
+        print(f"[SPIRE]   {len(ds.incidents)} incidents, {len(ds.cannib_events)} cannib events")
+        err = sum(1 for v in ds.violations if v.severity == "error")
+        warn = len(ds.violations) - err
+        print(f"[SPIRE]   consistency: {err} errors, {warn} warnings")
 
     ms = MODEL_STATE.status()
     print(f"[SPIRE] Models: sentry_loaded={ms['sentry_loaded']} pulse_loaded={ms['pulse_loaded']}")
@@ -91,6 +110,10 @@ app.middleware("http")(session_middleware)
 
 app.include_router(auth_router,   prefix="/api/auth",   tags=["auth"])
 app.include_router(system_router, prefix="/api/system", tags=["system"])
+# Stage live-ingest mode (Task #183). Mounted under /api/system so the
+# stage-ingest + dataset-status surfaces are siblings of the existing
+# /api/system/admin/reset-demo failsafe used by Shift+F8.
+app.include_router(stage_ingest_router, prefix="/api/system", tags=["stage-ingest"])
 
 # View-level role gates (Task #77). Mounted at the router include so every
 # route under the prefix is gated without per-handler edits. Mirrors

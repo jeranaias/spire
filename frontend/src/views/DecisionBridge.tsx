@@ -30,10 +30,13 @@ import {
   type DecisionBridgeMission,
   type DecisionBridgeShortage,
   type DecisionBridgeShortages,
+  isEmptyEnvelope,
 } from "../api";
 import { pollWithBackoff, formatApiError } from "../api-retry";
 import { ROLE_DEFAULT_VIEW, useSpireStore, type DdilMode } from "../state/store";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
+import { StageIngestHero } from "../components/StageIngestHero";
+import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import {
   EmptyState,
   ErrorState,
@@ -1093,6 +1096,11 @@ export function DecisionBridgeView() {
     return <StageGrid />;
   }
 
+  // Task #183 — empty/populated branch driver. The hero card and the
+  // tile-level placeholders both read from this hook. ``refresh()`` is
+  // called from ``StageIngestHero.onIngested`` so the next render flips
+  // every tile from "awaiting GCSS-MC ingest" to live data.
+  const { status: datasetStatus, refresh: refreshDatasetStatus } = useDatasetStatus();
   const [mission, setMission] = useState<DecisionBridgeMission | null>(null);
   const [missionErr, setMissionErr] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<DecisionBridgeAlerts | null>(null);
@@ -1132,14 +1140,24 @@ export function DecisionBridgeView() {
     return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
-  // BASTION COP — drives alert→building resolution. Cheap to keep cached.
+  // BASTION COP — drives alert→building resolution. Skip while empty
+  // so cop never holds the {empty:true,...} envelope (which has no
+  // .units and would throw inside resolveAlertTarget). Re-runs once
+  // when the dataset hydrates.
   useEffect(() => {
+    if (datasetStatus?.empty) {
+      setCop(null);
+      return;
+    }
     let cancelled = false;
     api.bastion.cop()
-      .then((v) => { if (!cancelled) setCop(v); })
+      .then((v) => {
+        if (cancelled || isEmptyEnvelope(v)) return;
+        setCop(v);
+      })
       .catch(() => { /* drill-through tolerantly falls back to /bastion sans focus */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [datasetStatus?.empty]);
 
   // Alerts — 10s cadence (multiplier=1 disables the steady-state back-off
   // because alert mix is the operator's primary scan signal). The cadence
@@ -1230,6 +1248,20 @@ export function DecisionBridgeView() {
       {/* Link-status strip — Task #47. Sits between header and tile grid so
        * it's the first thing the operator sees when they ask "is this live?". */}
       <LinkStatusStrip lastSuccessAt={lastSuccessAt} />
+
+      {/* Task #183 — stage live-ingest mode. While the dataset is empty
+       * the hero card occupies the row below the link-status strip and
+       * lets the data_custodian / security_manager drag in the three
+       * sanitized GCSS-MC CSVs. The tile grid stays mounted underneath
+       * (each tile renders its own "awaiting GCSS-MC ingest" placeholder)
+       * so the layout doesn't reflow when ingest completes. */}
+      {datasetStatus?.empty && (
+        <StageIngestHero
+          onIngested={() => {
+            refreshDatasetStatus();
+          }}
+        />
+      )}
 
       {/* 6-col × 2-row hero grid. Sized so the whole thing fits a 1920×1080
        * canvas without scrolling — tile bodies use min-h-0 + overflow so an

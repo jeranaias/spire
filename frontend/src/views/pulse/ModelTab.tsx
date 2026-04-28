@@ -23,20 +23,41 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, type ModelCard, type ModelCardBaseline } from "../../api";
+import { api, isEmptyEnvelope, type ModelCard, type ModelCardBaseline } from "../../api";
 import { formatApiError } from "../../api-retry";
+import { AwaitingIngestEmpty } from "../../components/AwaitingIngestEmpty";
 import { ErrorState, LoadingState } from "../../components/ui";
 
 export function ModelTab() {
   const [card, setCard] = useState<ModelCard | null>(null);
+  const [empty, setEmpty] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.pulse
       .modelCard()
-      .then(setCard)
+      .then((res) => {
+        // Task #183 — backend may return {empty:true} when the dataset
+        // singleton is empty (stage live-ingest mode pre-hydration).
+        // Defend the typed state against the envelope so we never
+        // dereference card.loss_function on a null card.
+        if (isEmptyEnvelope(res)) {
+          setEmpty(true);
+        } else {
+          setCard(res as ModelCard);
+        }
+      })
       .catch((e) => setError(formatApiError(e)));
   }, []);
+
+  if (empty) {
+    return (
+      <AwaitingIngestEmpty
+        surface="PULSE"
+        description="The PULSE model card hydrates from the live GCSS-MC export. Drop the three sanitized CSVs into DECISION BRIDGE to populate this surface."
+      />
+    );
+  }
 
   if (error && !card) {
     return (

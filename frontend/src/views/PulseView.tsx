@@ -7,6 +7,8 @@ import { CannibalizationTab } from "./pulse/CannibalizationTab";
 import { ForecastTab } from "./pulse/ForecastTab";
 import { ModelTab } from "./pulse/ModelTab";
 import { UseCaseStrip } from "../components/UseCaseStrip";
+import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
+import { useDatasetStatus } from "../hooks/useDatasetStatus";
 
 // Walkthrough #28 — numbered prefix on each tab + ARIA tablist + arrow
 // keyboard navigation. Active tab gets a thicker underline + bg tint.
@@ -19,20 +21,36 @@ const tabs = [
 ];
 
 export function PulseView() {
+  // Task #183 — container-level dataset-empty gate so every PULSE tab
+  // (overview/risk/cannib/forecast/model) shows the same Awaiting-ingest
+  // placeholder while the singleton is empty. This is the single source
+  // of truth for PULSE empty-state; the per-tab fetches still defend
+  // their typed state against {empty:true} envelopes for safety, but
+  // they should never see one once this gate fires.
+  const datasetStatus = useDatasetStatus().status;
+  const isEmpty = datasetStatus?.empty === true;
+
   return (
     <div className="flex h-full flex-col">
       <h1 className="sr-only">PULSE · Readiness &amp; Forecast</h1>
       <UseCaseStrip number="13" title="PULSE" subtitle="PARTS DEMAND FORECASTING — CONTESTED LOG · Class IX MAGTF" accent="var(--color-warning)" />
       <PulseSubnav />
       <div className="flex-1 overflow-hidden">
-        <Routes>
-          <Route index element={<FleetOverviewTab />} />
-          <Route path="overview"  element={<FleetOverviewTab />} />
-          <Route path="risk"      element={<RiskBoardTab />} />
-          <Route path="cannib"    element={<CannibalizationTab />} />
-          <Route path="forecast"  element={<ForecastTab />} />
-          <Route path="model"     element={<ModelTab />} />
-        </Routes>
+        {isEmpty ? (
+          <AwaitingIngestEmpty
+            surface="PULSE"
+            description="PULSE forecasts and risk surfaces hydrate from the live GCSS-MC export. Drop the three sanitized CSVs into DECISION BRIDGE to populate every PULSE tab."
+          />
+        ) : (
+          <Routes>
+            <Route index element={<FleetOverviewTab />} />
+            <Route path="overview"  element={<FleetOverviewTab />} />
+            <Route path="risk"      element={<RiskBoardTab />} />
+            <Route path="cannib"    element={<CannibalizationTab />} />
+            <Route path="forecast"  element={<ForecastTab />} />
+            <Route path="model"     element={<ModelTab />} />
+          </Routes>
+        )}
       </div>
     </div>
   );
