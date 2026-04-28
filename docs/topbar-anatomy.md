@@ -100,7 +100,7 @@ truncates.
 | DraftsBadge               | `NotificationsChip` Drafts tab                    |
 | FailsafePill              | `StageCluster` Failsafe icon (gated as before: scenario loaded + failsafe off, both modes) |
 | ResetDemoButton           | `StageCluster` Reset icon (gated as before: g4 in operator mode, any role in stage mode) |
-| AuditPill                 | `StageCluster` Audit icon (always visible, both modes) |
+| AuditPill                 | `StageCluster` Audit icon (stage-only, matches the original `{stageMode && <AuditPill />}` chrome) |
 | AirGapToggle              | IdentityPill → Operator settings → Air-gap row    |
 | DensityToggle             | IdentityPill → Operator settings → Density radio  |
 | CommsControl              | Stays in right group (single posture chip)        |

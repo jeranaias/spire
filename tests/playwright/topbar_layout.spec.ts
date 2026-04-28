@@ -128,7 +128,7 @@ test.describe("TopBar declutter (Task #184)", () => {
     await expect(topbar.getByRole("link", { name: /^BASTION$/i }).first()).toBeVisible();
   });
 
-  test("stage mode at lg shows StageCluster with Reset (relaxed) + Audit grouped", async ({ page }) => {
+  test("stage mode at lg renders the StageCluster with Reset + Audit grouped", async ({ page }) => {
     await page.setViewportSize(BREAKPOINTS.lg);
     await enableStageMode(page);
     // Reset is g4-only outside stage mode; in stage mode it relaxes to
@@ -137,27 +137,36 @@ test.describe("TopBar declutter (Task #184)", () => {
     const cluster = page.getByTestId("stage-cluster");
     await expect(cluster).toBeVisible();
     await expect(cluster).toHaveAttribute("data-stage-mode", "1");
-    // Reset relaxes for any role in stage mode; Audit is unconditional.
+    // In stage mode the cluster groups all three controls. Failsafe is
+    // gated on a loaded scenario (same gate as the original chrome) and
+    // the spec doesn't trigger one, so it's absent here — Reset and
+    // Audit are the two stage-only controls that always render.
     await expect(cluster.getByTestId("stage-cluster-reset")).toBeVisible();
     await expect(cluster.getByTestId("stage-cluster-audit")).toBeVisible();
-    // Failsafe is gated on a loaded scenario (same gate as the original
-    // chrome). The spec doesn't trigger one, so the button is absent —
-    // exactly what the old TopBar did. We assert the gate, not presence.
     await expect(cluster.getByTestId("stage-cluster-failsafe")).toHaveCount(0);
   });
 
-  test("operator mode preserves Audit (always) — Failsafe and Reset stay role-gated", async ({ page }) => {
-    // Reyes (g4) — Audit always visible, Reset visible for g4. Failsafe
-    // requires a scenario to be loaded, which the spec doesn't trigger,
-    // so we only assert it's NOT visible (matches the old chrome).
+  test("operator mode keeps stage-only controls hidden — Audit + Failsafe gated, Reset stays for g4", async ({ page }) => {
+    // The pre-declutter chrome rendered AuditPill only when stageMode is
+    // on (`{stageMode && <AuditPill />}`). The cluster preserves that
+    // exactly. Reset stays visible for g4 outside stage mode.
     await page.setViewportSize(BREAKPOINTS.lg);
     await signIn(page, TEST_DODID);
     const cluster = page.getByTestId("stage-cluster");
     await expect(cluster).toBeVisible();
     await expect(cluster).toHaveAttribute("data-stage-mode", "0");
-    await expect(cluster.getByTestId("stage-cluster-audit")).toBeVisible();
     await expect(cluster.getByTestId("stage-cluster-reset")).toBeVisible();
+    await expect(cluster.getByTestId("stage-cluster-audit")).toHaveCount(0);
     await expect(cluster.getByTestId("stage-cluster-failsafe")).toHaveCount(0);
+  });
+
+  test("operator mode for non-g4 with no scenario hides the StageCluster entirely", async ({ page }) => {
+    // For Park (security_manager) outside stage mode with no scenario:
+    // Audit gated (stage-only), Reset gated (g4-only), Failsafe gated
+    // (no scenario). The cluster returns null — no empty rounded shell.
+    await page.setViewportSize(BREAKPOINTS.lg);
+    await signIn(page, SECURITY_MANAGER_DODID);
+    await expect(page.getByTestId("stage-cluster")).toHaveCount(0);
   });
 
   test("IdentityPill menu hosts Operator settings (Air-gap, Density, Comms)", async ({ page }) => {
