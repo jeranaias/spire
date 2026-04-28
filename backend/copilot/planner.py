@@ -69,6 +69,17 @@ Tool selection guidance:
 - TMR submission ("move 5 MTVRs from Lejeune to Geiger") → handle outside;
   do not call a tool for it. The TMR parser handles it directly.
 
+Bare action verbs — non-negotiable:
+- "go", "do it", "do all", "execute", "run", "proceed", "kick off",
+  "send it", "affirm", "roger", "gtg", "let's go" with no further context
+  → ALWAYS emit a 3-step plan: status_summary, then predict_failures
+  (horizon 14d), then recommend_actions (top 5). Never reply with prose
+  alone. The operator just told you to act.
+- If a PRIOR_PROPOSAL block is present (the last assistant turn proposed
+  specific tools), execute THAT proposal exactly — same tools, same args
+  — instead of the generic 3-step. The operator is consenting to what
+  you offered, not asking you to re-plan.
+
 Output style:
 - For tool calls: return them via the tools list. Always include a brief
   user-facing `summary_for_operator` in your assistant message — one
@@ -80,8 +91,18 @@ Output style:
 """
 
 
-async def plan(text: str, role: str, view: str = "", current_data: Optional[dict] = None) -> dict:
+async def plan(
+    text: str,
+    role: str,
+    view: str = "",
+    current_data: Optional[dict] = None,
+    prior_proposal: Optional[list] = None,
+) -> dict:
     """Ask Gemma 4 for a plan in response to the operator's text.
+
+    `prior_proposal`, when present, is the steps[] array from the previous
+    assistant turn — used so an operator's "go" / "do it" consents to the
+    exact tools that were proposed instead of forcing a re-plan.
 
     Returns:
         {
@@ -97,6 +118,36 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
     from ..routes.llm import call_llm_chat
     from ..routes.bastion import _build_grounding_context
 
+    plan_id = f"PL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+
+    # Action-verb shortcut: bare "go" / "do it" / "execute" with no further
+    # context resolves deterministically without a Gemma round-trip. If a
+    # prior assistant turn proposed tools, we consent to that exact list;
+    # otherwise we run the standard 3-step (status_summary, predict_failures,
+    # recommend_actions). Skipping the LLM here is cheaper, deterministic,
+    # and survives any proxy hiccups during a live demo.
+    shortcut = _action_verb_shortcut(text, role, plan_id, prior_proposal)
+    if shortcut is not None:
+        from ..inference_economics import record_call
+        rule_entry = record_call(
+            tier="tier0_rule",
+            model="deterministic action-verb router",
+            input_tokens=0, output_tokens=0,
+            latency_ms=0.0, call_site="copilot_plan",
+            route="action_verb_shortcut", role=role,
+        )
+        shortcut["economics"] = {
+            "tier": "tier0_rule",
+            "model": rule_entry["model"],
+            "call_site": "copilot_plan",
+            "route": "action_verb_shortcut",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "latency_ms": 0.0,
+        }
+        return shortcut
+
     # Inject the canonical operational picture so direct-answer questions
     # ("what's CLB-6's readiness?") never fabricate. The grounding mirrors
     # /api/bastion/cop, so SPIRO's numbers can't disagree with the screen.
@@ -105,9 +156,19 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "system", "content": f"CURRENT_OPERATIONAL_PICTURE:\n{grounding}"},
-        {"role": "user", "content": f"Role: {role} · View: {view or 'unspecified'}\n\n{text}"},
     ]
-    plan_id = f"PL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+    if prior_proposal:
+        messages.append({
+            "role": "system",
+            "content": (
+                "PRIOR_PROPOSAL — the last assistant turn proposed these "
+                "tools and the operator has not yet executed them:\n"
+                f"{json.dumps(prior_proposal)[:1200]}"
+            ),
+        })
+    messages.append(
+        {"role": "user", "content": f"Role: {role} · View: {view or 'unspecified'}\n\n{text}"},
+    )
     # Two-tier LLM call:
     # 1. Tools-enabled call (Gemma can return tool_calls for agentic flows).
     # 2. If the proxy 400s/502s on the tools schema (some vLLM builds reject
@@ -416,6 +477,97 @@ _PROFILE_CANON = {
     "fvey-log": "FVEY_LOG", "fvey log": "FVEY_LOG",
     "fvey": "FVEY_BASE", "five eyes": "FVEY_BASE",
 }
+
+
+import re as _re
+
+# Bare action verbs the operator might issue with no further context —
+# "go", "do it", "execute", "proceed", etc. When matched, the planner
+# returns a deterministic plan instead of asking Gemma to re-decide.
+# Word boundaries on both sides; trailing punctuation tolerated.
+_ACTION_VERB_RE = _re.compile(
+    r"^\s*(?:"
+    # Bare "go" / "execute" / etc. — optionally followed by casual filler
+    # like "go for it", "execute it", "send it", "run it now".
+    r"go(?:\s+(?:for\s+it|for\s+real|now|already))?|"
+    r"do\s+it(?:\s+(?:already|now))?|"
+    # "do all of that shit" / "do all that stuff" / "do everything" /
+    # "do the whole thing" — Marine-speak the operator actually types.
+    r"do\s+all(?:\s+(?:of\s+)?(?:that|this|it|the|the\s+above))?(?:\s+(?:shit|stuff|things?|of\s+it))?|"
+    r"do\s+everything|do\s+the\s+(?:thing|whole\s+thing|works)|"
+    r"handle\s+(?:it|that|all\s+of\s+(?:it|that))|"
+    r"make\s+it\s+happen|"
+    r"execute|execute\s+(?:it|that|all|now)|"
+    r"run|run\s+(?:it|that|all|now)|"
+    r"proceed|proceed\s+with\s+(?:it|that)|"
+    r"kick(?:\s+it)?\s+off|"
+    r"send(?:\s+it)?|fire\s+(?:it\s+)?off|"
+    r"affirm|affirmative|roger(?:\s+that)?|gtg|good\s+to\s+go|"
+    r"let'?s\s+(?:go|do\s+(?:it|this|that)|roll)|"
+    r"do\s+the\s+thing"
+    r")\s*[.!]*\s*$",
+    flags=_re.IGNORECASE,
+)
+
+
+def _default_action_steps(role: str) -> list:
+    """Standard 3-step plan when an operator says 'go' with no specifics."""
+    args: dict = {"horizon_days": 14}
+    rec_args: dict = {"top": 5}
+    # Maintenance Chief is scoped to CLB-6; let the chief's "go" focus there.
+    if role == "maintenance_chief":
+        args["unit"] = "CLB-6"
+        rec_args["unit"] = "CLB-6"
+    return [
+        {"tool": "status_summary", "args": {}},
+        {"tool": "predict_failures", "args": args},
+        {"tool": "recommend_actions", "args": rec_args},
+    ]
+
+
+def _action_verb_shortcut(
+    text: str,
+    role: str,
+    plan_id: str,
+    prior_proposal: Optional[list],
+) -> Optional[dict]:
+    """If the operator's text is a bare action verb, return a deterministic
+    plan without consulting the LLM. Honors a prior-turn proposal when
+    present (the operator is consenting to what was offered, not asking
+    for a re-plan)."""
+    if not _ACTION_VERB_RE.match(text or ""):
+        return None
+    # Consent path — use whatever the assistant just proposed.
+    if prior_proposal and isinstance(prior_proposal, list) and len(prior_proposal) > 0:
+        steps = []
+        for s in prior_proposal:
+            if not isinstance(s, dict):
+                continue
+            tool = s.get("tool")
+            if not tool:
+                continue
+            steps.append({"tool": tool, "args": s.get("args") or {}})
+        if steps:
+            return {
+                "plan_id": plan_id,
+                "intent": "consent_to_prior",
+                "summary": "Executing the prior proposal — " + _plan_summary("", steps),
+                "answer": None,
+                "steps": steps,
+                "engine": "action-verb shortcut (prior-proposal consent)",
+                "tokens_used": None,
+            }
+    # No prior proposal — run the standard 3-step.
+    steps = _default_action_steps(role)
+    return {
+        "plan_id": plan_id,
+        "intent": "default_action",
+        "summary": _plan_summary("", steps),
+        "answer": None,
+        "steps": steps,
+        "engine": "action-verb shortcut (default 3-step)",
+        "tokens_used": None,
+    }
 
 
 def _extract_unit(text: str, role: str) -> Optional[str]:
