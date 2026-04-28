@@ -241,6 +241,94 @@ test.describe("TopBar declutter (Task #184)", () => {
     await expect(page.getByTestId("identity-failsafe")).toHaveCount(0);
   });
 
+  test("System chip drawer cycles through no-conflicts and conflicts-present states", async ({ page }) => {
+    // Task #192 — the consolidated SystemStatusChip drawer re-uses
+    // NodeStatus's exported ClockCard + ConflictRow. The Task #184 spec
+    // only proves the chip renders; this spec exercises the drawer end
+    // to end so a regression in either exported helper can't silently
+    // break the consolidated surface.
+    await page.setViewportSize(BREAKPOINTS.xl);
+    await signIn(page, SECURITY_MANAGER_DODID);
+    await page.keyboard.press("Escape");
+
+    // Backend conflict storage is module-level memory and may carry
+    // residue from earlier specs. Pre-clear via the resolve API so the
+    // first half of this spec lands cleanly in the "no conflicts" state.
+    const list = await page.request.get("/api/system/sync/conflicts");
+    if (list.ok()) {
+      const body = await list.json();
+      for (const c of (body.pending ?? []) as Array<{ id: string }>) {
+        await page.request.post(
+          `/api/system/sync/resolve/${encodeURIComponent(c.id)}`,
+          { data: { winner: "local", actor: "security_manager" } },
+        );
+      }
+    }
+    // Reload so the chip's polling picks up the cleaned-out state
+    // immediately (its fingerprint back-off would otherwise stretch the
+    // refresh window past this spec's budget).
+    await page.reload();
+    await page.keyboard.press("Escape");
+
+    await page.getByTestId("system-status-chip").click();
+    const panel = page.getByTestId("system-status-panel");
+    await expect(panel).toBeVisible();
+
+    // The drawer trigger only mounts once syncState has resolved.
+    const opener = page.getByTestId("system-status-open-conflicts");
+    await expect(opener).toBeVisible({ timeout: 10_000 });
+    // After the cleanup the trigger reads "Open drawer", not "Resolve N".
+    await expect(opener).toContainText(/open drawer/i);
+    await opener.click();
+
+    const drawer = page.getByRole("dialog", { name: /distributed sync drawer/i });
+    await expect(drawer).toBeVisible();
+
+    // ClockCard pair (NodeStatus's exported helper) renders the local +
+    // peer vector-clock columns side-by-side. Match on the column
+    // prefix only — node IDs are env-configurable (SPIRE_NODE_ID /
+    // SPIRE_PEER_NODE_ID) and we don't want this spec to wedge in a CI
+    // env that overrides them.
+    await expect(drawer.getByText(/^Local · \S/)).toBeVisible();
+    await expect(drawer.getByText(/^Peer · \S/)).toBeVisible();
+
+    // No-conflicts state — the empty banner + the (0) count both show.
+    await expect(drawer.getByText(/Pending conflicts \(0\)/i)).toBeVisible();
+    await expect(
+      drawer.getByText(/NO CONFLICTS — clocks reconciled/i),
+    ).toBeVisible();
+    // Pre-condition for the conflicts-present half: no ConflictRow yet.
+    await expect(drawer.getByRole("button", { name: /^pick$/i })).toHaveCount(0);
+
+    // Seed a demo conflict from inside the drawer and assert the
+    // empty state collapses + a ConflictRow appears with the local +
+    // peer vector-clock columns the task requires.
+    await drawer.getByRole("button", { name: /seed demo conflict/i }).click();
+    await expect(drawer.getByText(/Pending conflicts \(1\)/i)).toBeVisible({ timeout: 10_000 });
+    await expect(
+      drawer.getByText(/NO CONFLICTS — clocks reconciled/i),
+    ).toHaveCount(0);
+    // ConflictRow renders Local + Peer sides (one Pick button each) and
+    // each side surfaces a `clock:` line containing the vector-clock
+    // JSON — that's the affordance the resolution UI hinges on.
+    await expect(drawer.getByRole("button", { name: /^pick$/i })).toHaveCount(2);
+    const clockLines = drawer.getByText(/clock:/i);
+    expect(await clockLines.count()).toBeGreaterThanOrEqual(2);
+
+    // Leave the backend tidy so downstream specs don't inherit the
+    // seeded conflict (module-level state survives across pages).
+    const after = await page.request.get("/api/system/sync/conflicts");
+    if (after.ok()) {
+      const body = await after.json();
+      for (const c of (body.pending ?? []) as Array<{ id: string }>) {
+        await page.request.post(
+          `/api/system/sync/resolve/${encodeURIComponent(c.id)}`,
+          { data: { winner: "local", actor: "security_manager" } },
+        );
+      }
+    }
+  });
+
   test("IdentityPill menu hosts Operator settings (Air-gap, Density, Comms)", async ({ page }) => {
     await page.setViewportSize(BREAKPOINTS.lg);
     // Park is security_manager — the only role that sees the Air-gap row.
