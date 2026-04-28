@@ -12,6 +12,7 @@ import { UseCaseStrip } from "../components/UseCaseStrip";
 import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import { LinkStatusStrip, commsCadenceMultiplier } from "../components/LinkStatusStrip";
+import { DemoSurfaceMarker } from "../components/classification";
 import {
   Button,
   IconButton,
@@ -742,6 +743,11 @@ export function BastionView() {
       <div className="flex shrink-0 items-center justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
         <LinkStatusStrip />
       </div>
+      {/* Task #125 — per-beat classification + DEMO DATA chip on the
+        * BASTION surface itself, so a screenshot of the COP / alerts
+        * during a live demo beat self-marks instead of leaning on the
+        * global app-shell banner. Render-noop off-stage. */}
+      <DemoSurfaceMarker />
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left sidebar: alert stream — collapses to a 48px rail in Map
        * Focus Mode (#37). The rail still surfaces the active count + a

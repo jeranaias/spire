@@ -30,6 +30,7 @@ import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { LinkStatusStrip, commsCadenceMultiplier } from "../../components/LinkStatusStrip";
 import { Button, ErrorState, LoadingState, EmptyState, IconButton } from "../../components/ui";
 import { ClassifiedExport } from "../../components/classification/ClassifiedExport";
+import { DemoSurfaceMarker } from "../../components/classification";
 import { useClearance } from "../../components/classification/useClearance";
 import { AdminTabs } from "../AdminView";
 import {
@@ -431,6 +432,10 @@ export function AuditView() {
       <div className="flex shrink-0 items-center justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
         <LinkStatusStrip />
       </div>
+      {/* Task #125 — per-beat classification + DEMO DATA chip on the
+        * audit surface itself, so a screenshot of the audit chain
+        * during a live demo beat self-marks. Render-noop off-stage. */}
+      <DemoSurfaceMarker />
       {/* Header */}
       <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div className="flex items-baseline justify-between gap-4">

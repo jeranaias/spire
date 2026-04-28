@@ -24,3 +24,4 @@ export type { ClearanceCtx } from "./useClearance";
 export { ClassificationBadge } from "./ClassificationBadge";
 export { ClassificationBanner } from "./ClassificationBanner";
 export { ClassifiedExport } from "./ClassifiedExport";
+export { DemoSurfaceMarker } from "./DemoSurfaceMarker";

@@ -10,6 +10,7 @@ import { UseCaseStrip } from "../components/UseCaseStrip";
 import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import { LinkStatusStrip } from "../components/LinkStatusStrip";
+import { DemoSurfaceMarker } from "../components/classification";
 
 // Walkthrough #28 — numbered prefix on each tab + ARIA tablist + arrow
 // keyboard navigation. Active tab gets a thicker underline + bg tint.
@@ -41,6 +42,11 @@ export function PulseView() {
       <div className="flex shrink-0 items-center justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
         <LinkStatusStrip />
       </div>
+      {/* Task #125 — per-beat classification + DEMO DATA chip on the
+        * page surface itself, so a screenshot of e.g. the Risk Board
+        * during the H+12 casualty beat self-marks instead of leaning
+        * on the global app-shell banner. Render-noop off-stage. */}
+      <DemoSurfaceMarker />
       <PulseSubnav />
       <div className="flex-1 overflow-hidden">
         {isEmpty ? (

@@ -11,6 +11,7 @@ import { UseCaseStrip } from "../components/UseCaseStrip";
 import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import { LinkStatusStrip } from "../components/LinkStatusStrip";
+import { DemoSurfaceMarker } from "../components/classification";
 
 export interface SentryContext {
   batchId: string | null;
@@ -77,6 +78,10 @@ export function SentryView() {
       <div className="flex shrink-0 items-center justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
         <LinkStatusStrip />
       </div>
+      {/* Task #125 — per-beat classification + DEMO DATA chip on the
+        * page surface itself so a screenshot of the Coalition release
+        * scrub self-marks. Render-noop off-stage. */}
+      <DemoSurfaceMarker />
       <SentrySubnav />
       <div className="flex-1 overflow-hidden">
         <Routes>
