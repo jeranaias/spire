@@ -11,7 +11,7 @@ Asserts the in-PULSE model-card endpoint returns:
   * a `split` with non-empty train/val/test counts and ordered date ranges
   * a `drift` block with a monthly series + alert array (may be empty)
   * a `last_validation` block with a methodology link to the canonical
-    model card under /admin/models/pulse-risk
+    model card under /admin/models/pulse-risk-scorer
 
 The endpoint is deterministic under RANDOM_SEED=42, so any drift in the
 returned numbers is a real regression.
@@ -113,5 +113,5 @@ def test_model_card_drift_and_validation_links(client):
     assert isinstance(drift["alerts"], list)
 
     val = body["last_validation"]
-    assert val["methodology_link"].endswith("/admin/models/pulse-risk")
-    assert body["canonical_model_card_url"].endswith("/admin/models/pulse-risk")
+    assert val["methodology_link"].endswith("/admin/models/pulse-risk-scorer")
+    assert body["canonical_model_card_url"].endswith("/admin/models/pulse-risk-scorer")
