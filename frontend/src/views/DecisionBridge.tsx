@@ -915,6 +915,164 @@ function LinkStatusStrip({ lastSuccessAt }: { lastSuccessAt: number | null }) {
 }
 
 // ---------------------------------------------------------------------------
+// MDM 2026 stage-pivot — four hero use-case tiles. Replaces the 5-tile
+// operator grid when the store is in `stageMode`. Each tile is a cold-
+// open into one of the four use-case surfaces; the deeper signal
+// (alerts / shortages / MC% / audit) is reachable from inside that
+// surface, but the bridge itself is intentionally choice-first on stage.
+//
+// The tile chrome is deliberately heavier than the operator grid so the
+// audience can read it from the back of the room. We give each tile a
+// large title, a one-line "what" subtitle, and a one-line "why this
+// matters" caption pulled from the stage script.
+// ---------------------------------------------------------------------------
+type StageTileKey = "sentry" | "pulse" | "bastion" | "dha-rescue";
+
+interface StageTileSpec {
+  key: StageTileKey;
+  number: string;     // "01" — read-aloud sequence cue for the host
+  title: string;      // SENTRY
+  subtitle: string;   // "Classification & release"
+  blurb: string;      // body copy (1–2 lines)
+  accent: string;     // CSS var for the tile rail / number colour
+  to: string;         // route navigated on click
+}
+
+// Order locked by the WP-2 spec: SENTRY (UC 14) → PULSE (UC 13) →
+// BASTION (UC 15) → DHA RESCUE (UC 4). The badge is the hackathon
+// use-case number (NOT a re-numbered "01/02/03/04" sequence) so the
+// audience can match each tile back to the published call.
+const STAGE_TILES: StageTileSpec[] = [
+  {
+    key: "sentry",
+    number: "14",
+    title: "SENTRY",
+    subtitle: "CUI AUTO-TAGGING — DoDM 5200.01",
+    blurb:
+      "Auto-tag, classify, and release intel with a hash-chained reason — every export ships its own audit ticket.",
+    accent: "var(--color-info)",
+    to: "/sentry",
+  },
+  {
+    key: "pulse",
+    number: "13",
+    title: "PULSE",
+    subtitle: "PARTS DEMAND FORECASTING — CONTESTED LOG",
+    blurb:
+      "Forecast Class IX failures before they ground the fleet. MC% by unit, with the maintenance moves the model would make.",
+    accent: "var(--color-warning)",
+    to: "/pulse",
+  },
+  {
+    key: "bastion",
+    number: "15",
+    title: "BASTION",
+    subtitle: "INSTALLATION COP AGGREGATOR",
+    blurb:
+      "Gates, utilities, emergency, weather, sensors — fused on one COP. Detection to FPCON CHARLIE in seconds, not minutes.",
+    accent: "var(--color-danger)",
+    to: "/bastion",
+  },
+  {
+    key: "dha-rescue",
+    number: "4",
+    title: "DHA RESCUE",
+    subtitle: "BLOOD/CLASS VIII H+72 — DMO",
+    blurb:
+      "Predictive blood / Class VIII sustainment under INDOPACOM DMO. Hub-spoke supply, cold-chain, market-aware sourcing.",
+    accent: "var(--color-success)",
+    to: "/dha-rescue",
+  },
+];
+
+function StageTile({ spec }: { spec: StageTileSpec }) {
+  const nav = useNavigate();
+  return (
+    <Pressable
+      onClick={() => nav(spec.to)}
+      aria-label={`${spec.title} — ${spec.subtitle}`}
+      block
+      className="group relative flex h-full flex-col justify-between overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-5 transition-colors hover:border-[var(--color-border-active)]"
+    >
+      {/* Left rail accent — colour-codes the tile to its use case */}
+      <div
+        className="pointer-events-none absolute inset-y-0 left-0 w-1"
+        style={{ background: spec.accent }}
+        aria-hidden
+      />
+      <div className="flex items-baseline gap-3">
+        <span
+          className="font-mono text-3xl font-semibold tabular-nums"
+          style={{ color: spec.accent }}
+          aria-hidden
+        >
+          {spec.number}
+        </span>
+        <div className="flex flex-col">
+          <span className="font-mono text-2xl font-semibold uppercase tracking-[0.18em] text-[var(--color-text)]">
+            {spec.title}
+          </span>
+          <span className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            USE CASE {spec.number} · {spec.subtitle}
+          </span>
+        </div>
+      </div>
+      <p className="mt-3 text-[15px] leading-relaxed text-[var(--color-text-secondary)]">
+        {spec.blurb}
+      </p>
+      <div className="mt-4 flex items-center justify-between">
+        <span
+          className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
+        >
+          Open surface
+        </span>
+        <span
+          className="font-mono text-lg leading-none text-[var(--color-text-muted)] group-hover:text-[var(--color-text)]"
+          aria-hidden
+        >
+          →
+        </span>
+      </div>
+    </Pressable>
+  );
+}
+
+function StageGrid() {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden bg-[var(--color-bg)] p-6">
+      {/* WP-2 thesis strap — exact copy from the work order. Lives ABOVE
+       * the four tiles so the audience reads the claim before picking a
+       * use case to walk. */}
+      <div>
+        <h1 className="font-sans text-2xl font-semibold leading-tight tracking-tight text-[var(--color-text)]">
+          One OS · One dataset · One audit chain · Four use cases solved.
+        </h1>
+        <p className="mt-2 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-muted)]">
+          SPIRE · Decision Surface · pick a use-case tile to drive the live surface
+        </p>
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 md:grid-cols-2">
+        {STAGE_TILES.map((s) => (
+          <StageTile key={s.key} spec={s} />
+        ))}
+      </div>
+      {/* Built-by strap — placeholder name kept inside braces per spec
+       * so the host can grep & swap it before stage. Do NOT inline a
+       * concrete team identifier here without an explicit go from the
+       * presenter. */}
+      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-3">
+        <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+          Presented by
+        </div>
+        <div className="mt-1 font-sans text-sm text-[var(--color-text-secondary)]">
+          Built by {`{TEAM_NAME_PLACEHOLDERS}`} · MDM 2026
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // View root
 // ---------------------------------------------------------------------------
 export function DecisionBridgeView() {
@@ -925,7 +1083,15 @@ export function DecisionBridgeView() {
   // next tick, not whenever the existing back-off would have fired.
   const ddilMode = useSpireStore((s) => s.ddilMode);
   const cadenceMult = commsCadenceMultiplier(ddilMode);
+  const stageMode = useSpireStore((s) => s.stageMode);
   const nav = useNavigate();
+  // Stage-mode short-circuit. The four-up grid is rendered in place of
+  // the operator's 5-tile signal grid; no live polling fires below
+  // because the stage tiles are story tiles, not signal tiles. Operator
+  // sessions (the default) keep the original behaviour byte-for-byte.
+  if (stageMode) {
+    return <StageGrid />;
+  }
 
   const [mission, setMission] = useState<DecisionBridgeMission | null>(null);
   const [missionErr, setMissionErr] = useState<string | null>(null);

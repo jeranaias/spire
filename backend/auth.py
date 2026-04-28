@@ -300,6 +300,68 @@ def me(request: Request) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# MDM 2026 stage-pivot — additive quick-switch endpoint.
+#
+# Re-issues a session cookie for a different mock identity WITHOUT
+# requiring a PIN re-entry. Used only by the on-stage IdentityPill in
+# `stageMode` so the presenter can swap CAC identity in one click.
+#
+# Hardening:
+#   • Gated by env var `SPIRE_DEMO_QUICK_SWITCH=1`. Disabled (404) by
+#     default, so production / non-stage deploys never expose the path.
+#   • DODID must already exist in MOCK_USERS (no on-the-fly user
+#     creation; the four cert identities are the only valid targets).
+#   • Same cookie attributes as `/login` so a quick-switched session is
+#     indistinguishable on the wire from one that came through PIN entry.
+#   • Middleware is unchanged — this is router-only, additive code.
+# ---------------------------------------------------------------------------
+
+
+class QuickSwitchRequest(BaseModel):
+    dodid: str
+
+
+def _quick_switch_enabled() -> bool:
+    return os.environ.get("SPIRE_DEMO_QUICK_SWITCH", "0") == "1"
+
+
+@router.post("/quick-switch")
+def quick_switch(req: QuickSwitchRequest, request: Request, response: Response) -> dict[str, Any]:
+    if not _quick_switch_enabled():
+        raise HTTPException(status_code=404, detail="quick_switch_disabled")
+    # SECURITY: require an EXISTING authenticated session before re-issuing
+    # a cookie for any other identity. Without this gate, an unauthenticated
+    # caller could mint a valid session for any mock user just by knowing
+    # the env var was on. The session middleware already populates
+    # `request.state.user` from the signed cookie; if it is None the
+    # caller is not currently signed in and we refuse the swap.
+    current = getattr(request.state, "user", None)
+    if not current:
+        raise HTTPException(status_code=401, detail="quick_switch_requires_session")
+    user = MOCK_USERS_BY_DODID.get(req.dodid)
+    if not user:
+        raise HTTPException(status_code=404, detail="cert_not_found")
+    issued = int(time())
+    payload = {
+        "dodid": user["dodid"],
+        "iat": issued,
+        "exp": issued + SESSION_TTL_SECONDS,
+        "jti": secrets.token_hex(8),
+    }
+    token = sign_session(payload)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=SESSION_TTL_SECONDS,
+        path="/",
+        secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
+    )
+    return {"ok": True, "user": user, "expires_at": payload["exp"]}
+
+
+# ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
 

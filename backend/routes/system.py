@@ -281,15 +281,43 @@ async def dataset_info():
     }
 
 
+def _stage_demo_open(request: Request) -> bool:
+    """MDM 2026 stage-pivot — return True when the audit-read role gate
+    should be bypassed for the AUDIT-pill closing beat.
+
+    Two things must be true:
+      • `SPIRE_DEMO_QUICK_SWITCH=1` is set in the environment (the same
+        env signal that turns the additive quick-switch endpoint on).
+        This is the host's deliberate "I am running the stage demo"
+        toggle and is OFF in production by default.
+      • The caller has a valid signed session (any presenter identity).
+        The session middleware populates `request.state.user`; an
+        anonymous request still 401s before reaching this handler.
+
+    The bypass is intentionally narrow: it only applies to the audit
+    READ endpoints, never to mutating routes, and it requires both
+    signals so an accidental env flag in prod doesn't open the chain
+    to anonymous traffic.
+    """
+    if os.environ.get("SPIRE_DEMO_QUICK_SWITCH", "0") != "1":
+        return False
+    return getattr(request.state, "user", None) is not None
+
+
 @router.get("/audit")
-async def audit(limit: int = 50, role: str | None = None):
+async def audit(request: Request, limit: int = 50, role: str | None = None):
     """Append-only hash-chained audit log backed by SQLite. Each entry is
     SHA-256 chained to the previous; any mutation breaks the chain and
     verify_chain() reports the first offending id.
 
     Audit chain mining can reconstruct cross-role decision history, so
-    read access is gated to security_manager only."""
-    require_role(role, AUDIT_READ_ROLES, "audit.read")
+    read access is gated to security_manager only — UNLESS the demo
+    stage env toggle is on AND the caller is signed in (see
+    `_stage_demo_open`). The stage bypass exists so any presenter
+    identity can drop into the chain for the closing beat without
+    re-PINning into Park (security_manager)."""
+    if not _stage_demo_open(request):
+        require_role(role, AUDIT_READ_ROLES, "audit.read")
     chain = verify_chain()
     entries = recent_entries(limit=limit)
     return {
@@ -493,6 +521,42 @@ async def _secure_wipe(request: Request, payload: dict = Body(default={})):
 # GC-7 Air-gap deployment mode — comms-state + queue-on-disconnect
 # ---------------------------------------------------------------------------
 
+@router.post("/dha-rescue/audit")
+async def dha_rescue_audit(request: Request, payload: dict = Body(default={})):
+    """MDM 2026 stage-pivot — append a hash-chained audit row for a DHA
+    RESCUE (Class VIII / blood) operator action.
+
+    The DhaRescueView calls this when the presenter clicks "Advance to
+    H+72" or approves a market-sourcing recommendation. The chain
+    contract is the same one SENTRY/PULSE/BASTION write to (see
+    persistence.log) so the closing-beat AUDIT reveal shows entries
+    interleaved with the other use cases.
+
+    The endpoint trusts the authenticated session for actor identity;
+    payload fields are descriptive only (action label, recommendation
+    id, advanced-to hour). Anonymous calls are rejected by the auth
+    middleware before they reach this handler.
+    """
+    user = getattr(request.state, "user", None) or {}
+    action = str(payload.get("action") or "dha.unknown")
+    audit_log(
+        f"dha.{action}",
+        actor=user.get("dodid") or user.get("role") or "unknown",
+        subject_id=str(payload.get("subject_id") or "dha-rescue"),
+        payload={
+            "action": action,
+            "advance_to_hour": payload.get("advance_to_hour"),
+            "recommendation_id": payload.get("recommendation_id"),
+            "user_dodid": user.get("dodid"),
+            "user_role": user.get("role"),
+            "user_name": user.get("name"),
+            "surface": "dha-rescue",
+            "source_ip": _client_ip(request),
+        },
+    )
+    return {"ok": True, "logged": True, "action": action}
+
+
 @router.post("/audit/spillage")
 async def audit_spillage(request: Request, payload: dict = Body(default={})):
     """Frontend-side spillage record.
@@ -570,6 +634,7 @@ def _enrich_actor_identity(actor: str) -> dict:
 
 @router.get("/admin/audit")
 async def admin_audit(
+    request: Request,
     role: str | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -596,8 +661,13 @@ async def admin_audit(
 
     Returns enriched rows with parsed payload, identity lookup, anomaly
     tagging, and chain-walk metadata.
+
+    MDM 2026 stage-pivot — same stage-demo bypass as `/audit` so the
+    AUDIT-pill closing beat works for any signed-in presenter when
+    `SPIRE_DEMO_QUICK_SWITCH=1`.
     """
-    require_role(role, AUDIT_READ_ROLES, "audit.soc_view")
+    if not _stage_demo_open(request):
+        require_role(role, AUDIT_READ_ROLES, "audit.soc_view")
 
     actor_list = [a for a in (actors or "").split(",") if a]
     kind_list = [k for k in (kinds or "").split(",") if k]

@@ -11,11 +11,28 @@ import { MissionClock } from "./MissionClock";
 import { CommsControl } from "./CommsControl";
 import { Button, DangerButton, Pressable, useIdempotentAction } from "./ui";
 
-const tabs = [
-  { to: "/sentry",  label: "SENTRY", restrict: null as Role | null },
-  { to: "/pulse",   label: "PULSE",   restrict: null as Role | null },
-  { to: "/bastion", label: "BASTION", restrict: null as Role | null },
+type Tab = { to: string; label: string; restrict: Role | null };
+
+// Operator chrome — the historical nav. ADMIN is privileged-only and
+// stays gated to security_manager.
+const OPERATOR_TABS: Tab[] = [
+  { to: "/sentry",  label: "SENTRY",  restrict: null },
+  { to: "/pulse",   label: "PULSE",   restrict: null },
+  { to: "/bastion", label: "BASTION", restrict: null },
   { to: "/admin",   label: "ADMIN",   restrict: "security_manager" as Role },
+];
+
+// MDM 2026 stage-pivot — when `stageMode` is on, the primary nav spine
+// is the four hero use-cases (SENTRY/PULSE/BASTION/DHA RESCUE), no
+// ADMIN. The AUDIT pill on the right of the bar still routes the
+// presenter to /admin/audit for the closing beat, but the privileged
+// ADMIN landing surface is intentionally not exposed as a tab on stage
+// so the audience sees the four-module spine and nothing else.
+const STAGE_TABS: Tab[] = [
+  { to: "/sentry",     label: "SENTRY",     restrict: null },
+  { to: "/pulse",      label: "PULSE",      restrict: null },
+  { to: "/bastion",    label: "BASTION",    restrict: null },
+  { to: "/dha-rescue", label: "DHA RESCUE", restrict: null },
 ];
 
 // Friendly per-tab list of authorized roles for the out-of-scope tooltip.
@@ -26,7 +43,7 @@ function authorizedRolesFor(path: string, role: Role): { allowed: boolean; allow
 }
 
 export function TopBar() {
-  const { role, operatingMode, alertCount, currentUser } = useSpireStore();
+  const { role, operatingMode, alertCount, currentUser, stageMode } = useSpireStore();
 
   return (
     <header className="relative h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -68,11 +85,13 @@ export function TopBar() {
             </div>
           </div>
           <nav className="flex shrink-0 items-center gap-0">
-            {tabs
+            {(stageMode ? STAGE_TABS : OPERATOR_TABS)
               // ADMIN remains hidden when the role isn't security_manager
               // (it's a privileged surface, not a teaser). Other tabs render
               // even out of scope so operators can see what exists, but they
               // get the disabled treatment + tooltip.
+              // Stage mode swaps ADMIN for DHA RESCUE so the four-module
+              // spine matches the Decision Bridge tile order.
               .filter((t) => t.restrict == null || t.restrict === role)
               .map((tab, idx) => {
                 const { allowed, allowedRoles } = authorizedRolesFor(tab.to, role);
@@ -158,22 +177,39 @@ export function TopBar() {
          * label, and would just add visual noise next to the role
          * selector. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
-          <span className="hidden xl:contents"><NodeStatus /></span>
-          {/* GcssMcSyncPill must stay visible at every breakpoint — it is the
-           * only chrome-level "this connection is mocked" signal, and hiding
-           * it under 1280px would let the rest of the app keep reading
-           * "GCSS-MC" data sources without the operator ever seeing the REF
-           * disclosure. See .local/critiques/integrations-gcss-mc.md (P0-3). */}
-          <GcssMcSyncPill />
+          {/* MDM 2026 stage-pivot — operator chrome (NodeStatus, GCSS-MC
+           * sync, AirGapToggle, DensityToggle, PushToJoint, ModeBadge)
+           * is suppressed in stage mode so the four hero use-case tabs
+           * carry the visual weight on stage. CommsControl, IdentityPill,
+           * ResetDemo, and AlertBadge stay because they're presenter
+           * controls. AUDIT pill is added so the host can drop into
+           * `/admin/audit` from any surface in two clicks.
+           *
+           * Outside stage mode, GcssMcSyncPill stays visible at every
+           * breakpoint — it is the only chrome-level "this connection
+           * is mocked" signal, and hiding it under 1280px would let the
+           * rest of the app keep reading "GCSS-MC" data sources without
+           * the operator ever seeing the REF disclosure. See
+           * .local/critiques/integrations-gcss-mc.md (P0-3). */}
+          {!stageMode && <span className="hidden xl:contents"><NodeStatus /></span>}
+          {!stageMode && <GcssMcSyncPill />}
           <CommsControl />
-          <span className="hidden xl:contents"><AirGapToggle /></span>
-          <span className="hidden xl:contents"><DensityToggle /></span>
+          {!stageMode && <span className="hidden xl:contents"><AirGapToggle /></span>}
+          {!stageMode && <span className="hidden xl:contents"><DensityToggle /></span>}
+          {stageMode && <AuditPill />}
           <FailsafePill />
           <ResetDemoButton />
-          <PushToJointButton role={role} />
-          <DraftsBadge role={role} />
+          {!stageMode && <PushToJointButton role={role} />}
+          {!stageMode && <DraftsBadge role={role} />}
+          {/* MDM 2026 stage-pivot — multi-presenter handoff (WP-8). The
+           * 4-up chip strip sits inline with the right group only in
+           * stage mode and offers one-click identity swaps so the next
+           * presenter can take the mic without re-PINning. The detailed
+           * dropdown on IdentityPill remains available for off-roster
+           * actions (sign out, presenter routes). */}
+          {stageMode && <IdentityChips currentDodid={currentUser?.dodid ?? null} />}
           <IdentityPill user={currentUser} role={role} />
-          <span className="hidden xl:contents"><ModeBadge mode={operatingMode} /></span>
+          {!stageMode && <span className="hidden xl:contents"><ModeBadge mode={operatingMode} /></span>}
           <AlertBadge count={alertCount} />
         </div>
       </div>
@@ -245,9 +281,151 @@ function SpireMark() {
 // pill renders a placeholder; this branch is unreachable during normal use
 // (RequireAuth gates every authenticated route) but keeps the component
 // resilient during sign-out animations.
+// MDM 2026 stage-pivot — single-purpose AUDIT chip rendered in the
+// TopBar right group only when the store is in `stageMode`. The host
+// uses this to drop into `/admin/audit` after the BASTION beat, so the
+// audience sees the hash-chained record was being written the whole
+// time. The actual scope check on AuditView is bypassed in stage mode
+// (any role can land on the page) — see AuditView.
+function AuditPill() {
+  const nav = useNavigate();
+  return (
+    <Pressable
+      onClick={() => nav("/admin/audit")}
+      block={false}
+      aria-label="Open audit chain"
+      title="Audit · SOC view (hash-chained, append-only)"
+      className="!min-h-0 hidden h-9 shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)] sm:inline-flex"
+    >
+      <span
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{ background: "var(--color-success)", boxShadow: "0 0 6px var(--color-success)" }}
+        aria-hidden
+      />
+      AUDIT
+    </Pressable>
+  );
+}
+
+// MDM 2026 stage-pivot — IdentityChips: a four-up strip of the mock CAC
+// roster, rendered in stage mode immediately to the LEFT of the
+// IdentityPill. Each chip is a single-click identity swap that prefers
+// the additive `quick-switch` endpoint and falls back to the any-PIN
+// login path on 404 (matches IdentityPill.switchIdentity). The active
+// identity is highlighted with a primary outline so the audience can see
+// who's "driving" the demo. Below `xl` the strip collapses to initials
+// only to preserve TopBar real estate; the IdentityPill dropdown still
+// shows the long form. Outside stage mode the component is a render
+// no-op so the operator chrome is byte-identical to before.
+function IdentityChips({ currentDodid }: { currentDodid: string | null }) {
+  const [users, setUsers] = useState<AuthUser[] | null>(null);
+  const [busyDodid, setBusyDodid] = useState<string | null>(null);
+  const nav = useNavigate();
+  const signIn = useSpireStore((s) => s.signIn);
+  const pushToast = useSpireStore((s) => s.pushToast);
+
+  // Fetch the cert directory once on mount. Quiet-fail (just hide the
+  // strip) if it errors — IdentityPill is still available for swaps.
+  useEffect(() => {
+    let cancelled = false;
+    api.auth.users()
+      .then((r) => { if (!cancelled) setUsers(r.users); })
+      .catch(() => { if (!cancelled) setUsers([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!users || users.length === 0) return null;
+
+  async function swap(target: AuthUser) {
+    if (busyDodid) return;
+    if (target.dodid === currentDodid) return;
+    setBusyDodid(target.dodid);
+    try {
+      let u;
+      try {
+        const qr = await api.auth.quickSwitch(target.dodid);
+        u = qr.user;
+      } catch {
+        const r = await api.auth.login(target.dodid, "000000");
+        u = r.user;
+      }
+      signIn({
+        dodid: u.dodid, name: u.name, first_name: u.first_name, last_name: u.last_name,
+        rank: u.rank, rank_long: u.rank_long, billet: u.billet, unit: u.unit,
+        parent_command: u.parent_command, branch: u.branch, clearance: u.clearance,
+        role: u.role, initials: u.initials, cert_issuer: u.cert_issuer,
+        cert_serial: u.cert_serial, cert_expires: u.cert_expires,
+      });
+      pushToast({
+        tone: "ok",
+        text: `Signed in as ${u.rank} ${u.last_name} · ${ROLE_LABELS[u.role as Role]}`,
+        ttlMs: 3500,
+      });
+      // Always land on Decision Bridge so the new role's permissions
+      // resolve cleanly (matches IdentityPill behaviour).
+      nav("/", { replace: true });
+    } catch (e) {
+      pushToast({ tone: "error", text: `Identity switch failed: ${formatApiError(e)}` });
+    } finally {
+      setBusyDodid(null);
+    }
+  }
+
+  return (
+    <div
+      className="hidden lg:inline-flex shrink-0 items-center gap-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5"
+      role="group"
+      aria-label="Stage presenter handoff"
+    >
+      {users.map((u) => {
+        const active = u.dodid === currentDodid;
+        const busy = busyDodid === u.dodid;
+        return (
+          <Pressable
+            key={u.dodid}
+            onClick={() => swap(u)}
+            block={false}
+            disabled={active || !!busyDodid}
+            aria-label={`Switch to ${u.rank} ${u.last_name} · ${ROLE_LABELS[u.role as Role] ?? u.role}`}
+            aria-pressed={active}
+            title={`${u.rank} ${u.last_name} · ${ROLE_LABELS[u.role as Role] ?? u.role}${active ? " (active)" : ""}`}
+            className={
+              "!min-h-0 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm px-2 font-mono text-[10px] uppercase tracking-widest transition-colors " +
+              (active
+                ? "border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] text-[var(--color-text)]"
+                : "border border-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]")
+            }
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{
+                background: active ? "var(--color-primary)" : "var(--color-text-muted)",
+                boxShadow: active ? "0 0 6px var(--color-primary)" : undefined,
+              }}
+              aria-hidden
+            />
+            <span className="font-mono tabular-nums">{u.initials}</span>
+            <span className="hidden xl:inline truncate max-w-[6rem]">{u.last_name}</span>
+            {busy && (
+              <span className="ml-1 font-mono text-[9px] text-[var(--color-text-muted)]">…</span>
+            )}
+          </Pressable>
+        );
+      })}
+    </div>
+  );
+}
+
 function IdentityPill({ user, role }: { user: User | null; role: Role }) {
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  // MDM 2026 stage-pivot — when the session is in stage mode the
+  // identity-swap menu prefers the additive `quick-switch` endpoint
+  // over the PIN login path. quick-switch re-issues the cookie without
+  // requiring a 6-digit PIN, so the on-stage swap is one click. If the
+  // backend doesn't have the env var enabled the call 404s and we fall
+  // back to the existing login(target.dodid, "000000") path.
+  const stageMode = useSpireStore((s) => s.stageMode);
   // Stage-day affordance: presenters need to swap CAC identity mid-demo
   // (Hayes for the commander walk, Park for the SENTRY sanitization beat)
   // without the 4-step sign-out → cert-pick → PIN → sign-in dance under
@@ -306,11 +484,24 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
     if (switchingTo) return;
     setSwitchingTo(target.dodid);
     try {
-      // Mock auth: any 6-digit PIN clears. We use 000000 for the in-app
-      // swap so the presenter doesn't have to retype on stage. The real
-      // sign-in flow (cert + PIN entry) remains the only path from /auth.
-      const r = await api.auth.login(target.dodid, "000000");
-      const u = r.user;
+      // Stage mode → try the no-PIN quick-switch first. If the backend
+      // 404s (env var off, or older deploy), fall through to the
+      // any-6-digit-PIN login path so the presenter still gets a swap.
+      // Operator (non-stage) sessions go straight to login() — they
+      // shouldn't even know quick-switch exists.
+      let u;
+      if (stageMode) {
+        try {
+          const qr = await api.auth.quickSwitch(target.dodid);
+          u = qr.user;
+        } catch {
+          const r = await api.auth.login(target.dodid, "000000");
+          u = r.user;
+        }
+      } else {
+        const r = await api.auth.login(target.dodid, "000000");
+        u = r.user;
+      }
       signIn({
         dodid: u.dodid,
         name: u.name,
@@ -571,8 +762,13 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
            * caught in walkthrough Run C: a bare /pitch (no hash) loads
            * the SPA index and falls through to the Decision Bridge. The
            * index.html safety-net script catches that case in the URL
-           * bar; these menu items are the in-app, one-click entry. */}
-          <div className="border-b border-[var(--color-border)] py-1">
+           * bar; these menu items are the in-app, one-click entry.
+           *
+           * MDM 2026 stage-pivot — suppressed in stage mode. The four
+           * hero use-case tabs are the only nav surface during the 8-min
+           * stage demo; /pitch and /demo are operator/dev affordances
+           * that would muddy the on-stage choice surface. */}
+          {!stageMode && <div className="border-b border-[var(--color-border)] py-1">
             <div className="px-4 pt-2 pb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
               Presenter
             </div>
@@ -594,7 +790,7 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
               <span>Open demo cockpit</span>
               <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">/#/demo</span>
             </Pressable>
-          </div>
+          </div>}
 
           <Pressable
             role="menuitem"
@@ -1290,6 +1486,13 @@ function FailsafePill() {
 
 function ResetDemoButton() {
   const role = useSpireStore((s) => s.role);
+  // MDM 2026 stage-pivot — RESET DEMO must be reachable from any role
+  // when the session is on stage. The presenter often quick-switches
+  // to Hayes (security_manager) for the SENTRY beat and then needs to
+  // reset the scenario before the BASTION cold-open without first
+  // swapping back to Reyes (g4). Outside stage mode the affordance
+  // remains operator-only.
+  const stageMode = useSpireStore((s) => s.stageMode);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAirGap = useSpireStore((s) => s.setAirGap);
   const setQueueDepth = useSpireStore((s) => s.setQueueDepth);
@@ -1342,8 +1545,9 @@ function ResetDemoButton() {
     { lockoutMs: 750 },
   );
 
-  // Operator role only. Other roles never see the affordance.
-  if (role !== "g4") return null;
+  // Operator role only outside stage mode. In stage mode any role can
+  // reset the scenario between vignettes.
+  if (role !== "g4" && !stageMode) return null;
 
   return (
     <DangerButton

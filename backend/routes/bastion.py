@@ -780,6 +780,10 @@ async def simulate_thermalhawk_detection(
         backward-compat with the FE button (which doesn't send one), but
         we ignore it for routing and emit an audit row if it disagrees
         with the derived unit so cross-tenant probes are observable.
+
+    Round-4 hardening also writes a `bastion.thermalhawk_simulate`
+    audit row keyed on sim_id so the SOC AUDIT pill reflects every
+    invocation alongside the SENTRY/PULSE/DHA per-module rows.
     """
     payload = payload or {}
     user = getattr(request.state, "user", None) or {}
@@ -933,7 +937,7 @@ async def simulate_thermalhawk_detection(
     # outcome via load_state="live". Public builds always run the
     # scripted alert path — no mechanism disclosure.
 
-    return {
+    response = {
         "sim_id": sim_id,
         "alert": alert,
         "checklist": _response_checklist_for("UAS_INCURSION", "CRITICAL", location=motor_pool["name"]),
@@ -944,6 +948,27 @@ async def simulate_thermalhawk_detection(
         ],
         "response_forces_dispatched": ["WATCHDOG-3", "RAIDER-1", "IRONHORSE-2 (standby)"],
     }
+
+    # Hash-chain the BASTION simulate event so the AUDIT closing beat can
+    # show a `bastion.thermalhawk_simulate` entry alongside SENTRY,
+    # PULSE, and DHA writes. Anchored to the sim_id as the subject so
+    # subsequent /simulate/clear/{sim_id} requests refer to the same
+    # subject in the chain.
+    audit_log(
+        "bastion.thermalhawk_simulate",
+        actor=session_role(request) or "unknown",
+        subject_id=sim_id,
+        payload={
+            "unit": target_unit,
+            "incident_type": "UAS_INCURSION",
+            "severity": "CRITICAL",
+            "location": motor_pool.get("name"),
+            "cordon_zones_m": [c["radius_m"] for c in response["cordon_zones"]],
+            "readiness_note": readiness_note,
+        },
+    )
+
+    return response
 
 
 @router.post("/simulate/clear/{sim_id}")

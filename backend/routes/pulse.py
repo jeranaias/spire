@@ -1100,11 +1100,12 @@ async def propose_cannibalization(request: Request, payload: dict):
     }
     _PROPOSED_MATCHES.append(proposal)
     try:
-        # persistence.py exports the audit-chain writer as `log`; alias on
-        # import so the call site reads as `audit_log` (the bare-except
-        # below used to swallow the ImportError silently when the wrong
-        # name was imported, which meant the cannibalization audit row
-        # was quietly missing for months).
+        # persistence.py exports the audit-chain writer as `log`; alias
+        # on import so the call site reads as `audit_log`. Pre-round-4
+        # this import was `audit_log` and silently failed under the
+        # bare `except: pass` below — leaving the route 200-OK but
+        # never writing the audit row, so the SOC AUDIT pill missed
+        # every PULSE cross-level proposal for months. Now fixed.
         from ..persistence import log as audit_log
         audit_log(
             "cannibalization_propose",
