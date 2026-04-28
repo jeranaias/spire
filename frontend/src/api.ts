@@ -911,6 +911,13 @@ export interface ModelInAppSurface {
   route: string;
 }
 
+export interface ModelAuthorization {
+  ao?: string | null;
+  package_id?: string | null;
+  expiration?: string | null;
+  note?: string | null;
+}
+
 export interface ModelRegistrySummary {
   id: string;
   name: string;
@@ -920,9 +927,11 @@ export interface ModelRegistrySummary {
   hosting_target?: string | null;
   hosting_actual?: string | null;
   hosting_gap_present: boolean;
+  authorization?: ModelAuthorization | null;
   fedramp_status?: string | null;
   vendor_name?: string | null;
   vendor_jurisdiction?: string | null;
+  vendor_jurisdictions?: string[];
   vendor_foreign_pivot_risk?: string | null;
   last_validated_at?: string | null;
   holdout_accuracy?: number | null;
@@ -933,6 +942,14 @@ export interface SupplyChainAtAGlance {
   total_models: number;
   at_risk_jurisdictions: string[];
   at_risk_jurisdictions_count: number;
+  // Task #82 — split FedRAMP into honest buckets so the projector doesn't
+  // read "all five lack FedRAMP" as the headline. Color is reserved for
+  // `models_fedramp_pending` only.
+  models_fedramp_covered: number;
+  models_fedramp_not_applicable: number;
+  models_fedramp_pending: number;
+  // Back-compat: equals not_applicable + pending. Kept for any old callers
+  // — the new UI splits the bucket explicitly.
   models_without_fedramp_coverage: number;
   models_with_hosting_gap: number;
   models_with_placeholder_provenance: number;
@@ -964,11 +981,17 @@ export interface ModelImplementation {
     actual: string;
     gap?: string;
   };
+  // Task #82 — IL-5 *authorization* is distinct from IL-5 *hosting target*.
+  // Optional so older registry entries without the block keep rendering.
+  authorization?: ModelAuthorization;
   fedramp_status: string;
   fedramp_note?: string;
   vendor: {
     name: string;
     jurisdiction: string;
+    // Canonical multi-jurisdiction list — populated for vendors that span
+    // more than one country (e.g. Alphabet US + DeepMind UK).
+    jurisdictions?: string[];
     ownership?: string;
     known_acquisitions?: string[];
     foreign_pivot_risk?: string;

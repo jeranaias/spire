@@ -1,6 +1,6 @@
 {
   "_doc": "Canonical SPIRE model registry. Source of truth for /api/system/admin/models. The W1 task #30 supply-chain page reads from here. Honesty over hand-waving — anything that isn't yet real is labelled 'TBD — placeholder'.",
-  "registry_version": "2026-04-28.1",
+  "registry_version": "2026-04-28.2",
   "owner": "SPIRE Engineering · Thornveil",
   "models": [
     {
@@ -28,11 +28,18 @@
             "actual": "In-process Python alongside the FastAPI backend",
             "gap": "None — first-party in-process inference inherits the deployment posture; satisfies IL-5 / IL-6 boundaries by colocation."
           },
+          "authorization": {
+            "ao": "TBD — placeholder",
+            "package_id": "TBD — placeholder",
+            "expiration": "TBD — placeholder",
+            "note": "IL-5 is the hosting *target*, not an active authorization. SPIRE is in pre-fielding posture; ATO paperwork lands with the receiving MEF G-6 once a host enclave is selected. Distinct from the operational IL boundary the deployed enclave inherits."
+          },
           "fedramp_status": "not_applicable",
           "fedramp_note": "First-party deterministic algorithm inside the SPIRE process. No SaaS dependency to assess.",
           "vendor": {
             "name": "SPIRE (Thornveil LLC)",
             "jurisdiction": "United States",
+            "jurisdictions": ["United States"],
             "ownership": "Privately held by Jesse @ Thornveil",
             "known_acquisitions": [],
             "foreign_pivot_risk": "low",
@@ -72,11 +79,18 @@
             "actual": "Not deployed — env var unset",
             "gap": "TBD — placeholder until the trained checkpoint exists"
           },
+          "authorization": {
+            "ao": "TBD — placeholder",
+            "package_id": "TBD — placeholder",
+            "expiration": "TBD — placeholder",
+            "note": "IL-5 is the hosting *target*. No ATO until weights exist and a receiving enclave is selected."
+          },
           "fedramp_status": "TBD — placeholder",
           "fedramp_note": "Will inherit SPIRE deployment posture (in-process, no SaaS).",
           "vendor": {
             "name": "SPIRE / Thornveil",
             "jurisdiction": "United States",
+            "jurisdictions": ["United States"],
             "ownership": "Privately held",
             "known_acquisitions": [],
             "foreign_pivot_risk": "low",
@@ -127,11 +141,18 @@
             "actual": "In-process Python alongside the FastAPI backend",
             "gap": "None — first-party in-process inference."
           },
+          "authorization": {
+            "ao": "TBD — placeholder",
+            "package_id": "TBD — placeholder",
+            "expiration": "TBD — placeholder",
+            "note": "IL-5 is the hosting *target*, not an active authorization. SPIRE inherits whatever ATO the receiving enclave already holds; no SENTRY-specific package is on file."
+          },
           "fedramp_status": "not_applicable",
           "fedramp_note": "Deterministic regex. No SaaS dependency.",
           "vendor": {
             "name": "SPIRE (Thornveil LLC)",
             "jurisdiction": "United States",
+            "jurisdictions": ["United States"],
             "ownership": "Privately held",
             "known_acquisitions": [],
             "foreign_pivot_risk": "low",
@@ -171,11 +192,18 @@
             "actual": "Routes to local Gemma 4 via SPIRE_LLM_PROXY; never to commercial APIs.",
             "gap": "Cloud-routing aliases (haiku, sonnet, opus, openrouter, etc.) are filtered out of the proxy surface — see backend/routes/system._probe_llm_brief."
           },
+          "authorization": {
+            "ao": "TBD — placeholder",
+            "package_id": "TBD — placeholder",
+            "expiration": "TBD — placeholder",
+            "note": "IL-5 is the hosting *target* of the underlying copilot LLM. The Tier-2 routing layer holds no separate ATO — see copilot-llm authorization block."
+          },
           "fedramp_status": "not_applicable",
           "fedramp_note": "Local inference path. SaaS routing is filtered out at the proxy layer.",
           "vendor": {
             "name": "Routing layer is first-party. Underlying model: Google (Gemma weights) — see copilot-llm card.",
-            "jurisdiction": "United States",
+            "jurisdiction": "United States (routing layer); see copilot-llm for weights jurisdiction",
+            "jurisdictions": ["United States"],
             "ownership": "First-party routing; model weights detailed under copilot-llm.",
             "known_acquisitions": [],
             "foreign_pivot_risk": "low",
@@ -226,15 +254,22 @@
             "actual": "Local vLLM on operator rig (SPIRE_LLM_PROXY env var); 524288-token context window",
             "gap": "None — fully local inference. Network egress monitor (backend/network_monitor.py) blocks outbound to commercial LLM endpoints."
           },
+          "authorization": {
+            "ao": "TBD — placeholder",
+            "package_id": "TBD — placeholder",
+            "expiration": "TBD — placeholder",
+            "note": "IL-5 is the hosting *target*. SPIRE has no Gemma-specific ATO package; weights run inside the SPIRE process, so the model inherits whatever authorization the receiving enclave already holds. Distinct from the IL-5 *authorization* a fielded ATO would carry."
+          },
           "fedramp_status": "not_applicable",
           "fedramp_note": "Self-hosted inference. SPIRE never calls a SaaS LLM in production posture; the network egress monitor enforces this."
           ,
           "vendor": {
-            "name": "Google (open weights publisher) — operated locally by SPIRE",
-            "jurisdiction": "United States",
-            "ownership": "Alphabet Inc. (publisher of weights)",
-            "known_acquisitions": [],
-            "foreign_pivot_risk": "low — open weights. If Google withdraws future Gemma releases, the currently-cached FP8 checkpoint continues to operate offline.",
+            "name": "Alphabet (US, weights publisher) / DeepMind (UK, research lab) — operated locally by SPIRE",
+            "jurisdiction": "Alphabet (US) / DeepMind (UK)",
+            "jurisdictions": ["United States", "United Kingdom"],
+            "ownership": "Alphabet Inc. (Mountain View, CA) publishes the Gemma weights; the underlying research lab — Google DeepMind — is headquartered in London, UK. Operated locally by SPIRE.",
+            "known_acquisitions": ["Google acquired DeepMind (UK) in 2014"],
+            "foreign_pivot_risk": "low — open weights, fully local execution. Cached FP8 checkpoint keeps operating if Alphabet withdraws future releases. Recorded so the auditor sees the UK research-lab origin honestly rather than the page claiming a pure-US LLM.",
             "contingency": "Open weights are mirrored locally on the operator rig. A vendor pivot does not affect already-deployed inference. Replacement candidates: Llama 3.x, Mistral, Qwen — all swap-in via SPIRE_LLM_MODEL alias change."
           },
           "validation": {
@@ -281,11 +316,18 @@
             "actual": "Edge accelerator at C-UAS sensor; weights present-detected by SPIRE backend at boot. Eager-load when SPIRE_THERMALHAWK_EAGER=1 and the licensed package is installed.",
             "gap": "Inference disabled in this build — Thornveil private package not installed in the open-source SPIRE deploy. Sim alert advertises 'weights present, inference disabled' honestly."
           },
+          "authorization": {
+            "ao": "TBD — placeholder",
+            "package_id": "TBD — placeholder",
+            "expiration": "TBD — placeholder",
+            "note": "IL-5 is the hosting *target* for the edge sensor. No Thornveil-specific ATO; the model would inherit the edge enclave's authorization once fielded."
+          },
           "fedramp_status": "not_applicable",
           "fedramp_note": "Edge inference; no SaaS dependency.",
           "vendor": {
             "name": "Thornveil LLC",
             "jurisdiction": "United States",
+            "jurisdictions": ["United States"],
             "ownership": "Privately held",
             "known_acquisitions": [],
             "foreign_pivot_risk": "low",
@@ -335,11 +377,18 @@
             "actual": "In-process Python alongside the FastAPI backend",
             "gap": "None — first-party in-process inference."
           },
+          "authorization": {
+            "ao": "TBD — placeholder",
+            "package_id": "TBD — placeholder",
+            "expiration": "TBD — placeholder",
+            "note": "IL-5 is the hosting *target*, not an active authorization. Fusion correlator inherits the receiving enclave's ATO."
+          },
           "fedramp_status": "not_applicable",
           "fedramp_note": "Deterministic correlator. No SaaS dependency.",
           "vendor": {
             "name": "SPIRE (Thornveil LLC)",
             "jurisdiction": "United States",
+            "jurisdictions": ["United States"],
             "ownership": "Privately held",
             "known_acquisitions": [],
             "foreign_pivot_risk": "low",
