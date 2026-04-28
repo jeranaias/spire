@@ -1412,6 +1412,12 @@ export interface Forecast {
   threshold: number;
   threshold_cross_date: string | null;
   cross_probabilities: { date: string; p: number }[];
+  as_of?: string;
+  data_window_days?: number;
+  coverage_p10_p90?: number | null;
+  coverage_n?: number;
+  coverage_target?: number;
+  model_card_url?: string;
 }
 
 export interface SentryBatch {
