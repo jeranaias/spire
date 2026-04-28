@@ -15,14 +15,14 @@
  * SENTRY Review Queue cross-link into the relevant model detail page
  * (D1 owns the in-PULSE summary, this lane owns the canonical detail).
  */
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type ModelRegistryListResponse, type ModelRegistrySummary, type SupplyChainAtAGlance } from "../../api";
-import { withRetry, formatApiError } from "../../api-retry";
+import { api, type ModelRegistrySummary, type SupplyChainAtAGlance } from "../../api";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
+import { useRegistryFetch } from "./useRegistryFetch";
+import { DdilFreshnessBanner, FreshnessHeader, RegistryLoadErrorTile } from "./RegistryFreshness";
 
 export function ModelRegistryView() {
   const role = useSpireStore((s) => s.role);
@@ -36,32 +36,13 @@ export function ModelRegistryView() {
     );
   }
 
-  const [data, setData] = useState<ModelRegistryListResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [waking, setWaking] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const resp = await withRetry(() => api.system.adminModels(), {
-          onAttempt: (attempt) => {
-            if (!cancelled) setWaking(attempt > 1);
-          },
-        });
-        if (cancelled) return;
-        setData(resp);
-        setWaking(false);
-      } catch (e) {
-        if (cancelled) return;
-        setError(formatApiError(e));
-        setWaking(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // W1 #83 — fetch lifecycle (loadedAt + manual refresh + auto-refresh on
+  // DDIL reconnect) lives in the shared hook so the same affordances are
+  // wired identically here and on the detail page.
+  const { data, error, waking, loadedAt, refreshing, refresh } = useRegistryFetch(
+    () => api.system.adminModels(),
+    "registry-list",
+  );
 
   if (error && !data) {
     return (
@@ -69,7 +50,8 @@ export function ModelRegistryView() {
         title="Model Registry Offline"
         description="Could not load the model supply-chain registry. The backend may be cycling."
         detail={error}
-        onRetry={() => window.location.reload()}
+        onRetry={refresh}
+        retrying={refreshing}
       />
     );
   }
@@ -79,8 +61,8 @@ export function ModelRegistryView() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">
-      <div className="mb-4 flex items-baseline justify-between gap-4">
-        <div>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest">
             Admin · Model Supply Chain
           </h1>
@@ -92,26 +74,38 @@ export function ModelRegistryView() {
             Registry version {data.registry_version ?? "unknown"} · maintained by {data.owner ?? "SPIRE Engineering"}
           </div>
         </div>
-        <div className="shrink-0">
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <ClassificationBadge classification="UNCLASSIFIED" />
+          <FreshnessHeader loadedAt={loadedAt} refreshing={refreshing} onRefresh={refresh} />
         </div>
       </div>
 
-      <SupplyChainHeader g={data.supply_chain_at_a_glance} />
+      <DdilFreshnessBanner loadedAt={loadedAt} />
 
-      <div className="mt-4 mb-2 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
-        Models registered ({data.models.length})
-      </div>
-      <div className="flex flex-col gap-2">
-        {data.models.map((m) => (
-          <ModelRow key={m.id} model={m} />
-        ))}
-        {data.models.length === 0 && (
-          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            REGISTRY EMPTY — dataset/data/model_registry.json missing or unreadable
+      {/* W1 #83 — surface the backend's `load_error` field explicitly. A
+       * malformed model_registry.json used to render as the empty-state
+       * tile, indistinguishable from "no models registered". */}
+      {data.load_error ? (
+        <RegistryLoadErrorTile message={data.load_error} />
+      ) : (
+        <>
+          <SupplyChainHeader g={data.supply_chain_at_a_glance} />
+
+          <div className="mt-4 mb-2 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
+            Models registered ({data.models.length})
           </div>
-        )}
-      </div>
+          <div className="flex flex-col gap-2">
+            {data.models.map((m) => (
+              <ModelRow key={m.id} model={m} />
+            ))}
+            {data.models.length === 0 && (
+              <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+                REGISTRY EMPTY — dataset/data/model_registry.json missing or unreadable
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       <div className="mt-6 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
         Honesty over hand-waving — placeholder fields are labelled "TBD — placeholder" rather than fabricated.
