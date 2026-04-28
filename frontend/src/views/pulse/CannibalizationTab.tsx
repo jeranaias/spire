@@ -4,6 +4,7 @@ import { formatApiError } from "../../api-retry";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore, type CannibPendingRetry } from "../../state/store";
 import { Button, ErrorState, Pressable, fireIdempotent } from "../../components/ui";
+import { DONOR_MC_FLOOR, computeProposeProjection, type PendingDelta } from "./cannibProjection";
 
 type NeedRow = {
   sr_number: string;
@@ -51,6 +52,13 @@ type MatchRow = {
   // drain reactively.
   localStatus?: "committed" | "queued";
   localId?: string;
+  // Task #162 — captured at propose-time so the projected unit MC%
+  // panel in ConfirmProposeModal can subtract pending donor strips
+  // from the donor unit's MC tally without re-fetching the donor pool.
+  // Only true when the donor was MC at the moment of proposal (the
+  // strip drops a hull from the MC count); false/undefined for
+  // PMC / NMC strippables which don't change the MC tally.
+  donor_was_mc?: boolean;
 };
 
 // Task #40 -- DonorRow is a strippable asset record (not another open need).
@@ -336,6 +344,9 @@ export function CannibalizationTab() {
       nomenclature: need.needed_part.nomenclature,
       impact: `Proposed by operator · recipient ${need.unit} gains ${need.needed_part.nomenclature} from ${donor.unit}.`,
       localStatus: "committed",
+      // Task #162 — let downstream propose dialogs roll this strip's
+      // donor-MC delta into the projected unit MC% panel.
+      donor_was_mc: donor.current_status === "MC",
     };
     setProposedLocal((prev) => [optimistic, ...prev]);
     // Task-42 — route through the DDIL-aware client. The interceptor
@@ -624,6 +635,10 @@ export function CannibalizationTab() {
           nsn: need.needed_part.nsn,
           nomenclature: need.needed_part.nomenclature,
           impact: `Auto-proposed top match · ${need.asset_id} ← ${donor.asset_id}.`,
+          // Task #162 — capture donor MC status so the projection panel
+          // in subsequent propose dialogs can subtract this strip's
+          // contribution from the donor unit's MC tally.
+          donor_was_mc: donor.current_status === "MC",
         };
         if (result.outcome === "committed") {
           committedRows.push({ ...baseRow, commit_status: "committed" });
@@ -637,6 +652,13 @@ export function CannibalizationTab() {
           // queued for retry after re-auth.
           for (let j = i + 1; j < autoConfirm.drafts.length; j++) {
             const skipped = autoConfirm.drafts[j];
+            // Task #147 — route through the store so the rows survive
+            // the re-auth bounce. Task #162's `donor_was_mc` metadata
+            // is intentionally not threaded through here: pending_retry
+            // rows are excluded from the propose-modal projection panel
+            // (the operator already knows they did not land in the
+            // audit chain), so the donor-MC delta only needs to be
+            // recorded once the row actually commits.
             persistPending(
               skipped.need,
               skipped.donor,
@@ -1100,6 +1122,18 @@ export function CannibalizationTab() {
           need={confirmDonor.need}
           donor={confirmDonor.donor}
           committing={committing}
+          // Task #162 — pass the queue of already-proposed-but-not-yet-
+          // committed strips so the modal's projected unit MC% panel
+          // reflects the cumulative pending state, not just the
+          // server-side baseline. We exclude pending_retry rows
+          // (operator knows those did not land in the audit chain).
+          pendingProposals={proposedLocal
+            .filter((m) => m.commit_status !== "pending_retry")
+            .map<PendingDelta>((m) => ({
+              recipient_unit: m.recipient.unit,
+              donor_unit: m.donor.unit,
+              donor_was_mc: !!m.donor_was_mc,
+            }))}
           onCancel={() => setConfirmDonor(null)}
           onConfirm={commit}
         />
@@ -1209,12 +1243,14 @@ function ConfirmProposeModal({
   need,
   donor,
   committing,
+  pendingProposals,
   onCancel,
   onConfirm,
 }: {
   need: NeedRow;
   donor: DonorRow;
   committing: boolean;
+  pendingProposals: PendingDelta[];
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -1228,13 +1264,8 @@ function ConfirmProposeModal({
   // With strippable donors, removing the part only decrements the MC
   // count when the donor was MC to begin with. PMC/NMCM/NMCS donors do
   // not change the MC count (they were never counted as MC).
-  const donorMc = donor.unit_mc_rate ?? 0;
   const donorTotal = donor.unit_total ?? 0;
-  const donorMcCount = donor.unit_mc_count ?? 0;
   const willDropMc = donor.current_status === "MC" ? 1 : 0;
-  const projectedMc = donorTotal > 0
-    ? Math.max(0, (donorMcCount - willDropMc) / donorTotal)
-    : donorMc;
   // A donor is "high-impact" only when stripping it actually drops a MC
   // hull. A long-term-NMC strippable hull is a free cannibalization from
   // the unit's MC perspective.
@@ -1242,6 +1273,47 @@ function ConfirmProposeModal({
   // Walkthrough #10 -- operator must acknowledge the impact when stripping
   // an MC hull. NMC/PMC strippables don't gate.
   const [acknowledged, setAcknowledged] = useState(!donorIsHighImpact);
+
+  // Task #162 — projected unit MC% panel.
+  //
+  // We need to show the commander the bottom-line readiness shift on
+  // BOTH affected units (donor unit losing a hull from MC, recipient
+  // unit gaining one back), and we need to fold any other pending
+  // proposals on the same units into the baseline so the numbers
+  // reflect the queue the commander is actually about to approve --
+  // not just this single strip in isolation.
+  //
+  // Per-proposal effect on each unit's MC count:
+  //   recipient.unit  → +1 (deadlined recipient becomes MC once installed)
+  //   donor.unit      → -1 if donor was MC at proposal time; 0 otherwise
+  // Same-unit (intra-unit / self) cannibalization nets the two together.
+  const recipientUnit = need.unit;
+  const donorUnit = donor.unit;
+  const recipientBaselineMc = need.unit_mc_count ?? 0;
+  const recipientTotal = need.unit_total ?? 0;
+  const projection = computeProposeProjection({
+    recipient_unit: recipientUnit,
+    recipient_unit_mc_count: recipientBaselineMc,
+    recipient_unit_total: recipientTotal,
+    donor_unit: donorUnit,
+    donor_unit_mc_count: donor.unit_mc_count ?? 0,
+    donor_unit_total: donorTotal,
+    donor_was_mc: donor.current_status === "MC",
+    pendingProposals,
+  });
+  const {
+    sameUnit,
+    recipientBeforeMc,
+    recipientBeforeRate,
+    recipientAfterRate,
+    recipientAfterMc,
+    donorBeforeMc,
+    donorBeforeRate,
+    donorAfterRate,
+    donorAfterMc,
+    donorBreach,
+    donorAlreadyBelow,
+  } = projection;
 
   // Walkthrough #24 — Esc dismiss + click-outside + focus-trap.
   useEffect(() => {
@@ -1323,34 +1395,89 @@ function ConfirmProposeModal({
           </div>
         </div>
 
-        {/* Task #40 -- pre-commit MC impact estimate; only "warn" tone when
-            the donor was itself MC (stripping it drops a hull from the MC
+        {/* Task #162 -- projected unit MC% panel (donor + recipient,
+            before → after, factoring in any other proposals already
+            queued in this session). Replaces the donor-only impact
+            estimate so a commander sees the bottom-line readiness
+            shift on both affected units before approving the strip.
+
+            Task #40 still drives the gating: only "warn" tone when the
+            donor was itself MC (stripping it drops a hull from the MC
             tally). Long-term-NMC and PMC strippables show the math but
             don't gate the commit. */}
-        {donorTotal > 0 && (
+        {(donorTotal > 0 || recipientTotal > 0) && (
           <div
             className="mb-3 rounded-sm border bg-[var(--color-bg)] px-3 py-2 font-mono text-xs tracking-wide"
             style={{
-              borderColor: donorIsHighImpact
-                ? "color-mix(in oklab, var(--color-warning) 40%, var(--color-border))"
-                : "color-mix(in oklab, var(--color-success-muted) 60%, var(--color-border))",
+              borderColor: (donorBreach || donorAlreadyBelow)
+                ? "color-mix(in oklab, var(--color-danger) 50%, var(--color-border))"
+                : donorIsHighImpact
+                  ? "color-mix(in oklab, var(--color-warning) 40%, var(--color-border))"
+                  : "color-mix(in oklab, var(--color-success-muted) 60%, var(--color-border))",
             }}
           >
             <div className="text-[var(--color-text-muted)]">
-              Donor unit MC impact estimate · donor status {donor.current_status}
+              Projected unit MC% · donor status {donor.current_status}
+              {pendingProposals.length > 0 && (
+                <span className="ml-2 text-[var(--color-text-secondary)]">
+                  (incl. {pendingProposals.length} pending proposal
+                  {pendingProposals.length === 1 ? "" : "s"} in this session)
+                </span>
+              )}
             </div>
-            <div className="mt-0.5 text-sm text-[var(--color-text)] tabular-nums">
-              {donor.unit}: {(donorMc * 100).toFixed(1)}% → {(projectedMc * 100).toFixed(1)}% (≈{((donorMc - projectedMc) * 100).toFixed(1)} pp)
-            </div>
-            {!donorIsHighImpact && (
-              <div className="mt-1 text-[var(--color-text-secondary)]">
-                Donor was not in the MC tally; strip does not change unit MC rate.
+
+            {sameUnit ? (
+              <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm tabular-nums">
+                <div className="text-[var(--color-text-muted)]">
+                  {recipientUnit} (donor + recipient)
+                </div>
+                <div className="text-[var(--color-text)]">
+                  {(recipientBeforeRate * 100).toFixed(1)}% → {(recipientAfterRate * 100).toFixed(1)}%
+                  <span className="ml-2 text-[var(--color-text-muted)]">
+                    {recipientBeforeMc}/{recipientTotal} → {Math.max(0, Math.min(recipientTotal, recipientAfterMc))}/{recipientTotal} MC
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm tabular-nums">
+                <div className="text-[var(--color-text-muted)]">{donorUnit} (donor)</div>
+                <div className="text-[var(--color-text)]">
+                  {(donorBeforeRate * 100).toFixed(1)}% → {(donorAfterRate * 100).toFixed(1)}%
+                  <span className="ml-2 text-[var(--color-text-muted)]">
+                    {donorBeforeMc}/{donorTotal} → {Math.max(0, Math.min(donorTotal, donorAfterMc))}/{donorTotal} MC
+                  </span>
+                </div>
+                <div className="text-[var(--color-text-muted)]">{recipientUnit} (recipient)</div>
+                <div className="text-[var(--color-text)]">
+                  {(recipientBeforeRate * 100).toFixed(1)}% → {(recipientAfterRate * 100).toFixed(1)}%
+                  <span className="ml-2 text-[var(--color-text-muted)]">
+                    {recipientBeforeMc}/{recipientTotal} → {Math.max(0, Math.min(recipientTotal, recipientAfterMc))}/{recipientTotal} MC
+                  </span>
+                </div>
               </div>
             )}
-            {donorIsHighImpact && (
+
+            {!donorIsHighImpact && (
+              <div className="mt-1 text-[var(--color-text-secondary)]">
+                Donor was not in the MC tally; strip does not change donor unit MC rate.
+              </div>
+            )}
+            {donorIsHighImpact && !donorBreach && !donorAlreadyBelow && (
               <div className="mt-1 text-[var(--color-warning)]">
                 ⚠ Donor was MC. Strip will deadline this hull until the
                 donated part is replaced. Confirm acknowledgement before committing.
+              </div>
+            )}
+            {donorBreach && (
+              <div className="mt-1 text-[var(--color-danger)]">
+                ⚠ Strip would push donor unit {donorUnit} below the {(DONOR_MC_FLOOR * 100).toFixed(0)}% MC readiness floor
+                ({(donorBeforeRate * 100).toFixed(1)}% → {(donorAfterRate * 100).toFixed(1)}%). Commander approval recommended.
+              </div>
+            )}
+            {donorAlreadyBelow && !donorBreach && (
+              <div className="mt-1 text-[var(--color-danger)]">
+                ⚠ Donor unit {donorUnit} is already below the {(DONOR_MC_FLOOR * 100).toFixed(0)}% MC readiness floor.
+                This strip drops it further to {(donorAfterRate * 100).toFixed(1)}%.
               </div>
             )}
             <div className="mt-1 text-[var(--color-text-muted)]">
