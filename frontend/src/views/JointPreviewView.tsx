@@ -160,16 +160,24 @@ export function JointPreviewView() {
   // Compute "what's hot now" off the live data.
   const hot = useMemo(() => computeHotline(s.data), [s.data]);
 
-  // Staleness math for the DISCONNECTED stripe and the Pulled pill.
+  // Staleness math for the DISCONNECTED stripe and the topbar pills.
+  // Two distinct pills (Task #146):
+  //   * Published — wall-clock at which SPIRE's scenario state last
+  //     advanced. Freezes when the presenter pauses the mission clock,
+  //     which is the operator's "SPIRE's clock has stopped" cue.
+  //   * As-of    — moment the underlying readiness data reflects.
+  //     Sourced from the dataset snapshot, distinct from the publish
+  //     moment so we never lie about freshness.
   const isDisconnected = ddilMode === "DISCONNECTED";
   const lastGoodAgeSec = s.lastGoodPullAt != null ? Math.max(0, Math.floor((nowMs - s.lastGoodPullAt) / 1000)) : null;
   const pulledAgoSec = s.pulledAt != null ? Math.max(0, Math.floor((nowMs - s.pulledAt) / 1000)) : null;
-  const publishedAgoSec = s.data?.envelope.publishedAtUtc
-    ? (() => {
-        const t = Date.parse(s.data.envelope.publishedAtUtc);
-        return Number.isFinite(t) ? Math.max(0, Math.floor((nowMs - t) / 1000)) : null;
-      })()
-    : null;
+  const ageSecOf = (iso: string | undefined): number | null => {
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    return Number.isFinite(t) ? Math.max(0, Math.floor((nowMs - t) / 1000)) : null;
+  };
+  const publishedAgoSec = ageSecOf(s.data?.envelope.publishedAtUtc);
+  const asOfAgoSec = ageSecOf(s.data?.envelope.asOfUtc);
 
   // Layout: outer column flex pins the canonical CAPCO classification
   // strips to the very top and bottom of the viewport (DoDM 5200.01-V2
@@ -208,6 +216,7 @@ export function JointPreviewView() {
         )}
         <JointTopBar
           publishedAgoSec={publishedAgoSec}
+          asOfAgoSec={asOfAgoSec}
           pulledAgoSec={pulledAgoSec}
           loading={s.loading}
           onPull={() => void pull()}
@@ -491,12 +500,14 @@ function formatStale(sec: number): string {
 
 function JointTopBar({
   publishedAgoSec,
+  asOfAgoSec,
   pulledAgoSec,
   loading,
   onPull,
   ddilMode,
 }: {
   publishedAgoSec: number | null;
+  asOfAgoSec: number | null;
   pulledAgoSec: number | null;
   loading: boolean;
   onPull: () => void;
@@ -529,6 +540,7 @@ function JointTopBar({
         <Pill label="Source" value="SPIRE · USMC" />
         <Pill label="Standard" value="OMS 2.4 / UCI 5.0" />
         <Pill label="Published" value={publishedAgoSec == null ? "—" : `T-${formatStale(publishedAgoSec)}`} />
+        <Pill label="As of" value={asOfAgoSec == null ? "—" : `T-${formatStale(asOfAgoSec)}`} />
         <Pill label="Pulled" value={pulledAgoSec == null ? "—" : `T-${formatStale(pulledAgoSec)}`} />
         <JltcCommsControl mode={ddilMode} />
         <button
@@ -769,6 +781,8 @@ function Console({ data }: { data: JointOmsUciExport }) {
           <Field label="Spec version" value={env.specificationVersion} />
           <Field label="Marking" value={env.classification.marking} />
           <Field label="Releasability" value={env.classification.releasability} />
+          <Field label="Published (mission-clock)" value={short(env.publishedAtUtc)} />
+          <Field label="Data as of (snapshot)" value={short(env.asOfUtc)} />
         </div>
         <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8 }}>
           {Object.entries(counts).map(([k, v]) => (

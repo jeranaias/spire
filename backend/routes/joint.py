@@ -31,6 +31,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import session_role
+from ..scenario import published_wall_iso as _scenario_published_wall_iso
 from ..scoping import JOINT_RELEASE_ROLES, require_clearance, require_role
 from ..state import CanonicalDataset, get_dataset, last_day_snapshots
 
@@ -64,17 +65,23 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _snapshot_published_iso(ds: CanonicalDataset, last: list) -> str:
-    """Return the canonical 'published-at' timestamp for the joint payload.
+def _snapshot_as_of_iso(ds: CanonicalDataset, last: list) -> str:
+    """Return the 'data-as-of' timestamp for the joint payload — the
+    moment in time the underlying readiness/equipment numbers reflect.
 
-    Sourced from the underlying dataset snapshot, NOT wall-clock time, so two
-    back-to-back exports return identical `publishedAtUtc` when nothing in
-    the dataset has changed. The JLTC topbar's "Published" pill consumes
+    Sourced from the underlying dataset snapshot, NOT wall-clock time, so
+    two back-to-back exports return an identical `asOfUtc` when nothing
+    in the dataset has changed. The JLTC topbar's "As of" pill consumes
     this value and must reflect actual dataset freshness.
 
     Anchor is the latest `snapshot_date` (a date — pinned to end-of-day UTC
     so the field is a full RFC3339 datetime). Falls back to the dataset's
     own `generated_at` if the snapshot list is empty.
+
+    Distinct from `publishedAtUtc`, which the envelope sources from the
+    SPIRE mission-clock anchor: a paused scenario freezes `publishedAtUtc`
+    so the partner can see SPIRE's clock has stopped, but `asOfUtc` keeps
+    answering "and when were these numbers true?" — different question.
     """
     last_day: Optional[date] = None
     if last:
@@ -244,13 +251,28 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
     if not last:
         raise HTTPException(status_code=503, detail="dataset empty")
 
-    # Single freshness anchor for the whole envelope. Sourced from the
-    # snapshot date, NOT wall-clock, so back-to-back exports are byte-stable
-    # when the dataset hasn't changed (P0-3 in the joint-cop critique). The
-    # per-operator unit filter that used to live here was removed in Task #80
-    # — joint exports are a topic subscription (full MAGTF) and the role gate
-    # at the top of the handler is the access control surface.
-    published_iso = _snapshot_published_iso(ds, last)
+    # Two distinct freshness anchors for the envelope (Task #146):
+    #
+    #   * `as_of_iso` — sourced from the underlying dataset snapshot, NOT
+    #     wall-clock. Answers "when were these readiness numbers true?"
+    #     and is byte-stable across back-to-back pulls when the dataset
+    #     hasn't changed (P0-3 in the joint-cop critique). Stamped on
+    #     every per-message `asOfTime`.
+    #
+    #   * `published_iso` — sourced from the SPIRE mission-clock anchor
+    #     via `scenario.published_wall_iso()`, NOT from `_now_iso()`.
+    #     Answers "when did SPIRE's underlying scenario state last
+    #     advance?" If a presenter pauses the mission clock, this field
+    #     freezes — so the JLTC "Published T-Ns" pill stops counting and
+    #     the partner can see at a glance that SPIRE's clock has stopped
+    #     instead of being lied to by a confidently-fresh `_now_iso()`.
+    #
+    # The per-operator unit filter that used to live here was removed in
+    # Task #80 — joint exports are a topic subscription (full MAGTF) and
+    # the role gate at the top of the handler is the access control
+    # surface.
+    as_of_iso = _snapshot_as_of_iso(ds, last)
+    published_iso = _scenario_published_wall_iso()
 
     by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     equip_by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
@@ -296,7 +318,7 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
             },
             "OperationalStatus": ready["text"],
             "ReadinessRating": ready["code"],
-            "asOfTime": published_iso,
+            "asOfTime": as_of_iso,
         })
 
         tracks.append({
@@ -316,7 +338,7 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
                 "speedMetersPerSecond": 0.0,
                 "stationary": True,
             },
-            "asOfTime": published_iso,
+            "asOfTime": as_of_iso,
         })
 
         # LogisticsStatus mirrors UCI's LogisticsStatusMessage shape (sustained
@@ -337,7 +359,7 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
                 for eqp in sorted(equip_by_unit[u.name])
             ],
             "missionCapableRate": round(mc_rate, 4),
-            "asOfTime": published_iso,
+            "asOfTime": as_of_iso,
         })
 
     # AlertNotification messages mirror SPIRE alerts (readiness + cannib +
@@ -358,7 +380,7 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
                 "severity": _norm_severity("HIGH" if mc_rate < 0.60 else "MODERATE"),
                 "EntityIdentifierRef": _stable_track_id("UCI-ENT-", u.uic),
                 "summary": f"{u.name} mission-capable rate {mc_rate*100:.1f}% — below joint threshold",
-                "asOfTime": published_iso,
+                "asOfTime": as_of_iso,
             })
 
     incident_count = 0
@@ -379,7 +401,7 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
             "severity": _norm_severity(inc.severity),
             "EntityIdentifierRef": _stable_track_id("UCI-ENT-", unit_for_inc.uic),
             "summary": f"{inc.type.replace('_', ' ').title()} · {unit_for_inc.name} · FPCON {inc.fpcon_at_time}",
-            "asOfTime": inc.date_time.isoformat(timespec="seconds") if hasattr(inc.date_time, "isoformat") else published_iso,
+            "asOfTime": inc.date_time.isoformat(timespec="seconds") if hasattr(inc.date_time, "isoformat") else as_of_iso,
         })
         incident_count += 1
         if incident_count >= 10:
@@ -395,7 +417,16 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
             "sourceSystemVersion": "0.1.0-SBIR",
             "sourceService": "USMC",
             "sourceUnit": "II MEF / 3d MLR",
+            # `publishedAtUtc` — wall-clock at which the SPIRE scenario
+            # state was last advanced (mission-clock anchor). Freezes when
+            # the scenario is paused; the JLTC topbar's "Published T-Ns"
+            # pill stops counting too. See Task #146 / scenario.py.
             "publishedAtUtc": published_iso,
+            # `asOfUtc` — the data-as-of moment for the readiness numbers
+            # in this envelope, sourced from the underlying dataset
+            # snapshot. Distinct from publishedAtUtc so the partner can
+            # tell publish-moment from data-moment at a glance.
+            "asOfUtc": as_of_iso,
             "classification": {
                 "marking": "SECRET",
                 "releasability": "REL TO USA, FVEY",
@@ -469,11 +500,15 @@ async def link16_export(request: Request) -> dict[str, Any]:
     if not last:
         raise HTTPException(status_code=503, detail="dataset empty")
 
-    # Snapshot-derived freshness anchor for the Link 16 header. Same rule as
-    # the OMS/UCI envelope: deterministic across calls when the dataset
-    # hasn't changed. Per-operator unit scoping was removed in Task #80; the
-    # role gate above is the access control surface.
-    published_iso = _snapshot_published_iso(ds, last)
+    # Two distinct freshness anchors for the Link 16 header — same split
+    # as the OMS/UCI envelope (Task #146). `as_of_iso` is snapshot-derived
+    # and answers "when were these readiness numbers true?"; `published_iso`
+    # is the SPIRE mission-clock anchor and answers "when did the scenario
+    # state last advance?" (freezes when the scenario is paused). Per-
+    # operator unit scoping was removed in Task #80; the role gate above
+    # is the access control surface.
+    as_of_iso = _snapshot_as_of_iso(ds, last)
+    published_iso = _scenario_published_wall_iso()
 
     by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     for s in last:
@@ -590,7 +625,12 @@ async def link16_export(request: Request) -> dict[str, Any]:
             "sourceSystem": "SPIRE",
             "sourceJU": "01234",
             "originatorService": "USMC",
+            # `publishedAtUtc` — SPIRE mission-clock anchor (freezes when
+            # the scenario is paused). `asOfUtc` — dataset-snapshot
+            # freshness for the readiness numbers. See Task #146 / the
+            # OMS/UCI envelope for the rationale.
             "publishedAtUtc": published_iso,
+            "asOfUtc": as_of_iso,
             "classification": {
                 "marking": "SECRET",
                 "releasability": "REL TO USA, FVEY",

@@ -2205,7 +2205,15 @@ export interface JointOmsUciEnvelope {
   sourceSystemVersion: string;
   sourceService: string;
   sourceUnit: string;
+  // Wall-clock at which the SPIRE scenario state was last advanced
+  // (mission-clock anchor). Freezes when the scenario is paused so the
+  // JLTC "Published T-Ns" pill can stop counting and the operator can
+  // see SPIRE's clock has stopped. See backend/scenario.published_wall_iso.
   publishedAtUtc: string;
+  // Data-as-of moment for the readiness numbers in this envelope —
+  // sourced from the dataset snapshot, distinct from publishedAtUtc.
+  // The JLTC topbar renders this as a sibling "As-of" pill.
+  asOfUtc?: string;
   classification: JointClassification;
   operator?: JointOperatorFooter;
   messageCounts: Record<string, number>;
@@ -2230,7 +2238,9 @@ export interface JointLink16Header {
   sourceSystem: string;
   sourceJU: string;
   originatorService: string;
+  // See JointOmsUciEnvelope for the publishedAtUtc / asOfUtc split.
   publishedAtUtc: string;
+  asOfUtc?: string;
   classification: JointClassification;
   operator?: JointOperatorFooter;
   messageCounts: Record<string, number>;

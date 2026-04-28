@@ -9,17 +9,27 @@ Each assertion below maps to one of the P0/P1 defects called out in
   * P0-2: J7.2 Track Correlation messages only emit when an entity has BOTH
     a J3.5 land point AND a J3.3 surface track, and pair the two distinct
     TNs (no self-correlations).
-  * P0-3: `publishedAtUtc` and per-message `asOfTime` are sourced from the
-    underlying snapshot, NOT wall-clock time — two back-to-back curls return
-    identical `publishedAtUtc` when the dataset hasn't changed.
+  * P0-3: per-message `asOfTime` and the envelope `asOfUtc` are sourced from
+    the underlying snapshot, NOT wall-clock time — two back-to-back curls
+    return identical `asOfUtc` when the dataset hasn't changed.
   * P1-9: alert severity values come from a single normalized enum
     {LOW, MODERATE, HIGH, CRITICAL}.
+
+Task #146 — `publishedAtUtc` is sourced from the SPIRE mission-clock anchor,
+not wall-clock. When the scenario is paused, two consecutive exports return
+the same `publishedAtUtc`, so the JLTC topbar's "Published T-Ns" pill freezes
+and the operator can see SPIRE's clock has stopped. When the scenario is
+running, `publishedAtUtc` advances. Distinct from the data-as-of moment,
+which now lives in `asOfUtc`.
 """
 from __future__ import annotations
+
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
+from backend import scenario
 from backend.main import app
 from backend.routes.joint import ALERT_SEVERITY_ENUM, _sym2525
 from backend.state import get_dataset
@@ -121,40 +131,122 @@ def test_j72_correlations_pair_distinct_tns_only_when_both_present(client: TestC
 
 
 # ---------------------------------------------------------------------------
-# P0-3 — publishedAtUtc is snapshot-derived and stable across calls
+# P0-3 — asOfUtc is snapshot-derived and stable across calls (per-message
+# `asOfTime` follows the same anchor)
 # ---------------------------------------------------------------------------
 
-def test_oms_uci_published_at_is_stable_across_calls(client: TestClient):
+def test_oms_uci_as_of_is_stable_across_calls(client: TestClient):
     """Two back-to-back exports against an unchanged dataset must return the
-    same `publishedAtUtc` — the JLTC topbar's "Published" pill must reflect
-    dataset freshness, not wall-clock time."""
+    same `asOfUtc` — the JLTC topbar's "As of" pill must reflect dataset
+    freshness, not wall-clock time. Per-message `asOfTime` rides the same
+    snapshot anchor so a partner sees consistent freshness across the
+    envelope and the messages it carries."""
     _login(client, TS_SCI_DODID)
     r1 = client.get("/api/joint/oms-uci/export").json()
     r2 = client.get("/api/joint/oms-uci/export").json()
-    assert r1["envelope"]["publishedAtUtc"] == r2["envelope"]["publishedAtUtc"]
-    # And every per-message asOfTime that we generated (entities/tracks/
-    # logistics/readiness alerts) must equal the envelope timestamp.
-    pub = r1["envelope"]["publishedAtUtc"]
+    assert r1["envelope"]["asOfUtc"] == r2["envelope"]["asOfUtc"]
+    as_of = r1["envelope"]["asOfUtc"]
     for ent in r1["messages"]["EntityState"]:
-        assert ent["asOfTime"] == pub
+        assert ent["asOfTime"] == as_of
     for trk in r1["messages"]["TrackData"]:
-        assert trk["asOfTime"] == pub
+        assert trk["asOfTime"] == as_of
     for log in r1["messages"]["LogisticsStatus"]:
-        assert log["asOfTime"] == pub
+        assert log["asOfTime"] == as_of
 
 
-def test_link16_published_at_is_stable_and_snapshot_anchored(client: TestClient):
+def test_link16_as_of_is_stable_and_snapshot_anchored(client: TestClient):
     _login(client, TS_SCI_DODID)
     r1 = client.get("/api/joint/link16/export").json()
     r2 = client.get("/api/joint/link16/export").json()
-    assert r1["header"]["publishedAtUtc"] == r2["header"]["publishedAtUtc"]
+    assert r1["header"]["asOfUtc"] == r2["header"]["asOfUtc"]
 
-    # The published timestamp must encode the canonical snapshot date — i.e.
-    # contain the YYYY-MM-DD of the last simulated day.
+    # The data-as-of timestamp must encode the canonical snapshot date —
+    # i.e. contain the YYYY-MM-DD of the last simulated day. (The
+    # `publishedAtUtc` sibling field is now mission-clock-anchored and
+    # has its own dedicated test below.)
     with TestClient(app):
         ds = get_dataset()
     last_date = ds.snapshots[-1].snapshot_date.isoformat()
-    assert last_date in r1["header"]["publishedAtUtc"]
+    assert last_date in r1["header"]["asOfUtc"]
+
+
+# ---------------------------------------------------------------------------
+# Task #146 — `publishedAtUtc` is sourced from the SPIRE mission-clock
+# anchor, freezes when the scenario is paused
+# ---------------------------------------------------------------------------
+
+def test_published_at_pinned_when_scenario_paused(client: TestClient):
+    """Two consecutive exports with the scenario paused (no scenario-tick
+    in between) MUST carry the same `publishedAtUtc`. This is the cue the
+    JLTC topbar's "Published T-Ns" pill uses to freeze when SPIRE's clock
+    has stopped — the partner can see at a glance that the scenario isn't
+    advancing instead of being lied to with a confidently-fresh
+    `_now_iso()` timestamp on every poll."""
+    _login(client, TS_SCI_DODID)
+    # Pause the scenario explicitly; the default state is paused at H+0
+    # but other tests in the same process may have left it running.
+    scenario.pause()
+    try:
+        r1_oms = client.get("/api/joint/oms-uci/export").json()
+        time.sleep(0.05)  # ensure wall-clock advances between calls
+        r2_oms = client.get("/api/joint/oms-uci/export").json()
+        assert (
+            r1_oms["envelope"]["publishedAtUtc"]
+            == r2_oms["envelope"]["publishedAtUtc"]
+        ), "OMS/UCI publishedAtUtc must be pinned while scenario is paused"
+
+        r1_l16 = client.get("/api/joint/link16/export").json()
+        time.sleep(0.05)
+        r2_l16 = client.get("/api/joint/link16/export").json()
+        assert (
+            r1_l16["header"]["publishedAtUtc"]
+            == r2_l16["header"]["publishedAtUtc"]
+        ), "Link 16 publishedAtUtc must be pinned while scenario is paused"
+    finally:
+        # Leave the scenario paused for downstream tests so we don't
+        # introduce a play() side effect across the test session.
+        scenario.pause()
+
+
+def test_published_at_distinct_from_as_of(client: TestClient):
+    """`publishedAtUtc` (mission-clock anchor) and `asOfUtc` (dataset
+    snapshot) answer different questions and the envelope must surface
+    them as distinct fields. Concretely: after a process start the
+    mission-clock anchor is `now`-ish, while the dataset snapshot is a
+    historical date — the two should not collapse to one."""
+    _login(client, TS_SCI_DODID)
+    scenario.pause()
+    payload = client.get("/api/joint/oms-uci/export").json()
+    env = payload["envelope"]
+    assert "publishedAtUtc" in env
+    assert "asOfUtc" in env
+    assert env["publishedAtUtc"] != env["asOfUtc"], (
+        "publishedAtUtc must reflect the mission-clock anchor and asOfUtc "
+        "the dataset snapshot — collapsing both to a single value erases "
+        "the freshness vs publish-moment distinction the JLTC topbar relies on"
+    )
+
+
+def test_published_at_advances_when_scenario_running(client: TestClient):
+    """Counterpart to the paused-pinning test: when the scenario IS
+    running, the mission clock is advancing and `publishedAtUtc` must
+    advance with it — otherwise a Marine watching JLTC would see a
+    perpetually-frozen "Published" pill even during an active scenario."""
+    _login(client, TS_SCI_DODID)
+    scenario.play()
+    try:
+        r1 = client.get("/api/joint/oms-uci/export").json()
+        time.sleep(1.1)  # > 1s so the seconds-precision ISO string moves
+        r2 = client.get("/api/joint/oms-uci/export").json()
+        assert (
+            r1["envelope"]["publishedAtUtc"]
+            != r2["envelope"]["publishedAtUtc"]
+        ), "publishedAtUtc must advance while the scenario is running"
+        # asOfUtc still points at the (unchanged) dataset snapshot, so it
+        # should NOT have moved between the same two calls.
+        assert r1["envelope"]["asOfUtc"] == r2["envelope"]["asOfUtc"]
+    finally:
+        scenario.pause()
 
 
 # ---------------------------------------------------------------------------

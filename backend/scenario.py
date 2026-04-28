@@ -412,3 +412,31 @@ def snapshot() -> dict:
     without forcing a tick (useful for tests and audit payloads)."""
     with _LOCK:
         return serialize_locked()
+
+
+def published_wall_iso() -> str:
+    """Wall-clock at which the underlying SPIRE scenario state was last
+    advanced.
+
+    Semantics, used by the joint COP exports to stamp `publishedAtUtc`:
+
+      * Scenario running — the mission clock is ticking forward, so the
+        underlying scenario state IS being continuously advanced. Return
+        the current wall-clock so back-to-back pulls reflect the live
+        passage of scenario time.
+      * Scenario paused (or seeked / reset and not yet replayed) — the
+        scenario state is frozen at the anchor and is NOT advancing.
+        Return the wall-clock of the anchor itself, which stays pinned
+        across pulls. This is what makes the JLTC topbar's "Published
+        T-Ns" pill freeze the moment a presenter pauses SPIRE — the
+        partner can see at a glance that SPIRE's clock has stopped
+        instead of being lied to with a confidently-fresh timestamp.
+
+    Distinct from the dataset snapshot freshness (the canonical record of
+    "as of when did the readiness numbers reflect reality"); the joint
+    envelope carries that as a sibling `asOfUtc` field.
+    """
+    with _LOCK:
+        if _STATE.running:
+            return _iso(_utcnow())
+        return _iso(_STATE.anchor_wall)
