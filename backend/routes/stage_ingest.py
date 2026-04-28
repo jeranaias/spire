@@ -289,6 +289,12 @@ def _build_dataset_from_report(
     # synthesize the today-only DailySnapshot block below.
     asset_meta: dict = {}
     latest_open: Optional[date] = None
+    # Round-7 review fix: explicit skip counters surfaced in the
+    # ingest_report so the operator-facing UI (and any CI assertion
+    # gate) can detect silent row-drop drift instead of trusting the
+    # broad fallbacks below to be unreachable. Each counter increments
+    # only inside its own except branch; a clean ingest reports zeros.
+    skip_counts = {"srs": 0, "units": 0, "snapshots": 0}
     for r in report.rows:
         unit_uic = r.unit_uic_hashed or "OWNER_UNIT_unknown"
         unit_name = unit_uic[:24] if unit_uic else "UNKNOWN"
@@ -330,7 +336,9 @@ def _build_dataset_from_report(
             )
         except Exception:
             # Skip rows the dataclass can't accept rather than 500ing
-            # the entire ingest. Provenance still lives on the report.
+            # the entire ingest. Provenance still lives on the report,
+            # and the count is surfaced in ingest_report.skipped_rows.
+            skip_counts["srs"] += 1
             continue
         srs.append(sr_obj)
         seen_units.add(unit_uic)
@@ -377,6 +385,7 @@ def _build_dataset_from_report(
             ))
         except Exception:
             # Permissive fallback for any future schema drift.
+            skip_counts["units"] += 1
             continue
 
     # Synthesize one DailySnapshot per asset, anchored to the most
@@ -423,6 +432,7 @@ def _build_dataset_from_report(
                 deployment_status="GARRISON",
             ))
         except Exception:
+            skip_counts["snapshots"] += 1
             continue
 
     # Lift due_in.csv into requisition records carrying the *real*
@@ -494,7 +504,7 @@ def _build_dataset_from_report(
         for meta in asset_meta.values()
     ]
 
-    return CanonicalDataset(
+    ds = CanonicalDataset(
         units=units,
         assets=assets,
         roster=[],
@@ -509,6 +519,12 @@ def _build_dataset_from_report(
         generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
         seed=seed,
     )
+    # Stash skip_counts on the dataset object so the route layer can
+    # surface it without changing the CanonicalDataset dataclass shape
+    # (which other consumers depend on). Attribute access is safe
+    # because CanonicalDataset is a regular dataclass instance.
+    setattr(ds, "_stage_ingest_skip_counts", skip_counts)
+    return ds
 
 
 def _safe_decode(raw: bytes, *, label: str) -> str:
@@ -727,5 +743,12 @@ async def stage_ingest(
             "defect_code_trailing_period_normalized":
                 report.defect_code_trailing_period_normalized,
             "date_parse_failures": report.date_parse_failures,
+            # Round-7: explicit skip counters for the lift step
+            # (SR/Unit/DailySnapshot dataclass coercion). All zeros on
+            # a clean ingest; non-zero indicates schema drift the
+            # operator should investigate.
+            "skipped_rows": getattr(new_ds, "_stage_ingest_skip_counts", {
+                "srs": 0, "units": 0, "snapshots": 0,
+            }),
         },
     }

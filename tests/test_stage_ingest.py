@@ -186,6 +186,12 @@ class TestStageIngestRoute:
         assert body["ingest_report"]["rows_filtered_pmcs"] == 1
         # Trailing-period normalization happened on at least 2 rows.
         assert body["ingest_report"]["defect_code_trailing_period_normalized"] >= 2
+        # Round-7: skipped_rows surfaces lift-step drops. The fixture
+        # is well-formed so all three buckets must be zero on a clean
+        # ingest; non-zero indicates schema drift the operator should
+        # see in the UI.
+        skipped = body["ingest_report"]["skipped_rows"]
+        assert skipped == {"srs": 0, "units": 0, "snapshots": 0}, skipped
 
     def test_dataset_status_reflects_ingest(self, park_client):
         state_mod.init_empty_dataset()
@@ -487,6 +493,39 @@ class TestForceEmptyHook:
         resp = park_client.post("/api/system/admin/force-empty")
         assert resp.status_code == 200
         assert state_mod.is_dataset_empty() is True
+
+    def test_lifespan_boots_empty_when_env_set(self, monkeypatch):
+        """Round-7 review fix: directly exercise the lifespan boot path
+        with SPIRE_BOOT_EMPTY=1 so a regression in main.py's lifespan
+        branch is caught (the existing tests use init_empty_dataset()
+        directly, which bypasses the env-flag check). Boots a fresh
+        TestClient inside an env that sets SPIRE_BOOT_EMPTY, then
+        asserts the dataset reports empty via the public API.
+        """
+        monkeypatch.setenv("SPIRE_BOOT_EMPTY", "1")
+        # Pre-poison the singleton with a populated dataset so the
+        # assertion is meaningful — the lifespan must overwrite it.
+        state_mod.swap_dataset(
+            state_mod.load_dataset(),
+            source="test-poison",
+            ingested_by="test",
+            ingest_hash="poison",
+        )
+        assert state_mod.is_dataset_empty() is False
+        # Entering the TestClient context runs the FastAPI lifespan,
+        # which reads SPIRE_BOOT_EMPTY and calls init_empty_dataset().
+        with TestClient(app) as fresh:
+            login = fresh.post(
+                "/api/auth/login",
+                json={"dodid": "3456789012", "pin": "123456"},
+            )
+            assert login.status_code == 200, login.text
+            resp = fresh.get("/api/system/dataset-status")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["empty"] is True, body
+            assert body["counts"]["srs"] == 0
+            assert body["counts"]["snapshots"] == 0
 
     def test_force_empty_requires_privileged_role(self, client, monkeypatch):
         """Round-6 review fix: env-gate alone is insufficient. The
