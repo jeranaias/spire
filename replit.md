@@ -11,6 +11,9 @@ Key capabilities include:
 - Managing classification and export controls for sensitive data.
 - Integrating with external logistics systems (GCSS-MC, OMS-UCI, MIL-STD-6016).
 - Simulating communication states for disaster preparedness drills.
+- Integrating with external logistics systems (GCSS-MC, OMS-UCI, MIL-STD-6016).
+- Simulating communication states for disaster preparedness.
+- Integrating with external logistics systems and simulating communication states for disaster preparedness drills.
 - Maintaining a model registry for AI/ML supply chain transparency.
 - Offering a "Decision Bridge" dashboard for critical decision-making.
 - Supporting scenario-based vignettes for training and demonstrations, including in-app presentation tools.
@@ -61,10 +64,11 @@ The SPIRE application features a clear separation between its backend and fronte
 - **Stage Live-Ingest Mode** (Task #183): `SPIRE_BOOT_EMPTY=1` env flag causes `backend.main.lifespan` to skip `load_dataset()` so SPIRE boots with an empty dataset singleton (`backend/state.py::init_empty_dataset`). DECISION BRIDGE then renders a drag-drop hero card (`StageIngestHero.tsx`) with three named slots (header / sr_parts / due_in); on submit it POSTs to `/api/system/stage-ingest` (RBAC-gated to `data_custodian` / `security_manager`, 60s wall-clock timeout, sanitization gate that flags un-hashed TAMCN / SR_NUMBER / SERIAL_NUMBER / OWNER_UNIT) and atomically swaps the singleton via `swap_dataset()`. While empty, BASTION / PULSE / SENTRY render the "Awaiting GCSS-MC ingest" placeholder (`AwaitingIngestEmpty.tsx`) instead of fetching populated data; their backend routes return an `{empty: true, message}` envelope (type-guarded by `isEmptyEnvelope` in `frontend/src/api.ts`). The `useDatasetStatus` hook polls `/api/system/dataset-status` every 5 s. **Shift+F8** is a capture-phase global failsafe that POSTs to `/api/system/admin/reset-demo` (extended to also rehydrate the dataset singleton from the seed-42 baseline) and toasts `Failsafe — restored seed-42 baseline`. Synthetic 6-row CSV stand-ins for CI live in `tests/fixtures/stage_ingest/`; the real sanitized GCSS-MC export is **never** committed. Operator runbook: `docs/stage-rehearsal.md`.
 - **Per-asset Bill of Materials (Task #161)**: `backend/bom.py` augments canonical Asset records at runtime with an installed-component list (NSN + slot + serviceable state) derived from `dataset/data/equipment_profiles.json`. Core fault parts (the lead NSN of each fault block) are installed on every hull; sub-variant optional parts are present on ~80% of hulls keyed deterministically by `sha256(asset_id|nsn)`, so two JLTVs of different sub-variants no longer report identical BOMs. The PULSE `/cannibalization` endpoint filters strippable donors via `asset_carries_nsn_serviceable(donor, recipient_nsn, donor_open_classes)` instead of the old equipment-type proxy, and surfaces a `slot` label (e.g. "Right rear hub assembly") on each donor card. The `/cannibalization/propose` endpoint applies the same gate so a hand-rolled POST cannot smuggle a logically impossible donor into the audit chain (rejects with `DonorBomMismatch`). Augmentation lives outside `dataset/` to honor the canonical-fixtures rule.
 - **Dynamic Features**: Includes a live-demo failsafe, in-app pitch deck, and identity switching capabilities.
+- **SENTRY Reviewer Attribution on Queue Cards (Task #96)**: `GET /api/sentry/review-queue/{batch_id}` (`backend/routes/sentry.py::review_queue`) now decorates every held / flagged row with a `decision` block (`action`, `actor_name`, `actor_unit`, `actor_role`, `ts`) sourced from `decisions_for_batch` in `backend/persistence.py`. The Review Queue's `ReviewCard` (`frontend/src/views/sentry/ReviewQueueTab.tsx`) renders a `<ReviewerStamp>` chip — "Approved by GySgt Marcus Reyes (CLB-Det) at 12:14Z" — so judges can attribute a cleared card without opening the audit-chain modal. Auto-cleared rows are intentionally not decorated (their absence is the signal); legacy decisions with empty `actor_name` fall back to the role string. Locked in by `backend/tests/test_review_queue_reviewer_attribution.py`.
 
 ### System Design Choices
-- **Development Environment**: Frontend (Vite dev server on `0.0.0.0:5000`) proxies API requests to Backend (FastAPI on `127.0.0.1:8000`).
-- **Production Deployment**: `uvicorn backend.main:app --host 0.0.0.0 --port 5000` serves the frontend from `/` and API from `/api/*`. Deployment is via a single Docker container.
+- **Development Environment**: Frontend (Vite dev server on `0.0.0.0:5000`) proxies API requests to Backend (FastAPI on `127.0.0.1:8000`), running side-by-side in Replit.
+- **Production Deployment**: `uvicorn backend.main:app --host 0.0.0.0 --port 5000` serves the frontend build from `/` and API from `/api/*`. Deployment is via a single Docker container.
 - **CORS Configuration**: Widened for Replit's proxied iframe origin.
 - **Single Source of Truth**: Backend serves as the authoritative source for authentication, classification, and scenario state.
 - **Modularity**: Designed with clear modules for classification, scenario management, and distinct functionalities.
@@ -80,7 +84,7 @@ The SPIRE application features a clear separation between its backend and fronte
 - **Zustand**: State-management solution.
 - **React Router**: Declarative routing for React.
 - **Uvicorn**: ASGI server for FastAPI.
-- **GCSS-MC**: External logistics system (reference implementation).
+- **GCSS-MC**: External logistics system (reference integration).
 - **OMS-UCI**: External system for Joint COP export.
 - **MIL-STD-6016 (Link 16)**: External standard for Joint COP export.
 - **Gemma 4 26B FP8**: Self-hosted LLM model (`copilot-llm`).

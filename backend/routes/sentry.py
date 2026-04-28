@@ -1497,6 +1497,30 @@ async def review_queue(batch_id: str, role: Optional[str] = None):
         else:
             auto_cleared.append(r)
 
+    # Task #96 — surface persisted reviewer attribution on cleared cards.
+    # `decisions_for_batch` already returns actor_name / actor_unit /
+    # actor_role / ts (task #25); we attach it to each held/flagged row so
+    # the queue UI can render "Approved by GySgt Marcus Reyes (CLB-6) at
+    # 12:14Z" without forcing the operator into the audit-chain modal.
+    # Auto-cleared records aren't reviewed by a human, so we don't decorate
+    # them — their absence is the signal.
+    review_srs = [
+        r.get("sr_number")
+        for r in (held + flagged)
+        if r.get("sr_number")
+    ]
+    review_decisions = decisions_for_batch(review_srs) if review_srs else {}
+    for r in held + flagged:
+        d = review_decisions.get(r.get("sr_number"))
+        if d:
+            r["decision"] = {
+                "action": d.get("action", ""),
+                "actor_name": d.get("actor_name", "") or "",
+                "actor_role": d.get("actor_role", "") or "",
+                "actor_unit": d.get("actor_unit", "") or "",
+                "ts": d.get("ts", "") or "",
+            }
+
     if allowed is None:
         scoped_agg_risks = job["aggregation_risks"]
     else:

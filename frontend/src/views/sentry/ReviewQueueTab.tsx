@@ -874,6 +874,73 @@ function ReviewColumn({
   );
 }
 
+// Task #96 — concise time format for the reviewer chip on cleared cards.
+// The persisted `ts` is a UTC ISO string ("2026-04-28T12:14:23Z"); we render
+// `12:14Z` so the chip stays compact next to the operator name. Falls back
+// to the raw string if anything in the parse fails — better to show a noisy
+// timestamp than to swallow attribution silently.
+function formatReviewerTs(ts: string): string {
+  if (!ts) return "";
+  try {
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return ts;
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${hh}:${mm}Z`;
+  } catch {
+    return ts;
+  }
+}
+
+// Task #96 — humanize the persisted `action` verb for the chip.
+function reviewerActionLabel(action: string): string {
+  switch (action) {
+    case "approve":
+      return "Approved";
+    case "reject":
+      return "Rejected";
+    case "modify":
+      return "Modified";
+    default:
+      return action ? action.charAt(0).toUpperCase() + action.slice(1) : "Reviewed";
+  }
+}
+
+function ReviewerStamp({ decision }: { decision: any }) {
+  if (!decision) return null;
+  const verb = reviewerActionLabel(String(decision.action || ""));
+  const name = String(decision.actor_name || "").trim();
+  const unit = String(decision.actor_unit || "").trim();
+  const role = String(decision.actor_role || "").trim();
+  const ts = formatReviewerTs(String(decision.ts || ""));
+  // Legacy decisions (before task #25) carry no actor_name; fall back to the
+  // role string so the chip still attributes the action rather than rendering
+  // a confusing nameless "Approved at 12:14Z".
+  const who = name || (role ? role : "(unknown reviewer)");
+  return (
+    <div
+      className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-text-muted)_8%,transparent)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-secondary)]"
+      title={
+        `${verb} by ${who}` +
+        (unit ? ` (${unit})` : "") +
+        (ts ? ` at ${ts}` : "") +
+        (role && name ? ` · role: ${role}` : "")
+      }
+    >
+      <span className="font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+        {verb} by
+      </span>
+      <span className="text-[var(--color-text)]">{who}</span>
+      {unit && <span className="text-[var(--color-text-muted)]">({unit})</span>}
+      {ts && (
+        <span className="text-[var(--color-text-muted)]">
+          at <span className="tabular-nums">{ts}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ReviewCard({
   record,
   selected,
@@ -965,6 +1032,11 @@ function ReviewCard({
             )
           )}
         </div>
+        {/* Task #96 — if this held/flagged record already has a persisted
+            review decision, show the reviewer's name + unit + timestamp on
+            the card so a judge can attribute the action without opening the
+            audit-chain modal. */}
+        {record.decision && <ReviewerStamp decision={record.decision} />}
         {/* Walkthrough #11 — surface diversified Held reasons as badges so
             the operator can triage the queue by reason kind. */}
         {Array.isArray(record.held_reasons) && record.held_reasons.length > 0 && (
