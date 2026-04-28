@@ -3,24 +3,20 @@
  * Audit affordances. Replaces three side-by-side pills with one rounded
  * container so the right group reads as a single "stage controls" slot.
  *
- * The cluster honours each button's original gating so the operator
- * surface stays byte-equivalent to before the declutter:
+ * Stage-only: the cluster only renders when `stageMode === true`. The
+ * caller (TopBar) is expected to gate it with `{stageMode && ...}`.
+ * Operator-mode access to Reset and Failsafe is handled by the
+ * IdentityPill OperatorSettingsSection "Demo controls" rows (gated by
+ * `role === "g4"` and `scenarioLoaded` respectively), so the chrome is
+ * decluttered without losing any role-gated affordance.
  *
+ * Per-button gating inside the cluster (only evaluated when stageMode):
  *   - Failsafe: visible when a scenario is loaded and the failsafe is
- *     off (independent of stage mode).
- *   - Reset:    visible for `role === "g4"` outside stage mode; visible
- *     for any role inside stage mode (mirrors original ResetDemoButton).
- *   - Audit:    visible only in stage mode. The pre-declutter chrome
- *     guarded `AuditPill` with `{stageMode && <AuditPill />}`, so the
- *     icon is stage-only here too. (AuditView itself is reachable via
- *     direct nav in operator mode for g4 — the chrome chip was always
- *     stage-only.)
- *
- * The cluster renders nothing when none of its buttons are visible (so a
- * non-g4 operator with no scenario loaded never sees an empty rounded
- * shell). In operator mode for `role === "g4"` only the Reset button
- * renders inside the cluster, exactly mirroring the pre-declutter
- * `<ResetDemoButton />` chrome slot.
+ *     off (matches the original `<FailsafePill />` internal gate).
+ *   - Reset:    visible always (in stage mode `role === "g4" || stageMode`
+ *     reduces to `true`, matching the original `<ResetDemoButton />`).
+ *   - Audit:    visible always (matches the original
+ *     `{stageMode && <AuditPill />}` chrome).
  *
  * The cluster sits in one slot of the right group's visual budget — the
  * task's "at most 5 visible chips" target counts this container as one,
@@ -32,10 +28,10 @@ import { api } from "../api";
 import { formatApiError } from "../api-retry";
 import { useFailsafe } from "../state/failsafe";
 import { useScenarioPlayer } from "../state/scenarioPlayer";
-import { useSpireStore, type Role } from "../state/store";
+import { useSpireStore } from "../state/store";
 import { useIdempotentAction } from "./ui";
 
-export function StageCluster({ role }: { role: Role }) {
+export function StageCluster() {
   const stageMode = useSpireStore((s) => s.stageMode);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAirGap = useSpireStore((s) => s.setAirGap);
@@ -88,12 +84,14 @@ export function StageCluster({ role }: { role: Role }) {
     if (ok) openFullscreen();
   }
 
-  // Original gating preserved exactly. See file header for the table.
-  const showFailsafe = scenarioLoaded && failsafeMode === "off";
-  const showReset = stageMode || role === "g4";
-  const showAudit = stageMode;
+  // Stage-only by contract — return null in operator mode. The TopBar
+  // also gates this with `{stageMode && ...}`; this is belt-and-braces
+  // so stray render paths can't leak the cluster into operator chrome.
+  if (!stageMode) return null;
 
-  if (!showFailsafe && !showReset && !showAudit) return null;
+  const showFailsafe = scenarioLoaded && failsafeMode === "off";
+  const showReset = true;
+  const showAudit = true;
 
   // Stage mode shows the warning-bordered cluster (matches pre-declutter
   // dramatic chrome). Operator mode uses the standard border so the

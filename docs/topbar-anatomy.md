@@ -97,8 +97,8 @@ chip's stacking context. Tabs wrap. Tagline truncates.
 | AlertBadge (operator)     | `NotificationsChip` Alerts tab                    |
 | AlertBadge (stage)        | Backstop kept in stage mode for the dramatic ping |
 | DraftsBadge               | `NotificationsChip` Drafts tab                    |
-| FailsafePill              | `StageCluster` Failsafe icon (gated as before: scenario loaded + failsafe off, both modes) |
-| ResetDemoButton           | `StageCluster` Reset icon (gated as before: g4 in operator mode, any role in stage mode) |
+| FailsafePill              | Stage mode: `StageCluster` Failsafe icon. Operator mode: IdentityPill → Operator settings → Demo controls → Failsafe row (same gate: scenario loaded + failsafe off). |
+| ResetDemoButton           | Stage mode: `StageCluster` Reset icon. Operator mode: IdentityPill → Operator settings → Demo controls → Reset row (same gate: g4 only). |
 | AuditPill                 | `StageCluster` Audit icon (stage-only, matches the original `{stageMode && <AuditPill />}` chrome) |
 | AirGapToggle              | IdentityPill → Operator settings → Air-gap row    |
 | DensityToggle             | IdentityPill → Operator settings → Density radio  |

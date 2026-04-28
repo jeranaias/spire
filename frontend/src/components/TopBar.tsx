@@ -4,6 +4,8 @@ import clsx from "clsx";
 import { ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role, type User } from "../state/store";
 import { api, type AuthUser } from "../api";
 import { formatApiError } from "../api-retry";
+import { useScenarioPlayer } from "../state/scenarioPlayer";
+import { useFailsafe } from "../state/failsafe";
 import { MissionClock } from "./MissionClock";
 import { CommsControl } from "./CommsControl";
 import { SystemStatusChip } from "./SystemStatusChip";
@@ -207,11 +209,12 @@ export function TopBar() {
           <CommsControl />
           {!stageMode && <PushToJointButton role={role} />}
           {!stageMode && <NotificationsChip />}
-          {/* StageCluster handles its own per-button gating so it renders
-           * in operator mode too (Audit always, Reset for g4, Failsafe
-           * when scenario loaded). The cluster styling adapts: warning
-           * border in stage mode, neutral border in operator mode. */}
-          <StageCluster role={role} />
+          {/* StageCluster is stage-only — the operator chrome stays
+           * decluttered (System + Notif + Comms + Identity). Operator
+           * access to Reset (g4) and Failsafe (when scenario loaded)
+           * lives in the IdentityPill OperatorSettingsSection's "Demo
+           * controls" rows so role-gating is preserved. */}
+          {stageMode && <StageCluster />}
           {/* MDM 2026 stage-pivot — multi-presenter handoff (WP-8). The
            * 4-up chip strip sits inline with the right group only in
            * stage mode and offers one-click identity swaps so the next
@@ -886,11 +889,49 @@ function OperatorSettingsSection({ role }: { role: Role }) {
   const setAirGap = useSpireStore((s) => s.setAirGap);
   const setQueueDepth = useSpireStore((s) => s.setQueueDepth);
   const queueDepth = useSpireStore((s) => s.queueDepth);
+  const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const pushToast = useSpireStore((s) => s.pushToast);
   const density = useSpireStore((s) => s.density);
   const setDensity = useSpireStore((s) => s.setDensity);
   const ddilMode = useSpireStore((s) => s.ddilMode);
   const [airGapConfirm, setAirGapConfirm] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+  // Demo controls — preserves the operator-mode access to Reset (g4)
+  // and Failsafe (when scenario loaded) that the inline `<ResetDemoButton />`
+  // and `<FailsafePill />` chrome used to provide. The cluster itself is
+  // stage-only now, so these rows are how those affordances stay reachable.
+  const nav = useNavigate();
+  const scenarioLoaded = useScenarioPlayer((s) => s.scenarioId !== null);
+  const failsafeMode = useFailsafe((s) => s.mode);
+  const openFailsafe = useFailsafe((s) => s.openFullscreen);
+  const showFailsafeRow = scenarioLoaded && failsafeMode === "off";
+  const showResetRow = role === "g4";
+
+  const resetAction = useIdempotentAction(
+    "operator-settings:reset-demo",
+    async () => {
+      try {
+        const r = await api.system.resetDemo();
+        setAlertCount(0);
+        setAirGap(false);
+        setQueueDepth(0);
+        const seconds = (r.duration_ms / 1000).toFixed(2);
+        pushToast({
+          tone: r.ok ? "ok" : "warn",
+          text: r.ok
+            ? `SPIRE reset to clean demo state in ${seconds}s.`
+            : `Demo reset partial (${seconds}s) — ${r.failed_steps.length} step${r.failed_steps.length === 1 ? "" : "s"} failed.`,
+          ttlMs: 5000,
+        });
+        nav("/", { replace: true });
+      } catch (e) {
+        pushToast({ tone: "error", text: `Reset failed: ${formatApiError(e)}` });
+      } finally {
+        setResetConfirm(false);
+      }
+    },
+    { lockoutMs: 750 },
+  );
 
   const airGapAction = useIdempotentAction(
     `topbar:air-gap:${airGap ? "release" : "engage"}`,
@@ -1006,6 +1047,109 @@ function OperatorSettingsSection({ role }: { role: Role }) {
           {ddilMode}
         </span>
       </div>
+
+      {(showResetRow || showFailsafeRow) && (
+        <div
+          className="mt-1 border-t border-[var(--color-border)] pt-1"
+          data-testid="identity-demo-controls"
+        >
+          <div className="px-4 pt-1 pb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            Demo controls
+          </div>
+          {showResetRow && (
+            <div className="flex items-center justify-between gap-3 px-4 py-1.5">
+              <div className="flex min-w-0 flex-col">
+                <span className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+                  Reset SPIRE
+                </span>
+                <span className="font-mono text-[10px] tracking-wider text-[var(--color-text-muted)]">
+                  Return to clean t=0 demo state. (g4 only)
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetConfirm(true)}
+                disabled={resetAction.pending}
+                data-testid="identity-reset-demo"
+                className="shrink-0 rounded-sm border border-[var(--color-danger)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[11px] uppercase tracking-widest text-[var(--color-danger)] hover:bg-[color-mix(in_oklab,var(--color-danger-muted)_25%,var(--color-surface))] disabled:opacity-60"
+                aria-label="Reset SPIRE to clean demo state"
+              >
+                {resetAction.pending ? "Resetting…" : "Reset"}
+              </button>
+            </div>
+          )}
+          {showFailsafeRow && (
+            <div className="flex items-center justify-between gap-3 px-4 py-1.5">
+              <div className="flex min-w-0 flex-col">
+                <span className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+                  Failsafe
+                </span>
+                <span className="font-mono text-[10px] tracking-wider text-[var(--color-text-muted)]">
+                  Replace live demo with the recorded backup.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const ok = window.confirm(
+                    "Activate failsafe? The recorded backup will replace the live demo. Press OK only if the live demo has failed.",
+                  );
+                  if (ok) openFailsafe();
+                }}
+                data-testid="identity-failsafe"
+                className="shrink-0 rounded-sm border border-[var(--color-warning)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[11px] uppercase tracking-widest text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning)_20%,var(--color-surface))]"
+                aria-label="Activate failsafe — replace live demo with recorded backup"
+              >
+                Activate
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {resetConfirm && (
+        <div
+          className="fixed inset-0 z-[8800] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => !resetAction.pending && setResetConfirm(false)}
+          role="presentation"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="m-4 max-w-md rounded-md border border-[var(--color-warning)] bg-[var(--color-surface)] p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="identity-reset-confirm-title"
+          >
+            <div id="identity-reset-confirm-title" className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
+              Reset SPIRE
+            </div>
+            <h2 className="mt-1 font-sans text-lg font-semibold text-[var(--color-text)]">
+              Return to clean demo state?
+            </h2>
+            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+              Clears alerts, restarts mission clock, re-seeds simulator. Continue?
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setResetConfirm(false)}
+                disabled={resetAction.pending}
+                className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => resetAction.run()}
+                disabled={resetAction.pending}
+                className="rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_18%,var(--color-surface))] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning)_30%,var(--color-surface))] disabled:opacity-60"
+              >
+                {resetAction.pending ? "Resetting…" : "Reset demo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {airGapConfirm && (
         <div

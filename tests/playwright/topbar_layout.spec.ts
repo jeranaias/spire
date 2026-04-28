@@ -197,30 +197,48 @@ test.describe("TopBar declutter (Task #184)", () => {
     await expect(cluster.getByTestId("stage-cluster-failsafe")).toHaveCount(0);
   });
 
-  test("operator mode keeps stage-only controls hidden — Audit + Failsafe gated, Reset stays for g4", async ({ page }) => {
-    // The pre-declutter chrome rendered AuditPill only when stageMode is
-    // on (`{stageMode && <AuditPill />}`). The cluster preserves that
-    // exactly. Reset stays visible for g4 outside stage mode.
+  test("operator mode never shows the StageCluster — chrome stays decluttered", async ({ page }) => {
+    // Stage-only contract: the cluster must NOT appear in operator mode
+    // for any role, regardless of scenario state. Reset (g4) and Failsafe
+    // (when scenario loaded) are reachable through the IdentityPill
+    // Operator settings → Demo controls section instead.
     await page.setViewportSize(BREAKPOINTS.lg);
     await signIn(page, TEST_DODID);
-    const cluster = page.getByTestId("stage-cluster");
-    await expect(cluster).toBeVisible();
-    await expect(cluster).toHaveAttribute("data-stage-mode", "0");
-    await expect(cluster.getByTestId("stage-cluster-reset")).toBeVisible();
-    await expect(cluster.getByTestId("stage-cluster-audit")).toHaveCount(0);
-    await expect(cluster.getByTestId("stage-cluster-failsafe")).toHaveCount(0);
+    await expect(page.getByTestId("stage-cluster")).toHaveCount(0);
+    // Operator spine intact: System + Notif + Comms + Identity.
+    await expect(page.getByTestId("system-status-chip")).toBeVisible();
+    await expect(page.getByTestId("notifications-chip")).toBeVisible();
+    await expect(page.getByTestId("topbar-identity-pill")).toBeVisible();
   });
 
-  test("operator mode for non-g4 with no scenario hides the StageCluster entirely", async ({ page }) => {
-    // For Park (security_manager) outside stage mode with no scenario:
-    // Audit gated (stage-only), Reset gated (g4-only), Failsafe gated
-    // (no scenario). The cluster returns null — no empty rounded shell.
+  test("operator mode for non-g4 keeps spine intact, no StageCluster, no Demo controls", async ({ page }) => {
+    // Park (security_manager) outside stage mode with no scenario:
+    // - StageCluster: absent (stage-only)
+    // - Demo controls: absent (Reset is g4-only, Failsafe needs scenario)
+    // - Spine: present
     await page.setViewportSize(BREAKPOINTS.lg);
     await signIn(page, SECURITY_MANAGER_DODID);
     await expect(page.getByTestId("stage-cluster")).toHaveCount(0);
-    // SystemStatusChip is part of the spine and stays visible — only
-    // the stage-only cluster is gone.
     await expect(page.getByTestId("system-status-chip")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByTestId("topbar-identity-pill").click();
+    await expect(page.getByTestId("identity-operator-settings")).toBeVisible();
+    await expect(page.getByTestId("identity-demo-controls")).toHaveCount(0);
+  });
+
+  test("IdentityPill Demo controls expose Reset for g4 in operator mode (cluster replacement)", async ({ page }) => {
+    // The pre-declutter chrome had `<ResetDemoButton />` inline for g4
+    // outside stage mode. The cluster moved to stage-only, so the Reset
+    // affordance migrated to IdentityPill → Operator settings → Demo
+    // controls. Same role gate, different surface.
+    await page.setViewportSize(BREAKPOINTS.lg);
+    await signIn(page, TEST_DODID);
+    await page.keyboard.press("Escape");
+    await page.getByTestId("topbar-identity-pill").click();
+    await expect(page.getByTestId("identity-demo-controls")).toBeVisible();
+    await expect(page.getByTestId("identity-reset-demo")).toBeVisible();
+    // No scenario loaded → Failsafe row is correctly hidden.
+    await expect(page.getByTestId("identity-failsafe")).toHaveCount(0);
   });
 
   test("IdentityPill menu hosts Operator settings (Air-gap, Density, Comms)", async ({ page }) => {
