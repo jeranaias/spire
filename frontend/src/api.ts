@@ -390,6 +390,16 @@ export const api = {
     // pill; intentionally mock + deterministic across polls.
     gcssMcLastSync: () =>
       jsonFetch<GcssMcLastSync>("/integrations/gcss-mc/last-sync", undefined, false),
+    // Task #76 — system-of-record sample slice. Goes through jsonFetch so
+    // the DDIL interceptor applies (the integrations page is the one
+    // place that documents failure modes — it must respect the SATCOM
+    // denial drill, not silently bypass it).
+    gcssMcSample: (limit = 3) =>
+      jsonFetch<GcssMcSamplePayload>(
+        `/integrations/gcss-mc/sample?limit=${limit}`,
+        undefined,
+        false,
+      ),
     // Task #25 — return SPIRE to a clean t=0 demo state. Gated server-side
     // to the demo operator (g4); the topbar reset button is hidden for
     // every other role so this client method is never reachable from the
@@ -659,6 +669,27 @@ export interface DatasetInfo {
   as_of: string | null;
   generated_at: string;
   seed: number;
+}
+
+// Task #76 — sample-endpoint payload for the GCSS-MC reference adapter.
+// Shape mirrors `backend/integrations.py::sample_gcss_mc_slice`. Lives in
+// api.ts so the IntegrationsView and any future curl-fixture builder share
+// one type.
+export interface GcssMcSamplePayload {
+  _mock: {
+    label: string;
+    warning: string;
+    shape_version: string;
+    spec_sources: string[];
+    filters_applied: { limit: number; uic: string | null };
+    as_of_dataset_day: string | null;
+  };
+  field_mapping_reference: Record<string, Record<string, string>>;
+  EQUIPMENT_MASTER: Record<string, unknown>[];
+  MIMMS_DAILY_READINESS: Record<string, unknown>[];
+  EQUIPMENT_REPAIR_ORDER: Record<string, unknown>[];
+  SUPPLY_DOC: Record<string, unknown>[];
+  totals_in_canonical_dataset: Record<string, number>;
 }
 
 // Wave-1 lane #27 — GCSS-MC reference adapter freshness.
