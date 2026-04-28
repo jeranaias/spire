@@ -30,6 +30,7 @@ import {
   type DecisionBridgeMission,
   type DecisionBridgeShortage,
   type DecisionBridgeShortages,
+  isEmptyEnvelope,
 } from "../api";
 import { pollWithBackoff, formatApiError } from "../api-retry";
 import { ROLE_DEFAULT_VIEW, useSpireStore, type DdilMode } from "../state/store";
@@ -1140,13 +1141,32 @@ export function DecisionBridgeView() {
   }, []);
 
   // BASTION COP — drives alert→building resolution. Cheap to keep cached.
+  // Task #183 round-6: skip the fetch while datasetStatus.empty and refetch
+  // when emptiness flips false. Without this guard the cop state would
+  // hold an EmptyEnvelope object across the empty→hydrated transition,
+  // and a later resolveAlertTarget(cop) call would dereference cop.units
+  // on the envelope and throw. The deps array on datasetStatus.empty
+  // ensures the fetch re-runs exactly once when the dataset hydrates.
   useEffect(() => {
+    if (datasetStatus?.empty) {
+      // While the dataset singleton is empty the COP envelope is
+      // {empty:true,...}; clear any stale cop and don't fetch.
+      setCop(null);
+      return;
+    }
     let cancelled = false;
     api.bastion.cop()
-      .then((v) => { if (!cancelled) setCop(v); })
+      .then((v) => {
+        if (cancelled) return;
+        // Defense-in-depth: even with the empty-state guard above, the
+        // dataset-status poll has a 5s window where it could lag a
+        // hydrate; ignore an envelope payload rather than caching it.
+        if (isEmptyEnvelope(v)) return;
+        setCop(v);
+      })
       .catch(() => { /* drill-through tolerantly falls back to /bastion sans focus */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [datasetStatus?.empty]);
 
   // Alerts — 10s cadence (multiplier=1 disables the steady-state back-off
   // because alert mix is the operator's primary scan signal). The cadence

@@ -487,3 +487,17 @@ class TestForceEmptyHook:
         resp = park_client.post("/api/system/admin/force-empty")
         assert resp.status_code == 200
         assert state_mod.is_dataset_empty() is True
+
+    def test_force_empty_requires_privileged_role(self, client, monkeypatch):
+        """Round-6 review fix: env-gate alone is insufficient. The
+        endpoint now also requires a privileged role (RESET_DEMO_ROLES =
+        g4 / data_custodian / security_manager). An unauthenticated
+        caller must be denied even when SPIRE_TEST_HOOKS=1 — closes
+        the leak the reviewer flagged where a stray env var on a
+        non-test backend would let any anon caller reset the dataset.
+        """
+        monkeypatch.setenv("SPIRE_TEST_HOOKS", "1")
+        resp = client.post("/api/system/admin/force-empty")
+        # No login → require_role denies. Accept either 401 (auth mw)
+        # or 403 (role gate) so the test isn't coupled to mw ordering.
+        assert resp.status_code in (401, 403), resp.text

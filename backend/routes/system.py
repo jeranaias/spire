@@ -396,12 +396,20 @@ async def force_empty_dataset(request: Request) -> dict:
     """
     if os.environ.get("SPIRE_TEST_HOOKS", "0").lower() not in {"1", "true", "yes", "on"}:
         raise HTTPException(status_code=404, detail="Not Found")
+    # Round-6 review fix: env-gate alone is insufficient. If SPIRE_TEST_HOOKS
+    # ever leaks into a non-test context (CI image reused for staging,
+    # operator copies env, etc.) the env-only gate would let any caller
+    # blow away the dataset. Add the same role gate as reset-demo so the
+    # hook requires a privileged actor in addition to the env opt-in.
+    user = getattr(request.state, "user", None) or {}
+    actor = user.get("role") or session_role(request)
+    require_role(actor, RESET_DEMO_ROLES, "system.force_empty")
     from .. import state as _state_mod
     _state_mod.init_empty_dataset()
     return {
         "ok": True,
         "source": "force-empty",
-        "note": "test-only hook; gated on SPIRE_TEST_HOOKS=1",
+        "note": "test-only hook; gated on SPIRE_TEST_HOOKS=1 + role check",
     }
 
 
