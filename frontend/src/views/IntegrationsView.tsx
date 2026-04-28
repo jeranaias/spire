@@ -868,8 +868,11 @@ function FieldMappingSection({ sample }: { sample: SamplePayload | null }) {
       </div>
       {sample && (
         <p className="mt-3 spire-body-muted text-xs">
-          Live mapping reference (server-derived) is also embedded in every
-          response under <code className="font-mono text-[var(--color-primary)]">field_mapping_reference</code>.
+          The same mapping is also embedded server-side in every sample
+          response under <code className="font-mono text-[var(--color-primary)]">field_mapping_reference</code>
+          {" "}so a curl reader cannot drift from the page. The
+          payload is generated from the SPIRE synthetic dataset; this is
+          not a live read of GCSS-MC.
         </p>
       )}
     </Section>
@@ -1287,39 +1290,98 @@ function SampleEndpointSection({
       </div>
 
       {/* Refresh-cadence row — keeps this page honest against its own
-          claimed 30s polling cadence in PollingCadenceSection above. */}
-      <div
-        className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[11px]"
-        data-testid="integrations-refresh-cadence"
-      >
-        <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
-          <span
-            aria-hidden
-            className="inline-block h-1.5 w-1.5 rounded-full"
-            style={{
-              background: justRefreshed
-                ? "var(--color-success)"
-                : ddilMode === "DISCONNECTED"
-                ? "var(--color-danger)"
-                : ddilMode !== "CONNECTED"
-                ? "var(--color-warning)"
-                : "var(--color-text-muted)",
-            }}
-          />
-          <span className="uppercase tracking-widest">Polling cadence · {SAMPLE_REFRESH_INTERVAL_S}s</span>
-          <span className="text-[var(--color-text)]">
-            · next refresh in <span className="tabular-nums">{secondsToNext}s</span>
-          </span>
-        </div>
-        <Pressable
-          block={false}
-          onClick={onRefreshNow}
-          className="!min-h-0 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
-          aria-label="Refresh sample slice now"
-        >
-          Refresh now
-        </Pressable>
-      </div>
+          claimed 30s polling cadence in PollingCadenceSection above.
+          Task #124 honesty pass enforces the same tone rules the TopBar
+          pill adopted in Task #75:
+            • red    when the backend itself is unreachable (status==="error")
+                     or the operator is DDIL DISCONNECTED — same way the
+                     TopBar paints "GCSS DOWN" red.
+            • amber  while the backend is reachable but the upstream is
+                     mocked (REFERENCE_IMPLEMENTATION) — including the
+                     "just refreshed" pulse, which brightens amber rather
+                     than switching to green.
+            • green  is reserved for a real upstream link that does not
+                     exist yet, so it is never reached on this page. */}
+      {(() => {
+        // Centralized tone derivation so pip color, label color, and
+        // copy stay in lockstep — code review #124 flagged the prior
+        // pass for letting them drift (pip stayed amber while the
+        // sample fetch was failing).
+        const failed = status === "error";
+        const disconnected = ddilMode === "DISCONNECTED";
+        const tone: "down" | "warn" =
+          failed || disconnected ? "down" : "warn";
+        const downColor = "var(--color-danger)";
+        const warnColor = "var(--color-warning)";
+        const pipColor =
+          tone === "down"
+            ? downColor
+            : justRefreshed
+            ? warnColor
+            : "color-mix(in oklab, var(--color-warning) 55%, var(--color-text-muted))";
+        const headlineLabel = failed
+          ? "Sample endpoint unreachable"
+          : disconnected
+          ? "Mock-slice refresh paused · DDIL disconnected"
+          : `Mock-slice refresh · ${SAMPLE_REFRESH_INTERVAL_S}s`;
+        const qualifierLabel = failed
+          ? "Backend not responding · last fetch failed"
+          : disconnected
+          // Headline says "paused" — keep the qualifier in lockstep
+          // so a screenshot of just the row reads coherently.
+          ? "Polling halted · DDIL disconnected"
+          : "Polling SPIRE mock · not GCSS-MC";
+        const qualifierColor = tone === "down" ? downColor : warnColor;
+        const qualifierTitle = failed
+          ? "The backend mock endpoint is not responding. The pip is red because SPIRE itself is unreachable, not because GCSS-MC is."
+          : disconnected
+          ? "Comms are DISCONNECTED. The 30 s mock-slice poll is suspended until comms recover."
+          : "This rhythm polls SPIRE's local /api/integrations/gcss-mc/sample endpoint. There is no live GCSS-MC connection.";
+        return (
+          <div
+            className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[11px]"
+            data-testid="integrations-refresh-cadence"
+            data-tone={tone}
+          >
+            <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
+              <span
+                aria-hidden
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ background: pipColor }}
+              />
+              <span
+                className="uppercase tracking-widest"
+                style={{ color: tone === "down" ? downColor : undefined }}
+              >
+                {headlineLabel}
+              </span>
+              {!failed && !disconnected && (
+                <span className="text-[var(--color-text)]">
+                  · next refresh in <span className="tabular-nums">{secondsToNext}s</span>
+                </span>
+              )}
+              <span
+                className="ml-1 hidden sm:inline rounded-sm border px-1.5 py-[1px] text-[10px] uppercase tracking-widest"
+                style={{
+                  borderColor: qualifierColor,
+                  color: qualifierColor,
+                }}
+                title={qualifierTitle}
+              >
+                {qualifierLabel}
+              </span>
+            </div>
+            <Pressable
+              block={false}
+              onClick={onRefreshNow}
+              className="!min-h-0 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+              aria-label="Refresh sample slice now"
+            >
+              Refresh now
+            </Pressable>
+          </div>
+        );
+      })()}
 
       {status === "auth_required" && (
         <div className="mt-3">
@@ -1370,6 +1432,23 @@ function SampleEndpointSection({
       {sample && (
         <div className="mt-3 grid gap-3">
           <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-[var(--color-text-muted)] uppercase tracking-wider">
+            {/* Task #124 — surface the payload's _mock.label as a hard
+                amber chip so the sample table block carries the same
+                REF tone the topbar pill uses. The label comes straight
+                from the backend ("REFERENCE IMPLEMENTATION"). */}
+            <span
+              className="rounded-sm border px-2 py-0.5 text-[10px] font-semibold"
+              style={{
+                borderColor: "var(--color-warning)",
+                color: "var(--color-warning)",
+                background:
+                  "color-mix(in oklab, var(--color-warning-muted) 18%, var(--color-surface))",
+              }}
+              title={sample._mock.warning}
+              data-testid="integrations-sample-ref-chip"
+            >
+              {sample._mock.label} · MOCK SLICE
+            </span>
             <span>
               shape <span className="text-[var(--color-primary)]">{sample._mock.shape_version}</span>
             </span>
@@ -1396,6 +1475,13 @@ function SampleEndpointSection({
               </span>
             )}
           </div>
+          {/* Single line of provenance copy above the per-table block.
+              Without this, a screenshot of the EQUIPMENT_MASTER table on
+              its own reads as a live GCSS-MC pull. */}
+          <p className="text-[11px] font-mono text-[var(--color-text-muted)] leading-relaxed">
+            Rows below are GCSS-MC-shaped but sourced from the SPIRE
+            synthetic dataset. No live GCSS-MC connection is in place.
+          </p>
           {tableNames.map((t) => (
             <SampleTable key={t} title={t} rows={sample[t]} />
           ))}
@@ -1423,8 +1509,22 @@ function SampleTable({
   const cols = Object.keys(rows[0]);
   return (
     <div className="overflow-x-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
-      <div className="border-b border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-primary)]">
-        {title}
+      {/* Task #124 — bake the synthetic-source label into every table
+          header so a per-table screenshot can never read as a live
+          GCSS-MC pull. The amber qualifier lives in the same row as the
+          GCSS-MC table name on purpose: the two cannot be cropped apart. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest">
+        <span className="text-[var(--color-primary)]">{title}</span>
+        <span
+          className="rounded-sm border px-1.5 py-[1px] text-[9px] tracking-widest"
+          style={{
+            borderColor: "var(--color-warning)",
+            color: "var(--color-warning)",
+          }}
+          title="Rows are emitted in the GCSS-MC table shape but sourced from the SPIRE synthetic dataset, not from a GCSS-MC pull."
+        >
+          GCSS-MC shape · SPIRE synthetic source
+        </span>
       </div>
       <table className="w-full min-w-[720px] font-mono text-xs">
         <thead className="text-left uppercase tracking-widest text-[var(--color-text-muted)]">
