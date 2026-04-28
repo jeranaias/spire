@@ -1,6 +1,6 @@
 {
-  "_doc": "Canonical SPIRE model registry. Source of truth for /api/system/admin/models. The W1 task #30 supply-chain page reads from here. Honesty over hand-waving — anything that isn't yet real is labelled 'TBD — placeholder'.",
-  "registry_version": "2026-04-28.2",
+  "_doc": "Canonical SPIRE model registry. Source of truth for /api/system/admin/models. The W1 task #30 supply-chain page reads from here. Honesty over hand-waving — anything that isn't yet real is labelled 'TBD — placeholder'. Authorization blocks on active implementations carry a structured `status: pre_fielding` value (Task #138) so the AO / package / expiration text names the receiving-enclave inheritance path instead of leaving a bare placeholder; inactive lanes (torch_v0, tier2_llm_gate) keep the TBD label until they are promoted.",
+  "registry_version": "2026-04-28.3",
   "owner": "SPIRE Engineering · Thornveil",
   "models": [
     {
@@ -29,9 +29,10 @@
             "gap": "None — first-party in-process inference inherits the deployment posture; satisfies IL-5 / IL-6 boundaries by colocation."
           },
           "authorization": {
-            "ao": "TBD — placeholder",
-            "package_id": "TBD — placeholder",
-            "expiration": "TBD — placeholder",
+            "status": "pre_fielding",
+            "ao": "Pre-fielding · receiving MEF G-6 AO assigned at host-enclave selection",
+            "package_id": "Pre-fielding · inherits MEF enclave RMF/eMASS package (no standalone SPIRE package on file)",
+            "expiration": "Pre-fielding · tracks receiving enclave ATO expiration once issued",
             "note": "IL-5 is the hosting *target*, not an active authorization. SPIRE is in pre-fielding posture; ATO paperwork lands with the receiving MEF G-6 once a host enclave is selected. Distinct from the operational IL boundary the deployed enclave inherits."
           },
           "fedramp_status": "not_applicable",
@@ -142,9 +143,10 @@
             "gap": "None — first-party in-process inference."
           },
           "authorization": {
-            "ao": "TBD — placeholder",
-            "package_id": "TBD — placeholder",
-            "expiration": "TBD — placeholder",
+            "status": "pre_fielding",
+            "ao": "Pre-fielding · receiving enclave AO assigned at host-enclave selection",
+            "package_id": "Pre-fielding · inherits enclave RMF/eMASS package (no SENTRY-specific package on file)",
+            "expiration": "Pre-fielding · tracks receiving enclave ATO expiration once issued",
             "note": "IL-5 is the hosting *target*, not an active authorization. SPIRE inherits whatever ATO the receiving enclave already holds; no SENTRY-specific package is on file."
           },
           "fedramp_status": "not_applicable",
@@ -255,9 +257,10 @@
             "gap": "None — fully local inference. Network egress monitor (backend/network_monitor.py) blocks outbound to commercial LLM endpoints."
           },
           "authorization": {
-            "ao": "TBD — placeholder",
-            "package_id": "TBD — placeholder",
-            "expiration": "TBD — placeholder",
+            "status": "pre_fielding",
+            "ao": "Pre-fielding · receiving enclave AO assigned at host-enclave selection",
+            "package_id": "Pre-fielding · inherits enclave RMF/eMASS package (Gemma weights run in-process; no Gemma-specific package on file)",
+            "expiration": "Pre-fielding · tracks receiving enclave ATO expiration once issued",
             "note": "IL-5 is the hosting *target*. SPIRE has no Gemma-specific ATO package; weights run inside the SPIRE process, so the model inherits whatever authorization the receiving enclave already holds. Distinct from the IL-5 *authorization* a fielded ATO would carry."
           },
           "fedramp_status": "not_applicable",
@@ -317,9 +320,10 @@
             "gap": "Inference disabled in this build — Thornveil private package not installed in the open-source SPIRE deploy. Sim alert advertises 'weights present, inference disabled' honestly."
           },
           "authorization": {
-            "ao": "TBD — placeholder",
-            "package_id": "TBD — placeholder",
-            "expiration": "TBD — placeholder",
+            "status": "pre_fielding",
+            "ao": "Pre-fielding · C-UAS sensor enclave AO assigned at edge-deploy selection",
+            "package_id": "Pre-fielding · inherits sensor enclave RMF/eMASS package (no Thornveil-specific package on file)",
+            "expiration": "Pre-fielding · tracks sensor enclave ATO expiration once issued",
             "note": "IL-5 is the hosting *target* for the edge sensor. No Thornveil-specific ATO; the model would inherit the edge enclave's authorization once fielded."
           },
           "fedramp_status": "not_applicable",
@@ -378,9 +382,10 @@
             "gap": "None — first-party in-process inference."
           },
           "authorization": {
-            "ao": "TBD — placeholder",
-            "package_id": "TBD — placeholder",
-            "expiration": "TBD — placeholder",
+            "status": "pre_fielding",
+            "ao": "Pre-fielding · receiving enclave AO assigned at host-enclave selection",
+            "package_id": "Pre-fielding · inherits enclave RMF/eMASS package (no fusion-specific package on file)",
+            "expiration": "Pre-fielding · tracks receiving enclave ATO expiration once issued",
             "note": "IL-5 is the hosting *target*, not an active authorization. Fusion correlator inherits the receiving enclave's ATO."
           },
           "fedramp_status": "not_applicable",

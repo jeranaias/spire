@@ -213,9 +213,13 @@ function ImplementationCard({ impl, headline }: { impl: ModelImplementation; hea
 
         <Section title="Authorization (ATO)">
           {/*
-            Task #82 — distinct from hosting target. SPIRE is in
-            pre-fielding posture so most rows surface "TBD — placeholder"
-            honestly rather than implying an ATO that doesn't exist.
+            Task #82 introduced this block; Task #138 replaced the bare
+            "TBD — placeholder" strings on every active implementation
+            with structured pre-fielding status text (status: pre_fielding
+            + AO / package / expiration that names the receiving enclave
+            inheritance path). Inactive implementations (torch_v0,
+            tier2_llm_gate) still surface "TBD — placeholder" until they
+            are promoted, so the placeholder badge logic below remains.
           */}
           <Row label="Authorizing official" value={impl.authorization?.ao ?? "TBD — placeholder"} />
           <Row label="Package ID" value={impl.authorization?.package_id ?? "TBD — placeholder"} />

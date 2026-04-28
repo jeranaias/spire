@@ -1274,6 +1274,11 @@ export interface ModelInAppSurface {
 }
 
 export interface ModelAuthorization {
+  // Task #138 — machine-readable status. Active impls now carry
+  // "pre_fielding" with structured ao/package/expiration text instead of
+  // bare "TBD — placeholder". Older registry entries (and inactive impls
+  // still flagged as placeholder) leave it undefined.
+  status?: string | null;
   ao?: string | null;
   package_id?: string | null;
   expiration?: string | null;

@@ -1676,9 +1676,12 @@ def _model_summary(model: dict) -> dict:
     status, vendor jurisdiction(s), last validated date, active impl kind.
 
     Task #82 — distinguishes the IL-5 hosting *target* from an IL-5
-    *authorization* (the latter is a separate `authorization` block;
-    placeholder values when no ATO exists). Vendor jurisdiction is
-    surfaced as both the canonical list and the human-readable label so
+    *authorization* (the latter is a separate `authorization` block).
+    Task #138 — active impls now carry a structured `status: pre_fielding`
+    label with AO / package / expiration text that names the receiving
+    enclave inheritance path; bare "TBD — placeholder" text only remains
+    on inactive lanes that haven't been promoted yet. Vendor jurisdiction
+    is surfaced as both the canonical list and the human-readable label so
     multi-jurisdiction vendors (e.g. Alphabet/DeepMind) don't read as
     pure-US on the row."""
     impl = _active_impl(model) or {}
@@ -1699,6 +1702,7 @@ def _model_summary(model: dict) -> dict:
             and "none" not in str(hosting.get("gap", "")).lower()
         ),
         "authorization": {
+            "status": auth.get("status"),
             "ao": auth.get("ao"),
             "package_id": auth.get("package_id"),
             "expiration": auth.get("expiration"),
