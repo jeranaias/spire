@@ -40,7 +40,6 @@ import {
   type GcssMcDictionary,
   type GcssMcDictionarySection,
   type GcssMcDictionaryColumn,
-  type GcssMcDictionaryTopValue,
 } from "../api";
 import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
