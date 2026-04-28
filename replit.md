@@ -11,9 +11,6 @@ Key capabilities include:
 - Managing classification and export controls for sensitive data.
 - Integrating with external logistics systems (GCSS-MC, OMS-UCI, MIL-STD-6016).
 - Simulating communication states for disaster preparedness drills.
-- Integrating with external logistics systems (GCSS-MC, OMS-UCI, MIL-STD-6016).
-- Simulating communication states for disaster preparedness.
-- Integrating with external logistics systems and simulating communication states for disaster preparedness drills.
 - Maintaining a model registry for AI/ML supply chain transparency.
 - Offering a "Decision Bridge" dashboard for critical decision-making.
 - Supporting scenario-based vignettes for training and demonstrations, including in-app presentation tools.

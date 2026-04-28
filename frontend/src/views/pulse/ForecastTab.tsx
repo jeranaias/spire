@@ -43,12 +43,14 @@ function useElementWidth<T extends HTMLElement>(): [(el: T | null) => void, numb
   return [setRef, w];
 }
 import { api, ApiError, type Forecast } from "../../api";
+import { formatApiError, withRetry } from "../../api-retry";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { RecommendPanel } from "../../components/RecommendPanel";
 import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 import { LoadingState, ErrorState } from "../../components/ui";
 import { DatasetBadge } from "../../components/DatasetBadge";
+import { formatAsOf } from "./FleetOverviewTab";
 
 type Horizon = "7" | "14" | "30";
 
@@ -74,7 +76,20 @@ export function ForecastTab() {
   // unit the current role can't see (e.g. role changed while a stale
   // unit was selected, or a deep link from a higher-scoped session).
   const [scopeError, setScopeError] = useState<string | null>(null);
+  // Cold-load failure surface. Set only when the initial fetch (no
+  // prior data) errors out terminally after withRetry exhausts its
+  // backoff schedule. Auto-refresh failures keep the prior chart on
+  // screen so a single transient 5xx during SATCOM yellow doesn't
+  // dead-end the page; the operator gets a Retry button via
+  // <ErrorState> in the chart pane.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [units, setUnits] = useState<string[]>([]);
+  // F6 — DDIL cache freshness. Mirrors RiskBoardTab's chip so the
+  // operator sees the same stale-cache warning on every PULSE surface
+  // when comms are denied and the data on screen has aged out.
+  const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
+  const ddilMode = useSpireStore((s) => s.ddilMode);
   const [chartRef, chartWidth] = useElementWidth<HTMLDivElement>();
   const CHART_HEIGHT = 360;
   // Walkthrough audit (forecast freshness): tick once a second so the
@@ -86,9 +101,27 @@ export function ForecastTab() {
     return () => window.clearInterval(id);
   }, []);
 
+  // F6 — DDIL cache-stale derivation. Mirror RiskBoardTab: only fire
+  // while DDIL is actively DISCONNECTED, only when the last cache hit
+  // matched this view's endpoint, and only past the 5-minute floor so
+  // the chip is a real exception (not a false-alarm on a fresh-cached
+  // payload). The 1-second `now` tick already in place above means the
+  // chip flips on at the 5-minute mark without the operator having to
+  // re-navigate.
+  const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+  const cacheStaleMs = useMemo(() => {
+    if (ddilMode !== "DISCONNECTED") return null;
+    if (!ddilLastCacheHit) return null;
+    if (!ddilLastCacheHit.key.includes("/pulse/forecast")) return null;
+    const ageMs = now - ddilLastCacheHit.cachedAt;
+    return ageMs > STALE_THRESHOLD_MS ? ageMs : null;
+  }, [ddilLastCacheHit, ddilMode, now]);
+
   const refetch = useCallback(() => {
     setData(null);
     setScopeError(null);
+    setLoadError(null);
+    setRetrying(true);
     const targetUnit = unit === "FLEET" ? undefined : unit;
     // Catch transient errors so the chart shows its 'forecast
     // unavailable' state rather than logging an uncaught. A 403 from
@@ -98,10 +131,17 @@ export function ForecastTab() {
     // sit on a perpetual loading skeleton. Wrapped in `refetch` so the
     // manual Refresh button (added with the freshness chip) gets the
     // same scope handling as the initial-mount fetch.
-    api.pulse.forecast(targetUnit, Number(horizon))
+    //
+    // F6 — wrap the cold load in withRetry so a single transient 5xx /
+    // SATCOM yellow doesn't dead-end the chart. Schedule matches the
+    // sibling RiskBoardTab / FleetOverviewTab (1s/3s/5s). On terminal
+    // failure surface loadError so <ErrorState> can render a Retry
+    // button instead of leaving the pane on a perpetual skeleton.
+    withRetry(() => api.pulse.forecast(targetUnit, Number(horizon)))
       .then((d) => {
         setData(d);
         setScopeError(null);
+        setLoadError(null);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 403) {
@@ -111,9 +151,11 @@ export function ForecastTab() {
               : `${unit} is outside your scope. Snapping back to FLEET.`,
           );
           if (unit !== "FLEET") setUnit("FLEET");
+          return;
         }
-        /* other errors: keep prior data, chart shows skeleton/empty */
-      });
+        setLoadError(formatApiError(err));
+      })
+      .finally(() => setRetrying(false));
   }, [unit, horizon]);
 
   // Task #129 — background auto-refresh so the freshness chip / STALE
@@ -316,6 +358,16 @@ export function ForecastTab() {
               className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
             >
               Readiness Forecast · Monte Carlo
+              {/* F5 — dataset freshness stamp. Same shared formatAsOf
+               * helper FleetOverviewTab / RiskBoardTab use, so every PULSE
+               * tab header reads identical "as of <date>" copy from the
+               * canonical generation date instead of the operator
+               * inferring freshness from wall-clock time. */}
+              {data?.as_of && (
+                <span className="ml-3 font-mono text-[var(--color-text-muted)] tracking-wider">
+                  · as of {formatAsOf(data.as_of)}
+                </span>
+              )}
             </h2>
             {/* Task #127 — same "AS OF DDMMMYY" pill the Decision Bridge
              * tiles use. The forecast endpoint stamps `as_of` with
@@ -328,6 +380,18 @@ export function ForecastTab() {
           <div className="mt-1 spire-body-muted">
             200 forward paths, drift fit on last {data?.data_window_days ?? 30} days of history. Shaded band = 10–90 percentile.
           </div>
+          {cacheStaleMs != null && (
+            <div
+              role="status"
+              className="mt-1 inline-flex items-center gap-2 rounded-sm border border-[var(--color-warning-muted)] bg-[color-mix(in_oklab,var(--color-warning-muted)_18%,var(--color-surface))] px-2 py-1 font-mono text-xs text-[var(--color-warning)] tracking-wider"
+            >
+              <span aria-hidden>▲</span>
+              <span>
+                Cached {Math.floor(cacheStaleMs / 60000)} min ago — DDIL disconnected.
+                Verify before committing TMRs.
+              </span>
+            </div>
+          )}
           <ForecastFreshness data={data} now={now} onRefresh={onManualRefresh} />
         </div>
         <div className="flex items-center gap-3">
@@ -383,6 +447,15 @@ export function ForecastTab() {
             variant="inline"
             title="Out of scope"
             description={scopeError}
+          />
+        ) : loadError ? (
+          <ErrorState
+            variant="inline"
+            title="Forecast unavailable"
+            description="The PULSE forecast API did not return. Network or backend may be cycling."
+            detail={loadError}
+            onRetry={onManualRefresh}
+            retrying={retrying}
           />
         ) : !dataLoaded ? (
           <LoadingState size="panel" label="Running Monte Carlo forecast …" />

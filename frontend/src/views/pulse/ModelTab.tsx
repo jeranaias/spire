@@ -9,7 +9,7 @@
  * C3); this surface is the in-PULSE summary so an operator never has
  * to leave the workflow to inspect model behavior.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -24,19 +24,54 @@ import {
   YAxis,
 } from "recharts";
 import { api, isEmptyEnvelope, type ModelCard, type ModelCardBaseline } from "../../api";
-import { formatApiError } from "../../api-retry";
+import { formatApiError, withRetry } from "../../api-retry";
 import { AwaitingIngestEmpty } from "../../components/AwaitingIngestEmpty";
 import { ErrorState, LoadingState } from "../../components/ui";
+import { useSpireStore } from "../../state/store";
+import { formatAsOf } from "./FleetOverviewTab";
 
 export function ModelTab() {
   const [card, setCard] = useState<ModelCard | null>(null);
   const [empty, setEmpty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  // Bumping this re-runs the load effect so the ErrorState retry
+  // button re-enters the cold-load path without a full page reload
+  // (which would also wipe sibling-tab state).
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  // F6 — DDIL cache freshness. Mirrors the chip on RiskBoardTab and
+  // ForecastTab so the operator sees the same stale-cache warning on
+  // every PULSE surface when comms are denied and the data on screen
+  // has aged out beyond the 5-minute floor.
+  const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // 30s tick matches the RiskBoardTab cadence — fast enough that the
+    // chip flips on within ~5m05s of crossing the threshold without
+    // taxing render.
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const cacheStaleMs = useMemo(() => {
+    if (ddilMode !== "DISCONNECTED") return null;
+    if (!ddilLastCacheHit) return null;
+    if (!ddilLastCacheHit.key.includes("/pulse/model-card")) return null;
+    const ageMs = now - ddilLastCacheHit.cachedAt;
+    return ageMs > STALE_THRESHOLD_MS ? ageMs : null;
+  }, [ddilLastCacheHit, ddilMode, now]);
 
   useEffect(() => {
-    api.pulse
-      .modelCard()
+    let cancelled = false;
+    setError(null);
+    setRetrying(true);
+    // F6 — wrap the cold load in withRetry so a single transient 5xx /
+    // SATCOM yellow doesn't dead-end the model-card surface. Schedule
+    // matches the sibling RiskBoardTab / ForecastTab (1s/3s/5s).
+    withRetry(() => api.pulse.modelCard())
       .then((res) => {
+        if (cancelled) return;
         // Task #183 — backend may return {empty:true} when the dataset
         // singleton is empty (stage live-ingest mode pre-hydration).
         // Defend the typed state against the envelope so we never
@@ -47,8 +82,10 @@ export function ModelTab() {
           setCard(res as ModelCard);
         }
       })
-      .catch((e) => setError(formatApiError(e)));
-  }, []);
+      .catch((e) => { if (!cancelled) setError(formatApiError(e)); })
+      .finally(() => { if (!cancelled) setRetrying(false); });
+    return () => { cancelled = true; };
+  }, [loadAttempt]);
 
   if (empty) {
     return (
@@ -67,8 +104,8 @@ export function ModelTab() {
           title="Failed to load model card"
           description="The PULSE model-card endpoint did not respond."
           detail={error}
-          onRetry={() => window.location.reload()}
-          retryLabel="Reload"
+          onRetry={() => setLoadAttempt((n) => n + 1)}
+          retrying={retrying}
         />
       </div>
     );
@@ -78,7 +115,7 @@ export function ModelTab() {
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 p-4">
-        <Header card={card} />
+        <Header card={card} cacheStaleMs={cacheStaleMs} />
         <div className="grid grid-cols-2 gap-4">
           <Panel title="What we optimize · loss function">
             <div className="font-mono text-sm leading-relaxed text-[var(--color-text)]">
@@ -190,7 +227,7 @@ export function ModelTab() {
 // Header — engine label + canonical-card cross-link
 // ---------------------------------------------------------------------------
 
-function Header({ card }: { card: ModelCard }) {
+function Header({ card, cacheStaleMs }: { card: ModelCard; cacheStaleMs: number | null }) {
   const engine = card.engine.public_label;
   const tone =
     engine === "torch production"
@@ -215,6 +252,15 @@ function Header({ card }: { card: ModelCard }) {
       <div>
         <h2 className="font-mono text-base font-semibold uppercase tracking-widest text-[var(--color-text)]">
           PULSE Risk Scorer · Model Card
+          {/* F5 — dataset freshness stamp. Routes the model card's
+           * `as_of` through the shared formatAsOf helper so this header
+           * reads identical "as of <date>" copy to FleetOverviewTab,
+           * RiskBoardTab, and ForecastTab. */}
+          {card.as_of && (
+            <span className="ml-3 font-mono text-[var(--color-text-muted)] tracking-wider">
+              · as of {formatAsOf(card.as_of)}
+            </span>
+          )}
         </h2>
         <div className="mt-1 spire-body-muted">
           In-PULSE summary of the model behind the Risk Board, Predicted Failure panel, and Forecast spaghetti.
@@ -227,6 +273,18 @@ function Header({ card }: { card: ModelCard }) {
           </a>
           .
         </div>
+        {cacheStaleMs != null && (
+          <div
+            role="status"
+            className="mt-2 inline-flex items-center gap-2 rounded-sm border border-[var(--color-warning-muted)] bg-[color-mix(in_oklab,var(--color-warning-muted)_18%,var(--color-surface))] px-2 py-1 font-mono text-xs text-[var(--color-warning)] tracking-wider"
+          >
+            <span aria-hidden>▲</span>
+            <span>
+              Cached {Math.floor(cacheStaleMs / 60000)} min ago — DDIL disconnected.
+              Verify before quoting baselines.
+            </span>
+          </div>
+        )}
       </div>
       <div className="flex flex-col items-end gap-1.5">
         <span
@@ -241,9 +299,6 @@ function Header({ card }: { card: ModelCard }) {
         </span>
         <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
           internal id · {card.engine.internal_id}
-        </span>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-          as of · {card.as_of}
         </span>
       </div>
     </div>
