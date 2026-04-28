@@ -13,6 +13,14 @@ import {
 } from "../../components/classification";
 import { useSpireStore } from "../../state/store";
 import { SentrySplitPane } from "../../components/SentrySplitPane";
+import {
+  heldReasonLabel,
+  heldReasonDescription,
+  mismatchSeverityLabel,
+  mismatchSeverityDescription,
+  ruleLabel,
+  ruleDescription,
+} from "./evidence";
 
 // Task #185 (review pass) — Processing keeps its own splitter key so it
 // does not collide with the REVIEW screen's splitter, which now owns the
@@ -731,6 +739,22 @@ function SanitizedRecord({
   const flags: string[] = record.flags || [];
   const highlights = record.highlights || [];
   const remark: string = record.remark || "";
+  const heldReasons: string[] = Array.isArray(record.held_reasons) ? record.held_reasons : [];
+  const mismatchSeverity: string | undefined =
+    record.classification_discrepancy ? record.mismatch_severity : undefined;
+  // Task #150 — distinct rule names that fired on this record. The
+  // backend attaches the per-pattern rule on each highlight (e.g.
+  // `pii_edipi`, `pii_ssn4`); we surface up to two as evidence chips so
+  // the operator sees the mechanical reason for the redaction. Cap at 2
+  // so the card stays scannable in the right column.
+  const ruleNames: string[] = [];
+  for (const h of highlights as any[]) {
+    if (h?.rule && !ruleNames.includes(h.rule)) ruleNames.push(h.rule);
+  }
+  const evidenceRules = ruleNames.slice(0, 2);
+  const extraRuleCount = Math.max(0, ruleNames.length - evidenceRules.length);
+  const showEvidenceRow =
+    heldReasons.length > 0 || !!mismatchSeverity || evidenceRules.length > 0;
 
   // Walk the highlight spans and stamp the actual `[REDACTED:CAT]` tokens
   // over the offending substrings. This is the same span-based machinery
@@ -801,12 +825,68 @@ function SanitizedRecord({
         >
           {record.detected_classification}
         </span>
-        {record.classification_discrepancy && (
-          <span className="rounded-sm bg-[var(--color-danger-muted)] px-1 text-xs font-semibold uppercase tracking-wider text-[var(--color-danger)]">
-            MIS-MARKED
-          </span>
-        )}
       </div>
+
+      {/* Task #150 — evidence chip row. Closes the loop between "we
+          redacted this" and "here's why we flagged it" by surfacing the
+          Tier 2 LLM routing reason (held_reasons / mismatch_severity)
+          and the mechanical rule that fired (pii_edipi → "EDIPI pattern
+          matched"). Same vocabulary the Review Queue inspector uses, so
+          the chip an operator sees here matches what the audit trail
+          shows downstream. */}
+      {showEvidenceRow && (
+        <div className="mb-1 flex flex-wrap items-center gap-1">
+          {mismatchSeverity && (
+            <span
+              className="rounded-sm border px-1 py-[1px] font-mono text-[10px] font-semibold uppercase tracking-wider"
+              style={{
+                color:
+                  mismatchSeverity === "spillage_risk"
+                    ? "var(--color-danger)"
+                    : "var(--color-warning)",
+                borderColor:
+                  mismatchSeverity === "spillage_risk"
+                    ? "var(--color-danger)"
+                    : "var(--color-warning)",
+                background: `color-mix(in oklab, ${
+                  mismatchSeverity === "spillage_risk"
+                    ? "var(--color-danger)"
+                    : "var(--color-warning)"
+                } 12%, transparent)`,
+              }}
+              title={mismatchSeverityDescription(mismatchSeverity)}
+            >
+              MIS-MARKED · {mismatchSeverityLabel(mismatchSeverity)}
+            </span>
+          )}
+          {heldReasons.map((r) => (
+            <span
+              key={r}
+              className="rounded-sm border border-[var(--color-danger-muted)] bg-[color-mix(in_oklab,var(--color-danger)_10%,transparent)] px-1 py-[1px] font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--color-danger)]"
+              title={heldReasonDescription(r)}
+            >
+              HELD · {heldReasonLabel(r)}
+            </span>
+          ))}
+          {evidenceRules.map((r) => (
+            <span
+              key={r}
+              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-1 py-[1px] font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)]"
+              title={ruleDescription(r)}
+            >
+              {ruleLabel(r)}
+            </span>
+          ))}
+          {extraRuleCount > 0 && (
+            <span
+              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-1 py-[1px] font-mono text-[10px] tracking-wider text-[var(--color-text-muted)]"
+              title="Open the Review Queue inspector for the full evidence list."
+            >
+              +{extraRuleCount} more
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Task #66 supersedes the prior Task #65 "detection only, no
           redaction on this surface" position: the right column now

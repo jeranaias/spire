@@ -22,6 +22,14 @@ import {
   useClearance,
 } from "../../components/classification";
 import { SentrySplitPane } from "../../components/SentrySplitPane";
+import {
+  heldReasonLabel,
+  heldReasonDescription,
+  mismatchSeverityLabel,
+  mismatchSeverityDescription,
+  ruleLabel,
+  ruleDescription,
+} from "./evidence";
 
 // Task #185 (review pass) — REVIEW screen owns the canonical
 // `spire.sentry.splitterPx` slot per reviewer guidance. The splitter sits
@@ -59,14 +67,9 @@ const CLASS_COLOR: Record<string, string> = {
   TOP_SECRET: "var(--color-danger)",
 };
 
-// Walkthrough #11 — describe each Held reason so badges have hover detail
-// and operators can triage by reason rather than by mass-repeated discrepancy.
-const HELD_REASON_DESCRIPTION: Record<string, string> = {
-  classification_discrepancy: "Source marking and detected marking diverge — review for correctness.",
-  ambiguous_pii: "Possible PII without supporting context (no EDIPI/SSN/phone). Could be a false positive.",
-  novel_pattern: "Combination of evidence (controlled item + grid) the engine has not seen before.",
-  low_confidence_evidence: "Multiple flag categories but classifier confidence is below 0.90.",
-};
+// Walkthrough #11 — held-reason badge vocabulary lives in ./evidence so the
+// Processing tab's SanitizedRecord and the Review-Queue inspector render the
+// same chip text. (Task #150.)
 
 export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
   const [queue, setQueue] = useState<SentryReviewQueue | null>(null);
@@ -880,9 +883,9 @@ function ReviewCard({
               <span
                 key={r}
                 className="rounded-sm border border-[var(--color-danger-muted)] px-1 py-[1px] font-mono font-semibold uppercase tracking-wider text-[var(--color-danger)]"
-                title={HELD_REASON_DESCRIPTION[r] ?? r}
+                title={heldReasonDescription(r) ?? r}
               >
-                {r.replace(/_/g, " ")}
+                HELD · {heldReasonLabel(r)}
               </span>
             ))}
           </div>
@@ -1048,6 +1051,49 @@ function InspectorPane({
           )}
         </div>
 
+        {/* Task #150 — evidence chip row, mirroring the SanitizedRecord
+            chips on the Processing tab. Surfacing held_reasons and
+            mismatch_severity here gives the reviewer the same
+            operator-facing reason text the Processing right-column
+            already shows, so triage vocabulary is consistent end-to-end. */}
+        {(record.classification_discrepancy ||
+          (Array.isArray(record.held_reasons) && record.held_reasons.length > 0)) && (
+          <section>
+            <div className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
+              Why this record was held
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
+              {record.classification_discrepancy && (() => {
+                const sev = record.mismatch_severity ?? "marking_error";
+                const isSpillage = sev === "spillage_risk";
+                const color = isSpillage ? "var(--color-danger)" : "var(--color-warning)";
+                return (
+                  <span
+                    className="rounded-sm border px-1 py-[1px] font-mono text-[10px] font-semibold uppercase tracking-wider"
+                    style={{
+                      color,
+                      borderColor: color,
+                      background: `color-mix(in oklab, ${color} 12%, transparent)`,
+                    }}
+                    title={mismatchSeverityDescription(sev)}
+                  >
+                    MIS-MARKED · {mismatchSeverityLabel(sev)}
+                  </span>
+                );
+              })()}
+              {(record.held_reasons || []).map((r: string) => (
+                <span
+                  key={r}
+                  className="rounded-sm border border-[var(--color-danger-muted)] bg-[color-mix(in_oklab,var(--color-danger)_10%,transparent)] px-1 py-[1px] font-mono text-[10px] font-semibold uppercase tracking-wider text-[var(--color-danger)]"
+                  title={heldReasonDescription(r)}
+                >
+                  HELD · {heldReasonLabel(r)}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Remark with colored highlights */}
         <section>
           <div
@@ -1179,7 +1225,18 @@ function InspectorPane({
                     >
                       {h.category}
                     </span>
-                    <span className="font-mono text-[var(--color-text)]">{h.rule || h.pattern || "pattern match"}</span>
+                    {/* Task #150 — render the operator-facing rule label
+                        (e.g. "EDIPI pattern matched") instead of the raw
+                        engine identifier (`pii_edipi`). The raw name is
+                        preserved as the hover title so an analyst grep'ing
+                        the audit trail can still trace it back to the
+                        regex source. */}
+                    <span
+                      className="font-mono text-[var(--color-text)]"
+                      title={ruleDescription(h.rule) ?? h.rule ?? undefined}
+                    >
+                      {ruleLabel(h.rule || h.pattern)}
+                    </span>
                   </div>
                   <span className="font-mono tabular-nums text-[var(--color-text-muted)]">
                     [{h.start}-{h.end}]
