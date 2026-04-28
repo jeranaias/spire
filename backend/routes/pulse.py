@@ -897,6 +897,122 @@ async def cannibalization(role: Optional[str] = None):
             },
         })
 
+    # Task #40 -- Per-asset open-fault index used by the strippable-donor
+    # matcher below. A real donor is a hull where the recipient's needed
+    # part is INSTALLED AND SERVICEABLE. Without per-asset BOM in the
+    # canonical dataset, the strongest available proxy is "same equipment
+    # type, and the donor's own copy of that part class is not itself
+    # failing." This index gives us the latter check in O(1).
+    open_fault_classes_by_asset: dict[str, set[str]] = {}
+    deadline_days_by_asset: dict[str, int] = {}
+    deadline_class_by_asset: dict[str, str] = {}
+    for sr in ds.srs:
+        if sr.is_pmcs or sr.close_date is not None:
+            continue
+        cls = _normalize_component(sr.fault_component or "") if sr.fault_component else ""
+        if cls:
+            open_fault_classes_by_asset.setdefault(sr.asset_id, set()).add(cls)
+        if sr.condition == "Deadlined" and last_day:
+            days = (last_day - sr.open_date).days
+            if days > deadline_days_by_asset.get(sr.asset_id, -1):
+                deadline_days_by_asset[sr.asset_id] = days
+                deadline_class_by_asset[sr.asset_id] = cls or "subsystem"
+
+    # Task #40 -- Strippable donor pool, keyed by recipient SR number.
+    #
+    # Pre-fix bug (F-01 in pulse-cannibalization critique): the donor list
+    # was built from OTHER OPEN NMCS NEEDS sharing the same backordered NSN.
+    # Every "donor" was itself a deadlined asset waiting for that exact
+    # part -- they didn't have it to give. Any logistics-literate viewer
+    # would catch this instantly.
+    #
+    # Real-world cannibalization donor = a strippable hull (boneyard,
+    # awaiting disposal, lower-priority asset) where the part is installed
+    # and serviceable. We approximate "installed" via equipment_type match
+    # (same platform -> same parts catalog) and "serviceable" via "donor's
+    # own copy of this fault class is not currently failing." Strippability
+    # is captured by one of three priority tiers below.
+    asset_by_id = {a.asset_id: a for a in ds.assets}
+    strippable_donors: dict[str, list[dict]] = {}
+    for need in needs:
+        recipient_asset = asset_by_id.get(need["asset_id"])
+        if recipient_asset is None:
+            strippable_donors[need["sr_number"]] = []
+            continue
+        recipient_fault_class = need["fault_class"]
+        candidates: list[dict] = []
+        for a in ds.assets:
+            if a.asset_id == recipient_asset.asset_id:
+                continue
+            if a.equipment_type != recipient_asset.equipment_type:
+                continue
+            if allowed is not None and a.unit_name not in allowed:
+                continue
+            donor_open_classes = open_fault_classes_by_asset.get(a.asset_id, set())
+            # Cause-of-fault overlap: donor's copy of THIS part class is
+            # itself failing -- strip is nonsensical (Walkthrough #9 logic
+            # but applied to assets, not other open SRs).
+            if recipient_fault_class and recipient_fault_class in donor_open_classes:
+                continue
+
+            donor_status = a.current_status
+            donor_days_nmc = deadline_days_by_asset.get(a.asset_id, 0)
+            donor_dl_class = deadline_class_by_asset.get(a.asset_id, "")
+            donor_unit_stats = unit_mc.get(a.unit_name, {"mc": 0, "total": 1})
+            unit_total = max(1, donor_unit_stats["total"])
+            unit_mc_rate = donor_unit_stats["mc"] / unit_total
+
+            # Strippability tiers, best donor first.
+            strip_reason: Optional[str] = None
+            priority = 99
+            if donor_status in ("NMCM", "NMCS") and donor_days_nmc >= 30:
+                # Long-term NMC for an unrelated cause = effectively a
+                # boneyard / awaiting-disposal hull; well-known strippable.
+                cause = donor_dl_class or "unrelated subsystem"
+                strip_reason = (
+                    f"Long-term NMC ({donor_days_nmc}d) on {cause} -- strippable hull"
+                )
+                priority = 1
+            elif donor_status == "PMC":
+                # Partially mission capable -- still flying, but the lowest-
+                # priority MC-eligible hull to take a part from.
+                strip_reason = (
+                    "PMC hull -- degraded, lower priority than fully-MC fleet"
+                )
+                priority = 2
+            elif donor_status == "MC" and unit_mc_rate >= 0.70:
+                strip_reason = (
+                    f"MC hull at {(unit_mc_rate * 100):.0f}%-MC unit -- can spare"
+                )
+                priority = 3
+            else:
+                # Not a sensible strippable donor: MC at a unit that's
+                # already hurting, or NMC for the same fault class. Skip.
+                continue
+
+            candidates.append({
+                "asset_id": a.asset_id,
+                "unit": a.unit_name,
+                "equipment_type": a.equipment_type,
+                "current_status": donor_status,
+                "days_in_status": donor_days_nmc if donor_status in ("NMCM", "NMCS") else int(getattr(a, "days_in_current_status", 0) or 0),
+                "donor_fault_classes": sorted(donor_open_classes),
+                "strip_reason": strip_reason,
+                "priority": priority,
+                "unit_mc_rate": round(unit_mc_rate, 3),
+                "unit_mc_count": donor_unit_stats["mc"],
+                "unit_total": unit_total,
+            })
+        # Best strippable donors first; cap at 12 so the panel stays
+        # operator-readable.
+        candidates.sort(key=lambda c: (
+            c["priority"],
+            -c["days_in_status"],
+            c["unit"],
+            c["asset_id"],
+        ))
+        strippable_donors[need["sr_number"]] = candidates[:12]
+
     matches = []
     for ev in ds.cannib_events:
         if allowed is not None and ev.recipient_unit not in allowed and ev.donor_unit not in allowed:
@@ -941,6 +1057,10 @@ async def cannibalization(role: Optional[str] = None):
         "open_needs": needs,
         "completed_matches": matches,
         "total_events": len(matches),
+        # Task #40 -- per-recipient strippable donor pool. Replaces the
+        # broken "other open NMCS needs on the same NSN" derivation that
+        # offered donors which themselves did not have the part.
+        "strippable_donors": strippable_donors,
     }
 
 
@@ -956,14 +1076,23 @@ async def propose_cannibalization(request: Request, payload: dict):
     to the audit chain with a PROPOSED status. A production build would add a
     review gate + approval chain before committing."""
     recipient_sr = payload.get("recipient_sr")
+    # Task #40 -- strippable donors are asset-keyed (a healthy MC hull may
+    # have no open SR at all). Accept donor_asset_id as the canonical
+    # identifier; donor_sr remains optional for back-compat with operator
+    # actions queued before the donor pool fix.
+    donor_asset_id = payload.get("donor_asset_id")
     donor_sr = payload.get("donor_sr")
     nsn = payload.get("nsn")
-    if not (recipient_sr and donor_sr and nsn):
-        raise HTTPException(status_code=400, detail="recipient_sr, donor_sr, nsn required")
+    if not (recipient_sr and (donor_asset_id or donor_sr) and nsn):
+        raise HTTPException(
+            status_code=400,
+            detail="recipient_sr, donor_asset_id (or donor_sr), nsn required",
+        )
 
     proposal = {
         "proposal_id": f"PROP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
         "recipient_sr": recipient_sr,
+        "donor_asset_id": donor_asset_id,
         "donor_sr": donor_sr,
         "nsn": nsn,
         "status": "PROPOSED",

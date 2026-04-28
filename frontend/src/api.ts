@@ -747,10 +747,28 @@ export interface AssetDeepDive {
   readiness_trajectory: any[];
 }
 
+export interface StrippableDonor {
+  asset_id: string;
+  unit: string;
+  equipment_type: string;
+  current_status: string;
+  days_in_status: number;
+  donor_fault_classes: string[];
+  strip_reason: string;
+  priority: number;
+  unit_mc_rate: number;
+  unit_mc_count: number;
+  unit_total: number;
+}
+
 export interface Cannibalization {
   open_needs: any[];
   completed_matches: any[];
   total_events: number;
+  // Task #40 -- per-recipient SR strippable donor pool keyed by sr_number.
+  // Replaces the broken "other open NMCS needs on the same NSN" derivation
+  // (those donors did not actually have the part -- they were waiting for it).
+  strippable_donors?: Record<string, StrippableDonor[]>;
 }
 
 export interface SyncStateResponse {
