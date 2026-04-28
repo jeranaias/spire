@@ -382,6 +382,29 @@ async def audit(request: Request, limit: int = 50, role: str | None = None):
 RESET_DEMO_ROLES = frozenset({"g4"})
 
 
+@router.post("/admin/force-empty")
+async def force_empty_dataset(request: Request) -> dict:
+    """Test-only hook (Task #183): atomically reset the dataset
+    singleton to an empty state so the Playwright stage-ingest spec
+    can drive the empty → ingest → hydrated lifecycle deterministically
+    against any backend (including a dev backend that booted with the
+    seed-42 baseline).
+
+    Gated on ``SPIRE_TEST_HOOKS=1`` — without that env var the route
+    returns 404 so production deploys never expose it. The route is
+    intentionally not added to OpenAPI tags or the integrations docs.
+    """
+    if os.environ.get("SPIRE_TEST_HOOKS", "0").lower() not in {"1", "true", "yes", "on"}:
+        raise HTTPException(status_code=404, detail="Not Found")
+    from .. import state as _state_mod
+    _state_mod.init_empty_dataset()
+    return {
+        "ok": True,
+        "source": "force-empty",
+        "note": "test-only hook; gated on SPIRE_TEST_HOOKS=1",
+    }
+
+
 @router.post("/admin/reset-demo")
 async def reset_demo(request: Request):
     """Return SPIRE to a clean t=0 demo state. Idempotent; safe to call
