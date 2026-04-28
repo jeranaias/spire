@@ -48,6 +48,7 @@ import { useSpireStore } from "../../state/store";
 import { RecommendPanel } from "../../components/RecommendPanel";
 import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 import { LoadingState, ErrorState } from "../../components/ui";
+import { DatasetBadge } from "../../components/DatasetBadge";
 
 type Horizon = "7" | "14" | "30";
 
@@ -298,11 +299,20 @@ export function ForecastTab() {
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2
-            className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
-          >
-            Readiness Forecast · Monte Carlo
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2
+              className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
+            >
+              Readiness Forecast · Monte Carlo
+            </h2>
+            {/* Task #127 — same "AS OF DDMMMYY" pill the Decision Bridge
+             * tiles use. The forecast endpoint stamps `as_of` with
+             * wall-clock generation time (used by ForecastFreshness
+             * below), so we derive the dataset day from the last entry
+             * of the history array — that IS the snapshot date the
+             * Monte Carlo paths anchor on. */}
+            <DatasetBadge day={data?.history?.[data.history.length - 1]?.date} />
+          </div>
           <div className="mt-1 spire-body-muted">
             200 forward paths, drift fit on last {data?.data_window_days ?? 30} days of history. Shaded band = 10–90 percentile.
           </div>

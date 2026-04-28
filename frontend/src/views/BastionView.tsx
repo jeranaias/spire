@@ -13,6 +13,7 @@ import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import { LinkStatusStrip, commsCadenceMultiplier } from "../components/LinkStatusStrip";
 import { DemoSurfaceMarker } from "../components/classification";
+import { DatasetBadge } from "../components/DatasetBadge";
 import {
   Button,
   IconButton,
@@ -1015,10 +1016,16 @@ export function BastionView() {
         <div
           className="pointer-events-none absolute bottom-12 left-3 z-[6] max-w-[min(60vw,320px)] rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 py-2 backdrop-blur"
         >
-          <div
-            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
-          >
-            Common Operating Picture
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
+              Common Operating Picture
+            </span>
+            {/* Task #127 — same "AS OF DDMMMYY" pill the Decision Bridge
+             * tiles use, so an operator drilling from the bridge into
+             * BASTION still sees the snapshot date this readout was
+             * frozen against. `cop.as_of` is `last_day.isoformat()` from
+             * /bastion/cop — i.e. the canonical dataset day. */}
+            <DatasetBadge day={cop.as_of} />
           </div>
           <div
             className="mt-0.5 font-mono text-sm font-semibold uppercase text-[var(--color-text)] tracking-wider"

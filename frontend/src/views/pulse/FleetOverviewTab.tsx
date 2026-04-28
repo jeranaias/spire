@@ -9,6 +9,7 @@ import { useSpireStore } from "../../state/store";
 import { Button, IconButton, Pressable, ErrorState, LoadingState } from "../../components/ui";
 import { AwaitingIngestEmpty } from "../../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../../hooks/useDatasetStatus";
+import { DatasetBadge } from "../../components/DatasetBadge";
 
 type View = "heatmap" | "map";
 
@@ -208,11 +209,18 @@ export function FleetOverviewTab() {
 
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2
-              className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
-            >
-              {view === "heatmap" ? "Fleet Readiness · Heatmap" : "Fleet Readiness · CONUS"}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2
+                className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
+              >
+                {view === "heatmap" ? "Fleet Readiness · Heatmap" : "Fleet Readiness · CONUS"}
+              </h2>
+              {/* Task #127 — same "AS OF DDMMMYY" pill the Decision Bridge
+               * tiles use, so the freshness cue survives the drill-through
+               * from the bridge into PULSE main. `data.as_of` here is the
+               * canonical last-snapshot date (YYYY-MM-DD), not wall-clock. */}
+              <DatasetBadge day={data.as_of} />
+            </div>
             <div className="mt-0.5 spire-body-muted">
               MC rate by {view === "heatmap" ? "unit × equipment type" : "garrison location"} — as of {formatAsOf(data.as_of)}
             </div>

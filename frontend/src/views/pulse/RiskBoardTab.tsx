@@ -10,6 +10,7 @@ import { useSpireStore } from "../../state/store";
 import { PredictedFailurePanel } from "../../components/PredictedFailurePanel";
 import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 import { Button, IconButton, Pressable, ErrorState, fireIdempotent } from "../../components/ui";
+import { DatasetBadge } from "../../components/DatasetBadge";
 
 // Track-G1 — role-shaped default scope. A Maintenance Chief landing on the
 // Risk Board cold should see CLB-6 only (their unit), not the whole MEF.
@@ -239,24 +240,30 @@ export function RiskBoardTab() {
         </div>
         <div className="mb-3 flex items-end justify-between">
           <div>
-            <h2
-              className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
-            >
-              Risk Board · Top {filteredAssets.length}
-              {filteredAssets.length !== board.assets.length && (
-                <span className="ml-2 text-[var(--color-text-muted)]"> / {board.assets.length}</span>
-              )}
-              {/* F5 — dataset freshness stamp. Same formatAsOf helper
-               * FleetOverviewTab uses, so both PULSE tabs read identical
-               * "as of <date>" copy from the canonical last_snapshot
-               * date instead of the operator inferring freshness from
-               * wall-clock time. */}
-              {board.as_of && (
-                <span className="ml-3 font-mono text-[var(--color-text-muted)] tracking-wider">
-                  · as of {formatAsOf(board.as_of)}
-                </span>
-              )}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2
+                className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
+              >
+                Risk Board · Top {filteredAssets.length}
+                {filteredAssets.length !== board.assets.length && (
+                  <span className="ml-2 text-[var(--color-text-muted)]"> / {board.assets.length}</span>
+                )}
+                {/* F5 — dataset freshness stamp. Same formatAsOf helper
+                 * FleetOverviewTab uses, so both PULSE tabs read identical
+                 * "as of <date>" copy from the canonical last_snapshot
+                 * date instead of the operator inferring freshness from
+                 * wall-clock time. */}
+                {board.as_of && (
+                  <span className="ml-3 font-mono text-[var(--color-text-muted)] tracking-wider">
+                    · as of {formatAsOf(board.as_of)}
+                  </span>
+                )}
+              </h2>
+              {/* Task #127 — same "AS OF DDMMMYY" pill the Decision Bridge
+               * tiles use, so a judge drilling from the bridge into the
+               * Risk Board still sees the freshness cue at a glance. */}
+              <DatasetBadge day={board.as_of} />
+            </div>
             {cacheStaleMs != null && (
               <div
                 role="status"
