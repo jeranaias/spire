@@ -164,14 +164,14 @@ export const SLIDES: SlideSpec[] = [
       "Audit: every approve/dispatch/sign event written to an append-only ledger.",
       "Classification: U/S/TS gates enforced on every export and joint push.",
       "Hosting: IL-5-targeted; FedRAMP High path mapped via shared services.",
-      "Spillage block designed end-to-end: clearance gate code + audit-ledger entry shown on request.",
+      "Spillage block demonstrated end-to-end: low-clearance login → SECRET export attempt → gate fires + audit row, live on request.",
     ],
     visual: "lock-shield",
     targetSeconds: 60,
     speakerNotes: [
       "If asked about ATO: 'we are pre-ATO; the IL-5 target is the destination, not the claim.'",
       "Offer to show the audit ledger live if pressed. It is reachable from /admin/audit.",
-      "On the spillage block: today's mock CAC roster carries SECRET / TS//SCI personas only — there is no UNCLASSIFIED CAC seeded yet, so we cannot drive the block from a low-clearance login on stage. If pressed for a live demo, walk the judge through the gate code (auth.py classification check) and show the corresponding 'access_denied' entry in the audit ledger. Do NOT claim the drill was performed end-to-end against a live low-clearance user.",
+      "Live spillage drill is now wired end-to-end: invite the judge to drive it. Sign out, pick LCpl Avery Tran (UNCLASSIFIED records clerk, CLB-Det) at the cert splash, go to SENTRY → Export, hit Build bundle. The 403 + InsufficientClearance toast is the gate firing; switch to /admin/audit and the matching 'spillage_prevented' row is at the top of the ledger. Then quick-switch back to GySgt Reyes so the rest of the demo runs from the operator persona.",
     ],
   },
   {

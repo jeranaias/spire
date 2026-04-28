@@ -112,3 +112,70 @@ def test_export_route_for_security_manager_returns_classification_field(client):
     assert "classification" in body, "ExportResult must include classification"
     assert body["classification"] in {"CUI", "SECRET", "TS//SCI", "TOP_SECRET"}
     assert body["download_url"].startswith("/api/sentry/download/")
+
+
+def test_export_route_blocks_unclassified_persona_with_spillage_audit_row(client):
+    """Task #86 — drives the live stage spillage drill end-to-end.
+
+    LCpl Avery Tran (DODID 5678901234) is the UNCLASSIFIED-only records
+    clerk seeded into MOCK_USERS specifically so slide 6's 'demonstrated
+    end-to-end' claim is honest. She has the `data_custodian` role so the
+    SENTRY export role gate (`SENTRY_EXPORT_ROLES`) lets her through to
+    the classification gate — at which point the canonical dataset's
+    SECRET-or-higher bundle exceeds her UNCLASSIFIED clearance and
+    `require_clearance` must fire 403 + write a `spillage_prevented`
+    audit row tagged with her DODID. The presenter narrates this exact
+    flow on stage; if this test goes red, the slide-6 invitation is no
+    longer truthful and the demo script must be pulled back.
+    """
+    _login(client, "5678901234")  # LCpl Avery Tran — UNCLASSIFIED records clerk
+    r = client.post(
+        "/api/sentry/export",
+        json={
+            "release_authority": "US_ONLY",
+            "format": "xlsx",
+            "include_audit": True,
+            "batch_id": None,
+        },
+    )
+    # Classification gate must fire — not the role gate. If we ever see
+    # a 403 with `InsufficientPrivilege` here it means the persona
+    # drifted off `data_custodian` and the spillage drill no longer
+    # exercises the clearance lattice we're claiming on stage.
+    assert r.status_code == 403, r.text
+    body = r.json()
+    detail = body.get("detail") if isinstance(body.get("detail"), dict) else body
+    assert detail.get("error") == "InsufficientClearance", (
+        f"Expected the classification gate to fire, not the role gate; "
+        f"got detail={detail!r}. If `error` is `InsufficientPrivilege`, "
+        f"the LCpl Tran persona's role is no longer in SENTRY_EXPORT_ROLES."
+    )
+    assert detail.get("action") == "sentry.export"
+    assert detail.get("user_clearance") == "UNCLASSIFIED"
+    assert detail.get("user_role") == "data_custodian"
+    # Bundle classification on the canonical dataset is at least SECRET;
+    # don't pin the exact value (it can shift with seed updates) but
+    # require it to be strictly above UNCLASSIFIED.
+    required = detail.get("required_classification")
+    assert required in {"CUI", "CONFIDENTIAL", "SECRET", "TOP_SECRET", "TS_SCI"}, (
+        f"required_classification must be canonicalized and > UNCLASSIFIED; got {required!r}"
+    )
+
+    # Audit chain side effect: the matching `spillage_prevented` row
+    # must be reachable from the audit-ledger view the presenter opens
+    # next. `require_clearance` writes the row with subject_id=action
+    # ("sentry.export") when no explicit audit_subject is passed, so
+    # we look it up by subject and filter on user_dodid to avoid
+    # false-positives from other test runs sharing the same DB.
+    rows = entries_for_subject("sentry.export", limit=50)
+    matching = [
+        r for r in rows
+        if r.get("kind") == "spillage_prevented"
+        and r.get("payload", {}).get("user_dodid") == "5678901234"
+        and r.get("payload", {}).get("user_clearance") == "UNCLASSIFIED"
+        and r.get("payload", {}).get("action") == "sentry.export"
+    ]
+    assert matching, (
+        f"expected a spillage_prevented audit row for LCpl Tran's "
+        f"sentry.export attempt; got rows for subject=sentry.export={rows!r}"
+    )

@@ -7,12 +7,14 @@ HttpOnly session cookie; the matching middleware (`session_middleware`)
 hydrates `request.state.user` on every call and rejects unauthenticated
 `/api/*` (excluding `/api/auth/*`) with 401.
 
-The four mocked Marines exist in `MOCK_USERS` and represent the role
+The mocked Marines exist in `MOCK_USERS` and represent the role
 spectrum SPIRE currently scopes against: operator (G-4), maintenance chief,
-security manager, MEF commander. All four are assigned to the pilot
-customer named by slide 2 / AboutTeamView / TransitionView (3d MLR ·
-CLB-Det · III MEF · MARFORPAC). Identity payload is the contract every
-downstream lane reads — additions only, no renames.
+security manager, MEF commander, plus one UNCLASSIFIED-only new-join
+records clerk seeded so the slide-6 spillage drill can be driven from a
+real low-clearance login on stage (task #86). All personas are assigned
+to the pilot customer named by slide 2 / AboutTeamView / TransitionView
+(3d MLR · CLB-Det · III MEF · MARFORPAC). Identity payload is the
+contract every downstream lane reads — additions only, no renames.
 """
 from __future__ import annotations
 
@@ -196,6 +198,41 @@ MOCK_USERS: list[dict[str, Any]] = [
         "cert_issuer": "DOD ID CA-59",
         "cert_serial": "C4a8B335E97f1D60",
         "cert_expires": "2028-01-17",
+    },
+    # Task #86 — UNCLASSIFIED-only stage persona for the slide-6 spillage
+    # drill. A new-join LCpl records clerk in the CLB-Det admin shop:
+    # CAC issued, billeted, but the SECRET read-on hasn't transferred from
+    # MCRD yet, so DEERS still reflects an UNCLASSIFIED-only clearance.
+    # Role is `data_custodian` (the SENTRY-export role) so the export
+    # button is reachable from the UI — when she clicks it the bundle's
+    # auto-inherited classification (SECRET on the canonical dataset)
+    # exceeds her UNCLASSIFIED clearance, `require_clearance` returns
+    # 403 + a `spillage_prevented` audit row, and the gate fires live
+    # on stage instead of being narrated from a code reading.
+    #
+    # Wire-shape note: this is the first MOCK_USER carrying the
+    # `data_custodian` role. The frontend's AuthView grid (1/2/3 columns
+    # responsive) renders 5 cards cleanly; `test_role_gates`'s
+    # parametrized matrix walks every CAC × endpoint pair, so adding a
+    # 5th persona automatically extends the deny-coverage for the
+    # PULSE / BASTION / Admin views she's out of scope for.
+    {
+        "dodid": "5678901234",
+        "name": "LCpl Avery Tran",
+        "first_name": "Avery",
+        "last_name": "Tran",
+        "rank": "LCpl",
+        "rank_long": "Lance Corporal",
+        "billet": "Records Clerk (new-join)",
+        "unit": "CLB-Det",
+        "parent_command": "3d MLR",
+        "branch": "USMC",
+        "clearance": "UNCLASSIFIED",
+        "role": "data_custodian",
+        "initials": "AT",
+        "cert_issuer": "DOD ID CA-59",
+        "cert_serial": "9D03e518A6B7c4F2",
+        "cert_expires": "2028-04-09",
     },
 ]
 
