@@ -12,11 +12,12 @@ is inspectable. Production would load these from a signed policy store.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 DATA_PATH = Path(__file__).parent / "data" / "coalition_profiles.json"
 _CACHE: Optional[dict] = None
@@ -73,6 +74,47 @@ def classify_record(profile_key: str, record: dict) -> ReleaseDecision:
         return ReleaseDecision(False, f"category {category} not in release scope", [])
 
     return ReleaseDecision(True, "allowed", list(p.get("field_redactions", [])))
+
+
+def release_manifest(profile_key: str, records: Iterable[dict]) -> dict:
+    """Walk ``records`` through ``classify_record`` for ``profile_key`` and
+    compute a stable SHA-256 over the sorted in-scope SR ID set + the
+    profile's redaction policy + the profile key itself.
+
+    Returns a dict shaped::
+
+        {"manifest_sha256": str, "record_count": int, "sr_ids": [str, ...]}
+
+    The hash is the proof artefact that gets stored in the audit row so an
+    investigator can later prove *what* shipped, not just *that* something
+    did. Two releases for the same profile against an unchanged dataset
+    must produce the same hash; mutating the dataset, the profile's
+    redactions, or the profile key all change the hash. Records without
+    an ``sr_number`` are ignored — they're outside the SR-shaped manifest.
+    """
+    all_profiles = profiles()["profiles"]
+    p = all_profiles.get(profile_key, {}) or {}
+    redactions = sorted(p.get("field_redactions", []))
+    sr_ids: list[str] = []
+    for rec in records:
+        decision = classify_record(profile_key, rec)
+        if not decision.allowed:
+            continue
+        sr_id = rec.get("sr_number") or rec.get("sr_id")
+        if sr_id:
+            sr_ids.append(str(sr_id))
+    sr_ids.sort()
+    canonical = json.dumps(
+        {"profile": profile_key, "redactions": redactions, "sr_ids": sr_ids},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return {
+        "manifest_sha256": digest,
+        "record_count": len(sr_ids),
+        "sr_ids": sr_ids,
+    }
 
 
 def apply_redactions(record: dict, redactions: list[str]) -> dict:

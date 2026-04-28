@@ -1283,6 +1283,10 @@ export interface CoalitionView {
   partners: string[];
   distribution_statement: string;
   authorized_classifications: string[];
+  /** Rank-derived ceiling label (e.g. "UNCLASSIFIED", "CUI") backed by
+   *  `classification_rank()`, so callers don't have to assume the
+   *  `authorized_classifications` array is sorted ascending. */
+  classification_ceiling?: string;
   caveats_applied: string[];
   embargo_days_after_event: number;
   scope: {
@@ -1291,6 +1295,10 @@ export interface CoalitionView {
     sample_srs_allowed: number;
     sample_srs_blocked: number;
     sample_srs_total_inspected: number;
+    /** Count (within the inspected sample) of records whose source
+     * classification exceeds the profile's authorized ceiling. Drives
+     * the red-tint signal on the Generate Release button (F1). */
+    sample_srs_over_ceiling?: number;
   };
   allowed_units: { unit: string; parent: string; uic: string; location: string }[];
   sample_records: {
@@ -1323,6 +1331,15 @@ export interface CoalitionReleaseResult {
   caveats_applied: string[];
   audit_logged: boolean;
   created_at: string;
+  /** SHA-256 over the sorted in-scope SR ID set + the profile's
+   * redaction policy + the profile key. Stored in the audit row so an
+   * investigator can later prove what shipped, not just that something
+   * did. (F13.) */
+  manifest_sha256: string;
+  /** Number of in-scope SR records covered by the manifest hash. */
+  record_count: number;
+  /** Inherited classification ceiling stamped onto the audit row. */
+  classification?: string;
 }
 
 export interface FailurePrediction {
