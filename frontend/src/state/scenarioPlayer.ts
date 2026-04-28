@@ -106,12 +106,32 @@ export interface ScenarioPlayerState {
   /** Last load error so the picker / overlay can surface it. */
   loadError: string | null;
 
+  /** Last successful backend seek offset (in scenario minutes). Set by
+   *  the host whenever a `scenario.control seek` resolves; null until
+   *  the first successful sync. The sync banner uses this to show how
+   *  far the backend's mission clock has drifted from the player. */
+  lastSyncedOffsetMin: number | null;
+
+  /** Sticky desync record. The host sets this on ANY non-success seek
+   *  (DDIL drop, 401/403, 5xx, network blip). Cleared on the next
+   *  successful seek. The cockpit reads this to render the sticky
+   *  "backend out of sync" banner instead of pretending the timeline
+   *  advanced. */
+  syncError: {
+    message: string;
+    attemptedOffsetMin: number;
+    failedAt: number;
+  } | null;
+
   // Derived getters used by UI.
   currentBeat: () => BloodScenarioBeatMeta | null;
 
   // Lifecycle.
   loadScenario: (scenario: BloodScenarioMeta) => void;
   setLoadError: (msg: string | null) => void;
+  noteSyncSuccess: (offsetMin: number) => void;
+  setSyncError: (err: { message: string; attemptedOffsetMin: number }) => void;
+  clearSyncError: () => void;
 
   // Playback.
   play: () => void;
@@ -206,6 +226,8 @@ export const useScenarioPlayer = create<ScenarioPlayerState>((set, get) => ({
   beatEnteredAt: null,
   beatDwellMs: 0,
   loadError: null,
+  lastSyncedOffsetMin: null,
+  syncError: null,
 
   currentBeat: () => {
     const { beats, currentBeatIndex } = get();
@@ -236,11 +258,36 @@ export const useScenarioPlayer = create<ScenarioPlayerState>((set, get) => ({
       beatEnteredAt: null,
       beatDwellMs: dwell,
       loadError: null,
+      // Fresh load = fresh sync state; a desync from a prior session
+      // shouldn't carry into a new scenario load.
+      lastSyncedOffsetMin: null,
+      syncError: null,
     });
     savePersisted(get());
   },
 
   setLoadError: (msg) => set({ loadError: msg }),
+
+  noteSyncSuccess: (offsetMin) => {
+    // Record the latest backend-confirmed offset and clear any sticky
+    // desync banner. Called after each successful seek round-trip.
+    set({ lastSyncedOffsetMin: offsetMin, syncError: null });
+  },
+
+  setSyncError: ({ message, attemptedOffsetMin }) => {
+    // Sticky — we deliberately overwrite an existing error so the most
+    // recent attempt is what the operator sees, but we never silently
+    // clear it on a subsequent failure.
+    set({
+      syncError: {
+        message,
+        attemptedOffsetMin,
+        failedAt: Date.now(),
+      },
+    });
+  },
+
+  clearSyncError: () => set({ syncError: null }),
 
   play: () => {
     const { beats, currentBeatIndex, status } = get();
@@ -354,6 +401,11 @@ export const useScenarioPlayer = create<ScenarioPlayerState>((set, get) => ({
       status: beats.length > 0 ? "ready" : "idle",
       beatEnteredAt: null,
       beatDwellMs: dwell,
+      // Operator-initiated reset clears the desync banner: the next
+      // beat dispatch will re-seek the backend and either re-confirm
+      // sync or set a fresh error.
+      lastSyncedOffsetMin: null,
+      syncError: null,
     });
     savePersisted(get());
   },

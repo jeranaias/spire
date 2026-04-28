@@ -22,6 +22,7 @@
 import { useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { api, ApiError } from "../api";
+import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import {
   useScenarioPlayer,
@@ -52,6 +53,8 @@ export function ScenarioPlayerHost() {
   const togglePlay = useScenarioPlayer((s) => s.togglePlay);
   const pause = useScenarioPlayer((s) => s.pause);
   const toggleNarration = useScenarioPlayer((s) => s.toggleNarration);
+  const noteSyncSuccess = useScenarioPlayer((s) => s.noteSyncSuccess);
+  const setSyncError = useScenarioPlayer((s) => s.setSyncError);
 
   // Track the beat we last fanned out (navigated for + seeked to). On
   // change, run the side-effects exactly once — both for explicit
@@ -86,20 +89,36 @@ export function ScenarioPlayerHost() {
     // 2. Seek the mission clock so the backend injectors fire for this
     // beat. The control endpoint is gated to operator roles — for
     // non-operator identities (maintenance_chief, data_custodian) this
-    // 403s; surface a one-shot toast and keep the player going (the
-    // narration + view nav are still useful for a read-only walkthrough).
+    // 403s; the player keeps going (narration + view nav still useful
+    // for a read-only walkthrough) but we surface the desync via the
+    // sticky banner so nobody believes the backend timeline advanced.
+    //
+    // Other failure modes (DDIL DISCONNECTED dropping the write, 5xx,
+    // network blip, etc.) used to be silently swallowed — every beat
+    // tick would set the cockpit to PLAYING while the backend stayed
+    // pinned at H+0. Now ANY non-success seek records `syncError`, and
+    // the next successful seek clears it via `noteSyncSuccess`.
+    const targetOffset = beat.offset_min;
     api.system
-      .scenarioControl("seek", { offset_min: beat.offset_min })
+      .scenarioControl("seek", { offset_min: targetOffset })
       .then(() => {
         // Auto-pause the backend clock between beats so injectors don't
         // fire ahead of the scripted narration — the player owns the
         // cadence, not wall-time.
         return api.system.scenarioControl("pause");
       })
+      .then(() => {
+        // Backend confirmed the seek (and pause) round-trip — clear the
+        // sticky desync banner if one was up.
+        noteSyncSuccess(targetOffset);
+      })
       .catch((e) => {
+        const message = formatApiError(e);
+        setSyncError({ message, attemptedOffsetMin: targetOffset });
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
           // Only toast once per scenario play — repeat 403s during a
-          // run would spam the lane.
+          // run would spam the lane. The sticky banner stays up for
+          // every beat.
           if (!seekErrorShownRef.current) {
             seekErrorShownRef.current = true;
             pushToast({
@@ -109,15 +128,13 @@ export function ScenarioPlayerHost() {
             });
           }
         }
-        // Non-auth failures are tolerable too — the FE walkthrough still
-        // proceeds, the backend timeline just won't sync.
       });
     // location.pathname intentionally omitted from deps — re-running the
     // dispatch on every router transition would cause a navigation loop
     // when the user manually nav'd away mid-pause and we re-applied the
     // beat target on the next render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentBeatIndex, status, beats, navigate]);
+  }, [currentBeatIndex, status, beats, navigate, noteSyncSuccess, setSyncError]);
 
   // Reset the "already shown a 403 toast" flag on a fresh scenario load.
   const seekErrorShownRef = useRef(false);
