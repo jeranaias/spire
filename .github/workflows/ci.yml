@@ -45,10 +45,78 @@ jobs:
       - name: Type-check + build
         run: npm run build
 
+  playwright:
+    name: Playwright · regression sweep
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r dataset/requirements.txt
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Install Playwright runner
+        run: npm ci --no-audit --no-fund
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      # Backend serves the built frontend/dist on the same origin in
+      # prod and on Fly. Run that prod-shaped server on :5000 — the
+      # default Playwright `baseURL` already points there. Quick-switch
+      # is enabled so identity-pivoting specs work without a PIN re-entry.
+      - name: Boot uvicorn (serves API + built frontend on :5000)
+        env:
+          SPIRE_DEMO_QUICK_SWITCH: "1"
+        run: |
+          nohup uvicorn backend.main:app --host 127.0.0.1 --port 5000 \
+            > uvicorn.log 2>&1 &
+          echo "uvicorn pid $!"
+          # Wait for /api/system/status to come up. Up to ~60s — first
+          # boot regenerates the canonical dataset.
+          for i in $(seq 1 30); do
+            sleep 2
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/api/system/status || true)
+            echo "  attempt $i: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+          done
+          echo "::error::uvicorn did not become healthy in 60s"
+          tail -200 uvicorn.log
+          exit 1
+      - name: Run Playwright suite
+        env:
+          SPIRE_E2E_FRONTEND_URL: "http://127.0.0.1:5000"
+          SPIRE_E2E_BASE_URL: "http://127.0.0.1:5000"
+        run: npx playwright test --reporter=list
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            playwright-report/
+            uvicorn.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   docker:
     name: Docker · build images
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, playwright]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     steps:
       - uses: actions/checkout@v4
