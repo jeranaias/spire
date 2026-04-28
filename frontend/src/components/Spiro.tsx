@@ -609,7 +609,7 @@ export function Spiro() {
             Enter to send · Shift+Enter for newline
           </span>
           <Button
-            onClick={send}
+            onClick={() => send()}
             disabled={!text.trim()}
             pending={pending === "plan"}
             variant="primary"
