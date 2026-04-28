@@ -3,8 +3,8 @@ Risk-score computation + derivations used across PULSE endpoints.
 
 Mirrors spec §PULSE:Layer-2 weighting (hours-since-service 0.25, fault
 frequency 0.25, severity trend 0.20, days NMC 0.15, age 0.10, cost trend
-0.05). Rule-based for deterministic explainability; the trained
-HawkStack 8K predictor will later plug in as an alternate scorer.
+0.05). Rule-based for deterministic explainability; the trained PULSE
+failure predictor will later plug in as an alternate scorer.
 """
 from __future__ import annotations
 

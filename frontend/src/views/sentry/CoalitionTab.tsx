@@ -23,6 +23,7 @@ import { api, type CoalitionProfileSummary, type CoalitionView } from "../../api
 import { formatApiError } from "../../api-retry";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
+import { Button, Pressable, ErrorState, LoadingState, fireIdempotent } from "../../components/ui";
 
 export function CoalitionTab() {
   const role = useSpireStore((s) => s.role);
@@ -87,38 +88,42 @@ export function CoalitionTab() {
 
   async function generateRelease() {
     if (!view) return;
-    setReleasing(true);
-    try {
-      const r = await api.sentry.coalitionRelease(view.profile_key);
-      // Append to recents + persist so the operator can scroll back to
-      // confirm a release shipped (and find the audit chain entry by id).
-      setRecentReleases((prev) => {
-        const next = [
-          ...prev,
-          {
-            release_id: r.release_id,
-            profile: r.profile,
-            partners: r.partners,
-            created_at: r.created_at,
-          },
-        ].slice(-10);
-        try {
-          window.localStorage.setItem("spire.sentry.recent_releases", JSON.stringify(next));
-        } catch {
-          /* tolerant */
-        }
-        return next;
-      });
-      pushToast({
-        tone: "ok",
-        text: `✓ Release ${r.release_id} prepared for ${r.partners.join(", ")} · audit logged · see Recent Releases below`,
-        ttlMs: 6000,
-      });
-    } catch (e) {
-      pushToast({ tone: "error", text: `Release failed: ${formatApiError(e)}` });
-    } finally {
-      setReleasing(false);
-    }
+    // Idempotency guard — coalition release writes to the audit chain.
+    // Rapid double-tap on "Generate Release Package" must not register
+    // two release events for the same profile.
+    const profileKey = view.profile_key;
+    await fireIdempotent(`sentry:coalition:release:${profileKey}`, async () => {
+      setReleasing(true);
+      try {
+        const r = await api.sentry.coalitionRelease(profileKey);
+        setRecentReleases((prev) => {
+          const next = [
+            ...prev,
+            {
+              release_id: r.release_id,
+              profile: r.profile,
+              partners: r.partners,
+              created_at: r.created_at,
+            },
+          ].slice(-10);
+          try {
+            window.localStorage.setItem("spire.sentry.recent_releases", JSON.stringify(next));
+          } catch {
+            /* tolerant */
+          }
+          return next;
+        });
+        pushToast({
+          tone: "ok",
+          text: `✓ Release ${r.release_id} prepared for ${r.partners.join(", ")} · audit logged · see Recent Releases below`,
+          ttlMs: 6000,
+        });
+      } catch (e) {
+        pushToast({ tone: "error", text: `Release failed: ${formatApiError(e)}` });
+      } finally {
+        setReleasing(false);
+      }
+    }, 500);
   }
 
   const profileOptions = useMemo(
@@ -131,7 +136,7 @@ export function CoalitionTab() {
   );
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6" data-tour-id="sentry-coalition-content">
+    <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-4 flex items-end justify-between gap-4">
         <div>
           <h2
@@ -171,11 +176,11 @@ export function CoalitionTab() {
             {profileOptions.map((o) => {
               const active = o.value === selected;
               return (
-                <button
+                <Pressable
                   key={o.value}
-                  type="button"
                   aria-pressed={active}
                   onClick={() => setSelected(o.value)}
+                  block={false}
                   className={clsx(
                     "inline-flex h-11 items-center whitespace-nowrap rounded-sm border px-3 font-mono text-sm font-semibold uppercase tracking-wider transition-colors",
                     active
@@ -184,7 +189,7 @@ export function CoalitionTab() {
                   )}
                 >
                   {o.label}
-                </button>
+                </Pressable>
               );
             })}
           </div>
@@ -192,25 +197,22 @@ export function CoalitionTab() {
       </div>
 
       {loading && (
-        <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-6 font-mono text-sm text-[var(--color-text-muted)] tracking-wider">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
-          Scoping dataset for {selected} …
-        </div>
+        <LoadingState size="panel" label={`Scoping dataset for ${selected} …`} />
       )}
       {!loading && !view && viewError && (
-        <div className="rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 font-mono text-sm tracking-wider">
-          <div className="font-semibold uppercase text-[var(--color-danger)]">
-            Coalition view unavailable
-          </div>
-          <div className="mt-1 text-[var(--color-text-secondary)]">
-            Backend returned an error fetching <span className="font-semibold">{selected}</span>.
-            The map and other views can still render — coalition redaction may be cycling
-            during a deploy. Click the profile chip again to retry.
-          </div>
-          <div className="mt-2 break-all text-xs text-[var(--color-text-muted)]">
-            {viewError}
-          </div>
-        </div>
+        <ErrorState
+          variant="panel"
+          title="Coalition view unavailable"
+          description={`Backend returned an error fetching ${selected}. The map and other views can still render — coalition redaction may be cycling during a deploy.`}
+          detail={viewError}
+          onRetry={() => {
+            // Re-trigger the view fetch by toggling selected through itself.
+            const cur = selected;
+            setSelected("");
+            setTimeout(() => setSelected(cur), 0);
+          }}
+          retryLabel="Retry profile fetch"
+        />
       )}
 
       {view && (
@@ -243,13 +245,15 @@ export function CoalitionTab() {
                   )}
                 </div>
               </div>
-              <button
+              <Button
                 onClick={generateRelease}
                 disabled={releasing}
-                className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-4 py-2 font-mono text-sm font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50 tracking-widest"
+                pending={releasing}
+                variant="primary"
+                className="border-[var(--color-success)] bg-[var(--color-success)] hover:brightness-110"
               >
-                {releasing ? "Preparing …" : "Generate Release Package"}
-              </button>
+                Generate Release Package
+              </Button>
             </div>
             <div className="mt-3 spire-body-muted text-base">
               {view.distribution_statement}
@@ -431,16 +435,16 @@ export function CoalitionTab() {
             <div className="font-mono text-xs uppercase text-[var(--color-success)] tracking-widest">
               Recent Releases · {recentReleases.length}
             </div>
-            <button
-              type="button"
+            <Button
               onClick={() => {
                 setRecentReleases([]);
                 try { window.localStorage.removeItem("spire.sentry.recent_releases"); } catch { /* tolerant */ }
               }}
-              className="font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-wider"
+              variant="ghost"
+              size="sm"
             >
               Clear ✕
-            </button>
+            </Button>
           </div>
           <div className="flex flex-col gap-1.5">
             {[...recentReleases].reverse().map((r) => (

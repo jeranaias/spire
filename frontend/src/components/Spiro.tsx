@@ -20,8 +20,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useSpireStore } from "../state/store";
+import { Button, IconButton, Pressable } from "./ui";
 
 interface PlanStep { tool: string; args: Record<string, any>; id?: string; }
+interface SpiroPlanEconomics {
+  tier: string;
+  model: string;
+  call_site: string;
+  route: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  latency_ms: number;
+}
 interface SpiroPlan {
   plan_id: string;
   intent: string;
@@ -30,6 +41,7 @@ interface SpiroPlan {
   steps: PlanStep[];
   engine: string;
   tokens_used: number | null;
+  economics?: SpiroPlanEconomics | null;
 }
 interface SpiroResult {
   plan_id: string;
@@ -50,7 +62,7 @@ interface SpiroResult {
 // assistant message so the transcript reads top-down.
 type ChatMessage =
   | { id: string; kind: "user"; text: string; at: number }
-  | { id: string; kind: "answer"; text: string; at: number }
+  | { id: string; kind: "answer"; text: string; at: number; economics?: SpiroPlanEconomics | null }
   | { id: string; kind: "plan"; plan: SpiroPlan; at: number; status: "pending" | "approved" | "cancelled" }
   | { id: string; kind: "result"; result: SpiroResult; at: number }
   | { id: string; kind: "error"; text: string; at: number };
@@ -125,7 +137,13 @@ export function Spiro() {
       } else {
         setMessages((m) => [
           ...m,
-          { id: replyId, kind: "answer", text: (j.answer || j.summary || "").trim() || "(no response)", at: Date.now() },
+          {
+            id: replyId,
+            kind: "answer",
+            text: (j.answer || j.summary || "").trim() || "(no response)",
+            at: Date.now(),
+            economics: j.economics ?? null,
+          },
         ]);
       }
     } catch (e: any) {
@@ -299,14 +317,16 @@ export function Spiro() {
   // Collapsed-pill view — small button on the right edge.
   if (!open) {
     return (
-      <button
+      <Pressable
         onClick={() => setOpen(true)}
-        className="pointer-events-auto fixed right-0 top-1/2 z-[8400] -translate-y-1/2 rounded-l-md border border-r-0 border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] px-2 py-3 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] shadow-lg backdrop-blur transition-all hover:px-3 hover:bg-[color-mix(in_oklab,var(--color-primary)_28%,var(--color-surface))] tracking-widest"
+        block={false}
+        className="pointer-events-auto fixed right-0 top-1/2 z-[8400] !min-h-0 -translate-y-1/2 rounded-l-md border border-r-0 border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] px-2 py-3 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] shadow-lg backdrop-blur transition-all hover:px-3 hover:bg-[color-mix(in_oklab,var(--color-primary)_28%,var(--color-surface))] tracking-widest"
         style={{ writingMode: "vertical-rl" }}
         title="Open SPIRO (Ctrl+/)"
+        aria-label="Open SPIRO assistant (Ctrl+/)"
       >
         ◆ SPIRO
-      </button>
+      </Pressable>
     );
   }
 
@@ -334,21 +354,13 @@ export function Spiro() {
         </div>
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
-            <button
-              onClick={clearChat}
-              className="flex h-9 items-center rounded px-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] tracking-widest"
-              title="Clear conversation"
-            >
+            <Button onClick={clearChat} variant="ghost" size="sm" title="Clear conversation">
               Clear
-            </button>
+            </Button>
           )}
-          <button
-            onClick={() => setOpen(false)}
-            className="flex h-11 w-11 items-center justify-center rounded font-mono text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-            aria-label="Close SPIRO"
-          >
+          <IconButton onClick={() => setOpen(false)} aria-label="Close SPIRO">
             ✕
-          </button>
+          </IconButton>
         </div>
       </div>
 
@@ -362,14 +374,13 @@ export function Spiro() {
             <ul className="flex flex-col gap-1.5">
               {examplesForRole.map((ex) => (
                 <li key={ex}>
-                  <button
-                    type="button"
+                  <Pressable
                     onClick={() => fillExample(ex)}
-                    className="block w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-left font-mono text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-bg))] hover:text-[var(--color-text)]"
+                    className="!min-h-0 block w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-left font-mono text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-bg))] hover:text-[var(--color-text)]"
                     title="Click to drop this example into the prompt"
                   >
                     "{ex}"
-                  </button>
+                  </Pressable>
                 </li>
               ))}
             </ul>
@@ -388,7 +399,10 @@ export function Spiro() {
             if (m.kind === "answer") {
               return (
                 <div key={m.id} className="self-start max-w-[92%] rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--color-text)]">
-                  <div className="mb-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] tracking-widest">◆ SPIRO</div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <div className="font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] tracking-widest">◆ SPIRO</div>
+                    <CostBadge econ={m.economics} />
+                  </div>
                   {m.text}
                 </div>
               );
@@ -404,7 +418,10 @@ export function Spiro() {
               const p = m.plan;
               return (
                 <div key={m.id} className="self-start w-full rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-bg))] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--color-text)]">
-                  <div className="mb-1 font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] tracking-widest">◆ SPIRO · proposed plan</div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <div className="font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] tracking-widest">◆ SPIRO · proposed plan</div>
+                    <CostBadge econ={p.economics} />
+                  </div>
                   <div className="mb-2">{p.summary || `Run ${p.steps.length} tool${p.steps.length === 1 ? "" : "s"}.`}</div>
                   <ol className="mb-2 flex flex-col gap-1">
                     {p.steps.map((s, i) => (
@@ -423,20 +440,25 @@ export function Spiro() {
                   </ol>
                   {m.status === "pending" && (
                     <div className="flex items-center gap-2">
-                      <button
+                      <Button
                         onClick={() => approve(m.id, p)}
                         disabled={pending !== null}
-                        className="flex-1 rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-4 py-2 font-mono text-xs font-semibold uppercase text-white hover:opacity-90 disabled:opacity-50 tracking-widest"
+                        pending={pending === "execute"}
+                        variant="primary"
+                        size="md"
+                        fullWidth
+                        className="!border-[var(--color-success)] !bg-[var(--color-success)]"
                       >
                         {pending === "execute" ? "Executing…" : "Approve & Run"}
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={() => cancelPlan(m.id)}
                         disabled={pending !== null}
-                        className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-3 py-2 font-mono text-xs uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 tracking-widest"
+                        variant="secondary"
+                        size="md"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   )}
                   {m.status === "approved" && (
@@ -494,13 +516,13 @@ export function Spiro() {
                           {prose}
                         </div>
                       )}
-                      <button
-                        type="button"
+                      <Pressable
                         onClick={() => setRawOpen((s) => ({ ...s, [rawKey]: !showRaw }))}
-                        className="mt-1.5 text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                        block={false}
+                        className="!min-h-0 mt-1.5 text-[10px] font-mono uppercase tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
                       >
                         {showRaw ? "▾ HIDE RAW JSON" : "▸ SHOW RAW JSON"}
-                      </button>
+                      </Pressable>
                       {showRaw && (
                         <pre className="mt-1.5 max-h-[14rem] overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--color-text-secondary)]">
                           {JSON.stringify(sr.result, null, 2).slice(0, 1500)}
@@ -551,15 +573,54 @@ export function Spiro() {
           <span className="font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">
             Enter to send · Shift+Enter for newline
           </span>
-          <button
+          <Button
             onClick={send}
-            disabled={pending !== null || !text.trim()}
-            className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50 tracking-widest"
+            disabled={!text.trim()}
+            pending={pending === "plan"}
+            variant="primary"
+            size="sm"
           >
             {pending === "plan" ? "Sending…" : "Send"}
-          </button>
+          </Button>
         </div>
       </div>
     </aside>
+  );
+}
+
+// D3 — per-call cost surfaced inline next to the SPIRO output. Tier
+// abbreviation makes the badge readable at a glance ("T1 · $0.0002")
+// rather than overwhelming the chat bubble. Hidden if the call ran
+// rule-only (cost == 0 and tier0_rule).
+function CostBadge({ econ }: { econ?: { tier: string; cost_usd: number; latency_ms: number; model: string; call_site: string } | null }) {
+  if (!econ) return null;
+  const tierShort: Record<string, string> = {
+    tier0_rule: "T0",
+    tier1_small: "T1",
+    tier2_mid: "T2",
+    tier3_frontier: "T3",
+  };
+  const tone =
+    econ.tier === "tier3_frontier" ? "var(--color-danger)" :
+    econ.tier === "tier2_mid" ? "var(--color-warning)" :
+    econ.tier === "tier1_small" ? "var(--color-primary)" :
+    "var(--color-success)";
+  const cost = econ.cost_usd === 0
+    ? "$0"
+    : econ.cost_usd >= 0.01
+      ? `$${econ.cost_usd.toFixed(3)}`
+      : `$${econ.cost_usd.toFixed(5).replace(/0+$/, "").replace(/\.$/, ".0")}`;
+  return (
+    <span
+      className="rounded-sm border px-1.5 py-[1px] font-mono text-[10px] tabular-nums tracking-wider"
+      style={{
+        color: tone,
+        borderColor: `color-mix(in oklab, ${tone} 40%, var(--color-border))`,
+        background: `color-mix(in oklab, ${tone} 6%, transparent)`,
+      }}
+      title={`${econ.model} · ${econ.call_site} · ${econ.latency_ms.toFixed(0)} ms`}
+    >
+      {tierShort[econ.tier] || econ.tier} · {cost}
+    </span>
   );
 }

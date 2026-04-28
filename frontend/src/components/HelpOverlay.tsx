@@ -7,7 +7,9 @@
  * shortcut lands.
  */
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useSpireStore, ROLE_LABELS, VIEW_SCOPE } from "../state/store";
+import { IconButton, Pressable } from "./ui";
 
 const SHORTCUTS = [
   { keys: ["?"],          label: "Open this help" },
@@ -28,10 +30,14 @@ const SHORTCUTS = [
   { keys: ["+", "-"],     label: "Zoom map (BASTION)" },
   { keys: ["0"],           label: "Reset view (BASTION)" },
   { keys: ["←", "→", "↑", "↓"], label: "Pan map (BASTION)" },
+  // W2 Task #39 — failsafe panic key. Confined to /demo and /pitch.
+  // Esc closes from anywhere once active.
+  { keys: ["F9"],          label: "Failsafe — recorded backup (presenter only, /demo & /pitch)" },
 ];
 
 export function HelpOverlay() {
   const role = useSpireStore((s) => s.role);
+  const nav = useNavigate();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -96,12 +102,9 @@ export function HelpOverlay() {
               Keyboard shortcuts + role scope
             </div>
           </div>
-          <button
-            onClick={() => setOpen(false)}
-            className="rounded px-2 py-1 font-mono text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-          >
-            ✕
-          </button>
+          <IconButton onClick={() => setOpen(false)} aria-label="Close help" variant="ghost" size="sm">
+            <span aria-hidden>✕</span>
+          </IconButton>
         </div>
 
         <div className="grid grid-cols-2 gap-6">
@@ -160,11 +163,69 @@ export function HelpOverlay() {
           </section>
         </div>
 
-        <div
-          className="mt-5 border-t border-[var(--color-border)] pt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
-        >
-          File issues with the floating button bottom-right (or press g then f) ·
-          See SPIRE_INSTALL.md + CONTRIBUTING.md in the repo root for setup
+        {/* Integrations · system-of-record adapter contracts. Surfaced
+         * in Help so a judge asking "where does this live?" can find
+         * the GCSS-MC contract page without learning the URL. */}
+        <section className="mt-5 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+          <div className="mb-2 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
+            Integrations · System of record
+          </div>
+          <ul className="flex flex-col gap-1.5">
+            <li className="flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <span className="font-mono text-sm text-[var(--color-text)]">GCSS-MC</span>
+                <span className="font-mono text-[10px] text-[var(--color-text-muted)] tracking-wider uppercase">
+                  Marine Corps logistics SoR · adapter contract
+                </span>
+              </div>
+              <Pressable
+                onClick={() => {
+                  setOpen(false);
+                  nav("/integrations/gcss-mc");
+                }}
+                block={false}
+                title="Open the GCSS-MC adapter contract page"
+                className="!min-h-0 shrink-0 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+              >
+                Open contract
+              </Pressable>
+            </li>
+          </ul>
+        </section>
+
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+          <span>
+            File issues with the floating button bottom-right (or press g then f) ·
+            See SPIRE_INSTALL.md + CONTRIBUTING.md in the repo root for setup ·{" "}
+            <Link
+              to="/about/team"
+              onClick={() => setOpen(false)}
+              className="text-[var(--color-primary)] underline-offset-2 hover:underline"
+            >
+              Warfighter customer & team →
+            </Link>
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <Link
+              to="/about/transition"
+              onClick={() => setOpen(false)}
+              title="SBIR Phase II → MTA-Rapid Prototyping pathway, IP, sustainment, fielding plan, risks"
+              className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+            >
+              Transition pathway
+            </Link>
+            <Pressable
+              onClick={() => {
+                setOpen(false);
+                window.dispatchEvent(new CustomEvent("spire:replay-intro"));
+              }}
+              block={false}
+              title="Re-run the 60-second SPIRE intro"
+              className="!min-h-0 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+            >
+              Replay intro
+            </Pressable>
+          </div>
         </div>
       </div>
     </div>

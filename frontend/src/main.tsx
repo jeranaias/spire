@@ -1,10 +1,10 @@
-import { StrictMode, lazy, Suspense } from "react";
+import { StrictMode, lazy, Suspense, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 // HashRouter over BrowserRouter: SPIRE is designed to run from a local file
 // path as well as a localhost server. HashRouter works in both contexts and
 // keeps deep links (sentry/review, pulse/cannibalization) functional if a
 // judge reloads or clicks a share link while we're offline.
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 // Self-hosted fonts — eliminates the Google Fonts cross-origin DNS +
 // TLS handshake on every cold start. Vite emits these as same-origin
@@ -23,10 +23,11 @@ import "@fontsource/jetbrains-mono/600.css";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ScopeGuard } from "./components/ScopeGuard";
+import { AuthView } from "./views/AuthView";
 // ClassificationBand is rendered once in App.tsx (the app shell) — see
 // Walkthrough #JOB-F. Importing it here would invite a second instance
 // in the Suspense fallback, the exact duplication this fix eliminates.
-import { mintSession } from "./api";
+import { registerRoleSource, registerUnauthenticatedHandler, registerDdilHandlers } from "./api";
 import { useSpireStore, ROLE_DEFAULT_VIEW } from "./state/store";
 import "./index.css";
 
@@ -68,24 +69,116 @@ const SentryView  = lazyWithRecovery(() => import("./views/SentryView").then((m)
 const PulseView   = lazyWithRecovery(() => import("./views/PulseView").then((m) => ({ default: m.PulseView })));
 const BastionView = lazyWithRecovery(() => import("./views/BastionView").then((m) => ({ default: m.BastionView })));
 const AdminView   = lazyWithRecovery(() => import("./views/AdminView").then((m) => ({ default: m.AdminView })));
+const AuditView   = lazyWithRecovery(() => import("./views/admin/AuditView").then((m) => ({ default: m.AuditView })));
+// W1 #30 — Model registry / supply-chain page. Restricted to security_manager.
+const ModelRegistryView = lazyWithRecovery(() => import("./views/admin/ModelRegistryView").then((m) => ({ default: m.ModelRegistryView })));
+const ModelDetailView   = lazyWithRecovery(() => import("./views/admin/ModelDetailView").then((m) => ({ default: m.ModelDetailView })));
+const InferenceEconomicsView = lazyWithRecovery(() => import("./views/admin/InferenceEconomicsTab").then((m) => ({ default: m.InferenceEconomicsView })));
+// E1 hardened-primitives gallery — design/QA surface for verifying every
+// variant of every primitive renders correctly. Not in role-based nav;
+// reachable only by direct deep link (#/__ui-docs).
+const UiDocsView  = lazyWithRecovery(() => import("./views/UiDocsView").then((m) => ({ default: m.UiDocsView })));
+// W1 lane: /about/team — pure-content page (warfighter customer + team).
+// Not role-gated; reachable to any authenticated user from the help menu.
+const AboutTeamView = lazyWithRecovery(() => import("./views/AboutTeamView").then((m) => ({ default: m.AboutTeamView })));
+// W1 transition pathway page — linkable from the Help overlay so a TORCH-class
+// judge can read the SBIR→MTA-RP plan without leaving the app.
+const TransitionView = lazyWithRecovery(() => import("./views/TransitionView").then((m) => ({ default: m.TransitionView })));
+// Integrations / system-of-record adapter contracts. Wave-1 lane (#27);
+// currently scoped to GCSS-MC. No role-gate — every operator can read the
+// adapter posture as part of the inoculation-via-honesty narrative.
+const IntegrationsView = lazyWithRecovery(() => import("./views/IntegrationsView").then((m) => ({ default: m.IntegrationsView })));
+// Joint COP export — sister-service partner viewer (no SPIRE chrome) and
+// the integrations / conformance documentation surface. Both lazy.
+const JointPreviewView      = lazyWithRecovery(() => import("./views/JointPreviewView").then((m) => ({ default: m.JointPreviewView })));
+const JointIntegrationsView = lazyWithRecovery(() => import("./views/JointIntegrationsView").then((m) => ({ default: m.JointIntegrationsView })));
+// Task-24 — "15-second decision" hero dashboard. Lives at `/`. The
+// previous role-default redirect is preserved at `/home` as a fallback
+// + escape hatch for operators who prefer landing directly on their
+// scoped surface.
+const DecisionBridgeView = lazyWithRecovery(() => import("./views/DecisionBridge").then((m) => ({ default: m.DecisionBridgeView })));
+// W2 #38 — In-app pitch deck. Lives at `/pitch`. No role gate — any
+// authenticated identity can present (a g4 reviewing rehearsal, a
+// security_manager validating the security slide). The deck stays
+// inside the App shell so the ClassificationBand remains visible.
+const PitchView = lazyWithRecovery(() => import("./views/pitch/PitchView").then((m) => ({ default: m.PitchView })));
+// W2 Task #37 — `/demo` scripted scenario cockpit. Lazy because the
+// surface is presenter-only; no operator ever has to download the chunk
+// during normal use.
+const DemoView = lazyWithRecovery(() => import("./views/DemoView").then((m) => ({ default: m.DemoView })));
 
-// Bootstrap a signed session bearer for whichever role we initialized
-// with. Every API call after this resolves picks up the bearer header
-// automatically. Subsequent role swaps re-mint via store.setRole().
-//
-// We fire-and-forget here: the React tree paints immediately, and any
-// API call that fires before the mint resolves is just an unauthenticated
-// request that will surface as a 401 (handled by the panel's error UI)
-// rather than silently using a stale identity. In practice the mint
-// completes well before any post-mount fetch.
-void mintSession(useSpireStore.getState().role).catch((err) => {
-  console.warn("[SPIRE] initial session mint failed", err);
+// Expose the active role to the API layer. Every GET/POST now splices it as
+// `?role=...` so the backend's scoping filter applies per-call.
+registerRoleSource(() => useSpireStore.getState().role);
+
+// W1 — Wire the DDIL interceptor's view of the store. The api layer stays
+// Zustand-agnostic; this adapter is the single binding point. Cache TTL
+// is generous (10 minutes) so a DDIL drill that lasts a minute still has
+// fresh-enough cached reads to serve from.
+const DDIL_CACHE_TTL_MS = 10 * 60 * 1000;
+registerDdilHandlers({
+  getMode: () => useSpireStore.getState().ddilMode,
+  cacheRead: (key, body) => useSpireStore.getState().cacheDdilRead(key, body),
+  readCache: (key) => {
+    const hit = useSpireStore.getState().ddilCache[key];
+    if (!hit) return null;
+    const ageMs = Date.now() - hit.cachedAt;
+    if (ageMs > DDIL_CACHE_TTL_MS) return null;
+    return { body: hit.body, ageMs };
+  },
+  queueWrite: ({ method, path, body, actor }) => {
+    const entry = useSpireStore.getState().enqueueDdilWrite({ method, path, body, actor });
+    return entry.id;
+  },
+  noteCacheHit: (key, _ageMs, cachedAt) => {
+    useSpireStore.getState().noteDdilCacheHit(key, cachedAt);
+  },
 });
 
 // Send users to their role-appropriate home view on first load.
 function HomeRoute() {
   const role = useSpireStore.getState().role;
   return <Navigate to={ROLE_DEFAULT_VIEW[role] ?? "/bastion"} replace />;
+}
+
+// Auth gate. Wraps every authenticated route; if there's no `currentUser`
+// in the store, redirect to /auth and remember the intended path so we can
+// land them there after sign-in.
+//
+// The HttpOnly session cookie is the server's source of truth; the store's
+// `currentUser` is a same-tab cache hydrated from sessionStorage. If the
+// cookie is missing/expired, the next /api/* call will return 401 and the
+// global 401 handler clears the store -> we re-render here -> redirect.
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const currentUser = useSpireStore((s) => s.currentUser);
+  const loc = useLocation();
+  if (!currentUser) {
+    const intended = loc.pathname + loc.search + loc.hash;
+    return <Navigate to="/auth" state={{ from: intended === "/auth" ? "/" : intended }} replace />;
+  }
+  return <>{children}</>;
+}
+
+// Bridges the api layer's 401 callback to React-Router so any /api/* that
+// returns 401 mid-session signs the user out and bounces them to /auth.
+// Mounted once at the root.
+function UnauthenticatedBridge() {
+  const signOut = useSpireStore((s) => s.signOut);
+  const nav = useNavigate();
+  const loc = useLocation();
+  useEffect(() => {
+    registerUnauthenticatedHandler(() => {
+      // Only act if the store still thinks we're signed in — avoids
+      // re-running on the 401 from /api/auth/me right after sign-out.
+      if (useSpireStore.getState().currentUser) {
+        signOut();
+        const intended = loc.pathname + loc.search + loc.hash;
+        nav("/auth", { state: { from: intended }, replace: true });
+      }
+    });
+    return () => registerUnauthenticatedHandler(() => {});
+  }, [nav, signOut, loc]);
+  return null;
 }
 
 // Lightweight Suspense fallback. The app shell (App.tsx) already renders
@@ -117,9 +210,40 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary scope="app">
       <HashRouter>
+        <UnauthenticatedBridge />
         <Routes>
-          <Route path="/" element={<App />}>
-            <Route index element={<HomeRoute />} />
+          {/* Cert-selection splash — outside the App shell so no chrome
+           * leaks onto the surface. */}
+          <Route path="/auth" element={<AuthView />} />
+          {/* Joint COP partner view — opened in a new tab from the SPIRE
+           * topbar, intentionally rendered without SPIRE chrome so judges
+           * see the data in a sister-service shell, not the parent app.
+           *
+           * NOT wrapped in RequireAuth: the HttpOnly session cookie IS
+           * shared across tabs (cross-tab) but the same-tab sessionStorage
+           * cache the auth gate consults is NOT. Without this exception,
+           * "Push to Joint COP" opens a new tab that bounces straight to
+           * /auth even though the operator is signed in. The view itself
+           * calls /api/joint/oms-uci/export which still re-checks the
+           * cookie + clearance gate server-side. */}
+          <Route path="/joint/preview" element={<ViewSuspense><JointPreviewView /></ViewSuspense>} />
+          {/* Integrations / conformance docs — same treatment. The doc is
+           * authored from /api/joint/conformance which is auth-gated by
+           * the session middleware; the view shows a friendly "sign in
+           * to SPIRE first" if the cookie is missing. */}
+          <Route path="/integrations/joint" element={<ViewSuspense><JointIntegrationsView /></ViewSuspense>} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <App />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<ViewSuspense><DecisionBridgeView /></ViewSuspense>} />
+            {/* Role-default fallback — preserved for operators who prefer
+             * landing on their scoped surface instead of the bridge. */}
+            <Route path="home" element={<HomeRoute />} />
             <Route
               path="sentry/*"
               element={
@@ -147,6 +271,42 @@ createRoot(document.getElementById("root")!).render(
             {/* GC-6 Admin / Training Flywheel — Security Manager only,
              * scope-gated inside the view itself. */}
             <Route path="admin" element={<ViewSuspense><AdminView /></ViewSuspense>} />
+            <Route path="admin/audit" element={<ViewSuspense><AuditView /></ViewSuspense>} />
+            {/* W1 #30 — Model registry / supply-chain page. Per-model
+             * cards documenting provenance, hosting target, FedRAMP
+             * status, vendor jurisdiction, validation history. The
+             * inline guards mirror the backend MODEL_REGISTRY_ROLES
+             * gate. Cross-linked from SENTRY Review Queue. */}
+            <Route path="admin/models" element={<ViewSuspense><ModelRegistryView /></ViewSuspense>} />
+            <Route path="admin/models/:modelId" element={<ViewSuspense><ModelDetailView /></ViewSuspense>} />
+            <Route path="admin/economics" element={<ViewSuspense><InferenceEconomicsView /></ViewSuspense>} />
+            {/* E1 hardened-primitives gallery — design/QA surface only.
+             * Not gated, intentionally hidden from nav. */}
+            <Route path="__ui-docs" element={<ViewSuspense><UiDocsView /></ViewSuspense>} />
+            {/* W1 — about/team. Reachable from the help menu. No role
+             * scope: pure content, available to anyone signed in. */}
+            <Route path="about/team" element={<ViewSuspense><AboutTeamView /></ViewSuspense>} />
+            {/* W1 about / transition pathway — linkable from Help. No
+             * scope guard; this is unclassified company / program info. */}
+            <Route path="about/transition" element={<ViewSuspense><TransitionView /></ViewSuspense>} />
+            {/* GCSS-MC integration contract page (Wave-1 lane #27). The
+             * `:system` slug is fixed to `gcss-mc` for now — only one
+             * adapter contract exists — but the path keeps room for
+             * follow-on integrations (palantir, magtf-ii) without a
+             * router change. */}
+            <Route path="integrations/:system" element={<ViewSuspense><IntegrationsView /></ViewSuspense>} />
+            {/* W2 #38 — In-app pitch deck. `/pitch` (or `/pitch?slide=N`).
+             * Slide 4 hands off to `/demo` (lane A1) and back via the
+             * "Return to pitch — slide 5" affordance the demo player
+             * will deep-link to. Not in role-based nav; reachable via
+             * direct deep link or topbar nav once that lane lands. */}
+            <Route path="pitch" element={<ViewSuspense><PitchView /></ViewSuspense>} />
+            {/* W2 Task #37 — `/demo` presenter cockpit. Inside the App
+             * shell so the scripted player can navigate to operator
+             * surfaces without losing chrome. No ScopeGuard: the cockpit
+             * itself is read-only, and the scenarioControl seek calls
+             * are role-checked server-side. */}
+            <Route path="demo" element={<ViewSuspense><DemoView /></ViewSuspense>} />
           </Route>
         </Routes>
       </HashRouter>

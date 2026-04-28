@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useSpireStore, ROLE_LABELS } from "../state/store";
 import { formatApiError } from "../api-retry";
+import { Button, IconButton, Pressable } from "./ui";
 
 type IssueType = "bug" | "idea" | "question" | "praise";
 
@@ -263,9 +264,11 @@ export function FeedbackDrawer() {
             />
           </div>
         )}
-        <button
+        <Button
           onClick={() => { setOpen(true); dismissCoach(); }}
-          className="pointer-events-auto flex items-center gap-2 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] px-3 py-2 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] shadow-lg backdrop-blur transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-surface))] tracking-widest"
+          variant="secondary"
+          size="md"
+          className="pointer-events-auto !border-[var(--color-primary)] !bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] !text-[var(--color-primary)] shadow-lg backdrop-blur hover:!bg-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-surface))]"
           style={{
             animation: coachVisible ? "feedback-pulse 1.6s ease-in-out infinite" : undefined,
           }}
@@ -275,7 +278,7 @@ export function FeedbackDrawer() {
             <path d="M12 2L1 21h22L12 2zm0 5l7.5 12h-15L12 7zm-1 4v3h2v-3h-2zm0 5v2h2v-2h-2z" />
           </svg>
           <span>Report Issue</span>
-        </button>
+        </Button>
       </div>
 
       {open && (
@@ -307,13 +310,9 @@ export function FeedbackDrawer() {
                   )}
                 </div>
               </div>
-              <button
-                onClick={() => setOpen(false)}
-                className="flex h-11 w-11 items-center justify-center rounded font-mono text-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-                aria-label="Close feedback drawer"
-              >
+              <IconButton onClick={() => setOpen(false)} aria-label="Close feedback drawer">
                 ✕
-              </button>
+              </IconButton>
             </div>
 
             {/* Issue-type segmented picker — sets tone + placeholder + label
@@ -322,17 +321,18 @@ export function FeedbackDrawer() {
               {ISSUE_TYPES.map((t) => {
                 const active = t.value === issueType;
                 return (
-                  <button
+                  <Pressable
                     key={t.value}
                     onClick={() => setIssueType(t.value)}
-                    className="rounded-sm px-2 py-1.5 font-mono text-xs font-semibold uppercase transition-colors tracking-wider"
+                    block={false}
+                    className="!min-h-0 rounded-sm px-2 py-1.5 font-mono text-xs font-semibold uppercase transition-colors tracking-wider"
                     style={{
                       background: active ? "var(--color-primary)" : "transparent",
                       color: active ? "white" : "var(--color-text-secondary)",
                     }}
                   >
                     {t.label}
-                  </button>
+                  </Pressable>
                 );
               })}
             </div>
@@ -388,10 +388,11 @@ export function FeedbackDrawer() {
                 </span>
                 <div className="inline-flex overflow-hidden rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
                   {SEVERITIES.map((s, i) => (
-                    <button
+                    <Pressable
                       key={s.value}
                       onClick={() => setSeverity(s.value)}
-                      className="px-2 py-1 font-mono text-xs font-semibold uppercase transition-colors tracking-wider"
+                      block={false}
+                      className="!min-h-0 px-2 py-1 font-mono text-xs font-semibold uppercase transition-colors tracking-wider"
                       style={{
                         borderLeft: i === 0 ? "none" : "1px solid var(--color-border)",
                         background: severity === s.value ? "var(--color-primary)" : "transparent",
@@ -399,7 +400,7 @@ export function FeedbackDrawer() {
                       }}
                     >
                       {s.label}
-                    </button>
+                    </Pressable>
                   ))}
                 </div>
               </div>
@@ -413,13 +414,15 @@ export function FeedbackDrawer() {
               >
                 Audit chain · GitHub Issues (when token set)
               </span>
-              <button
+              <Button
                 onClick={submit}
-                disabled={submitting || !title.trim() || !body.trim()}
-                className="inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50 tracking-widest"
+                disabled={!title.trim() || !body.trim()}
+                pending={submitting}
+                variant="primary"
+                size="md"
               >
                 {submitting ? "Filing …" : "Submit"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -476,13 +479,13 @@ function DiagnosticsRow({ d }: { d: Diagnostics }) {
   const [show, setShow] = useState(false);
   return (
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
-      <button
+      <Pressable
         onClick={() => setShow((v) => !v)}
-        className="flex w-full items-center justify-between px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-widest"
+        className="!min-h-0 flex w-full items-center justify-between px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-widest"
       >
         <span>Diagnostics auto-attached · {d.viewport} · {d.air_gap ? "AIR-GAP" : d.comms_state}</span>
         <span>{show ? "▾" : "▸"}</span>
-      </button>
+      </Pressable>
       {show && (
         <ul className="border-t border-[var(--color-border)] px-2 py-2 font-mono text-xs text-[var(--color-text-secondary)]">
           {Object.entries(d).map(([k, v]) => (

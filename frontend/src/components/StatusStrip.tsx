@@ -22,6 +22,7 @@ import { useNavigate } from "react-router-dom";
 import { api, type DatasetInfo } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
+import { Pressable } from "./ui";
 
 const FPCON_TONE: Record<string, { fg: string; bg: string }> = {
   NORMAL:  { fg: "var(--color-success)", bg: "color-mix(in oklab, var(--color-success-muted) 25%, var(--color-bg))" },
@@ -215,12 +216,12 @@ export function StatusStrip() {
           >
             Mission
           </span>
-          <button
-            type="button"
+          <Pressable
             onClick={() => setMissionOpen((v) => !v)}
+            block={false}
             aria-expanded={missionOpen}
             aria-controls="status-strip-mission-detail"
-            className="flex min-w-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-xs text-[var(--color-text)] transition-colors hover:border-[var(--color-border-active)] tracking-wide"
+            className="!min-h-0 flex min-w-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-xs text-[var(--color-text)] transition-colors hover:border-[var(--color-border-active)] tracking-wide"
             title={`${datasetInfo?.installation_name ?? "Camp Henderson"} mission summary · click to expand CCIR + status`}
           >
             {/* Walkthrough audit: trailing space inside the bold span so
@@ -238,7 +239,7 @@ export function StatusStrip() {
             <span aria-hidden className="text-[var(--color-text-muted)]">
               {missionOpen ? "▴" : "▾"}
             </span>
-          </button>
+          </Pressable>
         </div>
       </div>
 
@@ -273,13 +274,13 @@ function Chip({
 }) {
   const interactive = !!onClick;
   return (
-    <button
-      type="button"
+    <Pressable
       onClick={onClick}
+      block={false}
       title={title}
       aria-label={ariaLabel}
       disabled={!interactive}
-      className="flex shrink-0 items-center gap-2 rounded-sm border px-2.5 py-[3px] font-mono text-xs leading-none transition-colors disabled:cursor-default"
+      className="!min-h-0 flex shrink-0 items-center gap-2 rounded-sm border px-2.5 py-[3px] font-mono text-xs leading-none transition-colors disabled:cursor-default"
       style={{
         borderColor: `color-mix(in oklab, ${tone} 40%, var(--color-border))`,
         background: background ?? "var(--color-surface)",
@@ -296,7 +297,7 @@ function Chip({
       <span className="font-semibold tabular-nums" style={{ color: tone }}>
         {value}
       </span>
-    </button>
+    </Pressable>
   );
 }
 
@@ -436,16 +437,16 @@ function McMethodologyHelp({
 
   return (
     <div ref={wrapRef} className="relative ml-1">
-      <button
-        type="button"
+      <Pressable
         onClick={onToggle}
+        block={false}
         aria-expanded={open}
         aria-label="How is MC% calculated?"
         title="How is MC% calculated?"
-        className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] font-mono text-[10px] font-semibold text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
+        className="!min-h-0 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] font-mono text-[10px] font-semibold text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
       >
         ?
-      </button>
+      </Pressable>
       {open && (
         <div
           role="dialog"

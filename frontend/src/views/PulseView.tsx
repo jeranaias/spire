@@ -5,6 +5,7 @@ import { FleetOverviewTab } from "./pulse/FleetOverviewTab";
 import { RiskBoardTab } from "./pulse/RiskBoardTab";
 import { CannibalizationTab } from "./pulse/CannibalizationTab";
 import { ForecastTab } from "./pulse/ForecastTab";
+import { ModelTab } from "./pulse/ModelTab";
 
 // Walkthrough #28 — numbered prefix on each tab + ARIA tablist + arrow
 // keyboard navigation. Active tab gets a thicker underline + bg tint.
@@ -13,6 +14,7 @@ const tabs = [
   { to: "/pulse/risk",     number: "02", label: "Risk" },
   { to: "/pulse/cannib",   number: "03", label: "Cannib" },
   { to: "/pulse/forecast", number: "04", label: "Forecast" },
+  { to: "/pulse/model",    number: "05", label: "Model" },
 ];
 
 export function PulseView() {
@@ -27,6 +29,7 @@ export function PulseView() {
           <Route path="risk"      element={<RiskBoardTab />} />
           <Route path="cannib"    element={<CannibalizationTab />} />
           <Route path="forecast"  element={<ForecastTab />} />
+          <Route path="model"     element={<ModelTab />} />
         </Routes>
       </div>
     </div>
@@ -61,7 +64,7 @@ function PulseSubnav() {
   }
 
   return (
-    <div className="h-12 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4" data-tour-id="pulse-subnav">
+    <div className="h-12 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
       <div
         role="tablist"
         aria-label="PULSE views"

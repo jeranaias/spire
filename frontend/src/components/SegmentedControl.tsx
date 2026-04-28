@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { Pressable } from "./ui";
 
 interface Option<T extends string> {
   value: T;
@@ -32,26 +33,21 @@ export function SegmentedControl<T extends string>({
       {options.map((o, i) => {
         const active = o.value === value;
         return (
-          <button
+          <Pressable
             key={o.value}
-            type="button"
             aria-pressed={active}
             onClick={() => onChange(o.value)}
+            block={false}
             className={clsx(
-              // 44px tap target per Apple HIG / WCAG 2.5.5. Filter pills used
-              // to be ~24px tall and failed mobile audits.
-              "inline-flex h-11 min-w-[44px] items-center justify-center px-3 font-mono text-sm font-semibold uppercase transition-colors tracking-wider",
+              "inline-flex min-w-[44px] items-center justify-center px-3 font-mono text-sm font-semibold uppercase transition-colors tracking-wider",
               i > 0 && "border-l border-[var(--color-border)]",
               active
                 ? "bg-[var(--color-primary)] text-white"
-                // Walkthrough #23 — bump unselected color to clear WCAG AA
-                // (≥ 3:1 against bg-[var(--color-bg)]). The previous
-                // --color-text-secondary token measured ~2.4:1 on dark.
                 : "text-[var(--color-text)] hover:bg-[var(--color-surface-hover)]",
             )}
           >
             {o.label}
-          </button>
+          </Pressable>
         );
       })}
     </div>

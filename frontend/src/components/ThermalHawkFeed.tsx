@@ -11,6 +11,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { api, type ThermalHawkFeedFrame, type ThermalHawkFeedInfo } from "../api";
+import { Pressable } from "./ui";
 
 const TARGET_FPS = 5;
 const TARGET_INTERVAL_MS = 1000 / TARGET_FPS;
@@ -127,13 +128,14 @@ export function ThermalHawkFeed() {
             </span>
           )}
         </div>
-        <button
-          type="button"
+        <Pressable
           onClick={() => setPaused((p) => !p)}
-          className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-[1px] text-[10px] uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-widest"
+          block={false}
+          aria-label={paused ? "Resume thermal feed" : "Pause thermal feed"}
+          className="!min-h-0 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-[1px] text-[10px] uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-widest"
         >
           {paused ? "▶ Play" : "⏸ Pause"}
-        </button>
+        </Pressable>
       </div>
 
       {/* Frame */}

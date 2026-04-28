@@ -19,8 +19,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 // Alias the default import to MapGL so we don't shadow the built-in Map constructor.
 import MapGL, { Marker, Source, Layer, NavigationControl, ScaleControl, Popup } from "react-map-gl/maplibre";
+import type { MapLayerMouseEvent } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Building, ECP, RallyPoint, BastionCOPUnit } from "../api";
+import { Pressable } from "./ui";
 
 const MAP_STYLE = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
@@ -348,6 +350,15 @@ export interface MapCanvasProps {
   selectedUnit?: string | null;
   onUnitClick?: (unitName: string) => void;
   flyToBuilding?: string | null;
+  // Persistent map-side building selection. Source-of-truth lives in the
+  // global store so the highlight survives drawer / sidebar interaction
+  // and any future cross-view drill. The map renders a sticky cyan
+  // outline + popup for the selected building and never auto-clears.
+  selectedBuildingId?: string | null;
+  // Called with a building id when the operator clicks a polygon, or with
+  // null when they explicitly close the sticky selection popup. Source-of-
+  // truth lives in the global store (see BastionView wiring).
+  onBuildingClick?: (buildingId: string | null) => void;
   // ThermalHawk sim
   simActive?: boolean;
   simTargetBuilding?: string;
@@ -374,6 +385,8 @@ export function MapCanvas({
   selectedUnit,
   onUnitClick,
   flyToBuilding,
+  selectedBuildingId,
+  onBuildingClick,
   simActive,
   simTargetBuilding,
   simCordons,
@@ -789,6 +802,30 @@ export function MapCanvas({
     }
   }, [buildings]);
 
+  // Click handler for building polygons. We keep `interactiveLayerIds`
+  // pinned to `buildings-fill` so MapLibre's hit-testing only fires for
+  // the building layer — stacked overlays (perimeter, cordon rings, label
+  // symbols) won't silently swallow the click. The handler short-circuits
+  // when the click landed on a Marker (markers stop propagation in their
+  // own onClick handlers above), so a unit / ECP / rally-point click
+  // never doubles up as a building click on the polygon underneath.
+  const onMapClick = useCallback((e: MapLayerMouseEvent) => {
+    if (!onBuildingClick) return;
+    const features = e.features ?? [];
+    const hit = features.find((f) => f.layer?.id === "buildings-fill");
+    if (!hit) return;
+    const id = hit.properties?.id;
+    if (typeof id === "string" && id) onBuildingClick(id);
+  }, [onBuildingClick]);
+
+  // The currently-selected building (sticky, store-driven). Looked up
+  // here so the highlight outline + popup can read its centroid and
+  // metadata without a second pass on every render.
+  const selectedBuilding = useMemo<Building | null>(() => {
+    if (!selectedBuildingId) return null;
+    return buildingById.get(selectedBuildingId) ?? null;
+  }, [selectedBuildingId, buildingById]);
+
   const simTarget = simActive && simTargetBuilding ? buildingById.get(simTargetBuilding) : null;
 
   return (
@@ -825,6 +862,7 @@ export function MapCanvas({
         }}
         interactiveLayerIds={["buildings-fill"]}
         onMouseMove={onMouseMove}
+        onClick={onMapClick}
         style={{ width: "100%", height: "100%" }}
       >
         {/* Cantonment perimeter — chamfered polygon below the buildings. */}
@@ -879,6 +917,25 @@ export function MapCanvas({
               ],
             }}
           />
+          {/* Sticky selection highlight — cyan dashed ring around the
+           * currently-selected building. Filtered by feature id so the
+           * paint stays cheap; reuses the same GeoJSON Source. Same cyan
+           * convention as the unit selection ring + the legend swatch
+           * (#22d3ee), so "selection" reads as one consistent visual
+           * vocabulary across units and buildings. */}
+          {selectedBuildingId && (
+            <Layer
+              id="buildings-selected-outline"
+              type="line"
+              filter={["==", ["get", "id"], selectedBuildingId]}
+              paint={{
+                "line-color": "#22d3ee",
+                "line-width": 3,
+                "line-opacity": 0.95,
+                "line-dasharray": [2, 1.5],
+              }}
+            />
+          )}
         </Source>
 
         {/* Building label badges — rendered over fills, only at close zoom. */}
@@ -1096,8 +1153,64 @@ export function MapCanvas({
           </Marker>
         )}
 
-        {/* Building hover popup — follows cursor via closeOnClick=false */}
-        {hoverBuilding && hoverBuilding.lat != null && hoverBuilding.lon != null && (
+        {/* Sticky selected-building popup — opens on click of a building
+         * polygon (or whenever the global selectedBuildingId changes via
+         * an alert drill). Mirrors the hover popup's content but uses
+         * closeOnClick=false so the panel survives map interaction; the
+         * operator dismisses it explicitly via the X. The same building
+         * may also be the hover target — we suppress the hover popup
+         * (below) when it would shadow this one to avoid double-stacked
+         * cards. */}
+        {selectedBuilding && selectedBuilding.lat != null && selectedBuilding.lon != null && (
+          <Popup
+            longitude={selectedBuilding.lon}
+            latitude={selectedBuilding.lat}
+            // Static `bottom` anchor — sticky popup, so the operator can
+            // pan to recover any clipping; that's the trade-off for not
+            // recomputing the anchor every render (the dynamic `pickAnchor`
+            // path reads a ref and triggers a render-time-refs warning).
+            anchor="bottom"
+            offset={14}
+            maxWidth="280px"
+            closeOnClick={false}
+            onClose={() => onBuildingClick?.(null)}
+            className="spire-map-popup"
+          >
+            <div className="rounded-sm bg-[var(--color-surface)] px-3 py-2" style={{ minWidth: 220 }}>
+              <div
+                className="font-mono text-xs uppercase tracking-widest"
+                style={{ color: TYPE_COLOR[selectedBuilding.type]?.stroke ?? "#9ca3af" }}
+              >
+                {selectedBuilding.id} · {selectedBuilding.type.replace(/_/g, " ")}
+              </div>
+              <div className="mt-0.5 text-base font-semibold text-[var(--color-text)]">
+                {selectedBuilding.name}
+              </div>
+              <div className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
+                {selectedBuilding.grid}
+              </div>
+              <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)]">
+                OCC {selectedBuilding.current_occupancy}/{selectedBuilding.occupancy_capacity}
+                {selectedBuilding.critical_infrastructure && (
+                  <span className="ml-2 text-[var(--color-primary)]">CRIT INFRA</span>
+                )}
+                {selectedBuilding.hazmat_present && (
+                  <span className="ml-2 text-[#fb923c]">HAZMAT</span>
+                )}
+              </div>
+              {selectedBuilding.notes && (
+                <div className="mt-1 text-xs italic text-[var(--color-text-muted)]">
+                  {selectedBuilding.notes}
+                </div>
+              )}
+            </div>
+          </Popup>
+        )}
+
+        {/* Building hover popup — follows cursor via closeOnClick=false.
+         * Suppressed when the hover target is already the sticky-selected
+         * building so we don't render two stacked cards on the same point. */}
+        {hoverBuilding && hoverBuilding.id !== selectedBuildingId && hoverBuilding.lat != null && hoverBuilding.lon != null && (
           <Popup
             longitude={hoverBuilding.lon}
             latitude={hoverBuilding.lat}
@@ -1304,8 +1417,7 @@ export function MapCanvas({
        * any cached pre-sim viewport. Reviewer flagged that an operator who
        * pans/zooms in the heat of an incident has no obvious way to "go
        * back to the wide picture" (#28). */}
-      <button
-        type="button"
+      <Pressable
         onClick={() => {
           // Use a local fitToAllUnits-equivalent path. We can't reach the
           // memoised callback directly from the render body without a ref,
@@ -1345,14 +1457,15 @@ export function MapCanvas({
             );
           } catch { /* tolerant */ }
         }}
-        className="absolute right-2 z-[7] flex h-8 w-[29px] items-center justify-center rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] font-mono text-xs uppercase text-[var(--color-text)] shadow hover:bg-[var(--color-surface-hover)] tracking-widest"
+        block={false}
+        className="!min-h-0 absolute right-2 z-[7] flex h-8 w-[29px] items-center justify-center rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] font-mono text-xs uppercase text-[var(--color-text)] shadow hover:bg-[var(--color-surface-hover)] tracking-widest"
         // 116px ≈ NavigationControl (56px tall) + ~10px gap + standard top-3 inset.
         style={{ top: "116px" }}
         title="Reset view — fit all units and ECPs in viewport"
         aria-label="Reset view"
       >
         ⤢
-      </button>
+      </Pressable>
 
       {/* Active-overlay legend — explains the pink cordon hatching, cyan
        * selection ring, and yellow route line so the operator doesn't
@@ -1360,7 +1473,13 @@ export function MapCanvas({
        * (#26). Bottom-left so it doesn't fight with the scale bar. */}
       <MapLegend
         cordonActive={!!simActive && !!simCordons && simCordons.length > 0}
-        selectionActive={!!selectedUnit || !!unitSelected || !!ecpSelected || !!rpSelected}
+        selectionActive={
+          !!selectedUnit
+          || !!unitSelected
+          || !!ecpSelected
+          || !!rpSelected
+          || !!selectedBuilding
+        }
         routeActive={false}
       />
     </div>

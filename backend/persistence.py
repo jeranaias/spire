@@ -121,8 +121,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
     self_hash   TEXT NOT NULL             -- SHA-256(prev_hash || row-canonical-bytes)
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_kind ON audit_log(kind);
-CREATE INDEX IF NOT EXISTS idx_audit_ts   ON audit_log(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_kind  ON audit_log(kind);
+CREATE INDEX IF NOT EXISTS idx_audit_ts    ON audit_log(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor);
 
 CREATE TABLE IF NOT EXISTS sentry_decisions (
     sr_number   TEXT PRIMARY KEY,
@@ -156,6 +157,14 @@ CREATE TABLE IF NOT EXISTS uploaded_batches (
     record_count INTEGER NOT NULL,
     schema_json TEXT,
     raw_bytes   BLOB
+);
+
+CREATE TABLE IF NOT EXISTS user_prefs (
+    dodid       TEXT NOT NULL,
+    pref_key    TEXT NOT NULL,
+    pref_value  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (dodid, pref_key)
 );
 """
 
@@ -232,6 +241,214 @@ def recent_entries(limit: int = 50) -> list[dict]:
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def query_audit(
+    *,
+    actors: Optional[list[str]] = None,
+    kinds: Optional[list[str]] = None,
+    resource_prefixes: Optional[list[str]] = None,
+    classification: Optional[str] = None,
+    after_ts: Optional[str] = None,
+    before_ts: Optional[str] = None,
+    q: Optional[str] = None,
+    only_anomalies: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """Filter the audit chain for the SOC view.
+
+    Indexed columns (actor, kind, ts) are filtered in SQL. Payload-derived
+    filters (classification substring, free-text q) are applied in Python on
+    the SQL-narrowed candidate set; the chain itself is small enough for a
+    hackathon-grade demo (<10k rows) that this is fine.
+
+    Returns:
+      {
+        rows:            [...]   # parsed payload + chain_ok per row
+        total:           N       # total rows matching the filter set
+        head_hash:       str     # current chain head
+        broken_at_id:    int|None
+        anomaly_count:   N       # broken_chain + spillage + downgrade across the matched set
+        kinds_in_view:   [...]   # distinct kinds present (for chip refresh)
+        actors_in_view:  [...]
+      }
+    """
+    sql_clauses: list[str] = []
+    sql_params: list[Any] = []
+    if actors:
+        placeholders = ",".join("?" for _ in actors)
+        sql_clauses.append(f"actor IN ({placeholders})")
+        sql_params.extend(actors)
+    if kinds:
+        placeholders = ",".join("?" for _ in kinds)
+        sql_clauses.append(f"kind IN ({placeholders})")
+        sql_params.extend(kinds)
+    if resource_prefixes:
+        # Each prefix becomes a kind LIKE 'prefix_%' clause, OR'd together.
+        ors = " OR ".join("kind LIKE ?" for _ in resource_prefixes)
+        sql_clauses.append(f"({ors})")
+        for p in resource_prefixes:
+            sql_params.append(f"{p}%")
+    if after_ts:
+        sql_clauses.append("ts >= ?")
+        sql_params.append(after_ts)
+    if before_ts:
+        sql_clauses.append("ts <= ?")
+        sql_params.append(before_ts)
+    if q:
+        # Free-text scan across actor / kind / subject / payload.
+        sql_clauses.append("(actor LIKE ? OR kind LIKE ? OR subject_id LIKE ? OR payload LIKE ?)")
+        like = f"%{q}%"
+        sql_params.extend([like, like, like, like])
+
+    where = ("WHERE " + " AND ".join(sql_clauses)) if sql_clauses else ""
+    select = (
+        "SELECT id, ts, actor, kind, subject_id, payload, prev_hash, self_hash "
+        f"FROM audit_log {where} ORDER BY id DESC"
+    )
+
+    # We also need a single chain walk so we know broken_at_id (per-row chain_ok).
+    # The walk is on the FULL table, not the filtered set, so a tampered row
+    # earlier in history is still flagged here.
+    with conn() as c:
+        rows = list(c.execute(select, tuple(sql_params)))
+        chain_rows = list(c.execute(
+            "SELECT id, ts, actor, kind, subject_id, payload, prev_hash, self_hash "
+            "FROM audit_log ORDER BY id ASC"
+        ))
+
+    broken_at_id: Optional[int] = None
+    head_hash = _GENESIS
+    prev = _GENESIS
+    for r in chain_rows:
+        entry = {
+            "ts": r["ts"], "actor": r["actor"], "kind": r["kind"],
+            "subject_id": r["subject_id"], "payload": r["payload"],
+            "prev_hash": r["prev_hash"],
+        }
+        expected = hashlib.sha256((prev + _canonical(entry)).encode()).hexdigest()
+        if r["prev_hash"] != prev or r["self_hash"] != expected:
+            if broken_at_id is None:
+                broken_at_id = r["id"]
+            # Don't break — still walk to compute the head and mark every
+            # downstream row as suspect (a tamper invalidates everything
+            # after it).
+        prev = r["self_hash"]
+    head_hash = prev
+
+    enriched: list[dict] = []
+    actors_in_view: set[str] = set()
+    kinds_in_view: set[str] = set()
+    anomaly_count = 0
+
+    SPILLAGE_KINDS = {"spillage_prevented", "downgrade_blocked"}
+
+    for r in rows:
+        try:
+            payload_obj = json.loads(r["payload"]) if r["payload"] else {}
+        except Exception:
+            payload_obj = {"raw": r["payload"]}
+        if not isinstance(payload_obj, dict):
+            payload_obj = {"value": payload_obj}
+
+        actors_in_view.add(r["actor"])
+        kinds_in_view.add(r["kind"])
+
+        # Post-fetch classification filter (payload-side).
+        cls_in_payload = (
+            payload_obj.get("classification")
+            or payload_obj.get("required_classification")
+            or payload_obj.get("_classification")
+            or ""
+        )
+        if classification and (str(cls_in_payload).upper() != classification.upper()):
+            continue
+
+        chain_ok = (broken_at_id is None) or (r["id"] < broken_at_id)
+        anomaly_tag: Optional[str] = None
+        if not chain_ok:
+            anomaly_tag = "broken_chain"
+        elif r["kind"] == "spillage_prevented":
+            anomaly_tag = "spillage_prevented"
+        elif r["kind"] == "downgrade_blocked":
+            anomaly_tag = "downgrade_blocked"
+        elif r["kind"].endswith("_blocked") or r["kind"].endswith("_error"):
+            anomaly_tag = "blocked_or_error"
+
+        if only_anomalies and anomaly_tag is None:
+            continue
+        if anomaly_tag is not None:
+            anomaly_count += 1
+
+        enriched.append({
+            "id": r["id"],
+            "ts": r["ts"],
+            "actor": r["actor"],
+            "kind": r["kind"],
+            "subject_id": r["subject_id"] or "",
+            "payload": payload_obj,
+            "prev_hash": r["prev_hash"],
+            "self_hash": r["self_hash"],
+            "chain_ok": chain_ok,
+            "anomaly_tag": anomaly_tag,
+            "classification": str(cls_in_payload) if cls_in_payload else "",
+            "model_invoked": payload_obj.get("model") or payload_obj.get("model_id") or "",
+            "source_ip": payload_obj.get("source_ip", ""),
+            "outcome": _derive_outcome(r["kind"], payload_obj),
+        })
+
+    total = len(enriched)
+    page = enriched[offset : offset + limit]
+    return {
+        "rows": page,
+        "total": total,
+        "head_hash": head_hash,
+        "broken_at_id": broken_at_id,
+        "anomaly_count": anomaly_count,
+        "kinds_in_view": sorted(kinds_in_view),
+        "actors_in_view": sorted(actors_in_view),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def _derive_outcome(kind: str, payload: dict) -> str:
+    """Return success | blocked | error from kind + payload."""
+    explicit = payload.get("decision") or payload.get("outcome") or payload.get("result")
+    if isinstance(explicit, str):
+        s = explicit.lower()
+        if s in ("blocked", "denied", "deny"):
+            return "blocked"
+        if s in ("error", "failed", "failure"):
+            return "error"
+        if s in ("ok", "success", "applied", "approved"):
+            return "success"
+    if "spillage" in kind or kind.endswith("_blocked"):
+        return "blocked"
+    if kind.endswith("_error") or "error" in payload:
+        return "error"
+    return "success"
+
+
+def distinct_audit_facets(limit_actors: int = 50, limit_kinds: int = 80) -> dict:
+    """Distinct kind / actor lists for filter chips. Cheap — scans the
+    audit table once with a GROUP BY (indexed)."""
+    with conn() as c:
+        actor_rows = c.execute(
+            "SELECT actor, COUNT(*) AS n FROM audit_log GROUP BY actor "
+            "ORDER BY n DESC LIMIT ?",
+            (limit_actors,),
+        ).fetchall()
+        kind_rows = c.execute(
+            "SELECT kind, COUNT(*) AS n FROM audit_log GROUP BY kind "
+            "ORDER BY n DESC LIMIT ?",
+            (limit_kinds,),
+        ).fetchall()
+    return {
+        "actors": [{"actor": r["actor"], "count": r["n"]} for r in actor_rows],
+        "kinds":  [{"kind":  r["kind"],  "count": r["n"]} for r in kind_rows],
+    }
 
 
 def entries_for_subject(subject_id: str, limit: int = 50) -> list[dict]:
@@ -318,6 +535,34 @@ def store_uploaded_batch(batch_id: str, source: str, record_count: int, schema: 
             (batch_id, source, ts, record_count, json.dumps(schema), raw),
         )
     log("batch_upload", subject_id=batch_id, payload={"source": source, "record_count": record_count})
+
+
+# ---------------------------------------------------------------------------
+# Per-identity preferences (lightweight key/value, scoped by DODID)
+# ---------------------------------------------------------------------------
+
+def get_user_pref(dodid: str, key: str, default: Optional[str] = None) -> Optional[str]:
+    """Return the stored value for (dodid, key) or `default` if unset."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT pref_value FROM user_prefs WHERE dodid = ? AND pref_key = ?",
+            (dodid, key),
+        ).fetchone()
+    return row["pref_value"] if row else default
+
+
+def set_user_pref(dodid: str, key: str, value: str) -> None:
+    """Upsert a per-identity preference. Values are TEXT — JSON-encode at the
+    call site if storing structured data."""
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    with conn() as c:
+        c.execute(
+            "INSERT INTO user_prefs(dodid, pref_key, pref_value, updated_at) "
+            "VALUES (?,?,?,?) "
+            "ON CONFLICT(dodid, pref_key) DO UPDATE SET "
+            "pref_value = excluded.pref_value, updated_at = excluded.updated_at",
+            (dodid, key, value, ts),
+        )
 
 
 # ---------------------------------------------------------------------------

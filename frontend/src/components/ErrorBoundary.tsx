@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { Button } from "./ui";
 
 interface State {
   error: Error | null;
@@ -83,26 +84,17 @@ export class ErrorBoundary extends Component<Props, State> {
           </pre>
           <div className="flex items-center gap-2">
             {isChunkFail ? (
-              <button
-                onClick={this.hardReload}
-                className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-2 font-mono text-xs font-semibold uppercase text-white tracking-widest hover:bg-[var(--color-primary-hover)]"
-              >
+              <Button onClick={this.hardReload} variant="primary" size="md">
                 Reload
-              </button>
+              </Button>
             ) : (
               <>
-                <button
-                  onClick={this.reset}
-                  className="rounded-sm border border-[var(--color-border-active)] px-4 py-2 font-mono text-xs uppercase tracking-widest hover:bg-[var(--color-surface-hover)]"
-                >
+                <Button onClick={this.reset} variant="secondary" size="md">
                   Try again
-                </button>
-                <button
-                  onClick={this.hardReload}
-                  className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-2 font-mono text-xs font-semibold uppercase text-white tracking-widest hover:bg-[var(--color-primary-hover)]"
-                >
+                </Button>
+                <Button onClick={this.hardReload} variant="primary" size="md">
                   Hard reload
-                </button>
+                </Button>
               </>
             )}
           </div>
