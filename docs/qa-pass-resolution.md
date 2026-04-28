@@ -200,10 +200,20 @@ they are intentional and harmless.
 **Disposition.** Documented in the issues. The display is correctly
 reading the backend telemetry (it is *not* counting per-click as
 QA-Explorer hypothesised) — what is increasing is the running tally
-of allow-listed-but-not-explicitly-classified outbound attempts. A
-proper fix requires re-classifying the GCSS-MC mock adapter source
-host as "allowed reference traffic" so it does not register as
-unauthorised. **Owned by the SOC honesty lane (Task #186).**
+of allow-listed-but-not-explicitly-classified outbound attempts.
+
+**Resolved (Task #197).** The `network_monitor.py` allow-list now
+recognises the GCSS-MC mock host (`gcss-mc.mock`,
+`gcss-mc.mock.spire.local`, `gcss-mc.reference.local`, plus anything
+under the mock zone) and the IETF-reserved DNS suffixes used by the
+integration suite (`.test`, `.invalid`, `.example`, `.local`,
+`.internal`, `.localdomain`, plus `example.com / .org / .net`) as
+"allowed reference traffic". The footer's
+`network_egress.unapproved_attempts` counter now only ticks up for
+genuinely surprising outbound — locked down by
+`backend/tests/test_network_monitor_allowlist.py` so the legitimate
+paths can't quietly regress and the unknown-host path is still
+flagged.
 
 ### `#114` — F9 keypress does not trigger failsafe
 

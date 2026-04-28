@@ -23,6 +23,14 @@ from .persistence import log as audit_log
 
 ALLOWED_HOSTS = {
     "127.0.0.1", "localhost", "::1",
+    # GCSS-MC mock reference adapter. There is no live GCSS-MC link in
+    # this build; the adapter shape is exercised against a local mock
+    # host so contract round-trips can be demonstrated. Treat these as
+    # "allowed reference traffic" so the SOC counter only fires on
+    # genuinely surprising egress (Task #186 — cluster F resolution).
+    "gcss-mc.mock",
+    "gcss-mc.mock.spire.local",
+    "gcss-mc.reference.local",
 }
 ALLOWED_NETWORKS = [
     ipaddress.ip_network("100.64.0.0/10"),  # Tailscale CGNAT
@@ -32,7 +40,36 @@ ALLOWED_HOSTNAMES_SUFFIX = (
     ".ts.net",                                # Tailscale MagicDNS + Funnel
     ".tail5bcfa2.ts.net",                    # this specific tailnet
     "localhost",
+    # Mock GCSS-MC reference adapter — anything under the mock zone is
+    # known synthetic traffic, never an outbound to a real partner.
+    ".gcss-mc.mock",
+    ".gcss-mc.mock.spire.local",
+    # IETF-reserved DNS suffixes used by integration tests and local
+    # service discovery. These names are guaranteed never to resolve to
+    # a real internet host (RFC 2606 / RFC 6761), so a lookup against
+    # them is by definition not "unauthorised egress" — it is a
+    # testbench probe. Including them stops the unapproved-attempts
+    # counter from ticking up every time the integration suite runs a
+    # name-resolution against a synthetic hostname.
+    ".test",            # RFC 2606 — reserved for testing
+    ".invalid",         # RFC 2606 — reserved, guaranteed not to resolve
+    ".example",         # RFC 2606 — reserved for documentation/examples
+    ".localhost",       # RFC 6761 — must resolve to loopback
+    ".local",           # mDNS / Bonjour — link-local only
+    ".internal",        # de-facto internal-only TLD
+    ".localdomain",     # legacy local-only suffix
+    # Reserved example domains (RFC 2606) used by the integration suite
+    # whenever it needs a fully-qualified name that is guaranteed never
+    # to be a real partner system. Leading dot covers ``foo.example.com``;
+    # the bare names are pinned in ALLOWED_HOSTS below.
+    ".example.com",
+    ".example.org",
+    ".example.net",
 )
+
+# Bare RFC 2606 example TLDs (the suffix list above only covers
+# subdomains of these; the apex names are pinned here).
+ALLOWED_HOSTS.update({"example.com", "example.org", "example.net"})
 
 # Known good known-to-be-outbound destinations we explicitly allow.
 ALLOWED_KNOWN = {
