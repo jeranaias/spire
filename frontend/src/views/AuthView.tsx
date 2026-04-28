@@ -312,11 +312,20 @@ export function AuthView() {
         </div>
 
         {/* Foot note — operator-relevant. Crypto/session primitives live on
-            the security/about page, not the front door. */}
+            the security/about page (Task #95), linked below for any
+            security-minded reviewer who wants the primitives. */}
         <div className="mt-6 grid gap-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] md:grid-cols-3">
           <div>12-hour shift session · cert lockout after 5 PIN failures</div>
           <div className="md:text-center">IL5-fit · local-first · no cloud egress</div>
           <div className="md:text-right">DDIL drills available post-login</div>
+        </div>
+        <div className="mt-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] md:text-right">
+          <a
+            href="#/security"
+            className="text-[var(--color-text-secondary)] underline-offset-2 hover:text-[var(--color-text)] hover:underline"
+          >
+            How SPIRE handles sessions and PKI →
+          </a>
         </div>
         </div>
       </div>

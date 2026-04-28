@@ -207,6 +207,14 @@ export function HelpOverlay() {
           </span>
           <div className="flex shrink-0 items-center gap-2">
             <Link
+              to="/security"
+              onClick={() => setOpen(false)}
+              title="How SPIRE handles sessions, cookies, RBAC, PKI/CAC, and DDIL"
+              className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+            >
+              Security &amp; identity
+            </Link>
+            <Link
               to="/about/transition"
               onClick={() => setOpen(false)}
               title="SBIR Phase II → MTA-Rapid Prototyping pathway, IP, sustainment, fielding plan, risks"

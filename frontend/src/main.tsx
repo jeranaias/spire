@@ -81,6 +81,12 @@ const UiDocsView  = lazyWithRecovery(() => import("./views/UiDocsView").then((m)
 // W1 lane: /about/team — pure-content page (warfighter customer + team).
 // Not role-gated; reachable to any authenticated user from the help menu.
 const AboutTeamView = lazyWithRecovery(() => import("./views/AboutTeamView").then((m) => ({ default: m.AboutTeamView })));
+// Task #95 — security/about page documenting session model, cookie flags,
+// RBAC, PKI/CAC story (and the demo-vs-fielded honesty about no live OCSP),
+// and DDIL behavior. Reachable both pre-login (from the AuthView footer)
+// and post-login (from the HelpOverlay), so it sits OUTSIDE RequireAuth —
+// same pattern as /joint/preview and /integrations/joint.
+const SecurityView = lazyWithRecovery(() => import("./views/SecurityView").then((m) => ({ default: m.SecurityView })));
 // W1 transition pathway page — linkable from the Help overlay so a TORCH-class
 // judge can read the SBIR→MTA-RP plan without leaving the app.
 const TransitionView = lazyWithRecovery(() => import("./views/TransitionView").then((m) => ({ default: m.TransitionView })));
@@ -305,6 +311,15 @@ createRoot(document.getElementById("root")!).render(
            * the session middleware; the view shows a friendly "sign in
            * to SPIRE first" if the cookie is missing. */}
           <Route path="/integrations/joint" element={<ViewSuspense><JointIntegrationsView /></ViewSuspense>} />
+          {/* Task #95 — `/security` (canonical) and `/about/security`
+           * (alias for path-symmetry with `/about/team` and
+           * `/about/transition`). OUTSIDE RequireAuth so the AuthView
+           * splash can deep-link to it; the view itself manages its own
+           * chrome (it renders the ClassificationBannerStrip directly so
+           * pre-login visitors still see the U-banner). Post-login
+           * visitors reach it from the HelpOverlay. */}
+          <Route path="/security" element={<ViewSuspense><SecurityView /></ViewSuspense>} />
+          <Route path="/about/security" element={<ViewSuspense><SecurityView /></ViewSuspense>} />
           <Route
             path="/"
             element={
