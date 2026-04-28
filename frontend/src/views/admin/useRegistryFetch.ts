@@ -18,6 +18,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { withRetry, formatApiError } from "../../api-retry";
 import { useSpireStore } from "../../state/store";
 
+/**
+ * Task #135 — separate "fatal" load failures from "manual refresh failed
+ * but we still have a cached payload on screen". The two have different
+ * UX consequences:
+ *
+ *   - `error`         → no cached data, the view collapses to ErrorState.
+ *   - `refreshError`  → there IS cached data; we keep rendering it but
+ *                       surface a dismissible inline warning so the
+ *                       operator doesn't mistake a 10-min-old card for
+ *                       the post-Refresh value.
+ */
+export interface RefreshFailure {
+  message: string;
+  at: number;
+}
+
 export interface RegistryFetchState<T> {
   data: T | null;
   error: string | null;
@@ -25,6 +41,8 @@ export interface RegistryFetchState<T> {
   loadedAt: number | null;
   refreshing: boolean;
   refresh: () => void;
+  refreshError: RefreshFailure | null;
+  dismissRefreshError: () => void;
 }
 
 /**
@@ -44,6 +62,7 @@ export function useRegistryFetch<T>(
   const [waking, setWaking] = useState(false);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<RefreshFailure | null>(null);
 
   // The cancellation token guards against late responses overwriting the
   // current view (key change mid-flight, unmount, double-clicks on the
@@ -53,14 +72,22 @@ export function useRegistryFetch<T>(
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
+  // Mirror `data` into a ref so the catch handler below can decide
+  // (without a stale closure capture) whether a refresh failure should
+  // collapse the view (no cached payload) or surface as an inline
+  // dismissible warning (cached payload still on screen).
+  const dataRef = useRef<T | null>(null);
+
   const load = useCallback(
     async (mode: "initial" | "refresh") => {
       const myEpoch = ++epochRef.current;
       if (mode === "initial") {
         setData(null);
+        dataRef.current = null;
         setError(null);
         setWaking(false);
         setLoadedAt(null);
+        setRefreshError(null);
       } else {
         setRefreshing(true);
       }
@@ -73,13 +100,29 @@ export function useRegistryFetch<T>(
         });
         if (epochRef.current !== myEpoch) return;
         setData(resp);
+        dataRef.current = resp;
         setError(null);
         setWaking(false);
         setLoadedAt(Date.now());
+        // Task #135 — a successful refresh clears any prior "refresh
+        // failed" warning so the operator isn't left staring at a
+        // banner that no longer reflects the on-screen payload.
+        setRefreshError(null);
       } catch (e) {
         if (epochRef.current !== myEpoch) return;
-        setError(formatApiError(e));
+        const message = formatApiError(e);
         setWaking(false);
+        // Task #135 — if we already have a cached payload on screen,
+        // a failed refresh is non-fatal: keep the view, surface the
+        // failure inline, and let the operator dismiss it. Without
+        // this branch the previous code wrote into `error` but the
+        // UI only renders ErrorState when `data` is null, so the
+        // failure was effectively silent.
+        if (mode === "refresh" && dataRef.current !== null) {
+          setRefreshError({ message, at: Date.now() });
+        } else {
+          setError(message);
+        }
       } finally {
         if (epochRef.current === myEpoch && mode === "refresh") {
           setRefreshing(false);
@@ -117,7 +160,20 @@ export function useRegistryFetch<T>(
     void load("refresh");
   }, [load]);
 
-  return { data, error, waking, loadedAt, refreshing, refresh };
+  const dismissRefreshError = useCallback(() => {
+    setRefreshError(null);
+  }, []);
+
+  return {
+    data,
+    error,
+    waking,
+    loadedAt,
+    refreshing,
+    refresh,
+    refreshError,
+    dismissRefreshError,
+  };
 }
 
 /** Format an epoch as operator-local clock time (HH:MM:SS, 24h). */

@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../components/ui";
 import { useSpireStore, type DdilMode } from "../../state/store";
-import { formatAge, formatLoadedAt } from "./useRegistryFetch";
+import { formatAge, formatLoadedAt, type RefreshFailure } from "./useRegistryFetch";
 
 const MODE_BANNER_LABEL: Record<Exclude<DdilMode, "CONNECTED">, string> = {
   LIMITED: "DDIL · LIMITED COMMS — high latency on every fetch",
@@ -94,6 +94,61 @@ export function FreshnessHeader({
       >
         ↻ Refresh
       </Button>
+    </div>
+  );
+}
+
+/**
+ * Task #135 — inline warning that surfaces when a manual / auto refresh
+ * fails but a previously-loaded payload is still on screen. Keeps the
+ * cached view intact (the operator can still read it) while making it
+ * obvious the ↻ Refresh click did NOT update the numbers. Dismissible
+ * because a steady-state operator may have already noted the failure
+ * and want the chrome out of the way; a subsequent successful refresh
+ * also clears it (the hook nulls the state).
+ */
+export function RefreshErrorBanner({
+  failure,
+  onDismiss,
+}: {
+  failure: RefreshFailure | null;
+  onDismiss: () => void;
+}) {
+  if (!failure) return null;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="mb-3 flex items-start gap-3 rounded-sm border px-3 py-2 font-mono text-[11px] uppercase tracking-widest"
+      style={{
+        color: "var(--color-warning)",
+        background:
+          "color-mix(in oklab, var(--color-warning) 12%, var(--color-surface))",
+        borderColor: "var(--color-warning)",
+      }}
+    >
+      <span
+        aria-hidden
+        className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full"
+        style={{ background: "var(--color-warning)" }}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold">
+          Refresh failed at {formatLoadedAt(failure.at)} — showing previous load
+        </div>
+        <div className="mt-0.5 break-words text-[10px] normal-case tracking-wide text-[var(--color-text-secondary)]">
+          {failure.message}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss refresh-failed warning"
+        title="Dismiss"
+        className="shrink-0 rounded-sm border border-[var(--color-warning)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning)_18%,transparent)]"
+      >
+        Dismiss
+      </button>
     </div>
   );
 }

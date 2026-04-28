@@ -18,7 +18,7 @@ import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
 import { useRegistryFetch } from "./useRegistryFetch";
-import { DdilFreshnessBanner, FreshnessHeader } from "./RegistryFreshness";
+import { DdilFreshnessBanner, FreshnessHeader, RefreshErrorBanner } from "./RegistryFreshness";
 
 export function ModelDetailView() {
   const role = useSpireStore((s) => s.role);
@@ -37,7 +37,16 @@ export function ModelDetailView() {
   // W1 #83 — same lifecycle as the registry index. Keying on `modelId`
   // resets `data`/`loadedAt` cleanly when the operator navigates between
   // model cards, so a stale "loaded HH:MM" never bleeds across cards.
-  const { data, error, waking, loadedAt, refreshing, refresh } = useRegistryFetch(
+  const {
+    data,
+    error,
+    waking,
+    loadedAt,
+    refreshing,
+    refresh,
+    refreshError,
+    dismissRefreshError,
+  } = useRegistryFetch(
     () => api.system.adminModelDetail(modelId),
     `model:${modelId}`,
   );
@@ -91,6 +100,11 @@ export function ModelDetailView() {
       </div>
 
       <DdilFreshnessBanner loadedAt={loadedAt} />
+
+      {/* Task #135 — failed refresh on top of a cached card. Keeps the
+       * model card readable while flagging that the ↻ Refresh click did
+       * not pull a new payload. Clears on the next successful refresh. */}
+      <RefreshErrorBanner failure={refreshError} onDismiss={dismissRefreshError} />
 
       {m.in_app_surfaces && m.in_app_surfaces.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3">

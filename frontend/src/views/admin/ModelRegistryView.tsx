@@ -22,7 +22,12 @@ import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
 import { useRegistryFetch } from "./useRegistryFetch";
-import { DdilFreshnessBanner, FreshnessHeader, RegistryLoadErrorTile } from "./RegistryFreshness";
+import {
+  DdilFreshnessBanner,
+  FreshnessHeader,
+  RefreshErrorBanner,
+  RegistryLoadErrorTile,
+} from "./RegistryFreshness";
 
 export function ModelRegistryView() {
   const role = useSpireStore((s) => s.role);
@@ -39,10 +44,16 @@ export function ModelRegistryView() {
   // W1 #83 — fetch lifecycle (loadedAt + manual refresh + auto-refresh on
   // DDIL reconnect) lives in the shared hook so the same affordances are
   // wired identically here and on the detail page.
-  const { data, error, waking, loadedAt, refreshing, refresh } = useRegistryFetch(
-    () => api.system.adminModels(),
-    "registry-list",
-  );
+  const {
+    data,
+    error,
+    waking,
+    loadedAt,
+    refreshing,
+    refresh,
+    refreshError,
+    dismissRefreshError,
+  } = useRegistryFetch(() => api.system.adminModels(), "registry-list");
 
   if (error && !data) {
     return (
@@ -81,6 +92,11 @@ export function ModelRegistryView() {
       </div>
 
       <DdilFreshnessBanner loadedAt={loadedAt} />
+
+      {/* Task #135 — failed manual / auto refresh on top of a cached
+       * payload. The banner clears on the next successful refresh or
+       * when the operator dismisses it. */}
+      <RefreshErrorBanner failure={refreshError} onDismiss={dismissRefreshError} />
 
       {/* W1 #83 — surface the backend's `load_error` field explicitly. A
        * malformed model_registry.json used to render as the empty-state
