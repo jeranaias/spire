@@ -911,25 +911,75 @@ function AuditChainModal({ subjectId, onClose }: { subjectId: string; onClose: (
               a marking decision, review action, or release event fires.
             </div>
           )}
-          {data && data.entries.map((e, i) => (
-            <div
-              key={i}
-              className="mb-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2"
-            >
-              <div className="mb-1 flex items-baseline gap-2">
-                <span className="text-[var(--color-primary)]">{e.kind}</span>
-                <span className="text-[var(--color-text-muted)]">{e.ts}</span>
-                <span className="ml-auto text-[var(--color-text-muted)]">actor: {e.actor}</span>
+          {data && data.entries.map((e, i) => {
+            // Task #25 — surface the operator's name (from the chain
+            // payload) in addition to the role string. The role alone
+            // ("g4", "security_manager") doesn't tell an investigator
+            // who actually keyed the decision; the payload now carries
+            // actor_name + actor_dodid + actor_unit + actor_cert_serial
+            // so the modal renders a proper Marine identity.
+            const p = e.payload || {};
+            const operatorName =
+              typeof p.actor_name === "string" && p.actor_name.trim()
+                ? p.actor_name
+                : null;
+            const operatorDodid =
+              typeof p.actor_dodid === "string" && p.actor_dodid.trim()
+                ? p.actor_dodid
+                : null;
+            const operatorUnit =
+              typeof p.actor_unit === "string" && p.actor_unit.trim()
+                ? p.actor_unit
+                : null;
+            const operatorCert =
+              typeof p.actor_cert_serial === "string" && p.actor_cert_serial.trim()
+                ? p.actor_cert_serial
+                : null;
+            return (
+              <div
+                key={i}
+                className="mb-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2"
+              >
+                <div className="mb-1 flex items-baseline gap-2">
+                  <span className="text-[var(--color-primary)]">{e.kind}</span>
+                  <span className="text-[var(--color-text-muted)]">{e.ts}</span>
+                  <span className="ml-auto text-[var(--color-text-muted)]">
+                    role: {e.actor}
+                  </span>
+                </div>
+                {(operatorName || operatorDodid || operatorUnit || operatorCert) && (
+                  <div className="mb-1 text-[var(--color-text)]">
+                    operator:{" "}
+                    <span className="font-semibold">
+                      {operatorName || "(unknown)"}
+                    </span>
+                    {operatorDodid && (
+                      <span className="ml-2 text-[var(--color-text-muted)]">
+                        DODID {operatorDodid}
+                      </span>
+                    )}
+                    {operatorUnit && (
+                      <span className="ml-2 text-[var(--color-text-muted)]">
+                        · {operatorUnit}
+                      </span>
+                    )}
+                    {operatorCert && (
+                      <span className="ml-2 text-[var(--color-text-muted)]">
+                        · cert {operatorCert}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="break-all text-[var(--color-text-muted)]">prev_hash: {e.prev_hash}</div>
+                <div className="break-all text-[var(--color-text)]">self_hash: {e.self_hash}</div>
+                {p && Object.keys(p).length > 0 && (
+                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[var(--color-text-secondary)]">
+                    {JSON.stringify(p, null, 2)}
+                  </pre>
+                )}
               </div>
-              <div className="break-all text-[var(--color-text-muted)]">prev_hash: {e.prev_hash}</div>
-              <div className="break-all text-[var(--color-text)]">self_hash: {e.self_hash}</div>
-              {e.payload && Object.keys(e.payload).length > 0 && (
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[var(--color-text-secondary)]">
-                  {JSON.stringify(e.payload, null, 2)}
-                </pre>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
