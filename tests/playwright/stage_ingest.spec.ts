@@ -27,19 +27,36 @@ const FIXTURE_PARTS = "tests/fixtures/stage_ingest/sr_parts.csv";
 const FIXTURE_DUE_IN = "tests/fixtures/stage_ingest/due_in.csv";
 
 /** Force the backend dataset singleton into the empty state via the
- *  test-only POST stub. Falls back to a no-op if the route isn't
- *  mounted (the spec then asserts whichever state is observed). */
-async function forceEmptyDataset(page: import("@playwright/test").Page) {
-  await page.evaluate(async () => {
+ *  test-only POST stub. Returns the HTTP status from the call so the
+ *  caller can branch between deterministic (200) and missing-hook
+ *  (404/410) modes. The hook itself is gated on SPIRE_TEST_HOOKS=1. */
+async function forceEmptyDataset(
+  page: import("@playwright/test").Page,
+): Promise<number> {
+  return await page.evaluate(async () => {
     try {
-      // /system/admin/reset-demo populates the dataset; the inverse
-      // (force-empty) is exposed via /system/admin/force-empty when
-      // the test harness env flag is set. We try it best-effort.
-      await fetch("/api/system/admin/force-empty", { method: "POST" });
+      const r = await fetch("/api/system/admin/force-empty", {
+        method: "POST",
+      });
+      return r.status;
     } catch {
-      /* no-op when the test stub isn't mounted */
+      return 0;
     }
   });
+}
+
+/** Hard-require the force-empty hook for the deterministic core flow.
+ *  Fails (does NOT skip) when SPIRE_TEST_HOOKS=1 isn't propagated to
+ *  the backend, so a misconfigured CI job is loud rather than silent. */
+async function forceEmptyOrFail(page: import("@playwright/test").Page) {
+  const status = await forceEmptyDataset(page);
+  if (status !== 200) {
+    throw new Error(
+      `force-empty test hook returned ${status}; expected 200. ` +
+        "Ensure the backend is started with SPIRE_TEST_HOOKS=1 so the " +
+        "stage-ingest core flow can drive the dataset to empty.",
+    );
+  }
 }
 
 test.describe("Stage live-ingest mode (Task #183)", () => {
@@ -52,19 +69,14 @@ test.describe("Stage live-ingest mode (Task #183)", () => {
   test("DECISION BRIDGE hero card renders the three named slots when empty", async ({
     page,
   }) => {
-    await forceEmptyDataset(page);
+    await forceEmptyOrFail(page);
     await gotoHash(page, "#/decision");
 
     // Hero card is identified by data-testid so the spec doesn't
-    // depend on copy or layout that may evolve.
+    // depend on copy or layout that may evolve. Deterministic now —
+    // force-empty must have succeeded before we reach this line.
     const hero = page.getByTestId("stage-ingest-hero");
-    // The hero only mounts when the dataset is empty. If the test
-    // harness force-empty stub isn't available, skip the body.
-    const heroCount = await hero.count();
-    test.skip(
-      heroCount === 0,
-      "force-empty hook unavailable — dataset is populated, hero card skipped.",
-    );
+    await expect(hero).toBeVisible();
 
     await expect(hero).toContainText(/Awaiting GCSS-MC ingest/i);
     await expect(page.getByTestId("stage-ingest-slot-header")).toBeVisible();
@@ -73,13 +85,10 @@ test.describe("Stage live-ingest mode (Task #183)", () => {
   });
 
   test("attaching CSVs to each slot flips them to valid", async ({ page }) => {
-    await forceEmptyDataset(page);
+    await forceEmptyOrFail(page);
     await gotoHash(page, "#/decision");
     const hero = page.getByTestId("stage-ingest-hero");
-    test.skip(
-      (await hero.count()) === 0,
-      "force-empty hook unavailable — slot validation flow skipped.",
-    );
+    await expect(hero).toBeVisible();
 
     await page
       .getByTestId("stage-ingest-input-header")
@@ -105,13 +114,10 @@ test.describe("Stage live-ingest mode (Task #183)", () => {
   });
 
   test("hydrate flow flips the dataset out of empty mode", async ({ page }) => {
-    await forceEmptyDataset(page);
+    await forceEmptyOrFail(page);
     await gotoHash(page, "#/decision");
     const hero = page.getByTestId("stage-ingest-hero");
-    test.skip(
-      (await hero.count()) === 0,
-      "force-empty hook unavailable — hydrate flow skipped.",
-    );
+    await expect(hero).toBeVisible();
 
     await page
       .getByTestId("stage-ingest-input-header")
@@ -137,13 +143,10 @@ test.describe("Stage live-ingest mode (Task #183)", () => {
   test("BASTION renders the awaiting-ingest placeholder when empty", async ({
     page,
   }) => {
-    await forceEmptyDataset(page);
+    await forceEmptyOrFail(page);
     await gotoHash(page, "#/bastion");
     const placeholder = page.getByTestId("awaiting-ingest-bastion");
-    test.skip(
-      (await placeholder.count()) === 0,
-      "force-empty hook unavailable — BASTION populated, placeholder skipped.",
-    );
+    await expect(placeholder).toBeVisible();
     await expect(placeholder).toContainText(/BASTION/i);
     await expect(placeholder).toContainText(/Awaiting GCSS-MC ingest/i);
   });
@@ -151,13 +154,14 @@ test.describe("Stage live-ingest mode (Task #183)", () => {
   test("PULSE renders the awaiting-ingest placeholder when empty", async ({
     page,
   }) => {
-    await forceEmptyDataset(page);
-    await gotoHash(page, "#/pulse/overview");
+    await forceEmptyOrFail(page);
+    // PulseView has a container-level dataset gate so /pulse/overview,
+    // /pulse/risk, /pulse/cannib, /pulse/forecast, /pulse/model all
+    // resolve to the same Awaiting placeholder while empty. Hit a
+    // non-overview route to prove the gate covers every PULSE tab.
+    await gotoHash(page, "#/pulse/risk");
     const placeholder = page.getByTestId("awaiting-ingest-pulse");
-    test.skip(
-      (await placeholder.count()) === 0,
-      "force-empty hook unavailable — PULSE populated, placeholder skipped.",
-    );
+    await expect(placeholder).toBeVisible();
     await expect(placeholder).toContainText(/PULSE/i);
     await expect(placeholder).toContainText(/Awaiting GCSS-MC ingest/i);
   });
@@ -165,13 +169,10 @@ test.describe("Stage live-ingest mode (Task #183)", () => {
   test("SENTRY renders the awaiting-ingest placeholder when empty", async ({
     page,
   }) => {
-    await forceEmptyDataset(page);
+    await forceEmptyOrFail(page);
     await gotoHash(page, "#/sentry/upload");
     const placeholder = page.getByTestId("awaiting-ingest-sentry");
-    test.skip(
-      (await placeholder.count()) === 0,
-      "force-empty hook unavailable — SENTRY populated, placeholder skipped.",
-    );
+    await expect(placeholder).toBeVisible();
     await expect(placeholder).toContainText(/SENTRY/i);
     await expect(placeholder).toContainText(/Awaiting GCSS-MC ingest/i);
   });

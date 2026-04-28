@@ -288,20 +288,32 @@ class TestStageIngestRobustness:
         )
 
     def test_parser_timeout_returns_504(self, park_client, monkeypatch):
-        """Force the wall-clock cap to 0.001s so the in-thread parser
-        always exceeds it; verify the route surfaces 504 with an
-        operator-facing message instead of a 500."""
+        """Force the wall-clock cap to 0.05s AND make the in-thread
+        parser sleep 0.5s so the timeout always trips. Asserts a
+        deterministic 504 with the operator-facing failsafe copy.
+        Monkeypatching the parser itself (not just the cap) removes
+        the race window that previously forced us to accept 200."""
+        import time as _time
+
         from backend.routes import stage_ingest as si_mod
 
-        monkeypatch.setattr(si_mod, "STAGE_INGEST_TIMEOUT_S", 0.001)
+        original_ingest = si_mod.ingest_sr_header_csv
+
+        def _slow_ingest(text, **kwargs):
+            # Sleep an order of magnitude longer than the cap so the
+            # asyncio.wait_for in _run_ingest_with_timeout always fires
+            # before _do_parse returns.
+            _time.sleep(0.5)
+            return original_ingest(text, **kwargs)
+
+        monkeypatch.setattr(si_mod, "STAGE_INGEST_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(si_mod, "ingest_sr_header_csv", _slow_ingest)
+
         resp = park_client.post("/api/system/stage-ingest", files=_csv_files())
-        # On a fast box the parse may still complete inside 1ms; accept
-        # either 504 (the path we want to exercise) or 200 (no race
-        # window left). We only flag 5xx-other as an actual failure.
-        assert resp.status_code in (200, 504), resp.text
-        if resp.status_code == 504:
-            assert "exceeded" in resp.text.lower()
-            assert "shift+f8" in resp.text.lower() or "failsafe" in resp.text.lower()
+        assert resp.status_code == 504, resp.text
+        body_lower = resp.text.lower()
+        assert "exceeded" in body_lower
+        assert "shift+f8" in body_lower or "failsafe" in body_lower
 
     def test_malformed_header_returns_4xx(self, park_client):
         """Binary garbage in header.csv — not a CSV at all — comes out
