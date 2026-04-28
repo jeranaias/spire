@@ -29,7 +29,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -344,6 +344,8 @@ def query_audit(
     before_ts: Optional[str] = None,
     q: Optional[str] = None,
     only_anomalies: bool = False,
+    only_role_only: bool = False,
+    role_only_predicate: Optional[Callable[[str], bool]] = None,
     limit: int = 100,
     offset: int = 0,
 ) -> dict:
@@ -354,6 +356,14 @@ def query_audit(
     the SQL-narrowed candidate set; the chain itself is small enough for a
     hackathon-grade demo (<10k rows) that this is fine.
 
+    `role_only_predicate` is the identity-aware "is this row bound to a
+    role rather than a person?" check, injected by the route layer (which
+    owns the MOCK_USERS lookup). It's applied per-row inside the same
+    filter loop as `classification` and `only_anomalies` so that
+    `total`, `role_only_count`, and the paginated slice all stay
+    consistent — and so `only_role_only` honours pagination instead of
+    being a client-side filter on top of an already-paginated set.
+
     Returns:
       {
         rows:            [...]   # parsed payload + chain_ok per row
@@ -361,6 +371,7 @@ def query_audit(
         head_hash:       str     # current chain head
         broken_at_id:    int|None
         anomaly_count:   N       # broken_chain + spillage + downgrade across the matched set
+        role_only_count: N       # rows bound to a role with no DODID, across the matched set
         kinds_in_view:   [...]   # distinct kinds present (for chip refresh)
         actors_in_view:  [...]
       }
@@ -432,6 +443,7 @@ def query_audit(
     actors_in_view: set[str] = set()
     kinds_in_view: set[str] = set()
     anomaly_count = 0
+    role_only_count = 0
 
     SPILLAGE_KINDS = {"spillage_prevented", "downgrade_blocked"}
 
@@ -469,6 +481,17 @@ def query_audit(
 
         if only_anomalies and anomaly_tag is None:
             continue
+
+        # Role-only filter (Task #123) — "rows where identity.dodid is
+        # empty AND the actor isn't a system process". The predicate is
+        # supplied by the route layer because the identity lookup lives
+        # alongside MOCK_USERS there. We compute the flag for every row
+        # so the chip count reflects the matched set, not just the page.
+        is_role_only = bool(role_only_predicate(r["actor"])) if role_only_predicate else False
+        if only_role_only and not is_role_only:
+            continue
+        if is_role_only:
+            role_only_count += 1
         if anomaly_tag is not None:
             anomaly_count += 1
 
@@ -497,6 +520,7 @@ def query_audit(
         "head_hash": head_hash,
         "broken_at_id": broken_at_id,
         "anomaly_count": anomaly_count,
+        "role_only_count": role_only_count,
         "kinds_in_view": sorted(kinds_in_view),
         "actors_in_view": sorted(actors_in_view),
         "limit": limit,

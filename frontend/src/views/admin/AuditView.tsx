@@ -186,6 +186,11 @@ export function AuditView() {
     return () => clearTimeout(t);
   }, [q]);
   const [onlyAnoms, setOnlyAnoms] = useState<boolean>(false);
+  // Task #123 — chip toggle for "rows where the actor is a role with no
+  // bound DODID". Mirrors the FE 'ROLE-ONLY · NO DODID' badge so the chip
+  // count and the row badges always agree. Server-side filter so
+  // pagination doesn't get out of sync with `total`.
+  const [onlyRoleOnly, setOnlyRoleOnly] = useState<boolean>(false);
   const [page, setPage]           = useState<number>(0);
   const [data, setData]           = useState<AuditQueryResult | null>(null);
   const [error, setError]         = useState<string | null>(null);
@@ -198,7 +203,7 @@ export function AuditView() {
   // Reset to page 0 whenever a filter changes — otherwise a narrowed result
   // set leaves the operator on an empty trailing page. Use the *debounced*
   // search value so the page doesn't reset on every keystroke.
-  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms]);
+  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms, onlyRoleOnly]);
 
   // Filter signature *without* pagination — drives both the page query
   // (joined with limit/offset) and the export-set fetch (limit 500).
@@ -218,8 +223,9 @@ export function AuditView() {
       before:         range.before,
       q:              debouncedQ.trim() || undefined,
       only_anomalies: onlyAnoms || undefined,
+      only_role_only: onlyRoleOnly || undefined,
     };
-  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms]);
+  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms, onlyRoleOnly]);
 
   const queryParams = useMemo<AuditQueryParams>(() => ({
     ...filterParams,
@@ -447,6 +453,35 @@ export function AuditView() {
             >
               {data.anomaly_count} anomal{data.anomaly_count === 1 ? "y" : "ies"} in view
             </span>
+            {/* Task #123 — role-only count badge, mirrors the anomaly
+                badge so the SOC analyst can see the size of the
+                "no DODID bound" set at a glance. Clicking toggles the
+                same filter as the chip below. */}
+            <button
+              type="button"
+              onClick={() => setOnlyRoleOnly((v) => !v)}
+              aria-pressed={onlyRoleOnly}
+              className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider transition-colors"
+              style={{
+                color: data.role_only_count > 0 ? "var(--color-warning)" : "var(--color-text-muted)",
+                borderColor: onlyRoleOnly
+                  ? "var(--color-warning)"
+                  : data.role_only_count > 0 ? "var(--color-warning-muted)" : "var(--color-border)",
+                background: onlyRoleOnly
+                  ? "color-mix(in oklab, var(--color-warning) 22%, transparent)"
+                  : data.role_only_count > 0
+                    ? "color-mix(in oklab, var(--color-warning-muted) 18%, transparent)"
+                    : "transparent",
+                cursor: "pointer",
+              }}
+              title={
+                onlyRoleOnly
+                  ? "Showing only role-only rows · click to clear"
+                  : "Rows whose actor is a role with no bound DODID · click to filter"
+              }
+            >
+              {data.role_only_count} role-only in view
+            </button>
             <ClassifiedExport
               classification={exportBundle?.level ?? "UNCLASSIFIED"}
               action="audit.export.json"
@@ -513,20 +548,31 @@ export function AuditView() {
             </div>
           </div>
 
-          {/* Anomalies toggle */}
-          <div className="col-span-12 lg:col-span-4 flex items-end gap-2">
+          {/* Anomalies / role-only toggles */}
+          <div className="col-span-12 lg:col-span-4 flex flex-wrap items-end gap-2">
             <Chip
               active={onlyAnoms}
               onClick={() => setOnlyAnoms((v) => !v)}
               label={onlyAnoms ? "ANOMALIES ONLY ✓" : "ANOMALIES ONLY"}
               tone={onlyAnoms ? "warn" : "default"}
             />
+            {/* Task #123 — quick filter for "which actions in the last 24h
+                aren't bound to a person?". Same warn-tone as the badge so
+                the chip and the row decoration read as one concept. */}
+            <Chip
+              active={onlyRoleOnly}
+              onClick={() => setOnlyRoleOnly((v) => !v)}
+              label={onlyRoleOnly ? "ROLE-ONLY · NO DODID ✓" : "ROLE-ONLY · NO DODID"}
+              tone={onlyRoleOnly ? "warn" : "default"}
+              title="Show only rows whose actor is a role with no bound DODID (matches the ROLE-ONLY badge)."
+            />
             <Button
               variant="secondary"
               size="sm"
               onClick={() => {
                 setActors([]); setKinds([]); setResource([]); setClassification("");
-                setTw("any"); setCustomAfter(""); setCustomBefore(""); setQ(""); setOnlyAnoms(false);
+                setTw("any"); setCustomAfter(""); setCustomBefore(""); setQ("");
+                setOnlyAnoms(false); setOnlyRoleOnly(false);
               }}
             >
               Clear filters
@@ -619,7 +665,7 @@ export function AuditView() {
             <EmptyState
               title="No audit entries match these filters"
               description="Loosen the time window or clear a chip; the chain itself is intact."
-              action={<Button size="sm" variant="secondary" onClick={() => { setActors([]); setKinds([]); setResource([]); setClassification(""); setTw("any"); setQ(""); setOnlyAnoms(false); }}>Clear filters</Button>}
+              action={<Button size="sm" variant="secondary" onClick={() => { setActors([]); setKinds([]); setResource([]); setClassification(""); setTw("any"); setQ(""); setOnlyAnoms(false); setOnlyRoleOnly(false); }}>Clear filters</Button>}
             />
           </div>
         ) : (
@@ -673,12 +719,14 @@ function Chip({
   label,
   tone = "default",
   tintColor,
+  title,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   tone?: "default" | "warn";
   tintColor?: string;
+  title?: string;
 }) {
   const accent =
     tintColor ??
@@ -688,6 +736,7 @@ function Chip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      title={title}
       className="rounded-sm border px-2 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors"
       style={{
         background: active

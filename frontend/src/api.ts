@@ -389,6 +389,7 @@ export const api = {
       if (params.before)          sp.set("before", params.before);
       if (params.q)               sp.set("q",      params.q);
       if (params.only_anomalies)  sp.set("only_anomalies", "true");
+      if (params.only_role_only)  sp.set("only_role_only", "true");
       sp.set("limit",  String(params.limit  ?? 100));
       sp.set("offset", String(params.offset ?? 0));
       return jsonFetch<AuditQueryResult>(
@@ -1367,6 +1368,7 @@ export interface AuditQueryParams {
   before?: string;
   q?: string;
   only_anomalies?: boolean;
+  only_role_only?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -1403,6 +1405,7 @@ export interface AuditQueryResult {
   head_hash: string;
   broken_at_id: number | null;
   anomaly_count: number;
+  role_only_count: number;
   kinds_in_view: string[];
   actors_in_view: string[];
   limit: number;

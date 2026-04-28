@@ -680,6 +680,42 @@ def _enrich_actor_identity(actor: str) -> dict:
     return {"dodid": "", "name": actor or "system", "rank": "", "role": actor, "unit": ""}
 
 
+# Mirrors the FE `SYSTEM_ACTOR_PREFIXES` list in
+# `frontend/src/views/admin/AuditView.tsx` — the SOC view classifies a row
+# as "system process" (not "role-only") when the actor matches one of these
+# prefixes, so the row gets a NON-PERSON badge instead of the
+# ROLE-ONLY · NO DODID badge. The `only_role_only` filter has to use the
+# same definition or the chip count would disagree with the badge count.
+_SYSTEM_ACTOR_PREFIXES = (
+    "system",
+    "scheduler",
+    "cron",
+    "network_monitor",
+    "scenario.",
+    "batch.",
+)
+
+
+def _is_role_only_actor(actor: str) -> bool:
+    """True iff an audit row's actor would render as 'ROLE-ONLY · NO DODID'
+    in the SOC view: enrichment yields no DODID *and* the actor is not one
+    of the known automation/system prefixes. Used by `query_audit` when
+    `only_role_only=true` so pagination can be enforced server-side."""
+    identity = _enrich_actor_identity(actor)
+    if identity.get("dodid"):
+        return False
+    a = (actor or "").strip().lower()
+    if not a:
+        return False
+    role_str = (identity.get("role") or "").strip().lower()
+    for p in _SYSTEM_ACTOR_PREFIXES:
+        if a == p or a.startswith(p):
+            return False
+        if role_str == p or role_str.startswith(p):
+            return False
+    return True
+
+
 @router.get("/admin/audit")
 async def admin_audit(
     request: Request,
@@ -694,6 +730,7 @@ async def admin_audit(
     before: str | None = None,
     q: str | None = None,
     only_anomalies: bool = False,
+    only_role_only: bool = False,
 ):
     """SOC-shaped audit query. Gated to security_manager.
 
@@ -705,6 +742,9 @@ async def admin_audit(
       - after / before: ISO8601 timestamp window.
       - q: free-text LIKE across actor/kind/subject/payload.
       - only_anomalies: filter to broken-chain + spillage + downgrade rows.
+      - only_role_only: filter to rows whose actor is a role with no
+        bound DODID (matches the FE 'ROLE-ONLY · NO DODID' badge). System
+        processes (scheduler/cron/system/…) are excluded by definition.
       - limit/offset: pagination.
 
     Returns enriched rows with parsed payload, identity lookup, anomaly
@@ -735,6 +775,8 @@ async def admin_audit(
         before_ts=before,
         q=q,
         only_anomalies=bool(only_anomalies),
+        only_role_only=bool(only_role_only),
+        role_only_predicate=_is_role_only_actor,
         limit=limit,
         offset=offset,
     )
