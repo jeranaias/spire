@@ -22,4 +22,5 @@ export type { Classification } from "./levels";
 export { useClearance } from "./useClearance";
 export type { ClearanceCtx } from "./useClearance";
 export { ClassificationBadge } from "./ClassificationBadge";
+export { ClassificationBanner } from "./ClassificationBanner";
 export { ClassifiedExport } from "./ClassifiedExport";

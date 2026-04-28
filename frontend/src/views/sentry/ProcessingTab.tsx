@@ -6,7 +6,7 @@ import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
 import { Button, ErrorState, EmptyState, LoadingState } from "../../components/ui";
 import {
-  ClassificationBadge,
+  ClassificationBanner,
   classificationRank,
   normalizeClassification,
   type Classification,
@@ -317,7 +317,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           rendering classified content per DoDM 5200.01. Computed from the
           highest source/detected classification across the records currently
           in view, not a hard-coded constant. */}
-      <ProcessingBanner edge="top" {...bannerProps} />
+      <ClassificationBanner edge="top" {...bannerProps} />
 
       {/* Task #65 — header tells the truth: the engine pass already
           finished synchronously inside POST /sentry/process before this
@@ -573,49 +573,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
       {/* CAPCO classification banner — bottom. Pairs with the top band so a
           presenter switching slides mid-processing always has the marking
           on screen, even if the top band scrolls under a presenter overlay. */}
-      <ProcessingBanner edge="bottom" {...bannerProps} />
-    </div>
-  );
-}
-
-function ProcessingBanner({
-  edge,
-  classification,
-  caveats,
-}: {
-  edge: "top" | "bottom";
-  classification: Classification;
-  caveats?: string[];
-}) {
-  // Full-width band tinted to match the active classification, with the
-  // standard ClassificationBadge centered. Reusing the badge primitive keeps
-  // the color/labelling logic in one place — adding a new caveat upstream
-  // automatically reflows here.
-  const bg = `color-mix(in oklab, ${
-    classification === "UNCLASSIFIED" ? "#007A33" :
-    classification === "CUI" ? "#502B85" :
-    classification === "CONFIDENTIAL" ? "#0033A0" :
-    classification === "SECRET" ? "#C8102E" :
-    classification === "TOP_SECRET" ? "#FF8C00" :
-    "#FFD100"
-  } 18%, var(--color-surface))`;
-  return (
-    <div
-      role="region"
-      aria-label={`Classification banner (${edge})`}
-      className={clsx(
-        "z-20 flex shrink-0 items-center justify-center gap-3 px-4 py-1.5",
-        edge === "top"
-          ? "border-b border-[var(--color-border)]"
-          : "border-t border-[var(--color-border)]",
-      )}
-      style={{ background: bg }}
-    >
-      <ClassificationBadge
-        classification={classification}
-        caveats={caveats}
-        size="md"
-      />
+      <ClassificationBanner edge="bottom" {...bannerProps} />
     </div>
   );
 }

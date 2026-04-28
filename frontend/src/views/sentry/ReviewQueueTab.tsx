@@ -16,10 +16,10 @@ import {
 } from "../../components/ui";
 import {
   CLASS_RANK,
-  CLASS_LABEL,
-  CLASS_COLOR as CAPCO_COLOR,
+  ClassificationBanner,
   normalizeClassification,
   useClearance,
+  type Classification,
 } from "../../components/classification";
 import { SentrySplitPane } from "../../components/SentrySplitPane";
 import {
@@ -43,14 +43,49 @@ const REVIEW_SPLITTER_KEY = "spire.sentry.splitterPx";
 // destructive-confirmation pattern used elsewhere for secure-wipe.
 const BULK_TYPED_CONFIRM_THRESHOLD = 50;
 
-// PII span categories that the inspector masks by default. `geo` (MGRS) and
-// `pii` (EDIPI / SSN4 / POC / ext) carry persistent identifiers; `controlled`
-// (USA/USMC serials) is operationally sensitive but not PII per se. The
-// presenter "REDACTED for projection" toggle masks all categories regardless.
-const PII_MASK_CATEGORIES = new Set(["pii", "geo"]);
-
 type Column = "auto_cleared" | "flagged" | "held";
 type Action = "approve" | "reject";
+
+// Task #149 — span-based redaction shared between the queue card preview
+// and the inspector's default view. Walks the highlight ranges and emits
+// `[REDACTED:CAT]` tokens over the offending substrings, identical to the
+// `SanitizedRecord` pass on the Processing tab. Categories covered:
+// `pii` (EDIPI / SSN4 / POC / ext), `geo` (MGRS), `comms` (HF / VHF freqs),
+// `classified`, and `controlled` (USA/USMC serials). Non-highlighted text
+// is passed through verbatim — the highlight set is the contract for what
+// counts as CUI on the surface.
+type RedactedSegment = {
+  text: string;
+  redactedAs?: string;
+  category?: string;
+};
+
+function buildRedactedSegments(
+  remark: string,
+  highlights: { start: number; end: number; category?: string }[],
+): RedactedSegment[] {
+  const segments: RedactedSegment[] = [];
+  if (!remark) return segments;
+  const sorted = [...highlights].sort(
+    (a, b) => (a.start ?? 0) - (b.start ?? 0),
+  );
+  let cursor = 0;
+  for (const h of sorted) {
+    const start = Math.max(h.start ?? 0, cursor);
+    const end = h.end ?? start;
+    if (end <= start) continue;
+    if (start > cursor) segments.push({ text: remark.slice(cursor, start) });
+    const cat = (h.category || "pii") as string;
+    segments.push({
+      text: "",
+      redactedAs: `[REDACTED:${cat.toUpperCase()}]`,
+      category: cat,
+    });
+    cursor = end;
+  }
+  if (cursor < remark.length) segments.push({ text: remark.slice(cursor) });
+  return segments;
+}
 
 const FLAG_COLOR: Record<string, string> = {
   pii: "var(--color-info)",
@@ -281,16 +316,16 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
   // automatically — the banner cannot lie about what the operator is
   // actually staring at. Declared *before* the loading/error early-returns
   // so React's hook order stays stable across renders.
-  const pageClassification = useMemo(() => {
+  const pageClassification = useMemo<Classification>(() => {
     let bestRank = 0;
-    let bestKey = "UNCLASSIFIED";
+    let best: Classification = "UNCLASSIFIED";
     const consider = (raw: any) => {
       if (!raw) return;
       const norm = normalizeClassification(String(raw));
       const r = CLASS_RANK[norm];
       if (r > bestRank) {
         bestRank = r;
-        bestKey = norm;
+        best = norm;
       }
     };
     const sweep = (xs: any[] | undefined) => {
@@ -313,8 +348,17 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
         }
       }
     }
-    return bestKey as keyof typeof CAPCO_COLOR;
+    return best;
   }, [filteredQueue, selected]);
+
+  // Walkthrough #35 / Task #149 — CUI banner is rendered as the dual-line
+  // "UNCLASSIFIED // CUI" per CAPCO so a judge reading the banner from the
+  // projector sees the controlled-marking suffix the same way DoDM 5200.01
+  // prints it on a cover sheet. Mirrors `bannerProps` in ProcessingTab.
+  const bannerProps =
+    pageClassification === "CUI"
+      ? { classification: "UNCLASSIFIED" as Classification, caveats: ["CUI"] }
+      : { classification: pageClassification };
 
   if (!ctx.batchId) {
     return (
@@ -357,10 +401,12 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Walkthrough #35 — top sticky classification banner (CAPCO color
-          block per DoDM 5200.01). Mirrored at the bottom of the page so a
-          screenshot from any scroll position carries marking. */}
-      <ClassificationStripe classification={pageClassification} position="top" />
+      {/* Walkthrough #35 / Task #149 — top sticky classification banner
+          (CAPCO color block per DoDM 5200.01). Mirrored at the bottom of
+          the page so a screenshot from any scroll position carries
+          marking. Uses the shared `ClassificationBanner` primitive (Task
+          #66) so the queue tab marks the same way Processing does. */}
+      <ClassificationBanner edge="top" {...bannerProps} />
 
       <div className="sticky top-0 z-[40] flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-xs tracking-wider">
         <div className="flex items-center gap-6">
@@ -486,8 +532,8 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
         <AggregationRiskPanel risks={queue.aggregation_risks} onClose={() => setShowAggregation(false)} />
       )}
 
-      {/* Walkthrough #35 — bottom sticky classification banner. */}
-      <ClassificationStripe classification={pageClassification} position="bottom" />
+      {/* Walkthrough #35 / Task #149 — bottom sticky classification banner. */}
+      <ClassificationBanner edge="bottom" {...bannerProps} />
 
       {/* Walkthrough #22 — bulk-action confirmation modal. */}
       {bulkConfirm && (
@@ -503,41 +549,6 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
           }}
         />
       )}
-    </div>
-  );
-}
-
-// Walkthrough #35 — sticky CAPCO classification stripe rendered at the top
-// and bottom of the Review Queue page. Required on every screen that
-// renders SECRET-adjacent content so a screenshot or projector frame
-// always carries marking. Color comes from CAPCO_COLOR in
-// components/classification/levels.ts so the stripe matches the badge.
-function ClassificationStripe({
-  classification,
-  position,
-}: {
-  classification: keyof typeof CAPCO_COLOR;
-  position: "top" | "bottom";
-}) {
-  const colors = CAPCO_COLOR[classification] ?? CAPCO_COLOR.UNCLASSIFIED;
-  const label = CLASS_LABEL[classification] ?? "UNCLASSIFIED";
-  return (
-    <div
-      role="status"
-      aria-label={`Page classification ${label}`}
-      className={clsx(
-        "sticky z-[60] flex items-center justify-center font-mono text-[11px] font-bold uppercase tracking-[0.18em]",
-        position === "top" ? "top-0" : "bottom-0",
-      )}
-      style={{
-        background: colors.bg,
-        color: colors.fg,
-        padding: "3px 12px",
-        borderTop: position === "bottom" ? "1px solid rgba(0,0,0,0.25)" : undefined,
-        borderBottom: position === "top" ? "1px solid rgba(0,0,0,0.25)" : undefined,
-      }}
-    >
-      <span>// {label} //</span>
     </div>
   );
 }
@@ -837,6 +848,16 @@ function ReviewCard({
 }) {
   const detected = record.detected_classification;
   const detectedColor = CLASS_COLOR[detected] ?? "var(--color-text-secondary)";
+  // Task #149 — card preview must never paint un-redacted CUI on a 30-foot
+  // projector. Walk the same `record.highlights` ranges the inspector does
+  // and stamp `[REDACTED:CAT]` tokens over every PII / GEO / COMMS /
+  // CLASSIFIED / CONTROLLED span. Falls back to the raw remark only when
+  // the record has no highlights, which means the engine found nothing
+  // sensitive — safe to render verbatim.
+  const cardSegments = buildRedactedSegments(
+    record.remark || "",
+    record.highlights || [],
+  );
   return (
     <div
       onClick={onClick}
@@ -874,7 +895,35 @@ function ReviewCard({
           <span className="text-[var(--color-text-muted)]">· {record.equipment_type.replace(/_/g, " ")}</span>
           <span className="text-[var(--color-text-muted)]">· {record.unit_name}</span>
         </div>
-        <div className="line-clamp-2 text-sm text-[var(--color-text-secondary)]">{record.remark}</div>
+        <div className="line-clamp-2 text-sm text-[var(--color-text-secondary)]">
+          {cardSegments.length === 0 ? (
+            <span>{record.remark}</span>
+          ) : (
+            cardSegments.map((s, i) =>
+              s.redactedAs ? (
+                <span
+                  key={i}
+                  className="mx-[1px] rounded-sm px-1 font-mono text-[10px] font-semibold uppercase tracking-wider"
+                  style={{
+                    background: `color-mix(in oklab, ${
+                      FLAG_COLOR[s.category || "pii"] || "var(--color-warning)"
+                    } 18%, var(--color-bg))`,
+                    color:
+                      FLAG_COLOR[s.category || "pii"] ||
+                      "var(--color-warning)",
+                    border: `1px solid color-mix(in oklab, ${
+                      FLAG_COLOR[s.category || "pii"] || "var(--color-warning)"
+                    } 50%, transparent)`,
+                  }}
+                >
+                  {s.redactedAs}
+                </span>
+              ) : (
+                <span key={i}>{s.text}</span>
+              ),
+            )
+          )}
+        </div>
         {/* Walkthrough #11 — surface diversified Held reasons as badges so
             the operator can triage the queue by reason kind. */}
         {Array.isArray(record.held_reasons) && record.held_reasons.length > 0 && (
@@ -950,36 +999,51 @@ function InspectorPane({
   // W1 #30 — gate the model-card cross-link on role; supply-chain page
   // is restricted to security_manager.
   const role = useSpireStore((s) => s.role);
-  // Walkthrough #37 — PII masking. The inspector renders highlighted PII
-  // spans (EDIPI, POC, MGRS) as opaque blocks by default. The operator can
-  // click-to-reveal each individual span only if their clearance meets the
-  // record's detected classification. The presenter can also flip the
-  // header "REDACTED for projection" toggle to mask everything (regardless
-  // of category, regardless of clearance) for stage projection.
+  // Task #149 — the inspector now defaults to the redacted view (every
+  // PII / GEO / COMMS / CLASSIFIED / CONTROLLED span is replaced with
+  // a `[REDACTED:CAT]` token, same machinery as the queue card preview
+  // and the SanitizedRecord export pane). The operator can flip a single
+  // "Show original" toggle to expose the underlying CUI text — but only
+  // if their clearance meets the record's detected classification. This
+  // replaces the prior partial scheme where `pii`/`geo` were masked but
+  // `comms`/`classified`/`controlled` painted in the clear by default.
   const clearance = useClearance();
   const recordClass = normalizeClassification(
     record.detected_classification ?? record.source_classification ?? "UNCLASSIFIED",
   );
-  const canRevealPII = clearance.can(recordClass);
-  const [projectionMode, setProjectionMode] = useState(false);
-  const [revealed, setRevealed] = useState<Set<number>>(new Set());
-  // Reset reveal-state on record change so revealed spans from one record
-  // never carry over visually to another. Projection mode is preserved on
-  // purpose — the presenter sets it once for the demo and it should stick.
+  const canShowOriginal = clearance.can(recordClass);
+  const [showOriginal, setShowOriginal] = useState(false);
+  // Reset to the redacted view whenever the operator selects a different
+  // record. A presenter who left "show original" on for a TS record must
+  // not bleed that posture into the next CUI record they click into.
   useEffect(() => {
-    setRevealed(new Set());
+    setShowOriginal(false);
   }, [record.sr_number]);
+  // If the operator's clearance changes (role swap mid-review), force the
+  // inspector back to the redacted default so a now-uncleared operator
+  // never keeps seeing a span the role swap should have re-masked.
+  useEffect(() => {
+    if (!canShowOriginal && showOriginal) setShowOriginal(false);
+  }, [canShowOriginal, showOriginal]);
+
   const highlights: { start: number; end: number; category: string }[] = record.highlights || [];
   const remark: string = record.remark || "";
-  const segments: { text: string; category?: string; idx: number }[] = [];
+  // Original-text segmentation — used only when `showOriginal` is true and
+  // the operator's clearance permits. Mirrors the prior highlight-overlay
+  // rendering so the original view is unchanged.
+  const originalSegments: { text: string; category?: string }[] = [];
   let cursor = 0;
   const sorted = [...highlights].sort((a, b) => a.start - b.start);
-  sorted.forEach((h, i) => {
-    if (h.start > cursor) segments.push({ text: remark.slice(cursor, h.start), idx: -1 });
-    segments.push({ text: remark.slice(h.start, h.end), category: h.category, idx: i });
+  sorted.forEach((h) => {
+    if (h.start > cursor) originalSegments.push({ text: remark.slice(cursor, h.start) });
+    originalSegments.push({ text: remark.slice(h.start, h.end), category: h.category });
     cursor = h.end;
   });
-  if (cursor < remark.length) segments.push({ text: remark.slice(cursor), idx: -1 });
+  if (cursor < remark.length) originalSegments.push({ text: remark.slice(cursor) });
+  // Default redacted segments — the SAME `[REDACTED:CAT]` token rendering
+  // the queue card and the export bundle use, so what the operator sees
+  // here matches what would actually leave the building.
+  const redactedSegments = buildRedactedSegments(remark, highlights);
 
   const detected = record.detected_classification;
   const detectedColor = CLASS_COLOR[detected] ?? "var(--color-text-secondary)";
@@ -1007,31 +1071,48 @@ function InspectorPane({
             <span aria-hidden>✕</span>
           </IconButton>
         </div>
-        {/* Walkthrough #37 — projection/redaction toggle. When ON, every
-            highlighted span renders as a black block regardless of category
-            or operator clearance — safe for projector / camera. */}
+        {/* Task #149 — single "Show original" toggle. Default state is the
+            redacted view (every PII / GEO / COMMS / CLASSIFIED / CONTROLLED
+            highlight rendered as a `[REDACTED:CAT]` token). The reveal is
+            gated on the operator's clearance vs the record's detected
+            classification — an UNCLAS operator on a SECRET record sees a
+            disabled toggle that names the missing clearance. Replaces the
+            prior projection-mode toggle and the per-category split that
+            painted COMMS / CLASSIFIED / CONTROLLED in the clear by default. */}
         <div className="mt-2 flex items-center justify-between gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1">
           <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            {projectionMode
-              ? "REDACTED for projection · all spans masked"
-              : canRevealPII
-                ? "PII masked · click to reveal"
-                : `PII masked · ${recordClass} clearance required to reveal`}
+            {showOriginal
+              ? "Original · CUI exposed for cleared review"
+              : canShowOriginal
+                ? "Redacted · default view"
+                : `Redacted · ${recordClass} clearance required to reveal`}
           </div>
           <button
             type="button"
             role="switch"
-            aria-checked={projectionMode}
-            aria-label="Toggle projection redaction"
-            onClick={() => setProjectionMode((v) => !v)}
+            aria-checked={showOriginal}
+            aria-label="Toggle show original CUI text"
+            disabled={!canShowOriginal}
+            title={
+              canShowOriginal
+                ? showOriginal
+                  ? "Hide original — return to redacted view"
+                  : "Show original CUI text (requires clearance)"
+                : `Insufficient clearance — record is ${recordClass}`
+            }
+            onClick={() => {
+              if (!canShowOriginal) return;
+              setShowOriginal((v) => !v);
+            }}
             className={clsx(
               "rounded-sm border px-2 py-[2px] font-mono text-[10px] font-semibold uppercase tracking-widest transition-colors",
-              projectionMode
+              !canShowOriginal && "cursor-not-allowed opacity-50",
+              showOriginal
                 ? "border-[var(--color-danger)] bg-[var(--color-danger)] text-white"
                 : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-danger)]",
             )}
           >
-            {projectionMode ? "REDACTED ✓" : "REDACT for projection"}
+            {showOriginal ? "ORIGINAL ✓" : "Show original"}
           </button>
         </div>
       </div>
@@ -1094,110 +1175,64 @@ function InspectorPane({
           </section>
         )}
 
-        {/* Remark with colored highlights */}
+        {/* Task #149 — remark renders the redacted view by default. The
+            `Show original` toggle in the header (clearance-gated) flips
+            this section to the colored highlight view. The redacted view
+            uses the same `[REDACTED:CAT]` token rendering as the queue
+            card preview and the export-bundle SanitizedRecord, so the
+            inspector shows what would actually leave the building. */}
         <section>
           <div
             className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
-            Remark · Highlighted
+            Remark · {showOriginal && canShowOriginal ? "Highlighted (original)" : "Redacted"}
           </div>
           <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-base leading-relaxed text-[var(--color-text)]">
-            {segments.map((s, i) => {
-              if (!s.category) return <span key={i}>{s.text}</span>;
-              const isPii = PII_MASK_CATEGORIES.has(s.category);
-              const shouldMask =
-                projectionMode || (isPii && !revealed.has(s.idx));
-              const flagColor = FLAG_COLOR[s.category] || "#fff";
-              if (shouldMask) {
-                // Black-block redaction. Width matches the underlying token
-                // length so layout doesn't reflow when the operator reveals.
-                const blockWidth = `${Math.max(2, s.text.length)}ch`;
-                return (
-                  <span
-                    key={i}
-                    role={canRevealPII && !projectionMode ? "button" : undefined}
-                    tabIndex={canRevealPII && !projectionMode ? 0 : -1}
-                    title={
-                      projectionMode
-                        ? "Masked for projection"
-                        : canRevealPII
-                          ? `Click to reveal ${s.category.toUpperCase()} span`
-                          : `Reveal blocked — ${recordClass} clearance required`
-                    }
-                    aria-label={
-                      projectionMode
-                        ? `Redacted ${s.category} span`
-                        : canRevealPII
-                          ? `Reveal ${s.category} span`
-                          : `Masked ${s.category} span (insufficient clearance)`
-                    }
-                    onClick={() => {
-                      if (projectionMode || !canRevealPII) return;
-                      setRevealed((prev) => {
-                        const next = new Set(prev);
-                        next.add(s.idx);
-                        return next;
-                      });
-                    }}
-                    onKeyDown={(e) => {
-                      if (projectionMode || !canRevealPII) return;
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setRevealed((prev) => {
-                          const next = new Set(prev);
-                          next.add(s.idx);
-                          return next;
-                        });
-                      }
-                    }}
-                    className={clsx(
-                      "mx-px inline-block select-none align-baseline rounded-sm",
-                      canRevealPII && !projectionMode && "cursor-pointer",
-                    )}
-                    style={{
-                      background: "#0a0a0a",
-                      color: "#0a0a0a",
-                      minWidth: blockWidth,
-                      borderBottom: `2px solid ${flagColor}`,
-                      lineHeight: 1.1,
-                    }}
-                  >
-                    {"█".repeat(Math.max(2, s.text.length))}
-                  </span>
-                );
-              }
-              const revealedSpan = (
-                <span
-                  key={i}
-                  className="rounded-sm px-0.5"
-                  style={{
-                    background: `color-mix(in oklab, ${flagColor} 28%, transparent)`,
-                    color: flagColor,
-                  }}
-                  title={
-                    isPii
-                      ? `Revealed ${s.category.toUpperCase()} span — click again to re-mask`
-                      : undefined
-                  }
-                  onClick={
-                    isPii
-                      ? () => {
-                          setRevealed((prev) => {
-                            const next = new Set(prev);
-                            next.delete(s.idx);
-                            return next;
-                          });
-                        }
-                      : undefined
-                  }
-                  role={isPii ? "button" : undefined}
-                  tabIndex={isPii ? 0 : -1}
-                >
-                  {s.text}
-                </span>
-              );
-              return revealedSpan;
-            })}
+            {showOriginal && canShowOriginal
+              ? originalSegments.map((s, i) => {
+                  if (!s.category) return <span key={i}>{s.text}</span>;
+                  const flagColor = FLAG_COLOR[s.category] || "#fff";
+                  return (
+                    <span
+                      key={i}
+                      className="rounded-sm px-0.5"
+                      style={{
+                        background: `color-mix(in oklab, ${flagColor} 28%, transparent)`,
+                        color: flagColor,
+                      }}
+                      title={`${s.category.toUpperCase()} span — toggle "Show original" off to re-redact`}
+                    >
+                      {s.text}
+                    </span>
+                  );
+                })
+              : redactedSegments.length === 0
+                ? <span>{remark}</span>
+                : redactedSegments.map((s, i) =>
+                    s.redactedAs ? (
+                      <span
+                        key={i}
+                        className="mx-[1px] rounded-sm px-1 font-mono text-[10px] font-semibold uppercase tracking-wider"
+                        style={{
+                          background: `color-mix(in oklab, ${
+                            FLAG_COLOR[s.category || "pii"] ||
+                            "var(--color-warning)"
+                          } 18%, var(--color-bg))`,
+                          color:
+                            FLAG_COLOR[s.category || "pii"] ||
+                            "var(--color-warning)",
+                          border: `1px solid color-mix(in oklab, ${
+                            FLAG_COLOR[s.category || "pii"] ||
+                            "var(--color-warning)"
+                          } 50%, transparent)`,
+                        }}
+                      >
+                        {s.redactedAs}
+                      </span>
+                    ) : (
+                      <span key={i}>{s.text}</span>
+                    ),
+                  )}
           </div>
         </section>
 
