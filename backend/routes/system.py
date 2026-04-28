@@ -1091,9 +1091,19 @@ async def scenario_blood_feed(
 # Whitelist of pref keys writable from the client. Keeps the surface small
 # and prevents the route from becoming a generic per-user kv smuggle path.
 # Every prefs route MUST go through `_ensure_pref_key_allowed`.
-_ALLOWED_PREF_KEYS: set[str] = {"onboarding.intro.seen_v2"}
+_ALLOWED_PREF_KEYS: set[str] = {
+    "onboarding.intro.seen_v2",
+    "topbar.visible_chips.v1",
+}
 
 _ONBOARDING_INTRO_KEY = "onboarding.intro.seen_v2"
+_TOPBAR_CHIPS_KEY = "topbar.visible_chips.v1"
+
+# The four chips an operator can pin/hide in the TopBar right group.
+# Kept in sync with the frontend `VisibleChipKey` union — the backend
+# is the canonical filter, so adding a new toggleable chip means
+# adding it here too. Anything else in a payload is rejected.
+_TOPBAR_CHIP_KEYS: set[str] = {"notifications", "system", "compactClock", "jointCop"}
 
 
 def _require_dodid(request: Request) -> str:
@@ -1129,6 +1139,59 @@ async def set_onboarding_intro_pref(request: Request, payload: dict = Body(defau
     seen = bool(payload.get("seen"))
     set_user_pref(dodid, _ONBOARDING_INTRO_KEY, "1" if seen else "0")
     return {"ok": True, "seen": seen}
+
+
+def _default_topbar_chips() -> dict[str, bool]:
+    """Default visibility — every chip is pinned for a fresh identity.
+    Operators can hide individual chips from the IdentityPill menu."""
+    return {k: True for k in _TOPBAR_CHIP_KEYS}
+
+
+def _coerce_topbar_chips(raw: object) -> dict[str, bool]:
+    """Accept any partial dict from the client and project it onto the
+    canonical 4-chip schema. Unknown keys are dropped silently; missing
+    keys default to True; non-bool values are coerced. This keeps the
+    endpoint forward-compatible with older clients posting a subset."""
+    out = _default_topbar_chips()
+    if isinstance(raw, dict):
+        for k in _TOPBAR_CHIP_KEYS:
+            if k in raw:
+                out[k] = bool(raw[k])
+    return out
+
+
+@router.get("/prefs/topbar-chips")
+async def get_topbar_chips_pref(request: Request):
+    """Return the current identity's TopBar chip visibility preferences.
+
+    Default response (unset) pins every chip — matches the legacy
+    one-canonical-layout behaviour from Task #184. The frontend uses
+    this on sign-in to hydrate the same per-DODID layout across
+    devices, with localStorage as the same-tab cache."""
+    dodid = _require_dodid(request)
+    _ensure_pref_key_allowed(_TOPBAR_CHIPS_KEY)
+    raw = get_user_pref(dodid, _TOPBAR_CHIPS_KEY)
+    if not raw:
+        return {"chips": _default_topbar_chips()}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        parsed = {}
+    return {"chips": _coerce_topbar_chips(parsed)}
+
+
+@router.post("/prefs/topbar-chips")
+async def set_topbar_chips_pref(request: Request, payload: dict = Body(default={})):
+    """Persist this identity's TopBar chip visibility preferences.
+
+    Body: {chips: {notifications: bool, system: bool, compactClock: bool, jointCop: bool}}
+    Partial bodies are accepted (missing keys default to visible). Unknown
+    keys are dropped — the whitelist is the canonical schema. Idempotent."""
+    dodid = _require_dodid(request)
+    _ensure_pref_key_allowed(_TOPBAR_CHIPS_KEY)
+    chips = _coerce_topbar_chips(payload.get("chips"))
+    set_user_pref(dodid, _TOPBAR_CHIPS_KEY, json.dumps(chips))
+    return {"ok": True, "chips": chips}
 
 
 # ---------------------------------------------------------------------------

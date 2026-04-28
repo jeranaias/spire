@@ -16,6 +16,24 @@ export type ToastTone = "ok" | "info" | "warn" | "error";
 // where tap targets and breathing room matter more than info per square inch.
 export type Density = "dense" | "sparse";
 
+// Per-operator TopBar chip pinning (Task #193). The TopBar declutter
+// (Task #184) settled on one canonical chip layout in the right group;
+// this lets each operator pick which of those four chips they want
+// pinned to the bar versus tucked into the IdentityPill menu. The
+// canonical schema is a Record across the four toggleable chips —
+// adding a new toggleable chip means adding a key here AND on the
+// backend (`_TOPBAR_CHIP_KEYS`). Persisted per-DODID in localStorage,
+// mirrored to /api/system/prefs/topbar-chips so a fresh device for the
+// same Marine inherits the same layout.
+export type VisibleChipKey = "notifications" | "system" | "compactClock" | "jointCop";
+export type VisibleChipsPrefs = Record<VisibleChipKey, boolean>;
+export const DEFAULT_VISIBLE_CHIPS: VisibleChipsPrefs = {
+  notifications: true,
+  system: true,
+  compactClock: true,
+  jointCop: true,
+};
+
 // CAC/PIV identity payload. Matches `backend/auth.MOCK_USERS` shape — the
 // load-bearing contract every Wave 1 lane reads. Additions only, no
 // renames: once a downstream lane pins against a field name it stays.
@@ -203,6 +221,13 @@ export interface SpireState {
   // Track-G3 — density toggle. Persisted per role in localStorage.
   density: Density;
 
+  // Task #193 — per-DODID TopBar chip visibility. Hydrated from
+  // localStorage on signIn (same-tab cache) and from the backend
+  // mirror /api/system/prefs/topbar-chips when the auth gate flushes
+  // the new identity through. Defaults to all-pinned when no record
+  // exists for this DODID.
+  visibleChips: VisibleChipsPrefs;
+
   // MDM 2026 stage-pivot. When `stageMode` is true the chrome collapses
   // to the four hero use-case tiles for the 8-min stage demo. Activated
   // via `?stage=1` URL param (hydrated in main.tsx) and persisted to
@@ -256,6 +281,8 @@ export interface SpireState {
   removeCannibPendingRetry: (id: string) => void;
   clearCannibPendingRetries: () => void;
   setDensity: (d: Density) => void;
+  setVisibleChip: (key: VisibleChipKey, visible: boolean) => void;
+  setVisibleChips: (chips: VisibleChipsPrefs) => void;
   bumpDraftsRefresh: () => void;
   openDraftsPopover: () => void;
   setStageMode: (b: boolean) => void;
@@ -319,6 +346,44 @@ export const VIEW_SCOPE: Record<string, Role[]> = {
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+// Per-DODID localStorage for the operator's TopBar chip-pinning
+// choices. Density is single-global because the type-scale flip on
+// role swap read as visual instability; chip pinning is the opposite —
+// each operator wants the same chip layout to follow them across
+// sessions on the same workstation, so we key by DODID.
+const VISIBLE_CHIPS_KEY_PREFIX = "spire.visibleChips:";
+function visibleChipsKey(dodid: string): string {
+  return `${VISIBLE_CHIPS_KEY_PREFIX}${dodid}`;
+}
+function loadVisibleChips(dodid: string | null | undefined): VisibleChipsPrefs {
+  if (!dodid || typeof window === "undefined") return { ...DEFAULT_VISIBLE_CHIPS };
+  try {
+    const raw = window.localStorage.getItem(visibleChipsKey(dodid));
+    if (!raw) return { ...DEFAULT_VISIBLE_CHIPS };
+    const parsed = JSON.parse(raw) as Partial<VisibleChipsPrefs>;
+    if (!parsed || typeof parsed !== "object") return { ...DEFAULT_VISIBLE_CHIPS };
+    // Project onto the canonical schema; unknown keys ignored, missing
+    // keys default to visible. Keeps us forward-compatible if a future
+    // build adds a fifth toggleable chip.
+    return {
+      notifications: typeof parsed.notifications === "boolean" ? parsed.notifications : true,
+      system: typeof parsed.system === "boolean" ? parsed.system : true,
+      compactClock: typeof parsed.compactClock === "boolean" ? parsed.compactClock : true,
+      jointCop: typeof parsed.jointCop === "boolean" ? parsed.jointCop : true,
+    };
+  } catch {
+    return { ...DEFAULT_VISIBLE_CHIPS };
+  }
+}
+function saveVisibleChips(dodid: string | null | undefined, chips: VisibleChipsPrefs): void {
+  if (!dodid || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(visibleChipsKey(dodid), JSON.stringify(chips));
+  } catch {
+    /* tolerant */
+  }
 }
 
 // Density localStorage — single global key. Was per-role keyed, but the
@@ -544,10 +609,20 @@ export const useSpireStore = create<SpireState>((set) => ({
   draftsPopoverOpenTick: 0,
   toasts: [],
   density: typeof window !== "undefined" ? loadDensity() : "dense",
+  visibleChips: loadVisibleChips(INITIAL_USER?.dodid),
   stageMode: typeof window !== "undefined" ? loadStageMode() : false,
   signIn: (user) => {
     saveUser(user);
-    set({ currentUser: user, role: user.role });
+    // Hydrate the chip-pin layout from the new identity's localStorage
+    // record before the TopBar re-renders for the new role. Backend
+    // mirror is fetched separately (see TopBar's hydration effect) so
+    // a fresh device for the same Marine still picks up the canonical
+    // record after one round-trip.
+    set({
+      currentUser: user,
+      role: user.role,
+      visibleChips: loadVisibleChips(user.dodid),
+    });
   },
   signOut: () => {
     saveUser(null);
@@ -651,6 +726,17 @@ export const useSpireStore = create<SpireState>((set) => ({
     saveDensity(density);
     set({ density });
   },
+  setVisibleChip: (key, visible) =>
+    set((s) => {
+      const next = { ...s.visibleChips, [key]: visible };
+      saveVisibleChips(s.currentUser?.dodid, next);
+      return { visibleChips: next };
+    }),
+  setVisibleChips: (chips) =>
+    set((s) => {
+      saveVisibleChips(s.currentUser?.dodid, chips);
+      return { visibleChips: { ...chips } };
+    }),
   bumpDraftsRefresh: () => set((s) => ({ draftsRefreshTick: s.draftsRefreshTick + 1 })),
   openDraftsPopover: () => set((s) => ({ draftsPopoverOpenTick: s.draftsPopoverOpenTick + 1 })),
   setStageMode: (stageMode) => {

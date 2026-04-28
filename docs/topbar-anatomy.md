@@ -37,8 +37,38 @@ note records how they collapse into a stable spine that survives
   cleared role) + `IdentityChips` (≤ 4 sibling certs) +
   `IdentityPill` (the menu).
 - **IdentityPill menu** holds Operator settings (Air-gap, Density,
-  Comms posture summary), Presenter shortcuts, and Sign out. This is
-  where the chips that used to crowd the right group now live.
+  Comms posture summary, **Visible chips**), Presenter shortcuts, and
+  Sign out. This is where the chips that used to crowd the right
+  group now live.
+
+## Per-operator chip pinning (Task #193)
+
+The four chips on the right of the spine — `Notifications`, `System`,
+`CompactMissionClock`, and `JointCOP` — are toggleable per identity.
+The IdentityPill menu's "Visible chips" section lists each chip with a
+`Pinned`/`Hidden` switch and (when hidden) an inline `Open` button so
+the underlying functionality is never lost: alerts deep-link to
+BASTION, the system status drawer's drill-in lands on
+`/integrations`, the mission clock dispatches the
+`spire:open-mission-clock` event, and JointCOP opens the partner
+viewer in a new tab.
+
+Preferences persist per DODID:
+
+- **localStorage** (same-tab cache): `spire.visibleChips:<DODID>`
+  stores a JSON `{notifications, system, compactClock, jointCop}`
+  record. Hydrated synchronously on `signIn`, written on every
+  toggle.
+- **Backend mirror**: `GET`/`POST /api/system/prefs/topbar-chips`
+  (DODID-scoped via the signed session cookie). The TopBar fires the
+  `GET` once after the operator signs in and projects the response
+  onto the canonical schema; toggling fires the `POST` best-effort.
+
+`CommsControl` is **not** toggleable — comms posture is safety-
+critical and the Marine should never have to hunt through a menu to
+read the current posture. Stage mode (`?stage=1`) ignores the per-
+identity layout and renders the canonical 4-chip spine so audience-
+visible chrome stays predictable.
 
 ## Breakpoint diagrams
 

@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
-import { ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role, type User } from "../state/store";
+import {
+  ROLE_LABELS,
+  useSpireStore,
+  VIEW_SCOPE,
+  type Density,
+  type Role,
+  type User,
+  type VisibleChipKey,
+  type VisibleChipsPrefs,
+} from "../state/store";
 import { api, type AuthUser } from "../api";
 import { formatApiError } from "../api-retry";
 import { useScenarioPlayer } from "../state/scenarioPlayer";
@@ -49,6 +58,42 @@ export function TopBar() {
   // SystemStatusChip and (for the stage backstop) the standalone
   // AlertBadge below, but we still need to read them for the destructure.
   const { role, alertCount, currentUser, stageMode } = useSpireStore();
+  const visibleChips = useSpireStore((s) => s.visibleChips);
+  const setVisibleChips = useSpireStore((s) => s.setVisibleChips);
+
+  // Task #193 — hydrate the chip-pin layout from the backend mirror
+  // when the operator signs in. localStorage is the same-tab cache; if
+  // the same Marine signs in on a fresh device we want their layout
+  // to follow them. Quiet-fail (network down / 401 in flight) — the
+  // localStorage default is safe and the operator can re-toggle.
+  useEffect(() => {
+    const dodid = currentUser?.dodid;
+    if (!dodid || stageMode) return;
+    let cancelled = false;
+    api.system
+      .getTopbarChips()
+      .then((r) => {
+        if (cancelled) return;
+        const incoming = r?.chips ?? {};
+        // Project onto the canonical schema; missing keys default to
+        // visible. Mirrors the backend coercion so a stale client and
+        // a fresh server agree on the shape.
+        const next: VisibleChipsPrefs = {
+          notifications:
+            typeof incoming.notifications === "boolean" ? incoming.notifications : true,
+          system: typeof incoming.system === "boolean" ? incoming.system : true,
+          compactClock: typeof incoming.compactClock === "boolean" ? incoming.compactClock : true,
+          jointCop: typeof incoming.jointCop === "boolean" ? incoming.jointCop : true,
+        };
+        setVisibleChips(next);
+      })
+      .catch(() => {
+        /* tolerant — localStorage default is the fallback */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.dodid, stageMode, setVisibleChips]);
 
   return (
     // Walkthrough audit (#36 from the in-app feedback drawer): the
@@ -197,18 +242,31 @@ export function TopBar() {
           {/* CompactMissionClock for the cramped 1024–1279 (md/lg) range.
            * The full centred MissionClock renders at xl+. At sm the
            * compact chip is hidden — the System chip dropdown's
-           * "Mission timeline" row is the fallback access path. */}
-          <span className="hidden md:inline-flex xl:hidden">
-            <MissionClock compact />
-          </span>
+           * "Mission timeline" row is the fallback access path.
+           *
+           * Task #193 — operator can hide this chip per DODID. The full
+           * MissionClock (xl+) and the System chip's Mission timeline
+           * row remain reachable, so the function is never lost.
+           * Honored only in operator mode; stage mode keeps the
+           * canonical spine intact. */}
+          {(stageMode || visibleChips.compactClock) && (
+            <span className="hidden md:inline-flex xl:hidden">
+              <MissionClock compact />
+            </span>
+          )}
           {/* SystemStatusChip is part of the stable spine — present in
            * both operator and stage modes so the sync/gcss/mode/timeline
            * dropdown is always one click away (and at sm it's the only
-           * way to reach the mission timeline). */}
-          <SystemStatusChip />
+           * way to reach the mission timeline).
+           *
+           * Task #193 — operator may hide it; the IdentityPill menu's
+           * "Hidden chips" section restores access to the System
+           * dropdown via a passthrough row. Stage mode ignores the
+           * pref to keep the canonical spine. */}
+          {(stageMode || visibleChips.system) && <SystemStatusChip />}
           <CommsControl />
-          {!stageMode && <PushToJointButton role={role} />}
-          {!stageMode && <NotificationsChip />}
+          {!stageMode && visibleChips.jointCop && <PushToJointButton role={role} />}
+          {!stageMode && visibleChips.notifications && <NotificationsChip />}
           {/* StageCluster is stage-only — the operator chrome stays
            * decluttered (System + Notif + Comms + Identity). Operator
            * access to Reset (g4) and Failsafe (when scenario loaded)
@@ -907,6 +965,165 @@ function PushToJointButton({ role }: { role: Role }) {
 
 
 /**
+ * VisibleChipsRows — Task #193. Renders one row per toggleable chip in
+ * the TopBar right group, with a Pin/Hide control on the right. When a
+ * chip is hidden, an inline "Open" button appears so the underlying
+ * functionality (alerts dropdown, system status drawer, mission
+ * timeline, JointCOP partner viewer) stays one click away from the
+ * IdentityPill menu — that's the "functionality is never lost"
+ * guarantee in the spec.
+ *
+ * The JointCOP row is suppressed for roles that wouldn't see the chip
+ * in the bar anyway (only security_manager / mef_commander /
+ * data_custodian can release a SECRET//REL bundle to the partner
+ * viewer); offering the toggle to other roles would just tease an
+ * affordance their role can't fire.
+ */
+type ToastPush = (t: { tone: "ok" | "info" | "warn" | "error"; text: string; ttlMs?: number }) => string;
+function VisibleChipsRows({
+  visibleChips,
+  onToggle,
+  jointCopAllowed,
+  nav,
+  pushToast,
+}: {
+  visibleChips: VisibleChipsPrefs;
+  onToggle: (key: VisibleChipKey, next: boolean) => void;
+  jointCopAllowed: boolean;
+  nav: ReturnType<typeof useNavigate>;
+  pushToast: ToastPush;
+}) {
+  // Where the "Open" affordance should land for each hidden chip.
+  // Notifications: the alerts column lives on BASTION; the drafts tab
+  // lives on PULSE Risk Board. Roles that can't see drafts (everyone
+  // except the planner triad) still get the alerts deep-link, since
+  // the alerts segment is the chip's universally-visible surface.
+  function openNotifications() {
+    nav("/bastion");
+    pushToast({ tone: "info", text: "Opened BASTION alerts column.", ttlMs: 2500 });
+  }
+  function openSystem() {
+    // The SystemStatusChip's drawer body is mostly the GCSS-MC
+    // freshness card — /integrations is the canonical fallback page
+    // when the chip itself is hidden. Security manager has /admin too,
+    // but /integrations is the closest 1:1 with the chip's drawer.
+    nav("/integrations");
+    pushToast({ tone: "info", text: "Opened integrations · GCSS-MC freshness.", ttlMs: 2500 });
+  }
+  function openMissionClock() {
+    // The full MissionClock listens for this event and opens itself
+    // (xl+ only). At sm/md/lg the SystemStatusChip is the alternate
+    // path — we still dispatch so the xl listener can react.
+    window.dispatchEvent(new CustomEvent("spire:open-mission-clock"));
+  }
+  function openJointCop() {
+    const url = new URL(window.location.href);
+    url.hash = "#/joint/preview";
+    window.open(url.toString(), "_blank", "noopener,noreferrer");
+  }
+
+  type ChipRow = {
+    key: VisibleChipKey;
+    label: string;
+    blurb: string;
+    onOpen: () => void;
+    show: boolean;
+  };
+  const rows: ChipRow[] = [
+    {
+      key: "notifications",
+      label: "Notifications",
+      blurb: "Drafts queue + active alerts.",
+      onOpen: openNotifications,
+      show: true,
+    },
+    {
+      key: "system",
+      label: "System",
+      blurb: "Sync · GCSS · backend mode summary.",
+      onOpen: openSystem,
+      show: true,
+    },
+    {
+      key: "compactClock",
+      label: "Mission clock",
+      blurb: "Compact mission timeline (md/lg).",
+      onOpen: openMissionClock,
+      show: true,
+    },
+    {
+      key: "jointCop",
+      label: "Joint COP",
+      blurb: "Push to OMS/UCI partner viewer.",
+      onOpen: openJointCop,
+      show: jointCopAllowed,
+    },
+  ];
+
+  // Suppress the section entirely if the role can't pin any chips
+  // (defensive — every current role can pin at least three).
+  const visibleRows = rows.filter((r) => r.show);
+  if (visibleRows.length === 0) return null;
+
+  return (
+    <div className="border-t border-[var(--color-border)] py-1" data-testid="identity-visible-chips">
+      <div className="px-4 pt-1 pb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+        Visible chips
+      </div>
+      {visibleRows.map((r) => {
+        const visible = visibleChips[r.key];
+        return (
+          <div
+            key={r.key}
+            className="flex items-center justify-between gap-3 px-4 py-1.5"
+            data-testid={`identity-chip-row-${r.key}`}
+          >
+            <div className="flex min-w-0 flex-col">
+              <span className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+                {r.label}
+              </span>
+              <span className="font-mono text-[10px] tracking-wider text-[var(--color-text-muted)]">
+                {r.blurb}
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {!visible && (
+                <button
+                  type="button"
+                  onClick={r.onOpen}
+                  data-testid={`identity-chip-open-${r.key}`}
+                  className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+                  aria-label={`Open ${r.label} (chip is hidden from the top bar)`}
+                  title={`Open ${r.label}`}
+                >
+                  Open
+                </button>
+              )}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={visible}
+                aria-label={`${visible ? "Hide" : "Pin"} ${r.label} chip in the top bar`}
+                onClick={() => onToggle(r.key, !visible)}
+                data-testid={`identity-chip-toggle-${r.key}`}
+                className={clsx(
+                  "shrink-0 rounded-sm border px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition-colors",
+                  visible
+                    ? "border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] text-[var(--color-primary)]"
+                    : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]",
+                )}
+              >
+                {visible ? "Pinned" : "Hidden"}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * OperatorSettingsSection — embedded inside IdentityPill's dropdown.
  *
  * Holds the three controls that used to be standalone chips in the right
@@ -930,6 +1147,31 @@ function OperatorSettingsSection({ role }: { role: Role }) {
   const density = useSpireStore((s) => s.density);
   const setDensity = useSpireStore((s) => s.setDensity);
   const ddilMode = useSpireStore((s) => s.ddilMode);
+  // Task #193 — per-DODID chip-pin layout. Toggling here updates the
+  // store (which writes localStorage) and posts to the backend mirror
+  // so the same Marine on a fresh device picks up the same layout.
+  const visibleChips = useSpireStore((s) => s.visibleChips);
+  const setVisibleChip = useSpireStore((s) => s.setVisibleChip);
+  // JointCOP only renders for cleared roles, so its toggle is gated to
+  // the same set — surfacing a "pin JointCOP" toggle for a maintenance
+  // chief would be a teaser, not a control.
+  const jointCopAllowed =
+    role === "security_manager" || role === "mef_commander" || role === "data_custodian";
+  function toggleChip(key: VisibleChipKey, next: boolean) {
+    setVisibleChip(key, next);
+    // Best-effort mirror — the localStorage write already happened so
+    // a network blip just means the cross-device sync lags by one
+    // toggle. Quiet-fail toast keeps the menu uncluttered.
+    api.system
+      .setTopbarChips({ ...visibleChips, [key]: next })
+      .catch(() => {
+        pushToast({
+          tone: "warn",
+          text: "Chip pref saved locally — backend mirror will retry on next change.",
+          ttlMs: 3500,
+        });
+      });
+  }
   const [airGapConfirm, setAirGapConfirm] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
   // Demo controls — preserves the operator-mode access to Reset (g4)
@@ -1083,6 +1325,19 @@ function OperatorSettingsSection({ role }: { role: Role }) {
           {ddilMode}
         </span>
       </div>
+
+      {/* Task #193 — Visible chips. The four toggleable chips that
+       * survive the TopBar declutter (Task #184) — each operator picks
+       * which ones stay pinned to the bar. Hidden chips remain
+       * reachable through the inline "Open" affordance so the
+       * underlying functionality is never lost. */}
+      <VisibleChipsRows
+        visibleChips={visibleChips}
+        onToggle={toggleChip}
+        jointCopAllowed={jointCopAllowed}
+        nav={nav}
+        pushToast={pushToast}
+      />
 
       {(showResetRow || showFailsafeRow) && (
         <div

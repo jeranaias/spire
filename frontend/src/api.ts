@@ -441,6 +441,17 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ seen }),
       }, false),
+    // Per-identity TopBar chip visibility (Task #193). DODID-scoped via
+    // the signed session cookie. The client treats this as a mirror —
+    // localStorage is the same-tab cache, this endpoint is the
+    // cross-device source of truth.
+    getTopbarChips: () =>
+      jsonFetch<{ chips: Record<string, boolean> }>("/system/prefs/topbar-chips", undefined, false),
+    setTopbarChips: (chips: Record<string, boolean>) =>
+      jsonFetch<{ ok: boolean; chips: Record<string, boolean> }>("/system/prefs/topbar-chips", {
+        method: "POST",
+        body: JSON.stringify({ chips }),
+      }, false),
     // Wave-1 lane #27 — GCSS-MC reference adapter freshness ping.
     // Backed by /api/integrations/gcss-mc/last-sync. Polled by the topbar
     // pill; intentionally mock + deterministic across polls.
