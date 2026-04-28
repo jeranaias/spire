@@ -170,6 +170,31 @@ CREATE TABLE IF NOT EXISTS user_prefs (
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (dodid, pref_key)
 );
+
+-- Risk Board "Draft Action" submissions. Persisting these turned the
+-- Draft button from a toast-only no-op into a real artifact a judge
+-- can drill into ("where did that go?" → here, plus an audit_log row).
+-- status is held|dismissed; the demo doesn't ship a full approval
+-- workflow, so the badge surfaces every held draft until an operator
+-- dismisses it.
+CREATE TABLE IF NOT EXISTS pulse_drafts (
+    draft_id    TEXT PRIMARY KEY,
+    asset_id    TEXT NOT NULL,
+    unit_name   TEXT,
+    kind        TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    description TEXT,
+    cost_usd    REAL,
+    mc_delta_pct REAL,
+    time_to_effect_hours REAL,
+    artifact_json TEXT,
+    actor       TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'held',
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pulse_drafts_status ON pulse_drafts(status);
+CREATE INDEX IF NOT EXISTS idx_pulse_drafts_created ON pulse_drafts(created_at);
 """
 
 
@@ -591,6 +616,121 @@ def feedback_summary() -> dict:
         total = c.execute("SELECT COUNT(*) AS n FROM pulse_feedback").fetchone()["n"]
         correct = c.execute("SELECT COUNT(*) AS n FROM pulse_feedback WHERE correct = 1").fetchone()["n"]
     return {"total": total, "correct": correct, "correct_rate": (correct / total) if total else 0.0}
+
+
+def record_pulse_draft(
+    *,
+    asset_id: str,
+    kind: str,
+    title: str,
+    actor: str,
+    unit_name: Optional[str] = None,
+    description: Optional[str] = None,
+    cost_usd: Optional[float] = None,
+    mc_delta_pct: Optional[float] = None,
+    time_to_effect_hours: Optional[float] = None,
+    artifact: Optional[dict] = None,
+) -> dict:
+    """Persist a Risk Board "Draft Action" so it survives a refresh and
+    shows up in the TopBar drafts badge. Also writes an audit_log row so
+    the chain has the artifact (subject_id is the draft_id, payload
+    captures the action specifics)."""
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    # draft_id pattern matches PROP-/expedite-style ids elsewhere in PULSE.
+    rand_hex = hashlib.sha256(f"{asset_id}{kind}{ts}{actor}".encode()).hexdigest()[:6].upper()
+    draft_id = f"DRAFT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{rand_hex}"
+    artifact_json = json.dumps(artifact or {}, sort_keys=True, default=str)
+    with conn() as c:
+        c.execute(
+            "INSERT INTO pulse_drafts(draft_id, asset_id, unit_name, kind, title, "
+            "description, cost_usd, mc_delta_pct, time_to_effect_hours, artifact_json, "
+            "actor, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                draft_id, asset_id, unit_name or "", kind, title,
+                description or "", cost_usd, mc_delta_pct, time_to_effect_hours,
+                artifact_json, actor, "held", ts,
+            ),
+        )
+    log(
+        "pulse_draft_action",
+        actor=actor,
+        subject_id=draft_id,
+        payload={
+            "asset_id": asset_id,
+            "unit_name": unit_name or "",
+            "kind": kind,
+            "title": title,
+            "description": description or "",
+            "cost_usd": cost_usd,
+            "mc_delta_pct": mc_delta_pct,
+            "time_to_effect_hours": time_to_effect_hours,
+            "artifact": artifact or {},
+            "status": "held",
+        },
+    )
+    return {
+        "draft_id": draft_id,
+        "asset_id": asset_id,
+        "unit_name": unit_name or "",
+        "kind": kind,
+        "title": title,
+        "description": description or "",
+        "cost_usd": cost_usd,
+        "mc_delta_pct": mc_delta_pct,
+        "time_to_effect_hours": time_to_effect_hours,
+        "artifact": artifact or {},
+        "actor": actor,
+        "status": "held",
+        "created_at": ts,
+    }
+
+
+def list_pulse_drafts(*, status: str = "held", limit: int = 50) -> list[dict]:
+    """Return drafts ordered newest-first. Default scope is held drafts so
+    the TopBar badge only counts the active queue."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT draft_id, asset_id, unit_name, kind, title, description, "
+            "cost_usd, mc_delta_pct, time_to_effect_hours, artifact_json, "
+            "actor, status, created_at FROM pulse_drafts "
+            "WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["artifact"] = json.loads(d.pop("artifact_json") or "{}")
+        except Exception:  # noqa: BLE001
+            d["artifact"] = {}
+        out.append(d)
+    return out
+
+
+def dismiss_pulse_draft(draft_id: str, *, actor: str) -> Optional[dict]:
+    """Mark a draft as dismissed and audit-log the dismissal. Returns the
+    updated row or None if the draft wasn't found / already dismissed."""
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    with conn() as c:
+        row = c.execute(
+            "SELECT draft_id, asset_id, kind, status FROM pulse_drafts WHERE draft_id = ?",
+            (draft_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["status"] != "held":
+            return dict(row)
+        c.execute(
+            "UPDATE pulse_drafts SET status = 'dismissed' WHERE draft_id = ?",
+            (draft_id,),
+        )
+    log(
+        "pulse_draft_dismiss",
+        actor=actor,
+        subject_id=draft_id,
+        payload={"asset_id": row["asset_id"], "kind": row["kind"], "ts": ts},
+    )
+    return {**dict(row), "status": "dismissed"}
 
 
 def store_uploaded_batch(batch_id: str, source: str, record_count: int, schema: dict, raw: bytes) -> None:

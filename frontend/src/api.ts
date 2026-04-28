@@ -425,6 +425,32 @@ export const api = {
       return jsonFetch<PredictFailuresResponse>(`/pulse/predict-failures?${sp}`);
     },
     modelCard: () => jsonFetch<ModelCard>("/pulse/model-card"),
+    // Draft Action persistence — Risk Board CTA writes through here so the
+    // click survives a refresh and shows up in the TopBar drafts badge.
+    draftAction: (body: {
+      asset_id: string;
+      kind: string;
+      title: string;
+      unit_name?: string;
+      description?: string;
+      cost_usd?: number | null;
+      mc_delta_pct?: number | null;
+      time_to_effect_hours?: number | null;
+      artifact?: Record<string, unknown> | null;
+    }) =>
+      jsonFetch<{ ok: boolean; draft: PulseDraft }>("/pulse/draft-action", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    drafts: (status: "held" | "dismissed" = "held") =>
+      jsonFetch<{ drafts: PulseDraft[]; count: number; status: string }>(
+        `/pulse/drafts?status=${status}`,
+      ),
+    dismissDraft: (draftId: string) =>
+      jsonFetch<{ ok: boolean; draft_id: string; status: string }>(
+        `/pulse/drafts/${encodeURIComponent(draftId)}/dismiss`,
+        { method: "POST" },
+      ),
   },
   sentry: {
     demoBatch: (limit = 500) => jsonFetch<SentryBatch>(`/sentry/demo-batch?limit=${limit}`),
@@ -1243,6 +1269,22 @@ export interface RecommendActionsAsset {
 export interface RecommendActionsResponse {
   assets: RecommendActionsAsset[];
   as_of: string;
+}
+
+export interface PulseDraft {
+  draft_id: string;
+  asset_id: string;
+  unit_name: string;
+  kind: string;
+  title: string;
+  description: string;
+  cost_usd: number | null;
+  mc_delta_pct: number | null;
+  time_to_effect_hours: number | null;
+  artifact: Record<string, unknown>;
+  actor: string;
+  status: "held" | "dismissed";
+  created_at: string;
 }
 
 export interface ModelCardBaseline {

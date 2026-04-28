@@ -351,8 +351,11 @@ function DraftActionModal({
   onClose: () => void;
 }) {
   const pushToast = useSpireStore((s) => s.pushToast);
+  const bumpDrafts = useSpireStore((s) => s.bumpDraftsRefresh);
   const [data, setData] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [draftingKey, setDraftingKey] = useState<string | null>(null);
+  const [draftedKeys, setDraftedKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api.pulse.recommendActions({ asset_id: asset.asset_id, top: 1 })
@@ -362,6 +365,44 @@ function DraftActionModal({
       })
       .catch((e) => setError(formatApiError(e)));
   }, [asset.asset_id]);
+
+  async function draftAction(act: any, key: string) {
+    if (draftingKey || draftedKeys.has(key)) return;
+    setDraftingKey(key);
+    try {
+      const r = await api.pulse.draftAction({
+        asset_id: asset.asset_id,
+        kind: act.kind,
+        title: act.title,
+        unit_name: asset.unit_name,
+        description: act.description,
+        cost_usd: act.cost_usd ?? null,
+        mc_delta_pct: act.mc_delta_pct ?? null,
+        time_to_effect_hours: act.time_to_effect_hours ?? null,
+        artifact: (act.artifact as Record<string, unknown>) ?? null,
+      });
+      setDraftedKeys((prev) => {
+        const n = new Set(prev);
+        n.add(key);
+        return n;
+      });
+      bumpDrafts();
+      pushToast({
+        tone: "ok",
+        // Walkthrough audit: the prior toast claimed "awaiting approval"
+        // when no approval queue existed. Honest copy now: the draft is
+        // persisted (audit row + DB) and surfaces in the topbar Drafts
+        // badge until an operator dismisses it. A full multi-step
+        // approval workflow ships post-MDM.
+        text: `${(act.kind || "").toUpperCase()} drafted for ${asset.asset_id} · held in Drafts (${r.draft.draft_id})`,
+        ttlMs: 5000,
+      });
+    } catch (e) {
+      pushToast({ tone: "error", text: `Draft failed: ${formatApiError(e)}` });
+    } finally {
+      setDraftingKey(null);
+    }
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -411,42 +452,52 @@ function DraftActionModal({
         )}
         {data && data.actions?.length > 0 && (
           <div className="flex flex-col gap-2">
-            {data.actions.map((act: any, i: number) => (
-              <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-                <div className="flex items-center justify-between">
-                  <div className="font-mono text-sm font-semibold uppercase text-[var(--color-text)] tracking-widest">
-                    {act.kind?.toUpperCase()}
+            {data.actions.map((act: any, i: number) => {
+              const key = `${act.kind}:${act.title}:${i}`;
+              const drafted = draftedKeys.has(key);
+              const drafting = draftingKey === key;
+              return (
+                <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="font-mono text-sm font-semibold uppercase text-[var(--color-text)] tracking-widest">
+                      {act.kind?.toUpperCase()}
+                    </div>
+                    <div className="font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide">
+                      {/* mc_delta_pct is 0..1; render as percentage points. */}
+                      +{((act.mc_delta_pct ?? 0) * 100).toFixed(0)}% MC · ${act.cost_usd?.toLocaleString("en-US")} · {act.time_to_effect_hours}h
+                    </div>
                   </div>
-                  <div className="font-mono text-xs tabular-nums text-[var(--color-text-muted)] tracking-wide">
-                    {/* mc_delta_pct is 0..1; render as percentage points. */}
-                    +{((act.mc_delta_pct ?? 0) * 100).toFixed(0)}% MC · ${act.cost_usd?.toLocaleString("en-US")} · {act.time_to_effect_hours}h
+                  <div className="mt-1 font-mono text-sm text-[var(--color-text)] tracking-wide">
+                    {act.title}
+                  </div>
+                  <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
+                    {act.description}
+                  </div>
+                  <div className="mt-2 flex items-center justify-end">
+                    <Button
+                      onClick={() => draftAction(act, key)}
+                      disabled={drafted || drafting || !!draftingKey}
+                      pending={drafting}
+                      variant={drafted ? "secondary" : "primary"}
+                      size="sm"
+                      title={drafted
+                        ? "Draft persisted — open the Drafts badge in the top bar"
+                        : "Persist this draft to the audit chain (no auto-approval)"}
+                    >
+                      {drafted ? "✓ Held in Drafts" : "Draft this"}
+                    </Button>
                   </div>
                 </div>
-                <div className="mt-1 font-mono text-sm text-[var(--color-text)] tracking-wide">
-                  {act.title}
-                </div>
-                <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
-                  {act.description}
-                </div>
-                <div className="mt-2 flex items-center justify-end">
-                  <Button
-                    onClick={() => {
-                      pushToast({
-                        tone: "ok",
-                        text: `${act.kind?.toUpperCase()} drafted for ${asset.asset_id} · awaiting approval`,
-                      });
-                      onClose();
-                    }}
-                    variant="primary"
-                    size="sm"
-                  >
-                    Draft this
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
+        {/* Honest framing: drafts persist + audit but no approval workflow ships
+         * with MDM. The TopBar badge is where the operator finds them next. */}
+        <div className="mt-3 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
+          Drafts are held with an audit row · review via the Drafts badge in the top bar.
+          Full approval workflow ships post-MDM.
+        </div>
         <div className="mt-3 flex items-center justify-end">
           <Button onClick={onClose} variant="secondary" size="sm">
             Close

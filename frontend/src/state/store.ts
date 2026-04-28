@@ -143,6 +143,13 @@ export interface SpireState {
   // stale" per the W1 brief).
   ddilLastCacheHit: { key: string; cachedAt: number; servedAt: number } | null;
 
+  // PULSE Risk Board "Draft Action" queue refresh nonce. The TopBar
+  // drafts badge polls /pulse/drafts on an interval, but the operator
+  // expects the count to bump immediately after they hit Draft this in
+  // the modal. Bumping this counter triggers an extra fetch in the
+  // badge's effect — cheaper than wiring a custom event bus.
+  draftsRefreshTick: number;
+
   // Toast queue.
   toasts: Toast[];
 
@@ -182,6 +189,7 @@ export interface SpireState {
   setDdilLastSyncAt: (n: number | null) => void;
   setDdilDrillActive: (b: boolean) => void;
   setDensity: (d: Density) => void;
+  bumpDraftsRefresh: () => void;
   pushToast: (t: Omit<Toast, "id">) => string;
   dismissToast: (id: string) => void;
 }
@@ -325,6 +333,7 @@ export const useSpireStore = create<SpireState>((set) => ({
   ddilLastSyncAt: null,
   ddilDrillActive: false,
   ddilLastCacheHit: null,
+  draftsRefreshTick: 0,
   toasts: [],
   density: typeof window !== "undefined" ? loadDensity() : "dense",
   signIn: (user) => {
@@ -389,6 +398,7 @@ export const useSpireStore = create<SpireState>((set) => ({
     saveDensity(density);
     set({ density });
   },
+  bumpDraftsRefresh: () => set((s) => ({ draftsRefreshTick: s.draftsRefreshTick + 1 })),
   pushToast: (t) => {
     const id = uid();
     set((s) => ({ toasts: [...s.toasts, { ...t, id }] }));
