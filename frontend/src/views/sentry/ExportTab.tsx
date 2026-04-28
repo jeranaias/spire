@@ -190,12 +190,17 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     }, 500);
   }
 
-  // The bundle classification is auto-inherited from the source records
-  // server-side. Until the operator runs an export we don't know what the
-  // bundle will mark; default to SECRET because canonical batches always
-  // contain at least one SECRET-tier record (the redaction report itself
-  // surfaces them). This is the gate the FE primitive renders against —
-  // the backend re-checks on every /export and /download call.
+  // Single-artifact path of the `<ClassifiedExport>` API: the bundle is
+  // assembled, redacted, and stamped *server-side*. The FE never enumerates
+  // the source records, so there is nothing to row-stamp from here — the
+  // server's `result.classification` is the authoritative roll-up and we
+  // pass it via `classification`. Pre-export we don't yet know the level;
+  // default to SECRET because canonical batches always contain at least one
+  // SECRET-tier record (the redaction report itself surfaces them). This is
+  // the gate the FE primitive renders against — the backend re-checks on
+  // every /export and /download call. (The `rows={…}` form of the primitive
+  // exists for surfaces like Audit · SOC View that DO assemble bundles
+  // client-side; see components/classification/README.md for the rule.)
   const expectedBundleClass = result?.classification ?? "SECRET";
 
   return (

@@ -33,3 +33,5 @@ export {
   MaskedSpan,
 } from "./InspectorRedaction";
 export type { PiiRedactionController, MaskedSpanProps } from "./InspectorRedaction";
+export { computeBundleClassification } from "./bundleClassification";
+export type { BundleRow, BundleClassification } from "./bundleClassification";

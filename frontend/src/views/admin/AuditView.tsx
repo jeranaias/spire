@@ -33,15 +33,13 @@ import { Button, ErrorState, LoadingState, EmptyState, IconButton } from "../../
 import { ClassifiedExport } from "../../components/classification/ClassifiedExport";
 import { DemoSurfaceMarker } from "../../components/classification";
 import { useClearance } from "../../components/classification/useClearance";
+import { computeBundleClassification } from "../../components/classification/bundleClassification";
 import { AdminTabs } from "../AdminView";
 import { DdilFreshnessBanner, FreshnessHeader } from "../../components/Freshness";
 import {
   CLASS_ORDER,
-  CLASS_RANK,
   classificationColors,
   classificationLabel,
-  normalizeClassification,
-  type Classification,
 } from "../../components/classification/levels";
 
 type TimeWindow = "any" | "15m" | "1h" | "24h" | "7d" | "custom";
@@ -85,14 +83,11 @@ function fmtUtc(iso: string): string {
 }
 
 /**
- * Compute the bundle classification (= max row classification) plus a
- * one-line provenance note: "stamped SECRET because 4 of 24 rows are SECRET".
- *
- * Rows with no classification field collapse to UNCLASSIFIED (matches
- * `normalizeClassification`'s permissive fallback). The result drives both
- * the visible export-stamp and the spillage gate; we deliberately reject
- * the operator's filter chip as an input — the stamp must reflect the
- * *contents* of the bundle, not the operator's intent (Task #37).
+ * The bundle-classification helper used to live inline here; it now lives
+ * in `components/classification/bundleClassification.ts` so every export
+ * call site can reuse the same "max(row.classification) + provenance"
+ * rule rather than copy/pasting it (and re-introducing the Task #37
+ * "operator-chip-stamps-the-bundle" spillage hatch).
  *
  * Manual verification (curl walk-through, Security Manager session):
  *
@@ -118,31 +113,6 @@ function fmtUtc(iso: string): string {
  *   #    pinned to TOP_SECRET because the 500-row export window is the
  *   #    same regardless of which page the operator is viewing.
  */
-function computeBundleClassification(rows: AuditEntry[]): {
-  level: Classification;
-  counts: Partial<Record<Classification, number>>;
-  provenance: string;
-} {
-  const counts: Partial<Record<Classification, number>> = {};
-  let maxRank = 0;
-  let maxLevel: Classification = "UNCLASSIFIED";
-  for (const r of rows) {
-    const lvl = normalizeClassification(r.classification);
-    counts[lvl] = (counts[lvl] ?? 0) + 1;
-    const rk = CLASS_RANK[lvl];
-    if (rk > maxRank) {
-      maxRank = rk;
-      maxLevel = lvl;
-    }
-  }
-  const total = rows.length;
-  const atLevel = counts[maxLevel] ?? 0;
-  const provenance =
-    total === 0
-      ? `stamped ${classificationLabel(maxLevel)} (empty bundle — defaulted to UNCLASSIFIED)`
-      : `stamped ${classificationLabel(maxLevel)} because ${atLevel} of ${total} row${total === 1 ? "" : "s"} ${atLevel === 1 ? "is" : "are"} ${classificationLabel(maxLevel)}`;
-  return { level: maxLevel, counts, provenance };
-}
 
 export function AuditView() {
   const role = useSpireStore((s) => s.role);
@@ -395,13 +365,19 @@ export function AuditView() {
   // could flip from TS_SCI → UNCLASSIFIED based on which slice they
   // happened to scroll to. Refreshing whenever the filter changes keeps
   // the gate in lock-step with what `onExport` will actually fetch.
-  const [exportBundle, setExportBundle] = useState<ReturnType<typeof computeBundleClassification> | null>(null);
+  //
+  // We store the rows themselves (rather than a pre-computed bundle) so
+  // the `<ClassifiedExport rows={…}>` primitive owns the auto-stamping —
+  // that keeps the "stamp from contents" rule in one place and removes
+  // the temptation for a future caller to pass the operator's filter chip
+  // here instead.
+  const [exportRows, setExportRows] = useState<AuditEntry[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setExportBundle(null);
+    setExportRows(null);
     api.system.auditQuery(exportSetParams)
-      .then((r) => { if (!cancelled) setExportBundle(computeBundleClassification(r.rows)); })
+      .then((r) => { if (!cancelled) setExportRows(r.rows); })
       .catch(() => { /* gate stays disabled until the next filter change retries */ });
     return () => { cancelled = true; };
   }, [exportSetParams]);
@@ -474,7 +450,7 @@ export function AuditView() {
     URL.revokeObjectURL(url);
     // Refresh the visible gate to match what we just exported (the wide
     // fetch may have grown since the last filter-change effect fired).
-    setExportBundle(bundle);
+    setExportRows(wide.rows);
   }, [data, queryParams, exportSetParams, can, clearance, pushToast]);
 
   if (error && !data) {
@@ -592,22 +568,26 @@ export function AuditView() {
               >
                 {data.role_only_count} role-only in view
               </button>
+              {/* Task #89 — row-driven export. ClassifiedExport stamps
+                  the bundle classification from max(row.classification)
+                  internally; the hint below mirrors that calculation
+                  for the analyst. */}
               <ClassifiedExport
-                classification={exportBundle?.level ?? "UNCLASSIFIED"}
+                rows={exportRows ?? []}
                 action="audit.export.json"
                 label="Export filtered set"
                 pendingLabel="Exporting…"
                 onExport={onExport}
-                disabled={exportBundle === null}
+                disabled={exportRows === null}
                 disabledReason={
-                  exportBundle === null
+                  exportRows === null
                     ? "Computing bundle classification from export window…"
                     : undefined
                 }
                 hint={
-                  exportBundle
-                    ? `Up to 500 rows · ${exportBundle.provenance} (recomputed at click)`
-                    : "Computing bundle classification from the 500-row export window…"
+                  exportRows === null
+                    ? "Computing bundle classification from the 500-row export window…"
+                    : `Up to 500 rows · ${computeBundleClassification(exportRows).provenance} (recomputed at click)`
                 }
               />
             </div>

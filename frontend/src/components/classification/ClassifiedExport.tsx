@@ -12,8 +12,16 @@
  *
  * The component refuses to silently fall back to "no badge" — every export
  * carries a visible classification mark whether or not the call succeeds.
+ *
+ * Two ways to declare the bundle's classification:
+ *   - `classification` (single artifact, e.g. one PDF or one server-stamped
+ *     bundle whose level is already rolled up upstream).
+ *   - `rows` (multi-row bundle assembled on the frontend). The primitive
+ *     auto-computes `max(row.classification)` and exposes a provenance
+ *     string in the hint. Pass the actual rows that will be downloaded —
+ *     never the operator's filter chip. See `README.md` for the rule.
  */
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 
 import { useSpireStore } from "../../state/store";
 import { api } from "../../api";
@@ -22,11 +30,14 @@ import {
   normalizeClassification,
   type Classification,
 } from "./levels";
+import {
+  computeBundleClassification,
+  type BundleRow,
+} from "./bundleClassification";
 import { useClearance } from "./useClearance";
 import { ClassificationBadge } from "./ClassificationBadge";
 
-interface Props {
-  classification: Classification | string;
+interface BaseProps {
   caveats?: string[];
   /**
    * Action label written into the audit entry on a block. Helps an
@@ -43,12 +54,36 @@ interface Props {
   disabled?: boolean;
   /** Caller-supplied disabled-tooltip string (independent of clearance gate). */
   disabledReason?: string;
-  /** Optional inline help text displayed under the button (cleared state). */
+  /**
+   * Optional inline help text displayed under the button (cleared state).
+   * When `rows` is supplied and `hint` is omitted, the auto-computed
+   * provenance string ("stamped X because N of M rows are X") is used.
+   */
   hint?: string;
   /** Pass-through to outer button styling. */
   className?: string;
   style?: React.CSSProperties;
 }
+
+interface SingleArtifactProps extends BaseProps {
+  /** Classification for a single-artifact export (e.g. one PDF). */
+  classification: Classification | string;
+  rows?: never;
+}
+
+interface BundleProps extends BaseProps {
+  /**
+   * Rows that will be packaged into the export. Used to auto-compute the
+   * bundle stamp + provenance. The gate level comes from
+   * `max(row.classification)`. Empty / null rows degrade to UNCLASSIFIED;
+   * pair with `disabled` while the row set is loading so the operator does
+   * not see a misleading green badge during the in-flight fetch.
+   */
+  rows: readonly BundleRow[];
+  classification?: never;
+}
+
+type Props = SingleArtifactProps | BundleProps;
 
 const buttonBase: React.CSSProperties = {
   padding: "10px 16px",
@@ -65,26 +100,41 @@ const buttonBase: React.CSSProperties = {
   transition: "background 0.12s ease",
 };
 
-export function ClassifiedExport({
-  classification,
-  caveats,
-  action,
-  onExport,
-  label = "Export",
-  pendingLabel,
-  loading = false,
-  disabled = false,
-  disabledReason,
-  hint,
-  className,
-  style,
-}: Props) {
+export function ClassifiedExport(props: Props) {
+  const {
+    caveats,
+    action,
+    onExport,
+    label = "Export",
+    pendingLabel,
+    loading = false,
+    disabled = false,
+    disabledReason,
+    hint,
+    className,
+    style,
+  } = props;
+
   const { user, clearance, can } = useClearance();
   const pushToast = useSpireStore((s) => s.pushToast);
   const [busy, setBusy] = useState(false);
-  const canonical = normalizeClassification(classification);
+
+  // Resolve the bundle: row-driven path takes precedence when `rows` is
+  // supplied. We keep the helper memoized on the rows reference so a
+  // re-render with the same array does not recompute the scan.
+  const rows = "rows" in props ? props.rows : undefined;
+  const explicitClassification = "classification" in props ? props.classification : undefined;
+  const bundle = useMemo(
+    () => (rows ? computeBundleClassification(rows) : null),
+    [rows],
+  );
+
+  const canonical: Classification = bundle
+    ? bundle.level
+    : normalizeClassification(explicitClassification);
   const cleared = can(canonical);
   const required = classificationLabel(canonical);
+  const effectiveHint = hint ?? bundle?.provenance;
 
   const handleBlocked = useCallback(async () => {
     pushToast({
@@ -99,7 +149,7 @@ export function ClassifiedExport({
         user_clearance: clearance,
         surface: "frontend",
       });
-    } catch (e) {
+    } catch {
       // Swallow — the toast already informed the operator; the backend's
       // own gate will fire its own audit entry on the next attempted call.
     }
@@ -146,8 +196,8 @@ export function ClassifiedExport({
           <ClassificationBadge classification={canonical} caveats={caveats} size="sm" />
           <span>{display}</span>
         </button>
-        {hint && (
-          <span style={{ fontSize: 10, color: "#9aa4b2", letterSpacing: 0.3 }}>{hint}</span>
+        {effectiveHint && (
+          <span style={{ fontSize: 10, color: "#9aa4b2", letterSpacing: 0.3 }}>{effectiveHint}</span>
         )}
       </span>
     );
@@ -174,9 +224,9 @@ export function ClassifiedExport({
           <ClassificationBadge classification={canonical} caveats={caveats} size="sm" />
           <span>{label}</span>
         </button>
-        {(hint || disabledReason) && (
+        {(effectiveHint || disabledReason) && (
           <span style={{ fontSize: 10, color: "#9aa4b2", letterSpacing: 0.3 }}>
-            {disabledReason || hint}
+            {disabledReason || effectiveHint}
           </span>
         )}
       </span>
