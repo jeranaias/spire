@@ -25,7 +25,15 @@ from ..scoping import (
 from ..state import get_dataset, last_day_snapshots
 from .streams import all_streams
 from ..fusion import fuse_alerts
-from ..persistence import AUDIT_KIND_SCOPE_FILTERED, log as audit_log
+from ..persistence import (
+    AUDIT_KIND_SCOPE_FILTERED,
+    clear_all_bastion_alert_states,
+    clear_bastion_alert_state,
+    get_all_bastion_alert_states,
+    get_bastion_alert_state,
+    log as audit_log,
+    set_bastion_alert_state,
+)
 
 router = APIRouter()
 
@@ -412,21 +420,27 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
     out = _compose_raw_alerts(ds)
     out = _scope_alerts(out, allowed)
 
-    # GC-4: run sensor fusion on the post-scoped alert window. Fused threats
-    # are prepended above the raw alerts so an operator sees "the chain"
-    # before the individual events. Same TTL semantics as raw alerts via
-    # the fused_id stability — re-running fusion on the same chain emits
-    # the same id, so poll-based callers don't get dupes.
-    fused = fuse_alerts(out, window_minutes=60)
-    fused_records = [t.to_alert_dict() for t in fused]
-
     # Apply per-alert state (ack / snooze / resolve) so the front-end can
     # render canonical groups + drop resolved rows. Snoozes auto-expire
     # via _is_snoozed; resolves remove the row from the response entirely
     # so the count drops only when the operator says it does.
+    #
+    # Task #105: states come from the SQLite-backed `bastion_alert_state`
+    # table (snapshotted in one query) instead of the process-local
+    # _ALERT_STATE dict — operator decisions now survive a backend
+    # restart. Snooze auto-expiry stays a lazy comparison on read
+    # (`_is_snoozed`) so we don't need a janitor job.
+    #
+    # Code-review correction: state filtering happens BEFORE fusion now
+    # so the `fused_threats` returned by /alerts matches the
+    # `/fused-threats` endpoint after a resolve. Previously /alerts ran
+    # fusion on the unfiltered scoped list, so a resolved readiness
+    # alert could still anchor a fused threat in /alerts while
+    # /fused-threats correctly omitted it — cross-endpoint drift.
+    states = get_all_bastion_alert_states()
     visible: list[dict] = []
     for a in out:
-        st = _ALERT_STATE.get(a["id"])
+        st = states.get(a["id"])
         if st and st.get("status") == "resolved":
             continue
         # Walkthrough audit: a row could be left tagged 'snoozed' indefinitely
@@ -438,6 +452,15 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
         if st:
             a = {**a, "_state": st}
         visible.append(a)
+
+    # GC-4: run sensor fusion on the post-scoped, post-state-filtered
+    # alert window. Fused threats are prepended above the raw alerts so
+    # an operator sees "the chain" before the individual events. Same
+    # TTL semantics as raw alerts via the fused_id stability — re-running
+    # fusion on the same chain emits the same id, so poll-based callers
+    # don't get dupes.
+    fused = fuse_alerts(visible, window_minutes=60)
+    fused_records = [t.to_alert_dict() for t in fused]
 
     # Severity breakdown — exposed so the TopBar badge can show the live
     # tooltip "30 open alerts (HIGH: x, MODERATE: y, INFO: z)" without
@@ -457,14 +480,16 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
 # ---------------------------------------------------------------------------
 # Per-alert state — ack / snooze / resolve
 #
-# In-memory store keyed by alert_id. A real deployment would persist to the
-# audit log; for the demo we keep state for the life of the process so the
-# operator's clicks survive role swaps + remounts. The /alerts response
-# bakes the per-alert state into the payload so the front-end never has to
-# infer it.
+# Task #105: state is durable, backed by the `bastion_alert_state` SQLite
+# table in `backend/persistence.py`. The `_ALERT_STATE` in-memory dict
+# this code used to keep was process-local — a uvicorn restart 2 minutes
+# before the demo would resurrect every alert the security manager had
+# resolved. Helpers (`get_bastion_alert_state`, `set_bastion_alert_state`,
+# etc.) are imported above and live alongside the audit chain so a real
+# deployment can survive container churn without losing operator context.
+# The /alerts response still bakes the per-alert state into the payload
+# so the front-end never has to infer it.
 # ---------------------------------------------------------------------------
-
-_ALERT_STATE: dict[str, dict] = {}
 
 
 def _is_snoozed(state: dict) -> bool:
@@ -512,10 +537,21 @@ def _collect_alert_universe(ds, allowed: Optional[set[str]] = None) -> dict[str,
         universe[aid] = {"id": aid, "unit": a.get("unit"), "source": a.get("source")}
 
     # Fused threats — must mirror /alerts exactly so feed-visible fused
-    # IDs are actionable. /alerts fuses AFTER scoping; do the same here.
+    # IDs are actionable. /alerts fuses AFTER scoping AND after dropping
+    # resolved alerts (Task #105 / code-review correction); do the same
+    # here so a fused id surfaced in the operator's feed is also the one
+    # `alert_action` validates against.
     try:
         scoped = _scope_alerts(composed_unscoped, allowed)
-        for t in fuse_alerts(scoped, window_minutes=60):
+        states = get_all_bastion_alert_states()
+        scoped_active = [
+            a for a in scoped
+            if not (
+                (st := states.get(a["id"]))
+                and st.get("status") == "resolved"
+            )
+        ]
+        for t in fuse_alerts(scoped_active, window_minutes=60):
             d = t.to_alert_dict()
             universe[d["id"]] = {"id": d["id"], "unit": d.get("unit"), "source": "FUSION"}
     except Exception:
@@ -614,26 +650,47 @@ async def alert_action(alert_id: str, action: str, request: Request):
             )
 
     now = datetime.utcnow()
+    now_iso = now.isoformat(timespec="seconds") + "Z"
+    # Task #105: capture the operator on the row so a restart preserves
+    # not just the decision but who made it. `actor_dodid` is empty when
+    # the request lacks a DODID claim (system / unauthenticated paths)
+    # — the audit chain already covers identity, but stamping the state
+    # row makes the security manager's display ("acked by Park, 14:02Z")
+    # work out of the box on a fresh process.
+    actor_dodid = (user or {}).get("dodid") or ""
+    actor_role_for_row = actor_role or ""
     if action == "ack":
-        _ALERT_STATE[alert_id] = {
-            "status": "acknowledged",
-            "at": now.isoformat(timespec="seconds") + "Z",
-        }
+        state = set_bastion_alert_state(
+            alert_id,
+            status="acknowledged",
+            at=now_iso,
+            actor_dodid=actor_dodid,
+            actor_role=actor_role_for_row,
+        )
     elif action == "snooze":
         until = now + timedelta(hours=1)
-        _ALERT_STATE[alert_id] = {
-            "status": "snoozed",
-            "at": now.isoformat(timespec="seconds") + "Z",
-            "snooze_until": until.isoformat(timespec="seconds") + "Z",
-        }
+        state = set_bastion_alert_state(
+            alert_id,
+            status="snoozed",
+            at=now_iso,
+            snooze_until=until.isoformat(timespec="seconds") + "Z",
+            actor_dodid=actor_dodid,
+            actor_role=actor_role_for_row,
+        )
     elif action == "resolve":
-        _ALERT_STATE[alert_id] = {
-            "status": "resolved",
-            "at": now.isoformat(timespec="seconds") + "Z",
-        }
+        state = set_bastion_alert_state(
+            alert_id,
+            status="resolved",
+            at=now_iso,
+            actor_dodid=actor_dodid,
+            actor_role=actor_role_for_row,
+        )
     elif action == "unack":
-        _ALERT_STATE.pop(alert_id, None)
-    return {"ok": True, "alert_id": alert_id, "state": _ALERT_STATE.get(alert_id)}
+        clear_bastion_alert_state(alert_id)
+        state = None
+    else:  # defensive — the validate-action guard at the top should preempt
+        state = get_bastion_alert_state(alert_id)
+    return {"ok": True, "alert_id": alert_id, "state": state}
 
 
 @router.get("/fused-threats")
@@ -675,6 +732,22 @@ async def fused_threats(role: Optional[str] = None):
 
     if allowed is not None:
         out = [a for a in out if a.get("unit") is None or a.get("unit") in allowed]
+
+    # Task #105: drop alerts the operator has already resolved before
+    # running fusion so the standalone `/fused-threats` panel matches
+    # the fused list `/alerts` exposes (which now sources its state
+    # from the durable `bastion_alert_state` table). Without this, a
+    # resolved readiness alert would still anchor a fused threat in
+    # the panel even though the operator just closed it out, and the
+    # behavior would diverge across endpoints after a restart.
+    states = get_all_bastion_alert_states()
+    out = [
+        a for a in out
+        if not (
+            (st := states.get(a["id"]))
+            and st.get("status") == "resolved"
+        )
+    ]
 
     fused = fuse_alerts(out, window_minutes=60)
     return {"fused_threats": [t.to_alert_dict() for t in fused]}
@@ -1205,10 +1278,13 @@ def reset_demo_state() -> dict:
     Called by the system-level `reset-demo` endpoint between Shark Tank
     runs. Safe to call repeatedly (idempotent) — each call returns counts
     of what was cleared.
+
+    Task #105: alert state lives in SQLite now, so the wipe goes through
+    the persistence helper instead of clearing an in-memory dict — same
+    `alert_states_cleared` counter, durable across the reset.
     """
-    cleared_alerts = len(_ALERT_STATE)
+    cleared_alerts = clear_all_bastion_alert_states()
     cleared_sims = len(_ACTIVE_SIMS)
-    _ALERT_STATE.clear()
     _ACTIVE_SIMS.clear()
     return {
         "alert_states_cleared": cleared_alerts,

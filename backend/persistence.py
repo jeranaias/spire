@@ -245,6 +245,24 @@ CREATE TABLE IF NOT EXISTS pulse_drafts (
 
 CREATE INDEX IF NOT EXISTS idx_pulse_drafts_status ON pulse_drafts(status);
 CREATE INDEX IF NOT EXISTS idx_pulse_drafts_created ON pulse_drafts(created_at);
+
+-- Task #105: persist BASTION per-alert ack / snooze / resolve state so the
+-- security manager's decisions survive a backend restart. The previous
+-- in-memory `_ALERT_STATE` dict in routes/bastion.py was process-local —
+-- a uvicorn restart 2 minutes before the demo would resurrect every alert
+-- the operator had just resolved. snooze_until is stored as ISO-8601 UTC
+-- so the same _is_snoozed comparison the route layer does on read still
+-- works after a restart (no per-row TTL job needed; expiry is lazy).
+CREATE TABLE IF NOT EXISTS bastion_alert_state (
+    alert_id        TEXT PRIMARY KEY,
+    status          TEXT NOT NULL,            -- acknowledged | snoozed | resolved
+    at              TEXT NOT NULL,
+    snooze_until    TEXT,
+    actor_dodid     TEXT NOT NULL DEFAULT '',
+    actor_role      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_bastion_alert_state_status ON bastion_alert_state(status);
 """
 
 
@@ -675,6 +693,136 @@ def entries_for_subject(subject_id: str, limit: int = 50) -> list[dict]:
             d["payload"] = {"raw": d.get("payload", "")}
         out.append(d)
     return out
+
+
+# ---------------------------------------------------------------------------
+# BASTION per-alert state (ack / snooze / resolve)
+#
+# Task #105: backed by `bastion_alert_state`. Reads/writes are direct table
+# operations — there is no in-memory cache because the route layer wants to
+# see the freshest state across worker restarts. Snooze auto-expiry is left
+# to the caller (the route's `_is_snoozed` check) so we don't need a
+# scheduled cleanup job; expired snoozes are simply ignored on read and
+# overwritten on the next mutation.
+# ---------------------------------------------------------------------------
+
+def get_bastion_alert_state(alert_id: str) -> Optional[dict]:
+    """Return the persisted state row for `alert_id` or None.
+
+    Shape mirrors the historical in-memory dict so the existing
+    `_is_snoozed` helper and the response payload can consume it
+    unchanged: {status, at, snooze_until?, actor_dodid?, actor_role?}.
+    """
+    with conn() as c:
+        row = c.execute(
+            "SELECT alert_id, status, at, snooze_until, actor_dodid, actor_role "
+            "FROM bastion_alert_state WHERE alert_id = ?",
+            (alert_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return _bastion_state_row_to_dict(row)
+
+
+def get_all_bastion_alert_states() -> dict[str, dict]:
+    """Snapshot every persisted alert state, keyed by alert_id.
+
+    The /alerts handler iterates the visible alert window once and
+    enriches each row with its state — pulling the whole table in a
+    single query avoids N round-trips across what's typically <100 rows.
+    """
+    with conn() as c:
+        rows = c.execute(
+            "SELECT alert_id, status, at, snooze_until, actor_dodid, actor_role "
+            "FROM bastion_alert_state"
+        ).fetchall()
+    out: dict[str, dict] = {}
+    for r in rows:
+        out[r["alert_id"]] = _bastion_state_row_to_dict(r)
+    return out
+
+
+def _bastion_state_row_to_dict(row: sqlite3.Row) -> dict:
+    """Translate a SQLite row into the historic in-memory dict shape.
+
+    `snooze_until` is omitted from the dict when NULL so the existing
+    `_is_snoozed` truthiness check (`if not until: return False`) keeps
+    its current short-circuit. `actor_*` keys are only included when
+    present so non-snooze ack payloads don't grow phantom empty fields.
+    """
+    out: dict = {
+        "status": row["status"],
+        "at": row["at"],
+    }
+    if row["snooze_until"]:
+        out["snooze_until"] = row["snooze_until"]
+    if row["actor_dodid"]:
+        out["actor_dodid"] = row["actor_dodid"]
+    if row["actor_role"]:
+        out["actor_role"] = row["actor_role"]
+    return out
+
+
+def set_bastion_alert_state(
+    alert_id: str,
+    *,
+    status: str,
+    at: str,
+    snooze_until: Optional[str] = None,
+    actor_dodid: str = "",
+    actor_role: str = "",
+) -> dict:
+    """Upsert the state row for `alert_id`. Returns the stored dict.
+
+    Uses ON CONFLICT REPLACE semantics so a re-ack of an already-acked
+    alert just rewrites the row (and refreshes `at`) instead of growing
+    a per-action history table. The audit chain owns the history; this
+    table owns "current state".
+    """
+    with conn() as c:
+        c.execute(
+            "INSERT INTO bastion_alert_state "
+            "(alert_id, status, at, snooze_until, actor_dodid, actor_role) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(alert_id) DO UPDATE SET "
+            "status=excluded.status, at=excluded.at, "
+            "snooze_until=excluded.snooze_until, "
+            "actor_dodid=excluded.actor_dodid, "
+            "actor_role=excluded.actor_role",
+            (alert_id, status, at, snooze_until, actor_dodid, actor_role),
+        )
+    out: dict = {"status": status, "at": at}
+    if snooze_until:
+        out["snooze_until"] = snooze_until
+    if actor_dodid:
+        out["actor_dodid"] = actor_dodid
+    if actor_role:
+        out["actor_role"] = actor_role
+    return out
+
+
+def clear_bastion_alert_state(alert_id: str) -> bool:
+    """Delete the state row for `alert_id` (the unack path).
+
+    Returns True if a row was actually deleted so callers can
+    distinguish "removed an ack" from "no-op on a never-acked alert".
+    """
+    with conn() as c:
+        cur = c.execute(
+            "DELETE FROM bastion_alert_state WHERE alert_id = ?",
+            (alert_id,),
+        )
+        return cur.rowcount > 0
+
+
+def clear_all_bastion_alert_states() -> int:
+    """Wipe the table (used by the demo-reset endpoint). Returns the
+    count of rows that existed before the wipe so the reset response
+    can keep its existing `alert_states_cleared` field."""
+    with conn() as c:
+        n = c.execute("SELECT COUNT(*) AS n FROM bastion_alert_state").fetchone()["n"]
+        c.execute("DELETE FROM bastion_alert_state")
+        return int(n)
 
 
 # ---------------------------------------------------------------------------
