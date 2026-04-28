@@ -67,3 +67,4 @@ walkthrough/
 # the deploy box pulls them once. Trained model weights live elsewhere
 # (see models/README.md and SPIRE_THERMALHAWK_WEIGHTS env var).
 /data/thermal_demo/
+attached_assets/

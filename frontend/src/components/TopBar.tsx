@@ -336,9 +336,11 @@ function IdentityChips({ currentDodid }: { currentDodid: string | null }) {
 
   // Fetch the cert directory once on mount. Quiet-fail (just hide the
   // strip) if it errors — IdentityPill is still available for swaps.
+  // Use `directory()` not `users()` — the strip needs `role` for the
+  // tooltip + label and the trimmed PublicAuthUser shape doesn't have it.
   useEffect(() => {
     let cancelled = false;
-    api.auth.users()
+    api.auth.directory()
       .then((r) => { if (!cancelled) setUsers(r.users); })
       .catch(() => { if (!cancelled) setUsers([]); });
     return () => { cancelled = true; };
