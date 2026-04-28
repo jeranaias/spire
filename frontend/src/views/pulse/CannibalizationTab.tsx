@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type Cannibalization, type StrippableDonor } from "../../api";
 import { formatApiError } from "../../api-retry";
 import { LoadingOverlay } from "./FleetOverviewTab";
-import { useSpireStore } from "../../state/store";
+import { useSpireStore, type CannibPendingRetry } from "../../state/store";
 import { Button, ErrorState, Pressable, fireIdempotent } from "../../components/ui";
 
 type NeedRow = {
@@ -112,12 +112,32 @@ async function postProposeAndClassify(body: {
 
 export function CannibalizationTab() {
   const role = useSpireStore((s) => s.role);
+  const currentUser = useSpireStore((s) => s.currentUser);
   const pushToast = useSpireStore((s) => s.pushToast);
   // Task-42 — subscribe to the DDIL queue so we can flip a queued
   // local match's badge from "Queued" → "Replayed" the moment the
   // CommsControl drain removes its id from the store.
   const ddilQueue = useSpireStore((s) => s.ddilQueue);
   const queuedIds = useMemo(() => new Set(ddilQueue.map((q) => q.id)), [ddilQueue]);
+  // Task #147 — pending-retry rows are mirrored to the zustand store
+  // (and persisted to localStorage) so they survive tab switches and
+  // hard reloads. Filter to the current operator's actor so other
+  // users on a shared workstation don't see (and can't accidentally
+  // re-issue) someone else's pending proposals.
+  const allPendingRetries = useSpireStore((s) => s.cannibPendingRetries);
+  const addCannibPendingRetry = useSpireStore((s) => s.addCannibPendingRetry);
+  const updateCannibPendingRetry = useSpireStore((s) => s.updateCannibPendingRetry);
+  const removeCannibPendingRetry = useSpireStore((s) => s.removeCannibPendingRetry);
+  const pendingRetries = useMemo(
+    () =>
+      allPendingRetries.filter(
+        (r) => !currentUser || r.actor === currentUser.dodid,
+      ),
+    [allPendingRetries, currentUser],
+  );
+  // Track which pending rows have an in-flight retry POST so we can
+  // disable the button (and avoid double-stamping the audit chain).
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
   // Task #41 — security_manager is read-only on this surface; they review
   // the audit chain after the fact, they don't add to it.
   const canPropose = role !== "security_manager";
@@ -171,6 +191,53 @@ export function CannibalizationTab() {
     loadCannibalization();
   }, [role, loadCannibalization]);
 
+  // Task #147 — background reconciliation. Each time the server's
+  // `/pulse/cannibalization` payload refreshes (initial mount, role
+  // change, manual retry success), scan the audit-chain rows for any
+  // that match a persisted pending-retry row by recipient asset / donor
+  // asset / NSN. A match means the original POST actually landed on the
+  // backend (e.g. our 4xx was a stale client view, or the response was
+  // lost on the wire after the audit chain wrote) — clear the stale
+  // pending row so the operator isn't asked to re-propose a match
+  // that's already in the chain.
+  //
+  // We compare against the snapshot in `pendingRetries` taken on this
+  // render to avoid an effect-loop: the effect only runs when `data`
+  // changes, and removeCannibPendingRetry mutates the store but won't
+  // re-trigger this effect on the same `data` reference.
+  useEffect(() => {
+    if (!data) return;
+    const completed = data.completed_matches as MatchRow[];
+    if (completed.length === 0 || pendingRetries.length === 0) return;
+    const reconciled: { id: string; eventId: string }[] = [];
+    for (const e of pendingRetries) {
+      const queuedDate = e.queuedAt.slice(0, 10);
+      const match = completed.find(
+        (m) =>
+          m.recipient.asset_id === e.recipient_asset_id &&
+          m.donor.asset_id === e.donor_asset_id &&
+          m.nsn === e.nsn &&
+          (typeof m.event_date !== "string" || m.event_date >= queuedDate),
+      );
+      if (match) reconciled.push({ id: e.id, eventId: match.event_id });
+    }
+    if (reconciled.length === 0) return;
+    for (const r of reconciled) removeCannibPendingRetry(r.id);
+    pushToast({
+      tone: "ok",
+      text:
+        reconciled.length === 1
+          ? `Reconciled · pending proposal cleared by audit chain (${reconciled[0].eventId}).`
+          : `Reconciled · ${reconciled.length} pending proposals already in the audit chain.`,
+      ttlMs: 5000,
+    });
+    // Intentionally exclude `pendingRetries`, `removeCannibPendingRetry`,
+    // and `pushToast` from deps: the effect is keyed off the server
+    // payload, and including the store-derived values would loop on
+    // every removal that this effect performs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
   // Task #40 -- Strippable donor pool from the backend. The previous
   // derivation built donors from OTHER OPEN NMCS NEEDS sharing the same
   // backordered NSN -- every "donor" was itself a deadlined asset waiting
@@ -204,7 +271,30 @@ export function CannibalizationTab() {
   if (!data) return <LoadingOverlay message="Matching needs with donors …" />;
 
   const allNeeds = data.open_needs as NeedRow[];
-  const matches = [...proposedLocal, ...(data.completed_matches as MatchRow[])];
+  // Task #147 — render persisted pending-retry rows (from the zustand
+  // store, mirrored to localStorage) ahead of any in-session optimistic
+  // rows and the server's audit-chain rows. The persisted rows carry
+  // `commit_status: "pending_retry"` so the existing yellow-row styling
+  // and "pending retry" badge in the matches column light up identically
+  // to a fresh failed commit; the only visual addition is the inline
+  // "Retry" button rendered below the impact summary.
+  const pendingRetryRows: MatchRow[] = pendingRetries.map((r) => ({
+    event_id: r.id,
+    event_date: r.queuedAt.slice(0, 10),
+    scope: r.scope,
+    recipient: { asset_id: r.recipient_asset_id, unit: r.recipient_unit },
+    donor: { asset_id: r.donor_asset_id, unit: r.donor_unit },
+    nsn: r.nsn,
+    nomenclature: r.nomenclature,
+    impact: `Pending retry · ${r.recipient_asset_id} ← ${r.donor_asset_id} (queued ${r.queuedAt.slice(0, 10)}).`,
+    commit_status: "pending_retry",
+    retry_reason: r.retry_reason,
+  }));
+  const matches = [
+    ...pendingRetryRows,
+    ...proposedLocal,
+    ...(data.completed_matches as MatchRow[]),
+  ];
 
   const partClasses = Array.from(new Set(allNeeds.map((n) => n.needed_part.nomenclature.split(",")[0].split(" ").slice(0, 2).join(" ")))).sort();
   const unitsList = Array.from(new Set(allNeeds.map((n) => n.unit))).sort();
@@ -320,7 +410,10 @@ export function CannibalizationTab() {
         // Task #41 — session expired mid-commit. Mark the row
         // pending_retry so it stays on screen for context, then
         // bounce out to /auth via the store's signOut bridge.
-        markRowPendingRetry(optimisticId, "Session expired before commit landed.");
+        // Task #147 — persist via the store so the operator finds
+        // the row still present after re-auth, instead of having it
+        // wiped by the unmount on the auth redirect.
+        persistPendingRetry(optimisticId, need, donor, "Session expired before commit landed.");
         pushToast({
           tone: "warn",
           text: "Session expired · sign in again to recommit the proposal.",
@@ -331,9 +424,10 @@ export function CannibalizationTab() {
         // or transport/abort. Task #41 invariant: keep the row visible
         // and yellow so the operator can't mistake a failed write for
         // an audit-chain entry; surface the underlying detail in the
-        // row's badge AND in a warn toast.
+        // row's badge AND in a warn toast. Task #147 — write through
+        // the store so a tab switch / refresh doesn't drop the row.
         const reason = formatApiError(err);
-        markRowPendingRetry(optimisticId, reason);
+        persistPendingRetry(optimisticId, need, donor, reason);
         pushToast({
           tone: "warn",
           text: `Commit pending retry · ${reason}`,
@@ -348,14 +442,34 @@ export function CannibalizationTab() {
     }
   }
 
-  function markRowPendingRetry(localId: string, reason: string) {
-    setProposedLocal((prev) =>
-      prev.map((m) =>
-        m.event_id === localId
-          ? { ...m, commit_status: "pending_retry", retry_reason: reason }
-          : m,
-      ),
-    );
+  // Task #147 — replaces the prior markRowPendingRetry. Pulls the
+  // optimistic row out of in-session `proposedLocal` (so the matches
+  // column doesn't render it twice once the persisted copy lands) and
+  // pushes a snapshot into the zustand store, which is mirrored to
+  // localStorage. The next mount of this tab — whether triggered by a
+  // tab switch, a hard reload, or a re-auth bounce — re-derives the
+  // row from the store and renders it with a Retry button.
+  function persistPendingRetry(
+    localId: string,
+    need: NeedRow,
+    donor: DonorRow,
+    reason: string,
+  ) {
+    setProposedLocal((prev) => prev.filter((m) => m.event_id !== localId));
+    addCannibPendingRetry({
+      id: localId,
+      recipient_sr: need.sr_number,
+      donor_sr: (donor as { sr_number?: string }).sr_number,
+      donor_asset_id: donor.asset_id,
+      nsn: need.needed_part.nsn,
+      recipient_asset_id: need.asset_id,
+      recipient_unit: need.unit,
+      donor_unit: donor.unit,
+      nomenclature: need.needed_part.nomenclature,
+      scope: need.unit === donor.unit ? "self" : "cross_unit",
+      retry_reason: reason,
+      actor: currentUser?.dodid ?? "unknown",
+    });
   }
   function markRowCommitted(localId: string) {
     setProposedLocal((prev) =>
@@ -363,6 +477,63 @@ export function CannibalizationTab() {
         m.event_id === localId ? { ...m, commit_status: "committed" } : m,
       ),
     );
+  }
+
+  // Task #147 — operator-initiated retry of a persisted pending row.
+  // Re-issues the same propose POST against the backend; on success
+  // the row is dropped from the store and we kick a fresh
+  // /pulse/cannibalization fetch so the new audit-chain entry shows
+  // in the matches column. On a fresh failure the entry stays put
+  // with an updated reason. On 401 we leave the row, refresh the
+  // reason copy, and bounce out to /auth.
+  async function retryPending(entry: CannibPendingRetry) {
+    if (!canPropose) return;
+    if (retryingIds.has(entry.id)) return;
+    setRetryingIds((prev) => {
+      const next = new Set(prev);
+      next.add(entry.id);
+      return next;
+    });
+    try {
+      const result = await postProposeAndClassify({
+        recipient_sr: entry.recipient_sr,
+        donor_sr: entry.donor_sr,
+        donor_asset_id: entry.donor_asset_id,
+        nsn: entry.nsn,
+      });
+      if (result.outcome === "committed") {
+        removeCannibPendingRetry(entry.id);
+        pushToast({
+          tone: "ok",
+          text: `Match committed on retry · ${entry.recipient_asset_id} ← ${entry.donor_asset_id}.`,
+        });
+        // Refresh so the audit-chain row replaces the now-cleared
+        // pending one without waiting on the next mount/poll.
+        loadCannibalization();
+      } else if (result.outcome === "unauthorized") {
+        updateCannibPendingRetry(entry.id, {
+          retry_reason: "Session expired before retry could land.",
+        });
+        pushToast({
+          tone: "warn",
+          text: "Session expired · sign in to retry the proposal.",
+        });
+        useSpireStore.getState().signOut();
+      } else {
+        updateCannibPendingRetry(entry.id, { retry_reason: result.reason });
+        pushToast({
+          tone: "warn",
+          text: `Retry still pending · ${result.reason}`,
+          ttlMs: 5500,
+        });
+      }
+    } finally {
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
+    }
   }
 
   // Walkthrough #45 / Task #40 / Task #41 -- bulk auto-propose top match per need.
@@ -407,15 +578,41 @@ export function CannibalizationTab() {
       let committed = 0;
       let pending = 0;
       let unauthorized = false;
-      const newRows: MatchRow[] = [];
+      const committedRows: MatchRow[] = [];
+      // Task #147 — pending-retry results from a batch are persisted to
+      // the store (and therefore localStorage) instead of stuffed into
+      // `proposedLocal`. Same outcome on screen, but a tab switch or a
+      // re-auth bounce no longer drops the rows the operator still owes
+      // a retry on.
+      const persistPending = (
+        need: NeedRow,
+        donor: DonorRow,
+        localId: string,
+        reason: string,
+      ) => {
+        addCannibPendingRetry({
+          id: localId,
+          recipient_sr: need.sr_number,
+          donor_sr: (donor as { sr_number?: string }).sr_number,
+          donor_asset_id: donor.asset_id,
+          nsn: need.needed_part.nsn,
+          recipient_asset_id: need.asset_id,
+          recipient_unit: need.unit,
+          donor_unit: donor.unit,
+          nomenclature: need.needed_part.nomenclature,
+          scope: need.unit === donor.unit ? "self" : "cross_unit",
+          retry_reason: reason,
+          actor: currentUser?.dodid ?? "unknown",
+        });
+      };
       for (let i = 0; i < autoConfirm.drafts.length; i++) {
         const { need, donor } = autoConfirm.drafts[i];
         const isSelf = need.unit === donor.unit;
         const localId = `CAN-LOCAL-${startedAt}-${i}`;
         const result = await postProposeAndClassify({
           recipient_sr: need.sr_number,
-          donor_sr: (donor as any).sr_number,
-          donor_asset_id: (donor as any).asset_id,
+          donor_sr: (donor as { sr_number?: string }).sr_number,
+          donor_asset_id: donor.asset_id,
           nsn: need.needed_part.nsn,
         });
         const baseRow: MatchRow = {
@@ -429,44 +626,32 @@ export function CannibalizationTab() {
           impact: `Auto-proposed top match · ${need.asset_id} ← ${donor.asset_id}.`,
         };
         if (result.outcome === "committed") {
-          newRows.push({ ...baseRow, commit_status: "committed" });
+          committedRows.push({ ...baseRow, commit_status: "committed" });
           committed++;
         } else if (result.outcome === "unauthorized") {
-          newRows.push({
-            ...baseRow,
-            commit_status: "pending_retry",
-            retry_reason: "Session expired mid-batch.",
-          });
+          persistPending(need, donor, localId, "Session expired mid-batch.");
           pending++;
           unauthorized = true;
-          // Stop iterating: subsequent calls would also 401.
+          // Stop iterating: subsequent calls would also 401. Pre-stage
+          // the remaining drafts as pending so the operator finds them
+          // queued for retry after re-auth.
           for (let j = i + 1; j < autoConfirm.drafts.length; j++) {
             const skipped = autoConfirm.drafts[j];
-            newRows.push({
-              event_id: `CAN-LOCAL-${startedAt}-${j}`,
-              event_date: new Date().toISOString().slice(0, 10),
-              scope: skipped.need.unit === skipped.donor.unit ? "self" : "cross_unit",
-              recipient: { asset_id: skipped.need.asset_id, unit: skipped.need.unit },
-              donor: { asset_id: skipped.donor.asset_id, unit: skipped.donor.unit },
-              nsn: skipped.need.needed_part.nsn,
-              nomenclature: skipped.need.needed_part.nomenclature,
-              impact: `Auto-proposed top match · ${skipped.need.asset_id} ← ${skipped.donor.asset_id}.`,
-              commit_status: "pending_retry",
-              retry_reason: "Session expired before this draft was sent.",
-            });
+            persistPending(
+              skipped.need,
+              skipped.donor,
+              `CAN-LOCAL-${startedAt}-${j}`,
+              "Session expired before this draft was sent.",
+            );
             pending++;
           }
           break;
         } else {
-          newRows.push({
-            ...baseRow,
-            commit_status: "pending_retry",
-            retry_reason: result.reason,
-          });
+          persistPending(need, donor, localId, result.reason);
           pending++;
         }
       }
-      setProposedLocal((prev) => [...newRows, ...prev]);
+      setProposedLocal((prev) => [...committedRows, ...prev]);
       if (unauthorized) {
         pushToast({
           tone: "warn",
@@ -820,6 +1005,33 @@ export function CannibalizationTab() {
                     Not in audit chain · {m.retry_reason}
                   </div>
                 )}
+                {/* Task #147 — Retry affordance for persisted pending rows.
+                    Pending entries from the persistent store carry the same
+                    `event_id` we wrote into the store, so we look them up
+                    by id; in-session optimistic rows that never made it to
+                    the store don't get a button (their commit attempt is
+                    still in flight or the operator is mid-modal). */}
+                {isPending && (() => {
+                  const persisted = pendingRetries.find((p) => p.id === m.event_id);
+                  if (!persisted) return null;
+                  const isRetrying = retryingIds.has(persisted.id);
+                  return (
+                    <div className="mt-2 flex items-center justify-end gap-2">
+                      {canPropose && (
+                        <Button
+                          onClick={() => retryPending(persisted)}
+                          variant="primary"
+                          size="sm"
+                          pending={isRetrying}
+                          disabled={isRetrying}
+                          title="Re-issue this proposal to the audit chain"
+                        >
+                          {isRetrying ? "Retrying" : "Retry"}
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">

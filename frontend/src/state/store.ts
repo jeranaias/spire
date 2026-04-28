@@ -70,6 +70,36 @@ export interface DdilQueuedWrite {
   actor: string;
 }
 
+// Task #147 — pending-retry cannibalization proposals lifted out of
+// `CannibalizationTab` local state so they survive tab switches and
+// hard reloads. Task #41 added the yellow "pending retry" badge on
+// rows whose propose POST was rejected (or whose session expired
+// mid-action), but the only place those rows lived was a React
+// `useState` array — switching to another PULSE tab unmounted the
+// component and the list silently vanished, so the operator never
+// got a second chance to resubmit. Persisting here (with localStorage
+// mirror, like DDIL queue / stage mode) keeps the row in front of
+// the operator until they explicitly retry it or the audit chain
+// reconciles it on a later refresh.
+export interface CannibPendingRetry {
+  id: string;
+  recipient_sr: string;
+  donor_sr?: string;
+  donor_asset_id: string;
+  nsn: string;
+  // Display snapshot — captured at queue time so the row can render
+  // after a hard refresh without re-fetching the original need/donor
+  // (which may by then be off the open-needs list).
+  recipient_asset_id: string;
+  recipient_unit: string;
+  donor_unit: string;
+  nomenclature: string;
+  scope: "self" | "cross_unit";
+  retry_reason: string;
+  queuedAt: string;
+  actor: string;
+}
+
 export interface SpireState {
   // CAC/PIV identity — null until the operator clears the cert-selection
   // splash. Every Wave 1 lane reads from here. `role` mirrors
@@ -143,6 +173,11 @@ export interface SpireState {
   ddilSyncing: boolean;
   ddilLastSyncAt: number | null;
   ddilDrillActive: boolean;
+  // Task #147 — persisted pending-retry cannibalization proposals (yellow
+  // rows on the matches column). Mirrored to localStorage so a tab switch
+  // or hard reload doesn't drop the operator's only handle on a write
+  // that the backend never confirmed.
+  cannibPendingRetries: CannibPendingRetry[];
   // Last cache hit served to a caller while DISCONNECTED. Used by the
   // DDIL freshness badge so the operator can see at a glance how stale
   // the data on screen actually is ("cached from H+xx:xx, n minutes
@@ -202,6 +237,18 @@ export interface SpireState {
   setDdilSyncing: (b: boolean) => void;
   setDdilLastSyncAt: (n: number | null) => void;
   setDdilDrillActive: (b: boolean) => void;
+  // Task #147 — pending-retry cannibalization proposal CRUD. Adding sets
+  // an `id`/`queuedAt` if missing; updating patches a row in place (used
+  // when a retry attempt fails again with a fresh reason); removing is
+  // called both on operator-initiated retry success and on the
+  // background reconciliation pass that finds the matching audit row in
+  // a fresh /pulse/cannibalization payload.
+  addCannibPendingRetry: (
+    entry: Omit<CannibPendingRetry, "queuedAt"> & { queuedAt?: string },
+  ) => CannibPendingRetry;
+  updateCannibPendingRetry: (id: string, patch: Partial<CannibPendingRetry>) => void;
+  removeCannibPendingRetry: (id: string) => void;
+  clearCannibPendingRetries: () => void;
   setDensity: (d: Density) => void;
   bumpDraftsRefresh: () => void;
   setStageMode: (b: boolean) => void;
@@ -311,6 +358,58 @@ function saveStageMode(b: boolean): void {
     else window.localStorage.removeItem(STAGE_KEY);
   } catch {
     /* tolerant */
+  }
+}
+
+// Task #147 — localStorage mirror for the pending-retry cannibalization
+// proposals queue. Stored as a JSON array under a single key. Bound by
+// hand (vs. zustand/middleware/persist) to keep parity with the existing
+// loadDensity / loadStageMode / loadUser pattern in this file and to
+// avoid pulling in another middleware layer for one new slice.
+const CANNIB_PENDING_KEY = "spire.cannibPendingRetries";
+function loadCannibPendingRetries(): CannibPendingRetry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(CANNIB_PENDING_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Tolerate older / partial entries — only keep ones with EVERY field
+    // the renderer (CannibalizationTab) and the retry POST actually read.
+    // The view calls e.g. `queuedAt.slice(...)` and `retry_reason` lands
+    // in the badge copy, so a partially-shaped row would crash on render
+    // rather than degrade gracefully. Drop those at load time.
+    return parsed.filter(
+      (e): e is CannibPendingRetry =>
+        e &&
+        typeof e === "object" &&
+        typeof e.id === "string" &&
+        typeof e.recipient_sr === "string" &&
+        typeof e.donor_asset_id === "string" &&
+        typeof e.nsn === "string" &&
+        typeof e.recipient_asset_id === "string" &&
+        typeof e.recipient_unit === "string" &&
+        typeof e.donor_unit === "string" &&
+        typeof e.nomenclature === "string" &&
+        (e.scope === "self" || e.scope === "cross_unit") &&
+        typeof e.retry_reason === "string" &&
+        typeof e.queuedAt === "string" &&
+        typeof e.actor === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+function saveCannibPendingRetries(rows: CannibPendingRetry[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (rows.length === 0) {
+      window.localStorage.removeItem(CANNIB_PENDING_KEY);
+    } else {
+      window.localStorage.setItem(CANNIB_PENDING_KEY, JSON.stringify(rows));
+    }
+  } catch {
+    /* tolerant — private mode / quota */
   }
 }
 
@@ -431,6 +530,8 @@ export const useSpireStore = create<SpireState>((set) => ({
   ddilSyncing: false,
   ddilLastSyncAt: null,
   ddilDrillActive: false,
+  cannibPendingRetries:
+    typeof window !== "undefined" ? loadCannibPendingRetries() : [],
   ddilLastCacheHit: null,
   draftsRefreshTick: 0,
   toasts: [],
@@ -505,6 +606,39 @@ export const useSpireStore = create<SpireState>((set) => ({
   setDdilSyncing: (ddilSyncing) => set({ ddilSyncing }),
   setDdilLastSyncAt: (ddilLastSyncAt) => set({ ddilLastSyncAt }),
   setDdilDrillActive: (ddilDrillActive) => set({ ddilDrillActive }),
+  addCannibPendingRetry: (entry) => {
+    const queuedAt = entry.queuedAt ?? new Date().toISOString();
+    const stamped: CannibPendingRetry = { ...entry, queuedAt };
+    set((s) => {
+      // Dedupe by id — re-adding the same row (e.g. a retry that re-fails
+      // and we want to refresh the reason) is handled by updateCannibPendingRetry,
+      // but be defensive: if a caller adds twice with the same id, keep the
+      // newest copy.
+      const filtered = s.cannibPendingRetries.filter((r) => r.id !== stamped.id);
+      const next = [...filtered, stamped];
+      saveCannibPendingRetries(next);
+      return { cannibPendingRetries: next };
+    });
+    return stamped;
+  },
+  updateCannibPendingRetry: (id, patch) =>
+    set((s) => {
+      const next = s.cannibPendingRetries.map((r) =>
+        r.id === id ? { ...r, ...patch } : r,
+      );
+      saveCannibPendingRetries(next);
+      return { cannibPendingRetries: next };
+    }),
+  removeCannibPendingRetry: (id) =>
+    set((s) => {
+      const next = s.cannibPendingRetries.filter((r) => r.id !== id);
+      saveCannibPendingRetries(next);
+      return { cannibPendingRetries: next };
+    }),
+  clearCannibPendingRetries: () => {
+    saveCannibPendingRetries([]);
+    set({ cannibPendingRetries: [] });
+  },
   setDensity: (density) => {
     saveDensity(density);
     set({ density });
