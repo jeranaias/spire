@@ -14,6 +14,8 @@ import {
   fireIdempotent,
   pushUndoToast,
 } from "../../components/ui";
+import { useFreshFetch } from "../../hooks/useFreshFetch";
+import { DdilFreshnessBanner, FreshnessHeader } from "../../components/Freshness";
 import {
   CLASS_RANK,
   ClassificationBanner,
@@ -107,44 +109,57 @@ const CLASS_COLOR: Record<string, string> = {
 // same chip text. (Task #150.)
 
 export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
-  const [queue, setQueue] = useState<SentryReviewQueue | null>(null);
   // Records resolved locally via optimistic removal so the view doesn't depend
   // on a refetch. Shape: { sr_number: "approve" | "reject" }.
   const [resolved, setResolved] = useState<Record<string, Action>>({});
   const [selected, setSelected] = useState<{ col: Column; idx: number } | null>(null);
   const [showAggregation, setShowAggregation] = useState(false);
   const [bulkRunning, setBulkRunning] = useState(false);
-  // Surfacing the load failure was missing — backend would 400 on a stale
-  // role param mismatch and the view would sit on "Loading review queue ..."
-  // forever. Tracked separately from `queue` so the retry button has its own
-  // affordance + the loading state is unambiguous.
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
   const role = useSpireStore((s) => s.role) as Role;
   const pushToast = useSpireStore((s) => s.pushToast);
 
+  // Task #136 — cold-load lifecycle (loadedAt + manual refresh +
+  // auto-refresh on DDIL reconnect + retry that re-runs the fetch
+  // instead of `window.location.reload()`) lives in the shared hook
+  // so the queue reads identically to PULSE / Audit / supply-chain.
+  // Re-keying on `${batchId}:${role}` re-runs the cold load on a
+  // batch swap *or* a role swap (the backend's queue scope is
+  // role-shaped — previously a role change after first load left
+  // the queue stale and any in-flight request rejected by the
+  // backend's role-scoping filter).
+  const fetchQueue = useCallback(
+    () => api.sentry.reviewQueue(ctx.batchId as string),
+    [ctx.batchId],
+  );
+  const {
+    data: queue,
+    error: loadError,
+    refreshing,
+    loadedAt,
+    refresh,
+  } = useFreshFetch<SentryReviewQueue>(
+    fetchQueue,
+    ctx.batchId ? `sentry-queue:${ctx.batchId}:${role}` : "",
+    // Code-review follow-up — the hook runs unconditionally above the
+    // empty-state early-return, so without `enabled` we'd fire
+    // `api.sentry.reviewQueue(undefined)` (and its retries) every time
+    // the operator landed on the SENTRY tab without a processed batch.
+    // The empty-state UI a few lines down already handles the
+    // no-batch case; gating the fetch keeps the network and the SOC
+    // log shelf quiet.
+    { enabled: !!ctx.batchId },
+  );
+
+  // The optimistic-resolution buffer is keyed by `sr_number` from the
+  // *current* queue snapshot. When refresh / batch / role flips and a
+  // new queue lands, those local resolutions either no longer apply
+  // (the backend already incorporated them) or refer to a queue the
+  // operator is no longer looking at. Wipe on each new payload so the
+  // counts in the column headers match what the operator is reading.
   useEffect(() => {
-    if (!ctx.batchId) return;
-    let cancelled = false;
-    setQueue(null);
-    setLoadError(null);
-    api.sentry
-      .reviewQueue(ctx.batchId)
-      .then((q) => {
-        if (cancelled) return;
-        setQueue(q);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setLoadError(formatApiError(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-    // Refetch on role swap so the URL/store are always in sync; previously a
-    // role change after first load left the queue stale and any in-flight
-    // request rejected by the backend's role-scoping filter.
-  }, [ctx.batchId, role, retryCount]);
+    setResolved({});
+    setSelected(null);
+  }, [queue]);
 
   const filteredQueue = useMemo(() => {
     if (!queue) return null;
@@ -370,14 +385,19 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
       </div>
     );
   }
-  if (loadError) {
+  if (loadError && !queue) {
     return (
       <div className="flex h-full items-center justify-center p-12">
         <ErrorState
           title="Review queue failed to load"
           description="Backend rejected the queue request. This is usually a stale role scope — switch role and back, or click retry."
           detail={loadError}
-          onRetry={() => setRetryCount((n) => n + 1)}
+          // Task #136 — `refresh()` re-runs the cold-load path
+          // through withRetry so the operator never has to refresh
+          // the whole page (which would also wipe sibling-tab
+          // selections).
+          onRetry={refresh}
+          retrying={refreshing}
         />
       </div>
     );
@@ -435,23 +455,47 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
             ↑↓ nav · A approve · R reject
           </span>
         </div>
-        {queue && queue.aggregation_risks.length > 0 && (
-          <Button
-            onClick={() => setShowAggregation((v) => !v)}
-            variant="warning"
-            size="sm"
-            // Walkthrough #36 — same red glow as the Held column dot so the
-            // warning count reads as urgent even before the operator clicks.
-            // The matrix also renders inline (left rail) so this button only
-            // toggles the prose detail panel and is no longer the only way
-            // to surface the matrix.
-            style={{
-              boxShadow: "0 0 6px color-mix(in oklab, var(--color-danger) 60%, transparent)",
-            }}
-          >
-            {queue.aggregation_risks.length} aggregation risk{queue.aggregation_risks.length === 1 ? "" : "s"}
-          </Button>
-        )}
+        <div className="flex items-center gap-3">
+          {/* Task #136 — Loaded HH:MM:SS · ↻ Refresh affordance.
+              Mirrors the Model Registry / PULSE Risk Board headers
+              so an operator hopping between surfaces reads
+              freshness identically everywhere. */}
+          <FreshnessHeader
+            loadedAt={loadedAt}
+            refreshing={refreshing}
+            onRefresh={refresh}
+            refreshLabel="Refresh review queue"
+            refreshTitle="Pull a fresh review queue now"
+          />
+          {queue && queue.aggregation_risks.length > 0 && (
+            <Button
+              onClick={() => setShowAggregation((v) => !v)}
+              variant="warning"
+              size="sm"
+              // Walkthrough #36 — same red glow as the Held column dot so the
+              // warning count reads as urgent even before the operator clicks.
+              // The matrix also renders inline (left rail) so this button only
+              // toggles the prose detail panel and is no longer the only way
+              // to surface the matrix.
+              style={{
+                boxShadow: "0 0 6px color-mix(in oklab, var(--color-danger) 60%, transparent)",
+              }}
+            >
+              {queue.aggregation_risks.length} aggregation risk{queue.aggregation_risks.length === 1 ? "" : "s"}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Task #136 — Inline DDIL banner. Renders nothing in
+          CONNECTED. When comms are degraded, the queue counts the
+          operator is moments away from acting on may already be
+          stale; the banner names the posture and (when DISCONNECTED)
+          how old the cached fetch is. Sits below the sticky header
+          so it scrolls out of the way once the operator is heads-down
+          on records. */}
+      <div className="px-4 pt-2">
+        <DdilFreshnessBanner loadedAt={loadedAt} className="mb-0" />
       </div>
 
       <div className="flex flex-1 overflow-hidden tracking-wider">

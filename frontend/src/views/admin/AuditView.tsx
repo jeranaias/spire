@@ -17,7 +17,7 @@
  * by joining on the actor field; rows where the actor is a role only get
  * a fallback identity so the column never renders blank.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type AuditEntry,
@@ -33,6 +33,7 @@ import { ClassifiedExport } from "../../components/classification/ClassifiedExpo
 import { DemoSurfaceMarker } from "../../components/classification";
 import { useClearance } from "../../components/classification/useClearance";
 import { AdminTabs } from "../AdminView";
+import { DdilFreshnessBanner, FreshnessHeader } from "../../components/Freshness";
 import {
   CLASS_ORDER,
   CLASS_RANK,
@@ -202,6 +203,18 @@ export function AuditView() {
   const [error, setError]         = useState<string | null>(null);
   const [waking, setWaking]       = useState<boolean>(false);
   const [openRow, setOpenRow]     = useState<AuditEntry | null>(null);
+  // Task #136 — loadedAt + manual refresh affordance to match the
+  // Model Registry / PULSE / SENTRY pages. Tracking a small bump
+  // counter (rather than swapping to useFreshFetch wholesale) keeps
+  // the existing abortable + debounced + polled fetch logic intact;
+  // the counter is just one more dependency on the cold-load
+  // effect and ticks whenever the operator clicks ↻ Refresh or the
+  // ErrorState retry button.
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const [refreshCounter, setRefreshCounter] = useState<number>(0);
+  // `ddilMode` already declared above (alongside the cadence multiplier
+  // for the 12s poll backoff under degraded comms — Task #128). Reuse
+  // it for the reconnect-bump effect below.
 
   const pushToast = useSpireStore((s) => s.pushToast);
   const { clearance, can } = useClearance();
@@ -265,6 +278,15 @@ export function AuditView() {
         setData(r);
         setError(null);
         setWaking(false);
+        // Task #136 — stamp loadedAt on every successful filter / page /
+        // refresh response. The polled background tick (12s) does NOT
+        // bump this — operators read "Loaded HH:MM:SS" as "the last
+        // time *I* (or my retry) pulled fresh data", not "the last
+        // time the polling timer happened to fire". This matches the
+        // Model Registry / PULSE / SENTRY semantics so an operator
+        // hopping between pages doesn't have to remember which surface
+        // counts polls vs explicit pulls.
+        setLoadedAt(Date.now());
       } catch (e) {
         if (cancelled) return;
         // AbortError is the expected outcome of a faster keystroke landing
@@ -280,7 +302,31 @@ export function AuditView() {
       cancelled = true;
       controller.abort();
     };
-  }, [queryParams]);
+    // refreshCounter is part of the dep set so the manual ↻ Refresh and
+    // the ErrorState retry both re-enter this effect.
+  }, [queryParams, refreshCounter]);
+
+  // Task #136 — auto-refresh on DDIL reconnect. When the operator
+  // flips the comms posture back to CONNECTED the audit chain may
+  // have grown server-side during the drill; bumping refreshCounter
+  // re-runs the cold-load path through the existing effect (which
+  // is already abortable + retrying-aware) so we don't fork a
+  // second fetch path. The previous-mode ref stops this firing on
+  // initial mount or every render.
+  const prevDdilModeRef = useRef(ddilMode);
+  useEffect(() => {
+    const prev = prevDdilModeRef.current;
+    prevDdilModeRef.current = ddilMode;
+    if (prev !== "CONNECTED" && ddilMode === "CONNECTED") {
+      setRefreshCounter((n) => n + 1);
+    }
+  }, [ddilMode]);
+
+  const refresh = useCallback(() => {
+    setError(null);
+    setWaking(true);
+    setRefreshCounter((n) => n + 1);
+  }, []);
 
   // Polled refresh (12s) — separate effect so filter re-fetches don't fight
   // the timer. Gated on `document.visibilityState === "visible"` so a
@@ -411,7 +457,12 @@ export function AuditView() {
         title="Audit Query Offline"
         description="Audit chain query endpoint did not respond."
         detail={error}
-        onRetry={() => { setError(null); setWaking(true); window.location.reload(); }}
+        // Task #136 — `refresh()` re-runs the cold-load path
+        // through withRetry so the SOC analyst keeps their filter
+        // chips, search string, page, and selected row instead of
+        // losing them to a window.location.reload().
+        onRetry={refresh}
+        retrying={waking}
       />
     );
   }
@@ -451,73 +502,98 @@ export function AuditView() {
               · {data.storage.encrypted_at_rest ? "AES-256 at rest" : "plaintext (dev)"}
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span
-              className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider"
-              style={{
-                color: data.anomaly_count > 0 ? "var(--color-warning)" : "var(--color-text-muted)",
-                borderColor: data.anomaly_count > 0 ? "var(--color-warning-muted)" : "var(--color-border)",
-                background: data.anomaly_count > 0
-                  ? "color-mix(in oklab, var(--color-warning-muted) 18%, transparent)"
-                  : "transparent",
-              }}
-              title={
-                data.broken_at_id
-                  ? `Chain break detected at id ${data.broken_at_id}`
-                  : "Includes spillage_prevented, downgrade_blocked, and chain-break flags"
-              }
-            >
-              {data.anomaly_count} anomal{data.anomaly_count === 1 ? "y" : "ies"} in view
-            </span>
-            {/* Task #123 — role-only count badge, mirrors the anomaly
-                badge so the SOC analyst can see the size of the
-                "no DODID bound" set at a glance. Clicking toggles the
-                same filter as the chip below. */}
-            <button
-              type="button"
-              onClick={() => setOnlyRoleOnly((v) => !v)}
-              aria-pressed={onlyRoleOnly}
-              className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider transition-colors"
-              style={{
-                color: data.role_only_count > 0 ? "var(--color-warning)" : "var(--color-text-muted)",
-                borderColor: onlyRoleOnly
-                  ? "var(--color-warning)"
-                  : data.role_only_count > 0 ? "var(--color-warning-muted)" : "var(--color-border)",
-                background: onlyRoleOnly
-                  ? "color-mix(in oklab, var(--color-warning) 22%, transparent)"
-                  : data.role_only_count > 0
+          <div className="flex flex-col items-end gap-2">
+            {/* Task #136 — Loaded HH:MM:SS · ↻ Refresh affordance.
+                Mirrors the Model Registry / PULSE / SENTRY headers
+                so an analyst hopping between surfaces reads
+                freshness identically everywhere. The 12s background
+                poll is intentionally NOT counted toward this stamp
+                — it reflects the operator's last *explicit* pull
+                (filter change, page nav, or ↻ click). */}
+            <FreshnessHeader
+              loadedAt={loadedAt}
+              refreshing={waking}
+              onRefresh={refresh}
+              refreshLabel="Refresh audit chain"
+              refreshTitle="Pull a fresh audit chain query now"
+            />
+            <div className="flex items-center gap-3">
+              <span
+                className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider"
+                style={{
+                  color: data.anomaly_count > 0 ? "var(--color-warning)" : "var(--color-text-muted)",
+                  borderColor: data.anomaly_count > 0 ? "var(--color-warning-muted)" : "var(--color-border)",
+                  background: data.anomaly_count > 0
                     ? "color-mix(in oklab, var(--color-warning-muted) 18%, transparent)"
                     : "transparent",
-                cursor: "pointer",
-              }}
-              title={
-                onlyRoleOnly
-                  ? "Showing only role-only rows · click to clear"
-                  : "Rows whose actor is a role with no bound DODID · click to filter"
-              }
-            >
-              {data.role_only_count} role-only in view
-            </button>
-            <ClassifiedExport
-              classification={exportBundle?.level ?? "UNCLASSIFIED"}
-              action="audit.export.json"
-              label="Export filtered set"
-              pendingLabel="Exporting…"
-              onExport={onExport}
-              disabled={exportBundle === null}
-              disabledReason={
-                exportBundle === null
-                  ? "Computing bundle classification from export window…"
-                  : undefined
-              }
-              hint={
-                exportBundle
-                  ? `Up to 500 rows · ${exportBundle.provenance} (recomputed at click)`
-                  : "Computing bundle classification from the 500-row export window…"
-              }
-            />
+                }}
+                title={
+                  data.broken_at_id
+                    ? `Chain break detected at id ${data.broken_at_id}`
+                    : "Includes spillage_prevented, downgrade_blocked, and chain-break flags"
+                }
+              >
+                {data.anomaly_count} anomal{data.anomaly_count === 1 ? "y" : "ies"} in view
+              </span>
+              {/* Task #123 — role-only count badge, mirrors the anomaly
+                  badge so the SOC analyst can see the size of the
+                  "no DODID bound" set at a glance. Clicking toggles the
+                  same filter as the chip below. Sits inside the inner
+                  row so the freshness header stays the topmost line of
+                  the right-hand stack. */}
+              <button
+                type="button"
+                onClick={() => setOnlyRoleOnly((v) => !v)}
+                aria-pressed={onlyRoleOnly}
+                className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider transition-colors"
+                style={{
+                  color: data.role_only_count > 0 ? "var(--color-warning)" : "var(--color-text-muted)",
+                  borderColor: onlyRoleOnly
+                    ? "var(--color-warning)"
+                    : data.role_only_count > 0 ? "var(--color-warning-muted)" : "var(--color-border)",
+                  background: onlyRoleOnly
+                    ? "color-mix(in oklab, var(--color-warning) 22%, transparent)"
+                    : data.role_only_count > 0
+                      ? "color-mix(in oklab, var(--color-warning-muted) 18%, transparent)"
+                      : "transparent",
+                  cursor: "pointer",
+                }}
+                title={
+                  onlyRoleOnly
+                    ? "Showing only role-only rows · click to clear"
+                    : "Rows whose actor is a role with no bound DODID · click to filter"
+                }
+              >
+                {data.role_only_count} role-only in view
+              </button>
+              <ClassifiedExport
+                classification={exportBundle?.level ?? "UNCLASSIFIED"}
+                action="audit.export.json"
+                label="Export filtered set"
+                pendingLabel="Exporting…"
+                onExport={onExport}
+                disabled={exportBundle === null}
+                disabledReason={
+                  exportBundle === null
+                    ? "Computing bundle classification from export window…"
+                    : undefined
+                }
+                hint={
+                  exportBundle
+                    ? `Up to 500 rows · ${exportBundle.provenance} (recomputed at click)`
+                    : "Computing bundle classification from the 500-row export window…"
+                }
+              />
+            </div>
           </div>
         </div>
+        {/* Task #136 — Inline DDIL banner. Renders nothing in
+            CONNECTED. When comms are degraded, an analyst staring
+            at a 12-second-old polled snapshot needs to know the
+            chain may have grown server-side without surfacing here.
+            The banner clears the moment ddilMode flips back to
+            CONNECTED (and the auto-refresh pulls a fresh page). */}
+        <DdilFreshnessBanner loadedAt={loadedAt} className="mt-3 mb-0" />
       </div>
 
       {/* Filters */}

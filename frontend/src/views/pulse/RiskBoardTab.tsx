@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
@@ -11,6 +11,8 @@ import { PredictedFailurePanel } from "../../components/PredictedFailurePanel";
 import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 import { Button, IconButton, Pressable, ErrorState, fireIdempotent } from "../../components/ui";
 import { DatasetBadge } from "../../components/DatasetBadge";
+import { useFreshFetch } from "../../hooks/useFreshFetch";
+import { DdilFreshnessBanner, FreshnessHeader } from "../../components/Freshness";
 
 // Track-G1 — role-shaped default scope. A Maintenance Chief landing on the
 // Risk Board cold should see CLB-6 only (their unit), not the whole MEF.
@@ -51,36 +53,39 @@ export function RiskBoardTab() {
   const usingRoleDefault = !explicitUnit && roleDefault != null;
   const rawUnitFilter = explicitUnit ?? roleDefault;
   const unitFilter = rawUnitFilter === ALL_UNITS_SENTINEL ? null : rawUnitFilter;
-  const [board, setBoard] = useState<RiskBoard | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState(false);
-  // Reload counter — bumping it re-runs the load effect so the
-  // ErrorState retry button can re-enter the cold-load path without a
-  // full page reload (which would also lose unsaved selections in
-  // sibling tabs).
-  const [loadAttempt, setLoadAttempt] = useState(0);
+
+  // Task #136 — fetch lifecycle (loadedAt + manual refresh + auto-
+  // refresh on DDIL reconnect) lives in the shared hook so PULSE,
+  // SENTRY, and audit all read freshness identically. Keying on `role`
+  // re-runs the cold-load path on a role swap (the backend's risk
+  // board scope is role-shaped). The previous loadAttempt counter is
+  // gone — `refresh()` from the hook does the same job for the
+  // ErrorState retry button.
+  const fetchBoard = useCallback(() => api.pulse.riskBoard(30), []);
+  const {
+    data: board,
+    error,
+    refreshing,
+    loadedAt,
+    refresh,
+  } = useFreshFetch<RiskBoard>(fetchBoard, `pulse-risk:${role}`);
+
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<AssetDeepDive | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   // Walkthrough #20 — Draft Action surfaces a modal of recommend_actions.
   const [draftActionFor, setDraftActionFor] = useState<RiskBoardAsset | null>(null);
 
+  // The detail drawer state belongs to the *current* board snapshot.
+  // When the cold-load fires (key change → board nulls then re-loads),
+  // an open drawer would point at an asset_id from the previous role's
+  // payload. Clear it whenever the board flips back to null.
   useEffect(() => {
-    let cancelled = false;
-    setBoard(null);
-    setError(null);
-    setSelected(null);
-    setDetail(null);
-    setRetrying(true);
-    // F6 — wrap the cold load in withRetry so a single transient 5xx /
-    // SATCOM yellow doesn't dead-end the lead UC13 surface. Schedule
-    // matches FleetOverviewTab / BastionView (1s/3s/5s).
-    withRetry(() => api.pulse.riskBoard(30))
-      .then((b) => { if (!cancelled) setBoard(b); })
-      .catch((e) => { if (!cancelled) setError(formatApiError(e)); })
-      .finally(() => { if (!cancelled) setRetrying(false); });
-    return () => { cancelled = true; };
-  }, [role, loadAttempt]);
+    if (board == null) {
+      setSelected(null);
+      setDetail(null);
+    }
+  }, [board]);
 
   // F5/F6 — cached-payload-age warning. When the Risk Board GET was
   // served from the DDIL cache and the cached snapshot is older than
@@ -170,22 +175,30 @@ export function RiskBoardTab() {
     api.pulse
       .assetDeepDive(selected)
       .then(setDetail)
-      .catch((e) => setError(formatApiError(e)))
+      .catch((e) =>
+        // Task #136 — the cold-load error state belongs to the board
+        // fetch (managed by useFreshFetch). A failed deep-dive on a
+        // single asset used to blank the entire Risk Board into the
+        // ErrorState page; now it just toasts so the operator can pick
+        // a different asset without losing context.
+        pushToast({ tone: "error", text: `Asset deep-dive failed: ${formatApiError(e)}` }),
+      )
       .finally(() => setDetailLoading(false));
-  }, [selected]);
+  }, [selected, pushToast]);
 
-  if (error) {
+  if (error && !board) {
     // F6 — chassis-consistent <ErrorState> with a real Retry button.
-    // Bumping loadAttempt re-runs the cold-load path through withRetry
-    // so the operator never has to refresh the whole page.
+    // Task #136 — `refresh()` from useFreshFetch re-runs the cold-load
+    // path through withRetry so the operator never has to refresh the
+    // whole page (which would also wipe sibling-tab selections).
     return (
       <ErrorState
         variant="panel"
         title="Risk board unavailable"
         description="The PULSE risk-board API did not return. Network or backend may be cycling."
         detail={error}
-        onRetry={() => setLoadAttempt((n) => n + 1)}
-        retrying={retrying}
+        onRetry={refresh}
+        retrying={refreshing}
       />
     );
   }
@@ -289,28 +302,50 @@ export function RiskBoardTab() {
                * inside ModelDetailView. */}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Walkthrough #8 — explicit unit dropdown so operators can
-             * scope the board without needing to read tooltips. */}
-            <UnitFilterDropdown
-              board={board}
-              current={unitFilter}
-              onSelect={(u) => setParams(u ? { unit: u } : {})}
-              onClear={clearFilter}
+          <div className="flex flex-col items-end gap-2">
+            {/* Task #136 — Loaded HH:MM:SS · ↻ Refresh affordance.
+             * Mirrors the Model Registry / Detail header so an
+             * operator hopping between PULSE and the supply-chain
+             * page reads freshness the same way on both. */}
+            <FreshnessHeader
+              loadedAt={loadedAt}
+              refreshing={refreshing}
+              onRefresh={refresh}
+              refreshLabel="Refresh risk board"
+              refreshTitle="Pull a fresh risk board snapshot now"
             />
-            {(unitFilter || equipFilter) && (
-              <Button
-                onClick={clearFilter}
-                variant="primary"
-                size="sm"
-                title={usingRoleDefault ? "Default scope from your role. Click to expand to all units." : "Clear filter"}
-              >
-                {usingRoleDefault ? "Role scope: " : "Filter: "}
-                {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {/* Walkthrough #8 — explicit unit dropdown so operators can
+               * scope the board without needing to read tooltips. */}
+              <UnitFilterDropdown
+                board={board}
+                current={unitFilter}
+                onSelect={(u) => setParams(u ? { unit: u } : {})}
+                onClear={clearFilter}
+              />
+              {(unitFilter || equipFilter) && (
+                <Button
+                  onClick={clearFilter}
+                  variant="primary"
+                  size="sm"
+                  title={usingRoleDefault ? "Default scope from your role. Click to expand to all units." : "Clear filter"}
+                >
+                  {usingRoleDefault ? "Role scope: " : "Filter: "}
+                  {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
+                </Button>
+              )}
+            </div>
           </div>
         </div>
+        {/* Task #136 — Inline DDIL banner. Renders nothing in
+         * CONNECTED. Sits *above* the cache-stale notice (which
+         * fires for the more specific "DISCONNECTED + cached >5min"
+         * case the operator needs to read before drafting a TMR).
+         * Both can render together — they answer different
+         * questions: the banner says "this whole view is from a
+         * cached fetch", the inline notice says "and that fetch
+         * is older than the 5-min TMR threshold". */}
+        <DdilFreshnessBanner loadedAt={loadedAt} />
         <div className="flex flex-col gap-2">
           {filteredAssets.map((a, i) => (
             <RiskRow
