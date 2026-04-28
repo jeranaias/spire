@@ -13,16 +13,34 @@
         "id": "JLTV_TRANS_SEAL",
         "component": "transmission",
         "description": "Transmission output seal leak",
-        "defect_code": ["NMAJ", "TRSM"],
+        "defect_code": [
+          "TRAN",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.8,
         "min_miles_before_occurrence": 8000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 16,
         "avg_parts_cost": 2400,
         "parts_needed": [
-          {"nsn": "2520-01-582-4721", "nomenclature": "SEAL, OUTPUT SHAFT", "qty": 1, "cost": 187.50},
-          {"nsn": "2520-01-582-4698", "nomenclature": "GASKET SET, TRANSMISSION", "qty": 1, "cost": 342.00},
-          {"nsn": "9150-01-578-2104", "nomenclature": "LUBRICANT, TRANSMISSION FLUID", "qty": 6, "cost": 28.50}
+          {
+            "nsn": "2520-01-582-4721",
+            "nomenclature": "SEAL, OUTPUT SHAFT",
+            "qty": 1,
+            "cost": 187.5
+          },
+          {
+            "nsn": "2520-01-582-4698",
+            "nomenclature": "GASKET SET, TRANSMISSION",
+            "qty": 1,
+            "cost": 342.0
+          },
+          {
+            "nsn": "9150-01-578-2104",
+            "nomenclature": "LUBRICANT, TRANSMISSION FLUID",
+            "qty": 6,
+            "cost": 28.5
+          }
         ],
         "tm_reference": "TM 9-2320-391-20",
         "classified": false,
@@ -37,15 +55,28 @@
         "id": "JLTV_CTIS",
         "component": "tire",
         "description": "Central Tire Inflation System manifold fault",
-        "defect_code": ["NMAJ", "TIRE"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_miles": 1.2,
         "min_miles_before_occurrence": 3000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 8,
         "avg_parts_cost": 890,
         "parts_needed": [
-          {"nsn": "2530-01-612-8834", "nomenclature": "VALVE, CTIS MANIFOLD", "qty": 1, "cost": 445.00},
-          {"nsn": "2530-01-612-8901", "nomenclature": "HOSE ASSY, CTIS", "qty": 2, "cost": 112.00}
+          {
+            "nsn": "2530-01-612-8834",
+            "nomenclature": "VALVE, CTIS MANIFOLD",
+            "qty": 1,
+            "cost": 445.0
+          },
+          {
+            "nsn": "2530-01-612-8901",
+            "nomenclature": "HOSE ASSY, CTIS",
+            "qty": 2,
+            "cost": 112.0
+          }
         ],
         "tm_reference": "TM 9-2320-391-20",
         "classified": false,
@@ -59,16 +90,34 @@
         "id": "JLTV_TURBO",
         "component": "engine",
         "description": "Turbocharger actuator seizure",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.3,
         "min_miles_before_occurrence": 15000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 24,
         "avg_parts_cost": 6800,
         "parts_needed": [
-          {"nsn": "2815-01-612-4472", "nomenclature": "TURBOCHARGER ASSY", "qty": 1, "cost": 4200.00},
-          {"nsn": "2815-01-612-4398", "nomenclature": "ACTUATOR, TURBO WASTEGATE", "qty": 1, "cost": 1850.00},
-          {"nsn": "5330-01-612-4501", "nomenclature": "GASKET SET, TURBO MOUNT", "qty": 1, "cost": 245.00}
+          {
+            "nsn": "2815-01-612-4472",
+            "nomenclature": "TURBOCHARGER ASSY",
+            "qty": 1,
+            "cost": 4200.0
+          },
+          {
+            "nsn": "2815-01-612-4398",
+            "nomenclature": "ACTUATOR, TURBO WASTEGATE",
+            "qty": 1,
+            "cost": 1850.0
+          },
+          {
+            "nsn": "5330-01-612-4501",
+            "nomenclature": "GASKET SET, TURBO MOUNT",
+            "qty": 1,
+            "cost": 245.0
+          }
         ],
         "tm_reference": "TM 9-2320-391-20",
         "classified": false,
@@ -82,14 +131,22 @@
         "id": "JLTV_ELECTRICAL",
         "component": "electrical",
         "description": "Battery / alternator system fault",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_miles": 1.5,
         "min_miles_before_occurrence": 2000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 4,
         "avg_parts_cost": 680,
         "parts_needed": [
-          {"nsn": "6140-01-612-3847", "nomenclature": "BATTERY, STORAGE", "qty": 2, "cost": 285.00}
+          {
+            "nsn": "6140-01-612-3847",
+            "nomenclature": "BATTERY, STORAGE",
+            "qty": 2,
+            "cost": 285.0
+          }
         ],
         "tm_reference": "TM 9-2320-391-10",
         "classified": false,
@@ -103,15 +160,28 @@
         "id": "JLTV_BRAKE",
         "component": "brake",
         "description": "Brake pad / rotor wear to safety minimum",
-        "defect_code": ["SAFE", "BRAK"],
+        "defect_code": [
+          "FCON",
+          "SAFDL"
+        ],
         "probability_per_1000_miles": 0.6,
         "min_miles_before_occurrence": 10000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 6,
         "avg_parts_cost": 1200,
         "parts_needed": [
-          {"nsn": "2530-01-612-5501", "nomenclature": "PAD SET, BRAKE", "qty": 2, "cost": 340.00},
-          {"nsn": "2530-01-612-5502", "nomenclature": "ROTOR, BRAKE", "qty": 2, "cost": 290.00}
+          {
+            "nsn": "2530-01-612-5501",
+            "nomenclature": "PAD SET, BRAKE",
+            "qty": 2,
+            "cost": 340.0
+          },
+          {
+            "nsn": "2530-01-612-5502",
+            "nomenclature": "ROTOR, BRAKE",
+            "qty": 2,
+            "cost": 290.0
+          }
         ],
         "tm_reference": "TM 9-2320-391-20",
         "classified": false,
@@ -125,15 +195,28 @@
         "id": "JLTV_COOLING",
         "component": "cooling",
         "description": "Coolant pump / thermostat failure",
-        "defect_code": ["NMAJ", "COOL"],
+        "defect_code": [
+          "COOL",
+          "CBB"
+        ],
         "probability_per_1000_miles": 0.5,
         "min_miles_before_occurrence": 6000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 5,
         "avg_parts_cost": 540,
         "parts_needed": [
-          {"nsn": "2930-01-612-6700", "nomenclature": "PUMP, COOLANT", "qty": 1, "cost": 380.00},
-          {"nsn": "4820-01-612-6701", "nomenclature": "THERMOSTAT", "qty": 1, "cost": 65.00}
+          {
+            "nsn": "2930-01-612-6700",
+            "nomenclature": "PUMP, COOLANT",
+            "qty": 1,
+            "cost": 380.0
+          },
+          {
+            "nsn": "4820-01-612-6701",
+            "nomenclature": "THERMOSTAT",
+            "qty": 1,
+            "cost": 65.0
+          }
         ],
         "tm_reference": "TM 9-2320-391-20",
         "classified": false,
@@ -159,15 +242,28 @@
         "id": "MTVR_AIR_BRAKE",
         "component": "brake",
         "description": "Air brake system moisture / valve failure",
-        "defect_code": ["SAFE", "BRAK"],
+        "defect_code": [
+          "FCON",
+          "SAFDL"
+        ],
         "probability_per_1000_miles": 1.0,
         "min_miles_before_occurrence": 5000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 6,
         "avg_parts_cost": 1400,
         "parts_needed": [
-          {"nsn": "2530-01-404-7211", "nomenclature": "VALVE, AIR BRAKE RELAY", "qty": 1, "cost": 410.00},
-          {"nsn": "2530-01-404-7212", "nomenclature": "DRYER, AIR", "qty": 1, "cost": 725.00}
+          {
+            "nsn": "2530-01-404-7211",
+            "nomenclature": "VALVE, AIR BRAKE RELAY",
+            "qty": 1,
+            "cost": 410.0
+          },
+          {
+            "nsn": "2530-01-404-7212",
+            "nomenclature": "DRYER, AIR",
+            "qty": 1,
+            "cost": 725.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20",
         "classified": false,
@@ -181,15 +277,28 @@
         "id": "MTVR_CTIS",
         "component": "tire",
         "description": "CTIS leak down / controller fault",
-        "defect_code": ["NMAJ", "TIRE"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_miles": 1.0,
         "min_miles_before_occurrence": 4000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 7,
         "avg_parts_cost": 650,
         "parts_needed": [
-          {"nsn": "2530-01-404-8201", "nomenclature": "CONTROLLER, CTIS", "qty": 1, "cost": 380.00},
-          {"nsn": "2530-01-404-8202", "nomenclature": "HOSE, CTIS", "qty": 3, "cost": 78.00}
+          {
+            "nsn": "2530-01-404-8201",
+            "nomenclature": "CONTROLLER, CTIS",
+            "qty": 1,
+            "cost": 380.0
+          },
+          {
+            "nsn": "2530-01-404-8202",
+            "nomenclature": "HOSE, CTIS",
+            "qty": 3,
+            "cost": 78.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20",
         "classified": false,
@@ -203,15 +312,28 @@
         "id": "MTVR_STARTER",
         "component": "electrical",
         "description": "Starter motor / solenoid failure",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.7,
         "min_miles_before_occurrence": 12000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 5,
         "avg_parts_cost": 1100,
         "parts_needed": [
-          {"nsn": "2920-01-404-9501", "nomenclature": "STARTER, ENGINE", "qty": 1, "cost": 820.00},
-          {"nsn": "2920-01-404-9502", "nomenclature": "SOLENOID, STARTER", "qty": 1, "cost": 145.00}
+          {
+            "nsn": "2920-01-404-9501",
+            "nomenclature": "STARTER, ENGINE",
+            "qty": 1,
+            "cost": 820.0
+          },
+          {
+            "nsn": "2920-01-404-9502",
+            "nomenclature": "SOLENOID, STARTER",
+            "qty": 1,
+            "cost": 145.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20",
         "classified": false,
@@ -225,15 +347,28 @@
         "id": "MTVR_TRANSFER_CASE",
         "component": "transmission",
         "description": "Transfer case seal / chain wear",
-        "defect_code": ["NMAJ", "TRSM"],
+        "defect_code": [
+          "TRAN",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.4,
         "min_miles_before_occurrence": 20000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 14,
         "avg_parts_cost": 3200,
         "parts_needed": [
-          {"nsn": "2520-01-404-1501", "nomenclature": "SEAL KIT, TRANSFER CASE", "qty": 1, "cost": 420.00},
-          {"nsn": "2520-01-404-1502", "nomenclature": "CHAIN ASSY, TRANSFER CASE", "qty": 1, "cost": 1850.00}
+          {
+            "nsn": "2520-01-404-1501",
+            "nomenclature": "SEAL KIT, TRANSFER CASE",
+            "qty": 1,
+            "cost": 420.0
+          },
+          {
+            "nsn": "2520-01-404-1502",
+            "nomenclature": "CHAIN ASSY, TRANSFER CASE",
+            "qty": 1,
+            "cost": 1850.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20",
         "classified": false,
@@ -247,15 +382,28 @@
         "id": "MTVR_COOLING",
         "component": "cooling",
         "description": "Radiator core / fan clutch failure",
-        "defect_code": ["NMAJ", "COOL"],
+        "defect_code": [
+          "COOL",
+          "CBB"
+        ],
         "probability_per_1000_miles": 0.5,
         "min_miles_before_occurrence": 8000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 8,
         "avg_parts_cost": 1950,
         "parts_needed": [
-          {"nsn": "2930-01-404-1701", "nomenclature": "RADIATOR ASSY", "qty": 1, "cost": 1450.00},
-          {"nsn": "2930-01-404-1702", "nomenclature": "CLUTCH, FAN", "qty": 1, "cost": 340.00}
+          {
+            "nsn": "2930-01-404-1701",
+            "nomenclature": "RADIATOR ASSY",
+            "qty": 1,
+            "cost": 1450.0
+          },
+          {
+            "nsn": "2930-01-404-1702",
+            "nomenclature": "CLUTCH, FAN",
+            "qty": 1,
+            "cost": 340.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20",
         "classified": false,
@@ -269,15 +417,28 @@
         "id": "MTVR_CORROSION",
         "component": "corrosion",
         "description": "Frame / body corrosion exceeding tolerance",
-        "defect_code": ["MINR", "CORR"],
+        "defect_code": [
+          "BODY",
+          "CBB"
+        ],
         "probability_per_1000_miles": 2.0,
         "min_miles_before_occurrence": 30000,
         "condition_impact": "Minor",
         "avg_repair_hours": 24,
         "avg_parts_cost": 650,
         "parts_needed": [
-          {"nsn": "8010-01-404-2001", "nomenclature": "PRIMER, RUST INHIBITOR", "qty": 4, "cost": 48.00},
-          {"nsn": "8010-01-404-2002", "nomenclature": "PAINT, CARC GREEN", "qty": 6, "cost": 72.00}
+          {
+            "nsn": "8010-01-404-2001",
+            "nomenclature": "PRIMER, RUST INHIBITOR",
+            "qty": 4,
+            "cost": 48.0
+          },
+          {
+            "nsn": "8010-01-404-2002",
+            "nomenclature": "PAINT, CARC GREEN",
+            "qty": 6,
+            "cost": 72.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20",
         "classified": false,
@@ -303,15 +464,28 @@
         "id": "MTVRW_WRECKER_HYDRAULIC",
         "component": "hydraulic",
         "description": "Boom / winch hydraulic pressure loss",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_miles": 1.1,
         "min_miles_before_occurrence": 4000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 10,
         "avg_parts_cost": 2900,
         "parts_needed": [
-          {"nsn": "4320-01-405-1101", "nomenclature": "PUMP, HYDRAULIC, WRECKER", "qty": 1, "cost": 2100.00},
-          {"nsn": "4730-01-405-1102", "nomenclature": "HOSE ASSY, HP HYDRAULIC", "qty": 2, "cost": 285.00}
+          {
+            "nsn": "4320-01-405-1101",
+            "nomenclature": "PUMP, HYDRAULIC, WRECKER",
+            "qty": 1,
+            "cost": 2100.0
+          },
+          {
+            "nsn": "4730-01-405-1102",
+            "nomenclature": "HOSE ASSY, HP HYDRAULIC",
+            "qty": 2,
+            "cost": 285.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20-1",
         "classified": false,
@@ -325,15 +499,28 @@
         "id": "MTVRW_AIR_BRAKE",
         "component": "brake",
         "description": "Air brake leak at trailer coupling",
-        "defect_code": ["SAFE", "BRAK"],
+        "defect_code": [
+          "FCON",
+          "SAFDL"
+        ],
         "probability_per_1000_miles": 0.9,
         "min_miles_before_occurrence": 5000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 4,
         "avg_parts_cost": 220,
         "parts_needed": [
-          {"nsn": "2530-01-405-1201", "nomenclature": "GLAD HAND KIT", "qty": 1, "cost": 95.00},
-          {"nsn": "2530-01-405-1202", "nomenclature": "AIR LINE, TRAILER", "qty": 1, "cost": 125.00}
+          {
+            "nsn": "2530-01-405-1201",
+            "nomenclature": "GLAD HAND KIT",
+            "qty": 1,
+            "cost": 95.0
+          },
+          {
+            "nsn": "2530-01-405-1202",
+            "nomenclature": "AIR LINE, TRAILER",
+            "qty": 1,
+            "cost": 125.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20-1",
         "classified": false,
@@ -347,14 +534,22 @@
         "id": "MTVRW_ELECTRICAL",
         "component": "electrical",
         "description": "Trailer lighting / PTO control harness",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.8,
         "min_miles_before_occurrence": 3000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 3,
         "avg_parts_cost": 210,
         "parts_needed": [
-          {"nsn": "5935-01-405-1301", "nomenclature": "HARNESS, PTO CONTROL", "qty": 1, "cost": 145.00}
+          {
+            "nsn": "5935-01-405-1301",
+            "nomenclature": "HARNESS, PTO CONTROL",
+            "qty": 1,
+            "cost": 145.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20-1",
         "classified": false,
@@ -368,14 +563,22 @@
         "id": "MTVRW_COOLING",
         "component": "cooling",
         "description": "Cooling system overheat during recovery",
-        "defect_code": ["NMAJ", "COOL"],
+        "defect_code": [
+          "COOL",
+          "CBB"
+        ],
         "probability_per_1000_miles": 0.4,
         "min_miles_before_occurrence": 10000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 6,
         "avg_parts_cost": 1250,
         "parts_needed": [
-          {"nsn": "2930-01-405-1401", "nomenclature": "PUMP, COOLANT, MTVR", "qty": 1, "cost": 880.00}
+          {
+            "nsn": "2930-01-405-1401",
+            "nomenclature": "PUMP, COOLANT, MTVR",
+            "qty": 1,
+            "cost": 880.0
+          }
         ],
         "tm_reference": "TM 9-2320-366-20-1",
         "classified": false,
@@ -400,15 +603,28 @@
         "id": "LVSR_CRANE_HYDRAULIC",
         "component": "hydraulic",
         "description": "PLS / Crane hydraulic cylinder leak",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.9,
         "min_miles_before_occurrence": 6000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 12,
         "avg_parts_cost": 3400,
         "parts_needed": [
-          {"nsn": "4320-01-407-1101", "nomenclature": "CYLINDER, HYDRAULIC, LHS", "qty": 1, "cost": 2400.00},
-          {"nsn": "4730-01-407-1102", "nomenclature": "SEAL KIT, CYLINDER", "qty": 1, "cost": 240.00}
+          {
+            "nsn": "4320-01-407-1101",
+            "nomenclature": "CYLINDER, HYDRAULIC, LHS",
+            "qty": 1,
+            "cost": 2400.0
+          },
+          {
+            "nsn": "4730-01-407-1102",
+            "nomenclature": "SEAL KIT, CYLINDER",
+            "qty": 1,
+            "cost": 240.0
+          }
         ],
         "tm_reference": "TM 9-2320-399-20",
         "classified": false,
@@ -422,14 +638,22 @@
         "id": "LVSR_SUSPENSION",
         "component": "suspension",
         "description": "Walking beam bushing wear",
-        "defect_code": ["MINR", "SUSP"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_miles": 0.6,
         "min_miles_before_occurrence": 15000,
         "condition_impact": "Minor",
         "avg_repair_hours": 10,
         "avg_parts_cost": 850,
         "parts_needed": [
-          {"nsn": "2510-01-407-1401", "nomenclature": "BUSHING KIT, WALKING BEAM", "qty": 1, "cost": 610.00}
+          {
+            "nsn": "2510-01-407-1401",
+            "nomenclature": "BUSHING KIT, WALKING BEAM",
+            "qty": 1,
+            "cost": 610.0
+          }
         ],
         "tm_reference": "TM 9-2320-399-20",
         "classified": false,
@@ -443,15 +667,28 @@
         "id": "LVSR_TRANS",
         "component": "transmission",
         "description": "Auto transmission harsh shifts / fluid overheat",
-        "defect_code": ["NMAJ", "TRSM"],
+        "defect_code": [
+          "TRAN",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.5,
         "min_miles_before_occurrence": 10000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 12,
         "avg_parts_cost": 1800,
         "parts_needed": [
-          {"nsn": "2520-01-407-1501", "nomenclature": "SENSOR, TRANS TEMP", "qty": 1, "cost": 120.00},
-          {"nsn": "2520-01-407-1502", "nomenclature": "COOLER, TRANS", "qty": 1, "cost": 980.00}
+          {
+            "nsn": "2520-01-407-1501",
+            "nomenclature": "SENSOR, TRANS TEMP",
+            "qty": 1,
+            "cost": 120.0
+          },
+          {
+            "nsn": "2520-01-407-1502",
+            "nomenclature": "COOLER, TRANS",
+            "qty": 1,
+            "cost": 980.0
+          }
         ],
         "tm_reference": "TM 9-2320-399-20",
         "classified": false,
@@ -465,15 +702,28 @@
         "id": "LVSR_BRAKE",
         "component": "brake",
         "description": "ABS sensor / modulator valve fault",
-        "defect_code": ["SAFE", "BRAK"],
+        "defect_code": [
+          "FCON",
+          "SAFDL"
+        ],
         "probability_per_1000_miles": 0.5,
         "min_miles_before_occurrence": 8000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 5,
         "avg_parts_cost": 740,
         "parts_needed": [
-          {"nsn": "2530-01-407-1601", "nomenclature": "SENSOR, WHEEL SPEED", "qty": 1, "cost": 115.00},
-          {"nsn": "2530-01-407-1602", "nomenclature": "VALVE, ABS MODULATOR", "qty": 1, "cost": 480.00}
+          {
+            "nsn": "2530-01-407-1601",
+            "nomenclature": "SENSOR, WHEEL SPEED",
+            "qty": 1,
+            "cost": 115.0
+          },
+          {
+            "nsn": "2530-01-407-1602",
+            "nomenclature": "VALVE, ABS MODULATOR",
+            "qty": 1,
+            "cost": 480.0
+          }
         ],
         "tm_reference": "TM 9-2320-399-20",
         "classified": false,
@@ -499,14 +749,22 @@
         "id": "TR_TIRE",
         "component": "tire",
         "description": "Tire tread wear / sidewall damage",
-        "defect_code": ["MINR", "TIRE"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_miles": 1.8,
         "min_miles_before_occurrence": 8000,
         "condition_impact": "Minor",
         "avg_repair_hours": 2,
         "avg_parts_cost": 420,
         "parts_needed": [
-          {"nsn": "2610-01-407-2101", "nomenclature": "TIRE, 395/85R20", "qty": 1, "cost": 395.00}
+          {
+            "nsn": "2610-01-407-2101",
+            "nomenclature": "TIRE, 395/85R20",
+            "qty": 1,
+            "cost": 395.0
+          }
         ],
         "tm_reference": "TM 9-2330-381-14",
         "classified": false,
@@ -520,14 +778,22 @@
         "id": "TR_LIGHTS",
         "component": "electrical",
         "description": "Trailer marker / ST/TA lights inop",
-        "defect_code": ["MINR", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_miles": 1.5,
         "min_miles_before_occurrence": 2000,
         "condition_impact": "Minor",
         "avg_repair_hours": 1,
         "avg_parts_cost": 45,
         "parts_needed": [
-          {"nsn": "6220-01-407-2201", "nomenclature": "LAMP, LED MARKER", "qty": 2, "cost": 18.00}
+          {
+            "nsn": "6220-01-407-2201",
+            "nomenclature": "LAMP, LED MARKER",
+            "qty": 2,
+            "cost": 18.0
+          }
         ],
         "tm_reference": "TM 9-2330-381-14",
         "classified": false,
@@ -541,14 +807,22 @@
         "id": "TR_BRAKE",
         "component": "brake",
         "description": "Trailer brake chamber diaphragm",
-        "defect_code": ["SAFE", "BRAK"],
+        "defect_code": [
+          "FCON",
+          "SAFDL"
+        ],
         "probability_per_1000_miles": 0.4,
         "min_miles_before_occurrence": 10000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 3,
         "avg_parts_cost": 180,
         "parts_needed": [
-          {"nsn": "2530-01-407-2301", "nomenclature": "CHAMBER, BRAKE, TYPE 30", "qty": 1, "cost": 155.00}
+          {
+            "nsn": "2530-01-407-2301",
+            "nomenclature": "CHAMBER, BRAKE, TYPE 30",
+            "qty": 1,
+            "cost": 155.0
+          }
         ],
         "tm_reference": "TM 9-2330-381-14",
         "classified": false,
@@ -561,15 +835,28 @@
         "id": "TR_CORROSION",
         "component": "corrosion",
         "description": "Bed frame corrosion",
-        "defect_code": ["COSM", "CORR"],
+        "defect_code": [
+          "BODY",
+          "CBB"
+        ],
         "probability_per_1000_miles": 2.5,
         "min_miles_before_occurrence": 20000,
         "condition_impact": "Minor",
         "avg_repair_hours": 8,
         "avg_parts_cost": 220,
         "parts_needed": [
-          {"nsn": "8010-01-407-2401", "nomenclature": "PRIMER, RUST INHIBITOR", "qty": 2, "cost": 48.00},
-          {"nsn": "8010-01-407-2402", "nomenclature": "PAINT, CARC GREEN", "qty": 2, "cost": 72.00}
+          {
+            "nsn": "8010-01-407-2401",
+            "nomenclature": "PRIMER, RUST INHIBITOR",
+            "qty": 2,
+            "cost": 48.0
+          },
+          {
+            "nsn": "8010-01-407-2402",
+            "nomenclature": "PAINT, CARC GREEN",
+            "qty": 2,
+            "cost": 72.0
+          }
         ],
         "tm_reference": "TM 9-2330-381-14",
         "classified": false,
@@ -594,14 +881,22 @@
         "id": "GEN_VOLTAGE_REG",
         "component": "electrical",
         "description": "Voltage regulator failure",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_hours": 2.0,
         "min_hours_before_occurrence": 500,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 4,
         "avg_parts_cost": 420,
         "parts_needed": [
-          {"nsn": "6110-01-461-8201", "nomenclature": "REGULATOR, VOLTAGE", "qty": 1, "cost": 320.00}
+          {
+            "nsn": "6110-01-461-8201",
+            "nomenclature": "REGULATOR, VOLTAGE",
+            "qty": 1,
+            "cost": 320.0
+          }
         ],
         "tm_reference": "TM 9-6115-642-10",
         "classified": false,
@@ -615,14 +910,22 @@
         "id": "GEN_FUEL_PUMP",
         "component": "fuel",
         "description": "Fuel lift pump failure",
-        "defect_code": ["NMAJ", "FUEL"],
+        "defect_code": [
+          "FUEL",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.5,
         "min_hours_before_occurrence": 300,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 3,
         "avg_parts_cost": 380,
         "parts_needed": [
-          {"nsn": "2910-01-461-8301", "nomenclature": "PUMP, FUEL LIFT", "qty": 1, "cost": 285.00}
+          {
+            "nsn": "2910-01-461-8301",
+            "nomenclature": "PUMP, FUEL LIFT",
+            "qty": 1,
+            "cost": 285.0
+          }
         ],
         "tm_reference": "TM 9-6115-642-10",
         "classified": false,
@@ -635,15 +938,28 @@
         "id": "GEN_COOLANT",
         "component": "cooling",
         "description": "Coolant loss / thermostat",
-        "defect_code": ["NMAJ", "COOL"],
+        "defect_code": [
+          "COOL",
+          "CBB"
+        ],
         "probability_per_1000_hours": 1.2,
         "min_hours_before_occurrence": 400,
         "condition_impact": "Degraded",
         "avg_repair_hours": 3,
         "avg_parts_cost": 220,
         "parts_needed": [
-          {"nsn": "4820-01-461-8401", "nomenclature": "THERMOSTAT, 180F", "qty": 1, "cost": 55.00},
-          {"nsn": "6850-01-461-8402", "nomenclature": "ANTIFREEZE, ETHYL GLYCOL", "qty": 2, "cost": 35.00}
+          {
+            "nsn": "4820-01-461-8401",
+            "nomenclature": "THERMOSTAT, 180F",
+            "qty": 1,
+            "cost": 55.0
+          },
+          {
+            "nsn": "6850-01-461-8402",
+            "nomenclature": "ANTIFREEZE, ETHYL GLYCOL",
+            "qty": 2,
+            "cost": 35.0
+          }
         ],
         "tm_reference": "TM 9-6115-642-10",
         "classified": false,
@@ -656,14 +972,22 @@
         "id": "GEN_GOVERNOR",
         "component": "engine",
         "description": "Electronic governor / actuator fault",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.8,
         "min_hours_before_occurrence": 1000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 5,
         "avg_parts_cost": 680,
         "parts_needed": [
-          {"nsn": "2990-01-461-8501", "nomenclature": "ACTUATOR, GOVERNOR", "qty": 1, "cost": 520.00}
+          {
+            "nsn": "2990-01-461-8501",
+            "nomenclature": "ACTUATOR, GOVERNOR",
+            "qty": 1,
+            "cost": 520.0
+          }
         ],
         "tm_reference": "TM 9-6115-642-10",
         "classified": false,
@@ -688,15 +1012,28 @@
         "id": "M1A1_TRACK_TENSION",
         "component": "track",
         "description": "Track tension out of specification",
-        "defect_code": ["NMAJ", "TRAK"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_miles": 3.0,
         "min_miles_before_occurrence": 500,
         "condition_impact": "Degraded",
         "avg_repair_hours": 8,
         "avg_parts_cost": 4500,
         "parts_needed": [
-          {"nsn": "2530-01-087-4872", "nomenclature": "TRACK SHOE, W/PADS", "qty": 6, "cost": 520.00},
-          {"nsn": "2530-01-087-4891", "nomenclature": "END CONNECTOR, TRACK", "qty": 12, "cost": 85.00}
+          {
+            "nsn": "2530-01-087-4872",
+            "nomenclature": "TRACK SHOE, W/PADS",
+            "qty": 6,
+            "cost": 520.0
+          },
+          {
+            "nsn": "2530-01-087-4891",
+            "nomenclature": "END CONNECTOR, TRACK",
+            "qty": 12,
+            "cost": 85.0
+          }
         ],
         "tm_reference": "TM 9-2350-264-20-1",
         "classified": false,
@@ -710,14 +1047,22 @@
         "id": "M1A1_FCS",
         "component": "fire_control",
         "description": "Fire control system alignment degraded",
-        "defect_code": ["SAFE", "FCTL"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.5,
         "min_miles_before_occurrence": 2000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 40,
         "avg_parts_cost": 18000,
         "parts_needed": [
-          {"nsn": "1240-01-495-8801", "nomenclature": "SIGHT UNIT, GUNNER PRIMARY", "qty": 1, "cost": 12000.00}
+          {
+            "nsn": "1240-01-495-8801",
+            "nomenclature": "SIGHT UNIT, GUNNER PRIMARY",
+            "qty": 1,
+            "cost": 12000.0
+          }
         ],
         "tm_reference": "[CLASSIFIED TM XX-XXXX-XXX-XX-X]",
         "classified": true,
@@ -731,14 +1076,22 @@
         "id": "M1A1_TURBINE",
         "component": "engine",
         "description": "AGT-1500 turbine FOD / performance degradation",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.4,
         "min_miles_before_occurrence": 3000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 72,
         "avg_parts_cost": 45000,
         "parts_needed": [
-          {"nsn": "2815-01-087-5201", "nomenclature": "ENGINE, GAS TURBINE, AGT-1500", "qty": 1, "cost": 42000.00}
+          {
+            "nsn": "2815-01-087-5201",
+            "nomenclature": "ENGINE, GAS TURBINE, AGT-1500",
+            "qty": 1,
+            "cost": 42000.0
+          }
         ],
         "tm_reference": "TM 9-2350-264-20-2",
         "classified": false,
@@ -752,15 +1105,28 @@
         "id": "M1A1_TURRET_HYDRAULIC",
         "component": "hydraulic",
         "description": "Turret drive hydraulic leak",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_miles": 1.0,
         "min_miles_before_occurrence": 800,
         "condition_impact": "Degraded",
         "avg_repair_hours": 14,
         "avg_parts_cost": 4800,
         "parts_needed": [
-          {"nsn": "4320-01-087-5301", "nomenclature": "PUMP, HYDRAULIC, TURRET", "qty": 1, "cost": 3600.00},
-          {"nsn": "4730-01-087-5302", "nomenclature": "HOSE ASSY, HP", "qty": 2, "cost": 420.00}
+          {
+            "nsn": "4320-01-087-5301",
+            "nomenclature": "PUMP, HYDRAULIC, TURRET",
+            "qty": 1,
+            "cost": 3600.0
+          },
+          {
+            "nsn": "4730-01-087-5302",
+            "nomenclature": "HOSE ASSY, HP",
+            "qty": 2,
+            "cost": 420.0
+          }
         ],
         "tm_reference": "TM 9-2350-264-20-1",
         "classified": false,
@@ -774,14 +1140,22 @@
         "id": "M1A1_COMMS",
         "component": "comms",
         "description": "SINCGARS intercom fault",
-        "defect_code": ["NMAJ", "COMM"],
+        "defect_code": [
+          "DAD1",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.7,
         "min_miles_before_occurrence": 300,
         "condition_impact": "Degraded",
         "avg_repair_hours": 3,
         "avg_parts_cost": 1250,
         "parts_needed": [
-          {"nsn": "5820-01-087-5401", "nomenclature": "CONTROL, INTERCOM", "qty": 1, "cost": 890.00}
+          {
+            "nsn": "5820-01-087-5401",
+            "nomenclature": "CONTROL, INTERCOM",
+            "qty": 1,
+            "cost": 890.0
+          }
         ],
         "tm_reference": "TM 11-5820-890-20",
         "classified": false,
@@ -806,15 +1180,28 @@
         "id": "M88_WINCH_HYDRAULIC",
         "component": "hydraulic",
         "description": "Main winch hydraulic motor / pump",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_miles": 1.5,
         "min_miles_before_occurrence": 800,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 20,
         "avg_parts_cost": 12000,
         "parts_needed": [
-          {"nsn": "4320-01-212-6101", "nomenclature": "MOTOR, HYDRAULIC, WINCH", "qty": 1, "cost": 8200.00},
-          {"nsn": "4320-01-212-6102", "nomenclature": "PUMP, HYDRAULIC, MAIN", "qty": 1, "cost": 3200.00}
+          {
+            "nsn": "4320-01-212-6101",
+            "nomenclature": "MOTOR, HYDRAULIC, WINCH",
+            "qty": 1,
+            "cost": 8200.0
+          },
+          {
+            "nsn": "4320-01-212-6102",
+            "nomenclature": "PUMP, HYDRAULIC, MAIN",
+            "qty": 1,
+            "cost": 3200.0
+          }
         ],
         "tm_reference": "TM 9-2350-292-20",
         "classified": false,
@@ -828,15 +1215,28 @@
         "id": "M88_TRACK",
         "component": "track",
         "description": "Track wear / end connector failure",
-        "defect_code": ["NMAJ", "TRAK"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_miles": 2.5,
         "min_miles_before_occurrence": 600,
         "condition_impact": "Degraded",
         "avg_repair_hours": 10,
         "avg_parts_cost": 3800,
         "parts_needed": [
-          {"nsn": "2530-01-212-6201", "nomenclature": "TRACK SHOE, M88", "qty": 4, "cost": 480.00},
-          {"nsn": "2530-01-212-6202", "nomenclature": "END CONNECTOR, M88", "qty": 8, "cost": 75.00}
+          {
+            "nsn": "2530-01-212-6201",
+            "nomenclature": "TRACK SHOE, M88",
+            "qty": 4,
+            "cost": 480.0
+          },
+          {
+            "nsn": "2530-01-212-6202",
+            "nomenclature": "END CONNECTOR, M88",
+            "qty": 8,
+            "cost": 75.0
+          }
         ],
         "tm_reference": "TM 9-2350-292-20",
         "classified": false,
@@ -849,14 +1249,22 @@
         "id": "M88_ENGINE",
         "component": "engine",
         "description": "AVDS-1790 turbocharger / injector",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.4,
         "min_miles_before_occurrence": 2000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 36,
         "avg_parts_cost": 18500,
         "parts_needed": [
-          {"nsn": "2815-01-212-6301", "nomenclature": "TURBOCHARGER, AVDS", "qty": 1, "cost": 6500.00}
+          {
+            "nsn": "2815-01-212-6301",
+            "nomenclature": "TURBOCHARGER, AVDS",
+            "qty": 1,
+            "cost": 6500.0
+          }
         ],
         "tm_reference": "TM 9-2350-292-20-2",
         "classified": false,
@@ -881,15 +1289,28 @@
         "id": "MRAP_HVAC",
         "component": "electrical",
         "description": "HVAC blower / compressor failure",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_miles": 1.4,
         "min_miles_before_occurrence": 2000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 6,
         "avg_parts_cost": 1600,
         "parts_needed": [
-          {"nsn": "4140-01-562-1101", "nomenclature": "BLOWER ASSY, HVAC", "qty": 1, "cost": 480.00},
-          {"nsn": "4140-01-562-1102", "nomenclature": "COMPRESSOR, AC", "qty": 1, "cost": 920.00}
+          {
+            "nsn": "4140-01-562-1101",
+            "nomenclature": "BLOWER ASSY, HVAC",
+            "qty": 1,
+            "cost": 480.0
+          },
+          {
+            "nsn": "4140-01-562-1102",
+            "nomenclature": "COMPRESSOR, AC",
+            "qty": 1,
+            "cost": 920.0
+          }
         ],
         "tm_reference": "TM 9-2355-307-20",
         "classified": false,
@@ -903,14 +1324,22 @@
         "id": "MRAP_ARMOR_BOLT",
         "component": "body",
         "description": "Armor panel mounting hardware loose / corroded",
-        "defect_code": ["MINR", "BODY"],
+        "defect_code": [
+          "BODY",
+          "CBB"
+        ],
         "probability_per_1000_miles": 1.0,
         "min_miles_before_occurrence": 5000,
         "condition_impact": "Minor",
         "avg_repair_hours": 4,
         "avg_parts_cost": 180,
         "parts_needed": [
-          {"nsn": "5306-01-562-1201", "nomenclature": "BOLT, ARMOR PANEL", "qty": 8, "cost": 22.00}
+          {
+            "nsn": "5306-01-562-1201",
+            "nomenclature": "BOLT, ARMOR PANEL",
+            "qty": 8,
+            "cost": 22.0
+          }
         ],
         "tm_reference": "TM 9-2355-307-20",
         "classified": false,
@@ -923,14 +1352,22 @@
         "id": "MRAP_ELECTRICAL",
         "component": "electrical",
         "description": "Starter / batteries fail in heat",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_miles": 1.0,
         "min_miles_before_occurrence": 3000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 4,
         "avg_parts_cost": 880,
         "parts_needed": [
-          {"nsn": "6140-01-562-1301", "nomenclature": "BATTERY, 12V 100AH", "qty": 4, "cost": 195.00}
+          {
+            "nsn": "6140-01-562-1301",
+            "nomenclature": "BATTERY, 12V 100AH",
+            "qty": 4,
+            "cost": 195.0
+          }
         ],
         "tm_reference": "TM 9-2355-307-20",
         "classified": false,
@@ -943,14 +1380,22 @@
         "id": "MRAP_ENGINE",
         "component": "engine",
         "description": "Cummins ISBe coolant leak / EGR",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.4,
         "min_miles_before_occurrence": 10000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 10,
         "avg_parts_cost": 2200,
         "parts_needed": [
-          {"nsn": "2815-01-562-1401", "nomenclature": "COOLER, EGR", "qty": 1, "cost": 1450.00}
+          {
+            "nsn": "2815-01-562-1401",
+            "nomenclature": "COOLER, EGR",
+            "qty": 1,
+            "cost": 1450.0
+          }
         ],
         "tm_reference": "TM 9-2355-307-20",
         "classified": false,
@@ -975,15 +1420,28 @@
         "id": "LAV_TURRET_TRAVERSE",
         "component": "turret",
         "description": "Turret traverse drive motor / brake",
-        "defect_code": ["NMAJ", "TURT"],
+        "defect_code": [
+          "WPNS",
+          "CBB"
+        ],
         "probability_per_1000_miles": 1.2,
         "min_miles_before_occurrence": 2000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 18,
         "avg_parts_cost": 5400,
         "parts_needed": [
-          {"nsn": "1005-01-188-2101", "nomenclature": "MOTOR, TRAVERSE", "qty": 1, "cost": 3800.00},
-          {"nsn": "1005-01-188-2102", "nomenclature": "BRAKE ASSY, TRAVERSE", "qty": 1, "cost": 820.00}
+          {
+            "nsn": "1005-01-188-2101",
+            "nomenclature": "MOTOR, TRAVERSE",
+            "qty": 1,
+            "cost": 3800.0
+          },
+          {
+            "nsn": "1005-01-188-2102",
+            "nomenclature": "BRAKE ASSY, TRAVERSE",
+            "qty": 1,
+            "cost": 820.0
+          }
         ],
         "tm_reference": "TM 9-2350-317-20-2",
         "classified": false,
@@ -997,14 +1455,22 @@
         "id": "LAV_TIRE_STATION",
         "component": "tire",
         "description": "CTIS wheel station leak",
-        "defect_code": ["NMAJ", "TIRE"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_miles": 1.1,
         "min_miles_before_occurrence": 3000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 6,
         "avg_parts_cost": 620,
         "parts_needed": [
-          {"nsn": "2530-01-188-2201", "nomenclature": "WHEEL STATION, CTIS", "qty": 1, "cost": 380.00}
+          {
+            "nsn": "2530-01-188-2201",
+            "nomenclature": "WHEEL STATION, CTIS",
+            "qty": 1,
+            "cost": 380.0
+          }
         ],
         "tm_reference": "TM 9-2350-317-20",
         "classified": false,
@@ -1017,15 +1483,28 @@
         "id": "LAV_ENGINE_TURBO",
         "component": "engine",
         "description": "6V53T turbo / exhaust manifold",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.5,
         "min_miles_before_occurrence": 8000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 20,
         "avg_parts_cost": 5200,
         "parts_needed": [
-          {"nsn": "2815-01-188-2301", "nomenclature": "TURBOCHARGER, 6V53T", "qty": 1, "cost": 3100.00},
-          {"nsn": "2815-01-188-2302", "nomenclature": "MANIFOLD, EXHAUST", "qty": 1, "cost": 1400.00}
+          {
+            "nsn": "2815-01-188-2301",
+            "nomenclature": "TURBOCHARGER, 6V53T",
+            "qty": 1,
+            "cost": 3100.0
+          },
+          {
+            "nsn": "2815-01-188-2302",
+            "nomenclature": "MANIFOLD, EXHAUST",
+            "qty": 1,
+            "cost": 1400.0
+          }
         ],
         "tm_reference": "TM 9-2350-317-20",
         "classified": false,
@@ -1039,14 +1518,22 @@
         "id": "LAV_COMMS",
         "component": "comms",
         "description": "SINCGARS vehicular amp fault",
-        "defect_code": ["NMAJ", "COMM"],
+        "defect_code": [
+          "DAD1",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.8,
         "min_miles_before_occurrence": 500,
         "condition_impact": "Degraded",
         "avg_repair_hours": 3,
         "avg_parts_cost": 1850,
         "parts_needed": [
-          {"nsn": "5820-01-188-2401", "nomenclature": "AMPLIFIER, VEHICULAR, RT-1523", "qty": 1, "cost": 1620.00}
+          {
+            "nsn": "5820-01-188-2401",
+            "nomenclature": "AMPLIFIER, VEHICULAR, RT-1523",
+            "qty": 1,
+            "cost": 1620.0
+          }
         ],
         "tm_reference": "TM 11-5820-890-20",
         "classified": false,
@@ -1071,14 +1558,22 @@
         "id": "LAVAT_LAUNCHER",
         "component": "weapon_system",
         "description": "TOW launcher elevation hydraulic",
-        "defect_code": ["SAFE", "WEAP"],
+        "defect_code": [
+          "WPNS",
+          "CBB"
+        ],
         "probability_per_1000_miles": 0.4,
         "min_miles_before_occurrence": 1500,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 16,
         "avg_parts_cost": 6400,
         "parts_needed": [
-          {"nsn": "1055-01-189-3101", "nomenclature": "CYLINDER, ELEVATION, LAUNCHER", "qty": 1, "cost": 4200.00}
+          {
+            "nsn": "1055-01-189-3101",
+            "nomenclature": "CYLINDER, ELEVATION, LAUNCHER",
+            "qty": 1,
+            "cost": 4200.0
+          }
         ],
         "tm_reference": "[CLASSIFIED TM XX-XXXX-XXX-XX-X]",
         "classified": true,
@@ -1092,14 +1587,22 @@
         "id": "LAVAT_FCS",
         "component": "fire_control",
         "description": "TOW sight unit alignment",
-        "defect_code": ["SAFE", "FCTL"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.5,
         "min_miles_before_occurrence": 2500,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 24,
         "avg_parts_cost": 8500,
         "parts_needed": [
-          {"nsn": "1240-01-189-3201", "nomenclature": "SIGHT UNIT, TOW", "qty": 1, "cost": 6500.00}
+          {
+            "nsn": "1240-01-189-3201",
+            "nomenclature": "SIGHT UNIT, TOW",
+            "qty": 1,
+            "cost": 6500.0
+          }
         ],
         "tm_reference": "[CLASSIFIED TM XX-XXXX-XXX-XX-X]",
         "classified": true,
@@ -1112,14 +1615,22 @@
         "id": "LAVAT_ENGINE",
         "component": "engine",
         "description": "Engine coolant pump failure (shared LAV powerpack)",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.7,
         "min_miles_before_occurrence": 5000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 6,
         "avg_parts_cost": 1200,
         "parts_needed": [
-          {"nsn": "2930-01-188-3401", "nomenclature": "PUMP, COOLANT, 6V53T", "qty": 1, "cost": 880.00}
+          {
+            "nsn": "2930-01-188-3401",
+            "nomenclature": "PUMP, COOLANT, 6V53T",
+            "qty": 1,
+            "cost": 880.0
+          }
         ],
         "tm_reference": "TM 9-2350-317-20",
         "classified": false,
@@ -1132,14 +1643,22 @@
         "id": "LAVAT_HULL_CORROSION",
         "component": "corrosion",
         "description": "Hull CPC active corrosion",
-        "defect_code": ["MINR", "CORR"],
+        "defect_code": [
+          "BODY",
+          "CBB"
+        ],
         "probability_per_1000_miles": 1.5,
         "min_miles_before_occurrence": 20000,
         "condition_impact": "Minor",
         "avg_repair_hours": 16,
         "avg_parts_cost": 420,
         "parts_needed": [
-          {"nsn": "8010-01-188-3501", "nomenclature": "PRIMER, CARC", "qty": 3, "cost": 55.00}
+          {
+            "nsn": "8010-01-188-3501",
+            "nomenclature": "PRIMER, CARC",
+            "qty": 3,
+            "cost": 55.0
+          }
         ],
         "tm_reference": "TM 9-2350-317-20",
         "classified": false,
@@ -1164,14 +1683,22 @@
         "id": "V22_PROPROTOR_GEARBOX",
         "component": "rotor",
         "description": "Proprotor gearbox chip light / oil sample",
-        "defect_code": ["SAFE", "ROTR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.8,
         "min_hours_before_occurrence": 300,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 48,
         "avg_parts_cost": 28000,
         "parts_needed": [
-          {"nsn": "1615-01-481-4101", "nomenclature": "GEARBOX, PROPROTOR", "qty": 1, "cost": 24000.00}
+          {
+            "nsn": "1615-01-481-4101",
+            "nomenclature": "GEARBOX, PROPROTOR",
+            "qty": 1,
+            "cost": 24000.0
+          }
         ],
         "tm_reference": "NA 01-V22AAA-2-1",
         "classified": false,
@@ -1185,14 +1712,22 @@
         "id": "V22_NACELLE_TILT",
         "component": "hydraulic",
         "description": "Nacelle conversion actuator hydraulic fault",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.0,
         "min_hours_before_occurrence": 200,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 20,
         "avg_parts_cost": 14000,
         "parts_needed": [
-          {"nsn": "4320-01-481-4201", "nomenclature": "ACTUATOR, NACELLE CONVERSION", "qty": 1, "cost": 11800.00}
+          {
+            "nsn": "4320-01-481-4201",
+            "nomenclature": "ACTUATOR, NACELLE CONVERSION",
+            "qty": 1,
+            "cost": 11800.0
+          }
         ],
         "tm_reference": "NA 01-V22AAA-2-3",
         "classified": false,
@@ -1205,14 +1740,22 @@
         "id": "V22_AVIONICS",
         "component": "avionics",
         "description": "Mission computer fault",
-        "defect_code": ["NMAJ", "AVIO"],
+        "defect_code": [
+          "DAD1",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.2,
         "min_hours_before_occurrence": 150,
         "condition_impact": "Degraded",
         "avg_repair_hours": 6,
         "avg_parts_cost": 18500,
         "parts_needed": [
-          {"nsn": "1270-01-481-4301", "nomenclature": "COMPUTER, MISSION, V22", "qty": 1, "cost": 16000.00}
+          {
+            "nsn": "1270-01-481-4301",
+            "nomenclature": "COMPUTER, MISSION, V22",
+            "qty": 1,
+            "cost": 16000.0
+          }
         ],
         "tm_reference": "NA 01-V22AAA-2-8",
         "classified": false,
@@ -1225,14 +1768,22 @@
         "id": "V22_HYDRAULIC_LEAK",
         "component": "hydraulic",
         "description": "Flight control hydraulic manifold leak",
-        "defect_code": ["SAFE", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.9,
         "min_hours_before_occurrence": 200,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 14,
         "avg_parts_cost": 6200,
         "parts_needed": [
-          {"nsn": "4320-01-481-4401", "nomenclature": "MANIFOLD, HYDRAULIC, FCS", "qty": 1, "cost": 5200.00}
+          {
+            "nsn": "4320-01-481-4401",
+            "nomenclature": "MANIFOLD, HYDRAULIC, FCS",
+            "qty": 1,
+            "cost": 5200.0
+          }
         ],
         "tm_reference": "NA 01-V22AAA-2-3",
         "classified": false,
@@ -1257,14 +1808,22 @@
         "id": "CH53_ROTOR_HEAD",
         "component": "rotor",
         "description": "Main rotor pitch lock / damper",
-        "defect_code": ["SAFE", "ROTR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.3,
         "min_hours_before_occurrence": 200,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 30,
         "avg_parts_cost": 18000,
         "parts_needed": [
-          {"nsn": "1615-01-141-5101", "nomenclature": "DAMPER, MAIN ROTOR", "qty": 1, "cost": 14800.00}
+          {
+            "nsn": "1615-01-141-5101",
+            "nomenclature": "DAMPER, MAIN ROTOR",
+            "qty": 1,
+            "cost": 14800.0
+          }
         ],
         "tm_reference": "NA 01-H53AAA-2-1",
         "classified": false,
@@ -1277,14 +1836,22 @@
         "id": "CH53_TRANS",
         "component": "transmission",
         "description": "Main transmission chip light",
-        "defect_code": ["SAFE", "TRSM"],
+        "defect_code": [
+          "TRAN",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.7,
         "min_hours_before_occurrence": 300,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 42,
         "avg_parts_cost": 35000,
         "parts_needed": [
-          {"nsn": "2520-01-141-5201", "nomenclature": "TRANSMISSION, MAIN, CH-53E", "qty": 1, "cost": 28000.00}
+          {
+            "nsn": "2520-01-141-5201",
+            "nomenclature": "TRANSMISSION, MAIN, CH-53E",
+            "qty": 1,
+            "cost": 28000.0
+          }
         ],
         "tm_reference": "NA 01-H53AAA-2-2",
         "classified": false,
@@ -1297,14 +1864,22 @@
         "id": "CH53_APU",
         "component": "engine",
         "description": "APU start / fuel control fault",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.6,
         "min_hours_before_occurrence": 150,
         "condition_impact": "Degraded",
         "avg_repair_hours": 8,
         "avg_parts_cost": 4200,
         "parts_needed": [
-          {"nsn": "2910-01-141-5301", "nomenclature": "CONTROL, FUEL, APU", "qty": 1, "cost": 3400.00}
+          {
+            "nsn": "2910-01-141-5301",
+            "nomenclature": "CONTROL, FUEL, APU",
+            "qty": 1,
+            "cost": 3400.0
+          }
         ],
         "tm_reference": "NA 01-H53AAA-2-2",
         "classified": false,
@@ -1317,14 +1892,22 @@
         "id": "CH53_HYDRAULIC",
         "component": "hydraulic",
         "description": "Flight control servo leak",
-        "defect_code": ["SAFE", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.0,
         "min_hours_before_occurrence": 100,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 10,
         "avg_parts_cost": 5400,
         "parts_needed": [
-          {"nsn": "4320-01-141-5401", "nomenclature": "SERVO, FCS", "qty": 1, "cost": 4800.00}
+          {
+            "nsn": "4320-01-141-5401",
+            "nomenclature": "SERVO, FCS",
+            "qty": 1,
+            "cost": 4800.0
+          }
         ],
         "tm_reference": "NA 01-H53AAA-2-3",
         "classified": false,
@@ -1349,14 +1932,22 @@
         "id": "HIMARS_LAUNCHER_RAIL",
         "component": "launcher",
         "description": "Launcher rail alignment fault",
-        "defect_code": ["SAFE", "WEAP"],
+        "defect_code": [
+          "WPNS",
+          "CBB"
+        ],
         "probability_per_1000_miles": 0.3,
         "min_miles_before_occurrence": 5000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 36,
         "avg_parts_cost": 24000,
         "parts_needed": [
-          {"nsn": "1055-01-458-4201", "nomenclature": "RAIL ASSY, LAUNCHER", "qty": 1, "cost": 18500.00}
+          {
+            "nsn": "1055-01-458-4201",
+            "nomenclature": "RAIL ASSY, LAUNCHER",
+            "qty": 1,
+            "cost": 18500.0
+          }
         ],
         "tm_reference": "[CLASSIFIED TM XX-XXXX-XXX-XX-X]",
         "classified": true,
@@ -1370,15 +1961,28 @@
         "id": "HIMARS_HYDRAULIC",
         "component": "hydraulic",
         "description": "Elevation pump degradation",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.5,
         "min_miles_before_occurrence": 8000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 12,
         "avg_parts_cost": 5200,
         "parts_needed": [
-          {"nsn": "4320-01-458-4501", "nomenclature": "PUMP, HYDRAULIC, LAUNCHER ELEVATION", "qty": 1, "cost": 3800.00},
-          {"nsn": "4730-01-458-4502", "nomenclature": "HOSE ASSY, HYDRAULIC, HIGH PRESSURE", "qty": 2, "cost": 340.00}
+          {
+            "nsn": "4320-01-458-4501",
+            "nomenclature": "PUMP, HYDRAULIC, LAUNCHER ELEVATION",
+            "qty": 1,
+            "cost": 3800.0
+          },
+          {
+            "nsn": "4730-01-458-4502",
+            "nomenclature": "HOSE ASSY, HYDRAULIC, HIGH PRESSURE",
+            "qty": 2,
+            "cost": 340.0
+          }
         ],
         "tm_reference": "TM 9-1055-646-20",
         "classified": false,
@@ -1392,14 +1996,22 @@
         "id": "HIMARS_FCS",
         "component": "fire_control",
         "description": "Launcher FCS computer fault",
-        "defect_code": ["SAFE", "FCTL"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.3,
         "min_miles_before_occurrence": 3000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 16,
         "avg_parts_cost": 22000,
         "parts_needed": [
-          {"nsn": "1270-01-458-4601", "nomenclature": "COMPUTER, FCS, HIMARS", "qty": 1, "cost": 19500.00}
+          {
+            "nsn": "1270-01-458-4601",
+            "nomenclature": "COMPUTER, FCS, HIMARS",
+            "qty": 1,
+            "cost": 19500.0
+          }
         ],
         "tm_reference": "[CLASSIFIED TM XX-XXXX-XXX-XX-X]",
         "classified": true,
@@ -1412,14 +2024,22 @@
         "id": "HIMARS_ELECTRICAL",
         "component": "electrical",
         "description": "Primary power distribution fault",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_miles": 0.6,
         "min_miles_before_occurrence": 4000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 6,
         "avg_parts_cost": 1450,
         "parts_needed": [
-          {"nsn": "5930-01-458-4701", "nomenclature": "DISTRIBUTION BOX, POWER", "qty": 1, "cost": 980.00}
+          {
+            "nsn": "5930-01-458-4701",
+            "nomenclature": "DISTRIBUTION BOX, POWER",
+            "qty": 1,
+            "cost": 980.0
+          }
         ],
         "tm_reference": "TM 9-1055-646-20",
         "classified": false,
@@ -1444,14 +2064,22 @@
         "id": "GATOR_PHASED_ARRAY",
         "component": "radar",
         "description": "Phased array calibration drift",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.5,
         "min_hours_before_occurrence": 200,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 48,
         "avg_parts_cost": 85000,
         "parts_needed": [
-          {"nsn": "5840-01-598-7701", "nomenclature": "MODULE, TRANSMIT/RECEIVE", "qty": 1, "cost": 72000.00}
+          {
+            "nsn": "5840-01-598-7701",
+            "nomenclature": "MODULE, TRANSMIT/RECEIVE",
+            "qty": 1,
+            "cost": 72000.0
+          }
         ],
         "tm_reference": "[CLASSIFIED TM XX-XXXX-XXX-XX-X]",
         "classified": true,
@@ -1465,14 +2093,22 @@
         "id": "GATOR_COOLING",
         "component": "cooling",
         "description": "Cooling pump failure",
-        "defect_code": ["NMAJ", "COOL"],
+        "defect_code": [
+          "COOL",
+          "CBB"
+        ],
         "probability_per_1000_hours": 2.0,
         "min_hours_before_occurrence": 100,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 12,
         "avg_parts_cost": 3400,
         "parts_needed": [
-          {"nsn": "4320-01-598-8201", "nomenclature": "PUMP, COOLANT, RADAR COOLING", "qty": 1, "cost": 2800.00}
+          {
+            "nsn": "4320-01-598-8201",
+            "nomenclature": "PUMP, COOLANT, RADAR COOLING",
+            "qty": 1,
+            "cost": 2800.0
+          }
         ],
         "tm_reference": "TM 11-5840-XXX-20",
         "classified": false,
@@ -1486,14 +2122,22 @@
         "id": "GATOR_COMMS",
         "component": "comms",
         "description": "Data link encryption device fault",
-        "defect_code": ["SAFE", "COMM"],
+        "defect_code": [
+          "DAD1",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.6,
         "min_hours_before_occurrence": 400,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 4,
         "avg_parts_cost": 6800,
         "parts_needed": [
-          {"nsn": "5810-01-598-8301", "nomenclature": "KGV-72 FILL DEVICE", "qty": 1, "cost": 5400.00}
+          {
+            "nsn": "5810-01-598-8301",
+            "nomenclature": "KGV-72 FILL DEVICE",
+            "qty": 1,
+            "cost": 5400.0
+          }
         ],
         "tm_reference": "TM 11-5810-428-20",
         "classified": false,
@@ -1506,14 +2150,22 @@
         "id": "GATOR_POWER",
         "component": "electrical",
         "description": "Primary power module fault",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.4,
         "min_hours_before_occurrence": 250,
         "condition_impact": "Degraded",
         "avg_repair_hours": 6,
         "avg_parts_cost": 4200,
         "parts_needed": [
-          {"nsn": "6130-01-598-8401", "nomenclature": "MODULE, POWER, RADAR", "qty": 1, "cost": 3500.00}
+          {
+            "nsn": "6130-01-598-8401",
+            "nomenclature": "MODULE, POWER, RADAR",
+            "qty": 1,
+            "cost": 3500.0
+          }
         ],
         "tm_reference": "TM 11-5840-XXX-20",
         "classified": false,
@@ -1538,14 +2190,22 @@
         "id": "Q36_ANTENNA",
         "component": "radar",
         "description": "Antenna servo drive / slip ring",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.5,
         "min_hours_before_occurrence": 200,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 16,
         "avg_parts_cost": 14500,
         "parts_needed": [
-          {"nsn": "5840-01-129-2101", "nomenclature": "SLIP RING, ANTENNA", "qty": 1, "cost": 10500.00}
+          {
+            "nsn": "5840-01-129-2101",
+            "nomenclature": "SLIP RING, ANTENNA",
+            "qty": 1,
+            "cost": 10500.0
+          }
         ],
         "tm_reference": "[CLASSIFIED TM XX-XXXX-XXX-XX-X]",
         "classified": true,
@@ -1558,14 +2218,22 @@
         "id": "Q36_COMMS",
         "component": "comms",
         "description": "Voice / data net equipment",
-        "defect_code": ["NMAJ", "COMM"],
+        "defect_code": [
+          "DAD1",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.0,
         "min_hours_before_occurrence": 300,
         "condition_impact": "Degraded",
         "avg_repair_hours": 3,
         "avg_parts_cost": 1800,
         "parts_needed": [
-          {"nsn": "5820-01-129-2201", "nomenclature": "RADIO SET, VEHICULAR", "qty": 1, "cost": 1450.00}
+          {
+            "nsn": "5820-01-129-2201",
+            "nomenclature": "RADIO SET, VEHICULAR",
+            "qty": 1,
+            "cost": 1450.0
+          }
         ],
         "tm_reference": "TM 11-5820-890-20",
         "classified": false,
@@ -1578,14 +2246,22 @@
         "id": "Q36_COOLING",
         "component": "cooling",
         "description": "Environmental control unit fault",
-        "defect_code": ["NMAJ", "COOL"],
+        "defect_code": [
+          "COOL",
+          "CBB"
+        ],
         "probability_per_1000_hours": 1.2,
         "min_hours_before_occurrence": 150,
         "condition_impact": "Degraded",
         "avg_repair_hours": 5,
         "avg_parts_cost": 2400,
         "parts_needed": [
-          {"nsn": "4140-01-129-2301", "nomenclature": "ECU, SHELTER", "qty": 1, "cost": 1950.00}
+          {
+            "nsn": "4140-01-129-2301",
+            "nomenclature": "ECU, SHELTER",
+            "qty": 1,
+            "cost": 1950.0
+          }
         ],
         "tm_reference": "TM 11-5840-298-20",
         "classified": false,
@@ -1598,14 +2274,22 @@
         "id": "Q36_PROCESSOR",
         "component": "radar",
         "description": "Signal processor card fault",
-        "defect_code": ["NMAJ", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.9,
         "min_hours_before_occurrence": 250,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 4,
         "avg_parts_cost": 12000,
         "parts_needed": [
-          {"nsn": "5840-01-129-2401", "nomenclature": "CARD, SIGNAL PROCESSOR", "qty": 1, "cost": 9800.00}
+          {
+            "nsn": "5840-01-129-2401",
+            "nomenclature": "CARD, SIGNAL PROCESSOR",
+            "qty": 1,
+            "cost": 9800.0
+          }
         ],
         "tm_reference": "[CLASSIFIED TM XX-XXXX-XXX-XX-X]",
         "classified": true,
@@ -1630,14 +2314,22 @@
         "id": "D7_TRACK_PAD",
         "component": "track",
         "description": "Track shoe / pad wear",
-        "defect_code": ["NMAJ", "TRAK"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_hours": 3.5,
         "min_hours_before_occurrence": 600,
         "condition_impact": "Degraded",
         "avg_repair_hours": 12,
         "avg_parts_cost": 3800,
         "parts_needed": [
-          {"nsn": "2530-01-089-7101", "nomenclature": "TRACK SHOE, D7", "qty": 6, "cost": 420.00}
+          {
+            "nsn": "2530-01-089-7101",
+            "nomenclature": "TRACK SHOE, D7",
+            "qty": 6,
+            "cost": 420.0
+          }
         ],
         "tm_reference": "TM 5-2410-237-24",
         "classified": false,
@@ -1650,14 +2342,22 @@
         "id": "D7_BLADE_HYDRAULIC",
         "component": "hydraulic",
         "description": "Blade tilt cylinder leak",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_hours": 2.0,
         "min_hours_before_occurrence": 300,
         "condition_impact": "Degraded",
         "avg_repair_hours": 8,
         "avg_parts_cost": 1800,
         "parts_needed": [
-          {"nsn": "4320-01-089-7201", "nomenclature": "CYLINDER, BLADE TILT", "qty": 1, "cost": 1400.00}
+          {
+            "nsn": "4320-01-089-7201",
+            "nomenclature": "CYLINDER, BLADE TILT",
+            "qty": 1,
+            "cost": 1400.0
+          }
         ],
         "tm_reference": "TM 5-2410-237-24",
         "classified": false,
@@ -1670,14 +2370,22 @@
         "id": "D7_FINAL_DRIVE",
         "component": "transmission",
         "description": "Final drive oil contamination",
-        "defect_code": ["NMAJ", "TRSM"],
+        "defect_code": [
+          "TRAN",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.7,
         "min_hours_before_occurrence": 1000,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 24,
         "avg_parts_cost": 8500,
         "parts_needed": [
-          {"nsn": "2520-01-089-7301", "nomenclature": "FINAL DRIVE ASSY, D7", "qty": 1, "cost": 6800.00}
+          {
+            "nsn": "2520-01-089-7301",
+            "nomenclature": "FINAL DRIVE ASSY, D7",
+            "qty": 1,
+            "cost": 6800.0
+          }
         ],
         "tm_reference": "TM 5-2410-237-24",
         "classified": false,
@@ -1690,14 +2398,22 @@
         "id": "D7_ENGINE",
         "component": "engine",
         "description": "3306 engine oil pressure",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.8,
         "min_hours_before_occurrence": 1200,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 16,
         "avg_parts_cost": 3600,
         "parts_needed": [
-          {"nsn": "2815-01-089-7401", "nomenclature": "PUMP, OIL, 3306", "qty": 1, "cost": 1800.00}
+          {
+            "nsn": "2815-01-089-7401",
+            "nomenclature": "PUMP, OIL, 3306",
+            "qty": 1,
+            "cost": 1800.0
+          }
         ],
         "tm_reference": "TM 5-2410-237-24",
         "classified": false,
@@ -1722,14 +2438,22 @@
         "id": "TRAM_HYDRAULIC",
         "component": "hydraulic",
         "description": "Loader bucket hydraulic cylinder",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.8,
         "min_hours_before_occurrence": 400,
         "condition_impact": "Degraded",
         "avg_repair_hours": 6,
         "avg_parts_cost": 1200,
         "parts_needed": [
-          {"nsn": "4320-01-234-5101", "nomenclature": "CYLINDER, BUCKET LIFT", "qty": 1, "cost": 950.00}
+          {
+            "nsn": "4320-01-234-5101",
+            "nomenclature": "CYLINDER, BUCKET LIFT",
+            "qty": 1,
+            "cost": 950.0
+          }
         ],
         "tm_reference": "TM 5-3805-254-24",
         "classified": false,
@@ -1742,14 +2466,22 @@
         "id": "TRAM_TRANS",
         "component": "transmission",
         "description": "Powershift transmission fault",
-        "defect_code": ["NMAJ", "TRSM"],
+        "defect_code": [
+          "TRAN",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.9,
         "min_hours_before_occurrence": 800,
         "condition_impact": "Degraded",
         "avg_repair_hours": 14,
         "avg_parts_cost": 3400,
         "parts_needed": [
-          {"nsn": "2520-01-234-5201", "nomenclature": "VALVE, POWERSHIFT", "qty": 1, "cost": 2400.00}
+          {
+            "nsn": "2520-01-234-5201",
+            "nomenclature": "VALVE, POWERSHIFT",
+            "qty": 1,
+            "cost": 2400.0
+          }
         ],
         "tm_reference": "TM 5-3805-254-24",
         "classified": false,
@@ -1762,14 +2494,22 @@
         "id": "TRAM_ENGINE",
         "component": "engine",
         "description": "Cummins 6BTA overheating",
-        "defect_code": ["NMAJ", "ENGN"],
+        "defect_code": [
+          "ENG",
+          "INOP"
+        ],
         "probability_per_1000_hours": 0.8,
         "min_hours_before_occurrence": 1000,
         "condition_impact": "Degraded",
         "avg_repair_hours": 5,
         "avg_parts_cost": 980,
         "parts_needed": [
-          {"nsn": "2930-01-234-5301", "nomenclature": "RADIATOR ASSY, TRAM", "qty": 1, "cost": 820.00}
+          {
+            "nsn": "2930-01-234-5301",
+            "nomenclature": "RADIATOR ASSY, TRAM",
+            "qty": 1,
+            "cost": 820.0
+          }
         ],
         "tm_reference": "TM 5-3805-254-24",
         "classified": false,
@@ -1782,14 +2522,22 @@
         "id": "TRAM_TIRE",
         "component": "tire",
         "description": "Foam-filled tire failure",
-        "defect_code": ["MINR", "TIRE"],
+        "defect_code": [
+          "AXLE",
+          "CBB"
+        ],
         "probability_per_1000_hours": 1.5,
         "min_hours_before_occurrence": 500,
         "condition_impact": "Minor",
         "avg_repair_hours": 4,
         "avg_parts_cost": 780,
         "parts_needed": [
-          {"nsn": "2610-01-234-5401", "nomenclature": "TIRE, FOAM FILLED, OFF-ROAD", "qty": 1, "cost": 720.00}
+          {
+            "nsn": "2610-01-234-5401",
+            "nomenclature": "TIRE, FOAM FILLED, OFF-ROAD",
+            "qty": 1,
+            "cost": 720.0
+          }
         ],
         "tm_reference": "TM 5-3805-254-24",
         "classified": false,
@@ -1814,14 +2562,22 @@
         "id": "ROWPU_MEMBRANE",
         "component": "fuel",
         "description": "Reverse osmosis membrane fouled / damaged",
-        "defect_code": ["NMAJ", "FUEL"],
+        "defect_code": [
+          "FUEL",
+          "INOP"
+        ],
         "probability_per_1000_hours": 2.2,
         "min_hours_before_occurrence": 500,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 8,
         "avg_parts_cost": 3200,
         "parts_needed": [
-          {"nsn": "4610-01-302-6101", "nomenclature": "MEMBRANE, RO ELEMENT", "qty": 2, "cost": 1400.00}
+          {
+            "nsn": "4610-01-302-6101",
+            "nomenclature": "MEMBRANE, RO ELEMENT",
+            "qty": 2,
+            "cost": 1400.0
+          }
         ],
         "tm_reference": "TM 10-4610-215-10",
         "classified": false,
@@ -1834,14 +2590,22 @@
         "id": "ROWPU_PUMP",
         "component": "hydraulic",
         "description": "High-pressure feed pump failure",
-        "defect_code": ["NMAJ", "HYDR"],
+        "defect_code": [
+          "FCON",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.5,
         "min_hours_before_occurrence": 800,
         "condition_impact": "Deadlined",
         "avg_repair_hours": 10,
         "avg_parts_cost": 4800,
         "parts_needed": [
-          {"nsn": "4320-01-302-6201", "nomenclature": "PUMP, HIGH PRESSURE, RO", "qty": 1, "cost": 3800.00}
+          {
+            "nsn": "4320-01-302-6201",
+            "nomenclature": "PUMP, HIGH PRESSURE, RO",
+            "qty": 1,
+            "cost": 3800.0
+          }
         ],
         "tm_reference": "TM 10-4610-215-10",
         "classified": false,
@@ -1854,14 +2618,22 @@
         "id": "ROWPU_CHEM_INJECTION",
         "component": "electrical",
         "description": "Chemical injection pump solenoid",
-        "defect_code": ["MINR", "ELEC"],
+        "defect_code": [
+          "ELEC",
+          "INOP"
+        ],
         "probability_per_1000_hours": 1.0,
         "min_hours_before_occurrence": 400,
         "condition_impact": "Minor",
         "avg_repair_hours": 2,
         "avg_parts_cost": 320,
         "parts_needed": [
-          {"nsn": "4320-01-302-6301", "nomenclature": "PUMP, METERING, SODIUM HYPO", "qty": 1, "cost": 240.00}
+          {
+            "nsn": "4320-01-302-6301",
+            "nomenclature": "PUMP, METERING, SODIUM HYPO",
+            "qty": 1,
+            "cost": 240.0
+          }
         ],
         "tm_reference": "TM 10-4610-215-10",
         "classified": false,

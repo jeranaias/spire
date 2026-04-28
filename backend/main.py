@@ -30,6 +30,8 @@ from .routes.bastion import router as bastion_router
 from .routes.llm import router as llm_router
 from .routes.copilot import router as copilot_router
 from .routes.integrations import router as integrations_router
+from .routes.gcss import router as gcss_router
+from .routes.gcss_export import router as gcss_export_router
 from .routes.joint import router as joint_router
 from .routes.decision_bridge import router as decision_bridge_router
 from .scoping import (
@@ -114,6 +116,9 @@ app.include_router(
 app.include_router(llm_router,    prefix="/api/llm",    tags=["llm"])
 app.include_router(copilot_router, prefix="/api/copilot", tags=["copilot"])
 app.include_router(integrations_router, prefix="/api/integrations", tags=["integrations"])
+app.include_router(gcss_router, prefix="/api/gcss", tags=["gcss"])
+app.include_router(gcss_export_router, prefix="/api/gcss/export", tags=["gcss-export"])
+app.include_router(gcss_export_router, prefix="/api/integrations/gcss-mc/export", tags=["gcss-export"])
 app.include_router(joint_router,  prefix="/api/joint",  tags=["joint"])
 app.include_router(decision_bridge_router, prefix="/api/decision-bridge", tags=["decision-bridge"])
 

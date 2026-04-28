@@ -31,7 +31,16 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ErrorState, LoadingState, Pressable } from "../components/ui";
-import { api, ApiError, type DdilMode, type GcssMcSamplePayload } from "../api";
+import {
+  api,
+  ApiError,
+  type DdilMode,
+  type GcssMcSamplePayload,
+  type GcssMcCoverageSummary,
+  type GcssMcDictionary,
+  type GcssMcDictionarySection,
+  type GcssMcDictionaryColumn,
+} from "../api";
 import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 
@@ -164,6 +173,7 @@ function GcssMcContractPage() {
           }
         />
         <FieldMappingSection sample={sample} />
+        <FieldDictionarySection />
         <PollingCadenceSection />
         <AuthSection />
         <AtoSection />
@@ -530,6 +540,289 @@ const MAPPING_ROWS: MappingRow[] = [
     notes: "Required Delivery Date (or actual receipt when status = D6).",
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Task #177 — Field Dictionary section
+//
+// Backs the integrations page's "what does the real GCSS-MC schema look
+// like, and how much of it does SPIRE actually consume?" question. Pulls
+// the derived `gcss_dictionary.json` (163 columns across 3 source CSVs)
+// and renders three accordion-style tables with green/amber/red coverage
+// badges. The hero strip at the top renders the totals so the consumed-%
+// number reads at projection scale without scrolling.
+// ---------------------------------------------------------------------------
+
+function filterDictionarySection(
+  section: GcssMcDictionarySection,
+  query: string,
+): GcssMcDictionarySection {
+  const q = query.trim().toLowerCase();
+  if (!q) return section;
+  const filtered = section.columns.filter((c) => {
+    if (c.column.toLowerCase().includes(q)) return true;
+    if ((c.coverage?.spire_field || "").toLowerCase().includes(q)) return true;
+    if ((c.comment || "").toLowerCase().includes(q)) return true;
+    return false;
+  });
+  return { ...section, columns: filtered };
+}
+
+function FieldDictionarySection() {
+  const [coverage, setCoverage] = useState<GcssMcCoverageSummary | null>(null);
+  const [dictionary, setDictionary] = useState<GcssMcDictionary | null>(null);
+  const [openSection, setOpenSection] = useState<string>("header");
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.system.gcssMcCoverageSummary(),
+      api.system.gcssMcDictionary(),
+    ])
+      .then(([cov, dict]) => {
+        if (cancelled) return;
+        setCoverage(cov);
+        setDictionary(dict);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(formatApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <Section
+      title="Field dictionary · real GCSS-MC schema"
+      subtitle="Sourced from the published USMC sanitized data dictionaries (sr_header_dict.csv, sr_repair_part_dict.csv, due_in_data_dict.csv). Each column shows its real top-3 value distribution and a coverage badge for whether SPIRE consumes it, partially consumes it, or drops it."
+    >
+      {error && (
+        <div className="mb-3 rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_8%,var(--color-bg))] px-3 py-2 font-mono text-xs text-[var(--color-warning)]">
+          Dictionary unavailable: {error}
+        </div>
+      )}
+      {!coverage && !error && <LoadingState label="Loading schema dictionary…" />}
+      {coverage && (
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <CoveragePill
+            label="Coverage"
+            value={`${coverage.totals.consumed_pct.toFixed(1)}%`}
+            sub={`${coverage.totals.consumed} / ${coverage.totals.columns} columns`}
+            tone="primary"
+          />
+          <CoveragePill
+            label="Consumed"
+            value={String(coverage.totals.consumed)}
+            sub="green badges"
+            tone="success"
+          />
+          <CoveragePill
+            label="Partial"
+            value={String(coverage.totals.partial)}
+            sub="amber badges"
+            tone="warning"
+          />
+          <CoveragePill
+            label="Dropped"
+            value={String(coverage.totals.dropped)}
+            sub="red badges"
+            tone="muted"
+          />
+        </div>
+      )}
+      {coverage && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {coverage.sections.map((s) => {
+            const isOpen = openSection === s.id;
+            return (
+              <Pressable
+                key={s.id}
+                block={false}
+                onClick={() => setOpenSection(s.id)}
+                className={
+                  "rounded-sm border px-3 py-1 font-mono text-[11px] uppercase tracking-widest transition " +
+                  (isOpen
+                    ? "border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_15%,var(--color-bg))] text-[var(--color-primary)]"
+                    : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)]")
+                }
+              >
+                {s.title} · {s.consumed}/{s.total_columns}
+              </Pressable>
+            );
+          })}
+        </div>
+      )}
+      {dictionary && (
+        <div className="mb-3">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search columns or SPIRE fields…"
+            aria-label="Search field dictionary"
+            data-testid="dictionary-search"
+            className="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:outline-none"
+          />
+        </div>
+      )}
+      {dictionary && (
+        <DictionaryTable
+          section={filterDictionarySection(
+            dictionary.sections.find((s) => s.id === openSection) ||
+              dictionary.sections[0],
+            search,
+          )}
+        />
+      )}
+      {dictionary && (
+        <p className="mt-3 spire-body-muted text-xs">
+          Generated from the published GCSS-MC dictionary CSVs at{" "}
+          <code className="font-mono text-[var(--color-primary)]">
+            {dictionary._meta.generated_at?.replace("T", " ").slice(0, 19) || "—"}
+          </code>
+          . Re-run with{" "}
+          <code className="font-mono">python -m dataset.scripts.build_gcss_dictionary</code>.
+        </p>
+      )}
+      {dictionary && (
+        <p className="mt-2 text-xs">
+          {/*
+            WP-8 acceptance: the Field Dictionary tab embeds a link to
+            the generated schema fidelity report. The backend serves the
+            markdown file at /api/integrations/gcss-mc/fidelity-report so
+            the report opens in a new tab without forcing the operator
+            out to GitHub (which is unreachable in DDIL conditions).
+          */}
+          <a
+            href="/api/integrations/gcss-mc/fidelity-report"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="fidelity-report-link"
+            className="font-mono text-[var(--color-primary)] underline-offset-2 hover:underline"
+          >
+            View full fidelity report →
+          </a>
+        </p>
+      )}
+    </Section>
+  );
+}
+
+function CoveragePill({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  tone: "primary" | "success" | "warning" | "muted";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "text-[var(--color-success)]"
+      : tone === "warning"
+      ? "text-[var(--color-warning)]"
+      : tone === "primary"
+      ? "text-[var(--color-primary)]"
+      : "text-[var(--color-text-muted)]";
+  return (
+    <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      <div className={`mt-1 font-mono text-2xl tabular-nums ${toneClass}`}>{value}</div>
+      <div className="mt-0.5 text-[11px] text-[var(--color-text-secondary)]">{sub}</div>
+    </div>
+  );
+}
+
+function DictionaryTable({ section }: { section: GcssMcDictionarySection }) {
+  return (
+    <div className="overflow-x-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
+      <div className="border-b border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-primary)_5%,var(--color-surface))] px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+        {section.title} · {section.columns.length} columns ·{" "}
+        {section.row_count_real_export.toLocaleString()} real rows · source{" "}
+        <span className="text-[var(--color-primary)]">{section.source_csv}</span>
+      </div>
+      <table
+        data-testid="dictionary-table"
+        className="w-full min-w-[760px] font-mono text-[11px]"
+      >
+        <thead className="bg-[color-mix(in_oklab,var(--color-primary)_4%,var(--color-surface))] text-left uppercase tracking-widest text-[var(--color-text-muted)]">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Column</th>
+            <th className="px-3 py-2 font-semibold">Type</th>
+            <th className="px-3 py-2 font-semibold">SPIRE coverage</th>
+            <th className="px-3 py-2 font-semibold">Real top-3 (sanitized)</th>
+            <th className="px-3 py-2 font-semibold">Comment</th>
+          </tr>
+        </thead>
+        <tbody>
+          {section.columns.map((c) => (
+            <DictionaryRow key={c.column} column={c} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DictionaryRow({ column }: { column: GcssMcDictionaryColumn }) {
+  const badgeColor =
+    column.coverage.badge === "green"
+      ? "var(--color-success)"
+      : column.coverage.badge === "amber"
+      ? "var(--color-warning)"
+      : "var(--color-text-muted)";
+  return (
+    <tr className="border-t border-[var(--color-border)] align-top">
+      <td className="px-3 py-2 text-[var(--color-text)]">{column.column}</td>
+      <td className="px-3 py-2 text-[var(--color-text-secondary)]">
+        {column.data_type}
+        {!column.nullable ? (
+          <span className="ml-1 text-[10px] text-[var(--color-warning)]">NOT NULL</span>
+        ) : null}
+      </td>
+      <td className="px-3 py-2">
+        <span
+          className="inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] uppercase tracking-widest"
+          style={{ borderColor: badgeColor, color: badgeColor }}
+        >
+          {column.coverage.label}
+        </span>
+        {column.coverage.spire_field && (
+          <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
+            → {column.coverage.spire_field}
+          </div>
+        )}
+      </td>
+      <td className="px-3 py-2 text-[var(--color-text-secondary)] tabular-nums">
+        {column.real_top_3.length === 0 ? (
+          <span className="text-[var(--color-text-muted)]">—</span>
+        ) : (
+          <ul className="space-y-0.5">
+            {column.real_top_3.map((tv, i) => (
+              <li key={`${tv.value}.${i}`}>
+                <span className="text-[var(--color-text)]">{tv.value || "(blank)"}</span>{" "}
+                <span className="text-[10px] text-[var(--color-text-muted)]">
+                  {tv.pct.toFixed(1)}%
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </td>
+      <td className="px-3 py-2 text-[10px] text-[var(--color-text-muted)] leading-relaxed">
+        {column.comment || "—"}
+      </td>
+    </tr>
+  );
+}
 
 function FieldMappingSection({ sample }: { sample: SamplePayload | null }) {
   return (

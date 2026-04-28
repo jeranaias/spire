@@ -1,0 +1,1322 @@
+{
+  "_meta": {
+    "source": "GCSS-MC sanitized export (hashed PII)",
+    "generated_at": "2026-04-28T13:46:33.593825Z",
+    "files": {
+      "header": "hashed_header.csv",
+      "parts": "hashed_sr_parts.csv",
+      "due_in": "hashed_due_in.csv"
+    }
+  },
+  "header": {
+    "row_count": 103686,
+    "sr_number_unique": 103686,
+    "sr_number_unique_pct": 100.0,
+    "fields": {
+      "SERVICE_REQUEST_TYPE": {
+        "total_rows": 103686,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 1,
+        "top_n": 25,
+        "top_values": [
+          {
+            "value": "Maintenance - CM",
+            "count": 103686,
+            "pct": 100.0
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "DEFECT_CODE": {
+        "total_rows": 103686,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 865,
+        "top_n": 50,
+        "top_values": [
+          {
+            "value": "FCON.CBB",
+            "count": 49882,
+            "pct": 48.1087
+          },
+          {
+            "value": "WPNS.CBB",
+            "count": 17406,
+            "pct": 16.7872
+          },
+          {
+            "value": "ELEC.INOP",
+            "count": 3196,
+            "pct": 3.0824
+          },
+          {
+            "value": "COMP.INOP",
+            "count": 2463,
+            "pct": 2.3754
+          },
+          {
+            "value": "DAD1.INOP",
+            "count": 1956,
+            "pct": 1.8865
+          },
+          {
+            "value": "FCON.OPTIC",
+            "count": 1927,
+            "pct": 1.8585
+          },
+          {
+            "value": ".",
+            "count": 1583,
+            "pct": 1.5267
+          },
+          {
+            "value": "FCON.INOP",
+            "count": 1347,
+            "pct": 1.2991
+          },
+          {
+            "value": "COMP.CBB",
+            "count": 1073,
+            "pct": 1.0349
+          },
+          {
+            "value": "ELEC.BTRY",
+            "count": 1035,
+            "pct": 0.9982
+          },
+          {
+            "value": "ELEC.CBB",
+            "count": 812,
+            "pct": 0.7831
+          },
+          {
+            "value": "WPNS.SAFDL",
+            "count": 678,
+            "pct": 0.6539
+          },
+          {
+            "value": "FCON.",
+            "count": 627,
+            "pct": 0.6047
+          },
+          {
+            "value": "WPNS.OPTIC",
+            "count": 590,
+            "pct": 0.569
+          },
+          {
+            "value": "BODY.CBB",
+            "count": 553,
+            "pct": 0.5333
+          },
+          {
+            "value": "ENG.INOP",
+            "count": 527,
+            "pct": 0.5083
+          },
+          {
+            "value": "ENG.CBB",
+            "count": 488,
+            "pct": 0.4707
+          },
+          {
+            "value": "ENG.RPLC",
+            "count": 465,
+            "pct": 0.4485
+          },
+          {
+            "value": "WPNS.",
+            "count": 453,
+            "pct": 0.4369
+          },
+          {
+            "value": "NMAJ.MINR",
+            "count": 433,
+            "pct": 0.4176
+          },
+          {
+            "value": "ELEC.",
+            "count": 420,
+            "pct": 0.4051
+          },
+          {
+            "value": "WPNS.PAINT",
+            "count": 374,
+            "pct": 0.3607
+          },
+          {
+            "value": "TRAN.INOP",
+            "count": 344,
+            "pct": 0.3318
+          },
+          {
+            "value": "COMP.SL3AP",
+            "count": 337,
+            "pct": 0.325
+          },
+          {
+            "value": "COMP.RPLC",
+            "count": 294,
+            "pct": 0.2835
+          },
+          {
+            "value": "DAD1.CBB",
+            "count": 280,
+            "pct": 0.27
+          },
+          {
+            "value": "ENG.MOIST",
+            "count": 225,
+            "pct": 0.217
+          },
+          {
+            "value": "AXLE.CBB",
+            "count": 223,
+            "pct": 0.2151
+          },
+          {
+            "value": "FCON.MINR",
+            "count": 215,
+            "pct": 0.2074
+          },
+          {
+            "value": "COMP.",
+            "count": 211,
+            "pct": 0.2035
+          },
+          {
+            "value": "ELEC.RPLC",
+            "count": 194,
+            "pct": 0.1871
+          },
+          {
+            "value": "FUEL.CBB",
+            "count": 193,
+            "pct": 0.1861
+          },
+          {
+            "value": "TRAN.RPLC",
+            "count": 192,
+            "pct": 0.1852
+          },
+          {
+            "value": "FUEL.INOP",
+            "count": 180,
+            "pct": 0.1736
+          },
+          {
+            "value": "WPNS.ASPM",
+            "count": 179,
+            "pct": 0.1726
+          },
+          {
+            "value": "COMP.BTRY",
+            "count": 176,
+            "pct": 0.1697
+          },
+          {
+            "value": "FCON.MOIST",
+            "count": 173,
+            "pct": 0.1668
+          },
+          {
+            "value": "TEDD.INOP",
+            "count": 159,
+            "pct": 0.1533
+          },
+          {
+            "value": "NMAJ.",
+            "count": 149,
+            "pct": 0.1437
+          },
+          {
+            "value": "DAD1.",
+            "count": 147,
+            "pct": 0.1418
+          },
+          {
+            "value": "FUEL.INJEC",
+            "count": 147,
+            "pct": 0.1418
+          },
+          {
+            "value": "FUEL.PUMP",
+            "count": 144,
+            "pct": 0.1389
+          },
+          {
+            "value": "FCON.SAFDL",
+            "count": 142,
+            "pct": 0.137
+          },
+          {
+            "value": "FCON.HOUS",
+            "count": 138,
+            "pct": 0.1331
+          },
+          {
+            "value": "TRAN.MOIST",
+            "count": 134,
+            "pct": 0.1292
+          },
+          {
+            "value": "TRAN.CBB",
+            "count": 133,
+            "pct": 0.1283
+          },
+          {
+            "value": "WPNS.COTO",
+            "count": 129,
+            "pct": 0.1244
+          },
+          {
+            "value": "AXLE.MOIST",
+            "count": 125,
+            "pct": 0.1206
+          },
+          {
+            "value": "COOL.CBB",
+            "count": 119,
+            "pct": 0.1148
+          },
+          {
+            "value": "ENG.SEAL",
+            "count": 117,
+            "pct": 0.1128
+          }
+        ],
+        "other_pct": 9.8364
+      },
+      "ECHELON_OF_MAINT": {
+        "total_rows": 103686,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 7,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "2",
+            "count": 57870,
+            "pct": 55.8127
+          },
+          {
+            "value": "3",
+            "count": 38029,
+            "pct": 36.6771
+          },
+          {
+            "value": "1",
+            "count": 7354,
+            "pct": 7.0926
+          },
+          {
+            "value": "null",
+            "count": 327,
+            "pct": 0.3154
+          },
+          {
+            "value": "4",
+            "count": 90,
+            "pct": 0.0868
+          },
+          {
+            "value": "5",
+            "count": 14,
+            "pct": 0.0135
+          },
+          {
+            "value": "E17982G",
+            "count": 2,
+            "pct": 0.0019
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "MASTER_PRIORITY_CODE": {
+        "total_rows": 103686,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 13,
+        "top_n": 20,
+        "top_values": [
+          {
+            "value": "06 B-Urgent",
+            "count": 56337,
+            "pct": 54.3342
+          },
+          {
+            "value": "05 B-Urgent",
+            "count": 21028,
+            "pct": 20.2805
+          },
+          {
+            "value": "13 C-Routine",
+            "count": 8994,
+            "pct": 8.6743
+          },
+          {
+            "value": "09 B-Urgent",
+            "count": 6476,
+            "pct": 6.2458
+          },
+          {
+            "value": "12 C-Routine",
+            "count": 3830,
+            "pct": 3.6938
+          },
+          {
+            "value": "03 A-Critical",
+            "count": 3634,
+            "pct": 3.5048
+          },
+          {
+            "value": "02 A-Critical",
+            "count": 2912,
+            "pct": 2.8085
+          },
+          {
+            "value": "14 C-Routine",
+            "count": 343,
+            "pct": 0.3308
+          },
+          {
+            "value": "07 A-Critical",
+            "count": 127,
+            "pct": 0.1225
+          },
+          {
+            "value": "01-DEC-23",
+            "count": 2,
+            "pct": 0.0019
+          },
+          {
+            "value": "10 B-Urgent",
+            "count": 1,
+            "pct": 0.001
+          },
+          {
+            "value": "01 A-Critical",
+            "count": 1,
+            "pct": 0.001
+          },
+          {
+            "value": "11 C-Routine",
+            "count": 1,
+            "pct": 0.001
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "TAMCN": {
+        "total_rows": 103686,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 705,
+        "top_n": 25,
+        "top_values": [
+          {
+            "value": "tamcn_LdTtAkWe7qujsAQoWR97",
+            "count": 6571,
+            "pct": 6.3374
+          },
+          {
+            "value": "tamcn_s7bbHIZOgqbgJ9iYyaDQ",
+            "count": 6486,
+            "pct": 6.2554
+          },
+          {
+            "value": "tamcn_g8nshKjOtiBVdkzVsuYH",
+            "count": 6429,
+            "pct": 6.2005
+          },
+          {
+            "value": "tamcn_oNxhR-Q6aggLC2F2OzF6",
+            "count": 6361,
+            "pct": 6.1349
+          },
+          {
+            "value": "tamcn_3dpCu5nRSC2owSF6wfsg",
+            "count": 5488,
+            "pct": 5.2929
+          },
+          {
+            "value": "tamcn_ZZXB40bW69Nz86Grc5wg",
+            "count": 5132,
+            "pct": 4.9496
+          },
+          {
+            "value": "tamcn_26hSYEejlxGFk_EZwppw",
+            "count": 4329,
+            "pct": 4.1751
+          },
+          {
+            "value": "tamcn_Sgv-uoWtTthveHNJjzeI",
+            "count": 2623,
+            "pct": 2.5298
+          },
+          {
+            "value": "tamcn_StJ_y1xi8i7io3w2VxFZ",
+            "count": 2562,
+            "pct": 2.4709
+          },
+          {
+            "value": "tamcn_cFGNQbvircWTQ-2g0Rmt",
+            "count": 2562,
+            "pct": 2.4709
+          },
+          {
+            "value": "tamcn_DMMo1DRYveVoqpqjgUuu",
+            "count": 2200,
+            "pct": 2.1218
+          },
+          {
+            "value": "null",
+            "count": 2006,
+            "pct": 1.9347
+          },
+          {
+            "value": "tamcn_TWyXGnuW0_i-z0EG0Zal",
+            "count": 1899,
+            "pct": 1.8315
+          },
+          {
+            "value": "tamcn_LUUg88e0EFShNNfBVQq_",
+            "count": 1780,
+            "pct": 1.7167
+          },
+          {
+            "value": "tamcn_fSVyJR2Cy9jPKxkOfLJY",
+            "count": 1703,
+            "pct": 1.6425
+          },
+          {
+            "value": "tamcn_TR6j8h-p4VvO0TKCkUxs",
+            "count": 1589,
+            "pct": 1.5325
+          },
+          {
+            "value": "tamcn_t-dpXnvgDBVMuzPxC--r",
+            "count": 1538,
+            "pct": 1.4833
+          },
+          {
+            "value": "tamcn_Sfih10vUuHa3F4ePOm9b",
+            "count": 1464,
+            "pct": 1.412
+          },
+          {
+            "value": "tamcn_7Mi0Y_s6ZZAA11scGUvl",
+            "count": 1278,
+            "pct": 1.2326
+          },
+          {
+            "value": "tamcn__9j3PomR9-HAxkRJZRY8",
+            "count": 1277,
+            "pct": 1.2316
+          },
+          {
+            "value": "tamcn_a2L-yL58ix4cvw2dYJ7W",
+            "count": 1211,
+            "pct": 1.1679
+          },
+          {
+            "value": "tamcn_ZE2utNyQ2fzKLvyK5mSC",
+            "count": 1199,
+            "pct": 1.1564
+          },
+          {
+            "value": "tamcn_NNjF0ZGZTqiYUfDt1FUZ",
+            "count": 1070,
+            "pct": 1.032
+          },
+          {
+            "value": "tamcn_e1PqKeRrw7WvrU5279JV",
+            "count": 1022,
+            "pct": 0.9857
+          },
+          {
+            "value": "tamcn_3LDVFcj5zsCYdxyRqeaQ",
+            "count": 957,
+            "pct": 0.923
+          }
+        ],
+        "other_pct": 31.7786
+      },
+      "OWNER_UNIT_ADDRESS_CODE": {
+        "total_rows": 103686,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 658,
+        "top_n": 25,
+        "top_values": [
+          {
+            "value": "owner_unit_address_code_ynbYZ7_knLyR6XDMEn32",
+            "count": 4960,
+            "pct": 4.7837
+          },
+          {
+            "value": "owner_unit_address_code_PGdDfNkynkfxA2a9vsHk",
+            "count": 3005,
+            "pct": 2.8982
+          },
+          {
+            "value": "owner_unit_address_code_jLj-J5GFPLPBAGZodf-q",
+            "count": 1905,
+            "pct": 1.8373
+          },
+          {
+            "value": "owner_unit_address_code_EYiV-xdUn1j-r7L_sb6C",
+            "count": 1842,
+            "pct": 1.7765
+          },
+          {
+            "value": "owner_unit_address_code_lAtlwF6DhET-Nqt0i3no",
+            "count": 1779,
+            "pct": 1.7158
+          },
+          {
+            "value": "owner_unit_address_code_NU1-KBGqjVzGcdj18Q5s",
+            "count": 1762,
+            "pct": 1.6994
+          },
+          {
+            "value": "owner_unit_address_code_5UioKDATVP5D15jCXVip",
+            "count": 1636,
+            "pct": 1.5778
+          },
+          {
+            "value": "owner_unit_address_code_yQ8bUHVRpMBLvUcMVXA5",
+            "count": 1601,
+            "pct": 1.5441
+          },
+          {
+            "value": "owner_unit_address_code_h1xQ6it0RMhEpPaaI4RD",
+            "count": 1531,
+            "pct": 1.4766
+          },
+          {
+            "value": "owner_unit_address_code_giR-YGaPnixSkXypWL-O",
+            "count": 1518,
+            "pct": 1.464
+          },
+          {
+            "value": "owner_unit_address_code__T24V1m_KeoBnuTVVbf5",
+            "count": 1515,
+            "pct": 1.4611
+          },
+          {
+            "value": "owner_unit_address_code_JLGn0b0Ux2cRuxGSledg",
+            "count": 1493,
+            "pct": 1.4399
+          },
+          {
+            "value": "owner_unit_address_code_czyDo-P99-giADYbqLGZ",
+            "count": 1404,
+            "pct": 1.3541
+          },
+          {
+            "value": "owner_unit_address_code_E7B8gz-57ugagJ1rtew9",
+            "count": 1392,
+            "pct": 1.3425
+          },
+          {
+            "value": "owner_unit_address_code_fSgvWTqF9cQSIXFmgH9_",
+            "count": 1359,
+            "pct": 1.3107
+          },
+          {
+            "value": "owner_unit_address_code_vWxWSYP_AaG9kXwbsgD8",
+            "count": 1358,
+            "pct": 1.3097
+          },
+          {
+            "value": "owner_unit_address_code_alNDvt8RUZjzrAXghIMZ",
+            "count": 1336,
+            "pct": 1.2885
+          },
+          {
+            "value": "owner_unit_address_code_CvlvFfJCRlMtf7FO5i3E",
+            "count": 1335,
+            "pct": 1.2875
+          },
+          {
+            "value": "owner_unit_address_code_fl8VRQz6vk9qBfY65hIN",
+            "count": 1252,
+            "pct": 1.2075
+          },
+          {
+            "value": "owner_unit_address_code_GG-5ovMYa_7qqshemwmB",
+            "count": 1251,
+            "pct": 1.2065
+          },
+          {
+            "value": "owner_unit_address_code_DCXZ-NS6ib-F6GfwiYYQ",
+            "count": 1194,
+            "pct": 1.1516
+          },
+          {
+            "value": "owner_unit_address_code_g2ryERvzfRY8ZWfYH5uv",
+            "count": 1091,
+            "pct": 1.0522
+          },
+          {
+            "value": "owner_unit_address_code_Aof8jXFX_icSjIpsX44T",
+            "count": 1078,
+            "pct": 1.0397
+          },
+          {
+            "value": "owner_unit_address_code_4cRKqspuj9hCSLwhKWQP",
+            "count": 1065,
+            "pct": 1.0271
+          },
+          {
+            "value": "owner_unit_address_code_TEV5JsoSOSaISGIDbvNJ",
+            "count": 1030,
+            "pct": 0.9934
+          }
+        ],
+        "other_pct": 60.7546
+      },
+      "DATE_RECEIVED_IN_SHOP": {
+        "total_rows": 103686,
+        "null_count": 2,
+        "null_pct": 0.0019,
+        "min": "2010-10-24",
+        "max": "2024-03-29",
+        "format_seen": {
+          "DD-MON-YY": 103684
+        },
+        "samples": [
+          "27-JAN-24",
+          "27-FEB-24",
+          "29-MAR-24",
+          "12-MAR-24",
+          "06-DEC-23"
+        ]
+      },
+      "DEADLINED_DATE": {
+        "total_rows": 103686,
+        "null_count": 2,
+        "null_pct": 0.0019,
+        "min": "2010-05-05",
+        "max": "2024-03-28",
+        "format_seen": {
+          "DD-MON-YY": 103684
+        },
+        "samples": [
+          "27-JAN-24",
+          "27-FEB-24",
+          "28-FEB-24",
+          "12-MAR-24",
+          "13-DEC-23"
+        ]
+      },
+      "JOB_STATUS_DATE": {
+        "total_rows": 103686,
+        "null_count": 2,
+        "null_pct": 0.0019,
+        "min": "2020-03-31",
+        "max": "2024-03-29",
+        "format_seen": {
+          "DD-MON-YY": 103684
+        },
+        "samples": [
+          "29-MAR-24",
+          "29-MAR-24",
+          "29-MAR-24",
+          "29-MAR-24",
+          "29-MAR-24"
+        ]
+      },
+      "JOB_STATUS_minus_RECEIVED_days": {
+        "paired_rows": 103684,
+        "min": 0,
+        "max": 3787,
+        "mean": 99.74,
+        "median": 46.0,
+        "p25": 12,
+        "p75": 106,
+        "p90": 230
+      },
+      "DEADLINED_minus_RECEIVED_days": {
+        "paired_rows": 103684,
+        "min": -3927,
+        "max": 3787,
+        "mean": 6.44,
+        "median": 0.0,
+        "p25": 0,
+        "p75": 0,
+        "p90": 0
+      }
+    },
+    "dirty_signals": {
+      "defect_code_trailing_period_count": 4341
+    }
+  },
+  "parts": {
+    "row_count": 98210,
+    "fields": {
+      "SERVICE_ACTIVITY": {
+        "total_rows": 98210,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 6,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "Issue from Inventory",
+            "count": 57994,
+            "pct": 59.051
+          },
+          {
+            "value": "null",
+            "count": 34564,
+            "pct": 35.194
+          },
+          {
+            "value": "SECREP Exchange",
+            "count": 3585,
+            "pct": 3.6503
+          },
+          {
+            "value": "Return to Inventory",
+            "count": 1436,
+            "pct": 1.4622
+          },
+          {
+            "value": "Issue to Inventory",
+            "count": 628,
+            "pct": 0.6394
+          },
+          {
+            "value": "Parent S/N Change",
+            "count": 3,
+            "pct": 0.0031
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "QUANTITY_REQUIRED": {
+        "total_rows": 98210,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "min": 0.001,
+        "max": 762.0,
+        "mean": 1.8954,
+        "median": 1.0
+      },
+      "PARTS_CHARGE": {
+        "total_rows": 98210,
+        "null_count": 34564,
+        "null_pct": 35.194,
+        "min": 0.0,
+        "max": 1010000.0,
+        "mean": 2527.7248,
+        "median": 34.74
+      },
+      "DOCUMENT_NUMBER_null_pct": 0.0,
+      "RNSN_unique_count": 14554
+    }
+  },
+  "due_in": {
+    "row_count": 38108,
+    "fields": {
+      "DIC": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 4,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "A0A",
+            "count": 26458,
+            "pct": 69.429
+          },
+          {
+            "value": "A01",
+            "count": 8098,
+            "pct": 21.2501
+          },
+          {
+            "value": "A2A",
+            "count": 2820,
+            "pct": 7.4
+          },
+          {
+            "value": "A21",
+            "count": 732,
+            "pct": 1.9209
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "PRI_CD": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 9,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "6",
+            "count": 19853,
+            "pct": 52.0967
+          },
+          {
+            "value": "5",
+            "count": 6494,
+            "pct": 17.041
+          },
+          {
+            "value": "3",
+            "count": 5510,
+            "pct": 14.4589
+          },
+          {
+            "value": "2",
+            "count": 4721,
+            "pct": 12.3885
+          },
+          {
+            "value": "13",
+            "count": 743,
+            "pct": 1.9497
+          },
+          {
+            "value": "12",
+            "count": 458,
+            "pct": 1.2018
+          },
+          {
+            "value": "9",
+            "count": 264,
+            "pct": 0.6928
+          },
+          {
+            "value": "14",
+            "count": 36,
+            "pct": 0.0945
+          },
+          {
+            "value": "7",
+            "count": 29,
+            "pct": 0.0761
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "ITEM_TYPE": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 2,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "I",
+            "count": 34246,
+            "pct": 89.8656
+          },
+          {
+            "value": "SECREP",
+            "count": 3862,
+            "pct": 10.1344
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "DOC_STATUS": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 2,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "Complete",
+            "count": 33088,
+            "pct": 86.8269
+          },
+          {
+            "value": "Cancelled",
+            "count": 5020,
+            "pct": 13.1731
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "RULE_ASSIGNED": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 11,
+        "top_n": 15,
+        "top_values": [
+          {
+            "value": "2",
+            "count": 30017,
+            "pct": 78.7682
+          },
+          {
+            "value": "12",
+            "count": 5016,
+            "pct": 13.1626
+          },
+          {
+            "value": "4",
+            "count": 2899,
+            "pct": 7.6073
+          },
+          {
+            "value": "6",
+            "count": 75,
+            "pct": 0.1968
+          },
+          {
+            "value": "14",
+            "count": 36,
+            "pct": 0.0945
+          },
+          {
+            "value": "10",
+            "count": 35,
+            "pct": 0.0918
+          },
+          {
+            "value": "34",
+            "count": 21,
+            "pct": 0.0551
+          },
+          {
+            "value": "18",
+            "count": 4,
+            "pct": 0.0105
+          },
+          {
+            "value": "24",
+            "count": 3,
+            "pct": 0.0079
+          },
+          {
+            "value": "8",
+            "count": 1,
+            "pct": 0.0026
+          },
+          {
+            "value": "22",
+            "count": 1,
+            "pct": 0.0026
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "SUPP_ADD": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 1307,
+        "top_n": 25,
+        "top_values": [
+          {
+            "value": "YARM",
+            "count": 6140,
+            "pct": 16.1121
+          },
+          {
+            "value": "YMT",
+            "count": 3019,
+            "pct": 7.9222
+          },
+          {
+            "value": "YOPT",
+            "count": 2459,
+            "pct": 6.4527
+          },
+          {
+            "value": "YMTM",
+            "count": 2100,
+            "pct": 5.5107
+          },
+          {
+            "value": "null",
+            "count": 1398,
+            "pct": 3.6685
+          },
+          {
+            "value": "MMFAF5",
+            "count": 1294,
+            "pct": 3.3956
+          },
+          {
+            "value": "YFC",
+            "count": 1107,
+            "pct": 2.9049
+          },
+          {
+            "value": "YMAINT",
+            "count": 789,
+            "pct": 2.0704
+          },
+          {
+            "value": "YHE",
+            "count": 750,
+            "pct": 1.9681
+          },
+          {
+            "value": "YENG",
+            "count": 699,
+            "pct": 1.8343
+          },
+          {
+            "value": "MMFAG8",
+            "count": 544,
+            "pct": 1.4275
+          },
+          {
+            "value": "YUT",
+            "count": 485,
+            "pct": 1.2727
+          },
+          {
+            "value": "YCOMM",
+            "count": 386,
+            "pct": 1.0129
+          },
+          {
+            "value": "MMFAF7",
+            "count": 365,
+            "pct": 0.9578
+          },
+          {
+            "value": "YIWR",
+            "count": 365,
+            "pct": 0.9578
+          },
+          {
+            "value": "MMG801",
+            "count": 343,
+            "pct": 0.9001
+          },
+          {
+            "value": "MMFAK9",
+            "count": 304,
+            "pct": 0.7977
+          },
+          {
+            "value": "YMSMTM",
+            "count": 291,
+            "pct": 0.7636
+          },
+          {
+            "value": "YMTMC",
+            "count": 290,
+            "pct": 0.761
+          },
+          {
+            "value": "Y2PL",
+            "count": 289,
+            "pct": 0.7584
+          },
+          {
+            "value": "YOMFC",
+            "count": 270,
+            "pct": 0.7085
+          },
+          {
+            "value": "YMOTOR",
+            "count": 259,
+            "pct": 0.6796
+          },
+          {
+            "value": "YMAIN",
+            "count": 238,
+            "pct": 0.6245
+          },
+          {
+            "value": "YARMO",
+            "count": 217,
+            "pct": 0.5694
+          },
+          {
+            "value": "Y1PL",
+            "count": 217,
+            "pct": 0.5694
+          }
+        ],
+        "other_pct": 35.3994
+      },
+      "SOS": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 16,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "sos_KaVbhcpv0pjDblSRAq8q",
+            "count": 33365,
+            "pct": 87.5538
+          },
+          {
+            "value": "sos_cbcuqWBBRp0KrOC_VSIP",
+            "count": 2456,
+            "pct": 6.4448
+          },
+          {
+            "value": "sos_2-6UEUaC4vrGcCUWkHsf",
+            "count": 1031,
+            "pct": 2.7055
+          },
+          {
+            "value": "sos_3NIPqUGDZsjQdnyvDUmQ",
+            "count": 563,
+            "pct": 1.4774
+          },
+          {
+            "value": "sos_lLPn-ybboqhB1_xKJRPf",
+            "count": 431,
+            "pct": 1.131
+          },
+          {
+            "value": "sos_eAdXAbjoqn-ioRUzgRGk",
+            "count": 216,
+            "pct": 0.5668
+          },
+          {
+            "value": "sos_Y-tkbh_EsiKuxkr29tx2",
+            "count": 14,
+            "pct": 0.0367
+          },
+          {
+            "value": "sos_akxRGlCoZIrU_aeP51zw",
+            "count": 10,
+            "pct": 0.0262
+          },
+          {
+            "value": "sos_Bb5QWQfDbMtrUMNjf-jf",
+            "count": 9,
+            "pct": 0.0236
+          },
+          {
+            "value": "sos_fomTPO1lAk5pixPnluvl",
+            "count": 4,
+            "pct": 0.0105
+          }
+        ],
+        "other_pct": 0.0236
+      },
+      "RCVR_CD": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 8,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "Z",
+            "count": 30929,
+            "pct": 81.1614
+          },
+          {
+            "value": "F",
+            "count": 1474,
+            "pct": 3.868
+          },
+          {
+            "value": "D",
+            "count": 1415,
+            "pct": 3.7131
+          },
+          {
+            "value": "H",
+            "count": 1383,
+            "pct": 3.6292
+          },
+          {
+            "value": "O",
+            "count": 1356,
+            "pct": 3.5583
+          },
+          {
+            "value": "L",
+            "count": 953,
+            "pct": 2.5008
+          },
+          {
+            "value": "A",
+            "count": 539,
+            "pct": 1.4144
+          },
+          {
+            "value": "null",
+            "count": 59,
+            "pct": 0.1548
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "ADVICE_CODE": {
+        "total_rows": 38108,
+        "null_count": 0,
+        "null_pct": 0.0,
+        "unique_count": 1,
+        "top_n": 10,
+        "top_values": [
+          {
+            "value": "null",
+            "count": 38108,
+            "pct": 100.0
+          }
+        ],
+        "other_pct": 0.0
+      },
+      "ESTABLISHED_DT": {
+        "total_rows": 38108,
+        "null_count": 36915,
+        "null_pct": 96.8694,
+        "min": "2020-03-31",
+        "max": "2024-03-05",
+        "format_seen": {
+          "other": 1193
+        },
+        "samples": [
+          "3/31/2020 6:10 PM",
+          "3/31/2020 2:00 PM",
+          "3/31/2020 4:35 AM",
+          "3/31/2020 12:17 PM",
+          "3/31/2020 7:48 PM"
+        ]
+      },
+      "MAX_STAT_DT": {
+        "total_rows": 38108,
+        "null_count": 36816,
+        "null_pct": 96.6096,
+        "min": "2020-03-31",
+        "max": "2024-05-13",
+        "format_seen": {
+          "other": 1292
+        },
+        "samples": [
+          "6/1/2020 2:02 PM",
+          "4/3/2020 5:27 PM",
+          "4/17/2020 4:24 AM",
+          "4/6/2020 6:52 PM",
+          "4/10/2020 6:35 PM"
+        ]
+      },
+      "ESTABLISHED_to_MAX_STAT_days": {
+        "paired_rows": 129,
+        "min": 0,
+        "max": 237,
+        "mean": 19.97,
+        "median": 6,
+        "p25": 3,
+        "p75": 14,
+        "p90": 60
+      },
+      "REMAIN_DUE_nonzero_pct": 0.0
+    }
+  }
+}
