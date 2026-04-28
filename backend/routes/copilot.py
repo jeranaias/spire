@@ -35,9 +35,19 @@ async def make_plan(request: Request, payload: dict = Body(default={})):
     role = _role(request)
     view = payload.get("view") or ""
     current_data = payload.get("current_data")
+    # `prior_proposal` is the steps[] from the previous assistant turn
+    # — the frontend forwards it so an operator's "go" consents to the
+    # proposal we just made instead of forcing the planner to re-decide.
+    prior_proposal = payload.get("prior_proposal")
     if not text:
         raise HTTPException(status_code=400, detail="text required")
-    return await copilot_plan(text, role=role, view=view, current_data=current_data)
+    return await copilot_plan(
+        text,
+        role=role,
+        view=view,
+        current_data=current_data,
+        prior_proposal=prior_proposal,
+    )
 
 
 @router.post("/execute")
