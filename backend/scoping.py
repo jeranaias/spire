@@ -49,6 +49,13 @@ SENTRY_REVIEW_ROLES      = frozenset({"g4", "data_custodian", "security_manager"
 # clock is a piece of demo plumbing, not an analyst surface.
 SCENARIO_CONTROL_ROLES   = frozenset({"security_manager", "mef_commander", "g4"})
 
+# BASTION ThermalHawk simulate (task #54 / critique F1). The button is
+# hidden in the UI for everyone outside this set; the API now mirrors
+# that gate so a Maintenance Chief's CAC can't reach the endpoint via
+# `curl` and trigger a CRITICAL UAS incident on another battalion's
+# motor pool. Matches `frontend/src/views/BastionView.tsx:674`.
+BASTION_SIMULATE_ROLES   = frozenset({"mef_commander", "security_manager", "g4"})
+
 # Model registry / supply-chain page (W1 task #30). The model card surface
 # enumerates every model SPIRE uses with its provenance, hosting target,
 # vendor jurisdiction, and validation history. The data is mostly public
