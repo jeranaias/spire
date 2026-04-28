@@ -48,7 +48,15 @@ function tone(phase: string) {
   return PHASE_TONE[phase] ?? PHASE_TONE["Pre-conflict"];
 }
 
-export function MissionClock() {
+/**
+ * MissionClock chip.
+ *
+ * `compact` mode renders a slimmer pill (no phase chip, no progress bar,
+ * no header label) for the cramped 1024–1279px range where there's no
+ * room for the full clock alongside the right group. Operator controls
+ * remain accessible via the same dropdown.
+ */
+export function MissionClock({ compact = false }: { compact?: boolean } = {}) {
   const role = useSpireStore((s) => s.role);
   const setScenario = useSpireStore((s) => s.setScenario);
   const pushToast = useSpireStore((s) => s.pushToast);
@@ -160,6 +168,19 @@ export function MissionClock() {
     };
   }, [open]);
 
+  // Listen for the System chip's "Controls" button — the System chip
+  // dispatches a custom event when the operator clicks Controls in its
+  // Mission timeline row. Only the operator-mode chip should respond
+  // (other roles get a passive label and no dropdown).
+  useEffect(() => {
+    if (!isOperator) return;
+    function onOpenRequest() {
+      setOpen(true);
+    }
+    window.addEventListener("spire:open-mission-clock", onOpenRequest);
+    return () => window.removeEventListener("spire:open-mission-clock", onOpenRequest);
+  }, [isOperator]);
+
   const controlAction = useIdempotentAction(
     "scenario:control",
     async (
@@ -188,6 +209,7 @@ export function MissionClock() {
       className="pointer-events-auto relative flex shrink-0 items-stretch"
       role="region"
       aria-label="Mission clock and scenario phase"
+      data-testid={compact ? "mission-clock-compact" : "mission-clock"}
     >
       <Pressable
         onClick={() => isOperator && setOpen((v) => !v)}
@@ -201,7 +223,11 @@ export function MissionClock() {
             ? `Scenario time ${offsetLabel} · ${phase} · ${running ? `running ${rate}×` : "paused"} — click for controls`
             : `Scenario time ${offsetLabel} · ${phase} · ${running ? `running ${rate}×` : "paused"}`
         }
-        className="!min-h-0 group flex h-11 items-center gap-2 rounded-sm border border-[var(--color-border-active)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))] px-2.5 font-mono text-xs uppercase tracking-wider text-[var(--color-text)] transition-colors hover:border-[var(--color-primary)] disabled:cursor-default"
+        className={
+          compact
+            ? "!min-h-0 group flex h-9 items-center gap-1.5 rounded-sm border border-[var(--color-border-active)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))] px-2 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text)] transition-colors hover:border-[var(--color-primary)] disabled:cursor-default"
+            : "!min-h-0 group flex h-11 items-center gap-2 rounded-sm border border-[var(--color-border-active)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))] px-2.5 font-mono text-xs uppercase tracking-wider text-[var(--color-text)] transition-colors hover:border-[var(--color-primary)] disabled:cursor-default"
+        }
       >
         {/* Tiny play/pause indicator dot — pulses while running so the
          * operator can see at a glance whether the clock is advancing. */}
@@ -217,24 +243,37 @@ export function MissionClock() {
             style={{ background: running ? "var(--color-primary)" : "var(--color-text-muted)" }}
           />
         </span>
-        <div className="flex flex-col items-start leading-tight">
-          <span className="text-[10px] tracking-widest text-[var(--color-text-muted)]">
-            Mission Clock {running && rate > 1 ? `· ${rate}×` : ""}
-          </span>
-          <span className="font-semibold tabular-nums text-[13px] tracking-wide text-[var(--color-text)]">
+        {compact ? (
+          <span className="font-semibold tabular-nums text-[12px] tracking-wide text-[var(--color-text)]">
             {offsetLabel}
+            {running && rate > 1 && (
+              <span className="ml-1 text-[10px] font-normal text-[var(--color-text-muted)] tracking-widest">
+                {rate}×
+              </span>
+            )}
           </span>
-        </div>
-        <span
-          className="ml-1 hidden h-7 items-center gap-1 rounded-sm border px-2 font-mono text-[10px] font-semibold uppercase tracking-widest md:inline-flex"
-          style={{
-            color: t.fg,
-            background: t.bg,
-            borderColor: `color-mix(in oklab, ${t.fg} 40%, var(--color-border))`,
-          }}
-        >
-          {phase}
-        </span>
+        ) : (
+          <>
+            <div className="flex flex-col items-start leading-tight">
+              <span className="text-[10px] tracking-widest text-[var(--color-text-muted)]">
+                Mission Clock {running && rate > 1 ? `· ${rate}×` : ""}
+              </span>
+              <span className="font-semibold tabular-nums text-[13px] tracking-wide text-[var(--color-text)]">
+                {offsetLabel}
+              </span>
+            </div>
+            <span
+              className="ml-1 hidden h-7 items-center gap-1 rounded-sm border px-2 font-mono text-[10px] font-semibold uppercase tracking-widest md:inline-flex"
+              style={{
+                color: t.fg,
+                background: t.bg,
+                borderColor: `color-mix(in oklab, ${t.fg} 40%, var(--color-border))`,
+              }}
+            >
+              {phase}
+            </span>
+          </>
+        )}
         {isOperator && (
           <svg
             className={clsx(
@@ -252,16 +291,19 @@ export function MissionClock() {
 
       {/* Sub-pixel progress bar — unobtrusive but lets the operator see how
        * far through the scripted timeline we are without opening the
-       * dropdown. Anchored to the bottom edge of the chip. */}
-      <div
-        className="pointer-events-none absolute -bottom-px left-1 right-1 h-px overflow-hidden"
-        aria-hidden
-      >
+       * dropdown. Anchored to the bottom edge of the chip. Hidden in
+       * compact mode where the chip itself is already minimal. */}
+      {!compact && (
         <div
-          className="h-full transition-[width] duration-500 ease-out"
-          style={{ width: `${pct}%`, background: t.fg, opacity: 0.7 }}
-        />
-      </div>
+          className="pointer-events-none absolute -bottom-px left-1 right-1 h-px overflow-hidden"
+          aria-hidden
+        >
+          <div
+            className="h-full transition-[width] duration-500 ease-out"
+            style={{ width: `${pct}%`, background: t.fg, opacity: 0.7 }}
+          />
+        </div>
+      )}
 
       {open && isOperator && (
         <div

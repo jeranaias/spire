@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role, type User } from "../state/store";
-import { useScenarioPlayer } from "../state/scenarioPlayer";
-import { useFailsafe } from "../state/failsafe";
-import { api, type AuthUser, type PulseDraft } from "../api";
+import { api, type AuthUser } from "../api";
 import { formatApiError } from "../api-retry";
-import { NodeStatus } from "./NodeStatus";
 import { MissionClock } from "./MissionClock";
 import { CommsControl } from "./CommsControl";
-import { Button, DangerButton, Pressable, useIdempotentAction } from "./ui";
+import { SystemStatusChip } from "./SystemStatusChip";
+import { StageCluster } from "./StageCluster";
+import { NotificationsChip } from "./NotificationsChip";
+import { Button, Pressable, useIdempotentAction } from "./ui";
 
 type Tab = { to: string; label: string; restrict: Role | null };
 
@@ -43,7 +43,10 @@ function authorizedRolesFor(path: string, role: Role): { allowed: boolean; allow
 }
 
 export function TopBar() {
-  const { role, operatingMode, alertCount, currentUser, stageMode } = useSpireStore();
+  // operatingMode + alertCount are still surfaced — they migrated into
+  // SystemStatusChip and (for the stage backstop) the standalone
+  // AlertBadge below, but we still need to read them for the destructure.
+  const { role, alertCount, currentUser, stageMode } = useSpireStore();
 
   return (
     // Walkthrough audit (#36 from the in-app feedback drawer): the
@@ -56,7 +59,7 @@ export function TopBar() {
     // whole TopBar to z-[60] keeps it above StatusStrip / view content
     // while staying well below toasts (z-[8900-9100]), modals
     // (z-[8800]), and banner strips so those still cover the bar.
-    <header className="relative z-[60] h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+    <header data-testid="topbar-root" className="relative z-[60] h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
       {/* Thin horizon accent below the top bar */}
       <div
         className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
@@ -66,29 +69,30 @@ export function TopBar() {
         }}
       />
       <div className="relative flex h-full min-w-0 items-center justify-between gap-3 px-4">
-        {/* B4 Mission Clock owns the centred region of the topbar.
-         * Absolute-positioned + translateX to claim the geometric centre
-         * without fighting the flex justify-between layout that hosts the
-         * left (brand + tabs) and right (identity + chrome) groups. The
-         * clock self-hides below xl so the role-pill + alert badge keep
-         * priority on cramped viewports — operators on iPads can still
-         * reach the controls via the /admin scenario panel (future) or by
-         * widening the window. */}
+        {/* MissionClock owns the centred region — full clock at xl+ only.
+         * Below xl, the right group renders a CompactMissionClock at lg/md
+         * and (at sm) the System chip dropdown's Mission timeline row is
+         * the fallback. Absolute-positioned so it claims the geometric
+         * centre without fighting the flex justify-between layout. */}
         <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 xl:block">
           <MissionClock />
         </div>
         <div className="flex min-w-0 items-center gap-4">
-          <div className="flex shrink-0 items-center gap-2.5">
+          <div className="flex min-w-0 shrink items-center gap-2.5">
             <SpireMark />
-            <div className="flex flex-col leading-none">
+            <div className="flex min-w-0 flex-col leading-none">
               <span
                 className="font-mono text-lg font-semibold tracking-[0.2em] text-[var(--color-text)]"
                 style={{ fontFeatureSettings: "'ss01'" }}
               >
                 SPIRE
               </span>
+              {/* Tagline truncates instead of pushing the right group on
+               * narrow viewports. min-w-0 on the parent column lets the
+               * truncate take effect inside the flex row. */}
               <span
-                className="mt-[3px] hidden font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest lg:block"
+                className="mt-[3px] hidden min-w-0 max-w-[14rem] truncate font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest lg:block"
+                title="Contested Logistics"
               >
                 Contested Logistics
               </span>
@@ -103,7 +107,7 @@ export function TopBar() {
               // Stage mode swaps ADMIN for DHA RESCUE so the four-module
               // spine matches the Decision Bridge tile order.
               .filter((t) => t.restrict == null || t.restrict === role)
-              .map((tab, idx) => {
+              .map((tab) => {
                 const { allowed, allowedRoles } = authorizedRolesFor(tab.to, role);
                 if (!allowed) {
                   // Out-of-scope: render as a non-NavLink span so it can't be
@@ -115,11 +119,10 @@ export function TopBar() {
                       title={`Out of scope · authorized: ${allowedRoles.map((r) => ROLE_LABELS[r]).join(", ")}`}
                       className="group relative cursor-not-allowed select-none px-3 py-2 font-mono text-sm font-semibold uppercase tracking-widest text-[var(--color-text-muted)] opacity-50"
                     >
-                      <span
-                        className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
-                      >
-                        {String(idx + 1).padStart(2, "0")}
-                      </span>
+                      {/* Tab numerals removed in TopBar declutter — the
+                       * "01/02/03" prefix added decoration that the spec
+                       * called noise. Module identity is carried by the
+                       * label itself. */}
                       {tab.label}
                       {/* Walkthrough audit: the "·LOCK" suffix read as
                        * "01 SENTRY · LOCK" with the dot floating between
@@ -150,11 +153,7 @@ export function TopBar() {
                   >
                     {({ isActive }) => (
                       <>
-                        <span
-                          className="mr-1.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
-                        >
-                          {String(idx + 1).padStart(2, "0")}
-                        </span>
+                        {/* Tab numerals dropped — see disabled-tab branch. */}
                         {tab.label}
                         {isActive && (
                           <>
@@ -176,51 +175,51 @@ export function TopBar() {
           </nav>
         </div>
 
-        {/* Walkthrough audit: at 1037px viewport the role selector and
-         * NodeStatus chip used to overlap the BASTION tab text. The
-         * right group now hides the lower-priority chrome below xl so
-         * the role selector + alert badge always have room. The hidden
-         * controls remain available — DensityToggle is on the help
-         * overlay, AirGap mode flips via Security Manager wall, ModeBadge
-         * mirrors the StatusFooter mode chip. NodeStatus also hides
-         * below xl: an icon-only dot conveys no meaning without its
-         * label, and would just add visual noise next to the role
-         * selector. */}
+        {/* TopBar declutter (Task #184) — the right group is the stable
+         * spine. Operator mode condenses the old 6-pill cluster
+         * (NodeStatus + GcssMcSync + AirGap + Density + ModeBadge +
+         * Drafts/Alerts) into 3 group-chips:
+         *   • SystemStatusChip  — sync · gcss · backend mode + drawer
+         *   • NotificationsChip — drafts + alerts (with tabbed dropdown)
+         *   • IdentityPill      — now also hosts Air-gap, Density and a
+         *                         comms posture summary in its dropdown
+         * CommsControl stays inline because the comms posture is safety-
+         * critical and an operator should not have to open a menu to see
+         * the current posture. PushToJoint stays at xl+ where there is
+         * room for the dedicated CTA.
+         *
+         * Stage mode replaces operator chrome with StageCluster (Failsafe
+         * + Reset + Audit) and keeps the AlertBadge backstop so a stage
+         * presenter sees the alert count even with the dropdown closed. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
-          {/* MDM 2026 stage-pivot — operator chrome (NodeStatus, GCSS-MC
-           * sync, AirGapToggle, DensityToggle, PushToJoint, ModeBadge)
-           * is suppressed in stage mode so the four hero use-case tabs
-           * carry the visual weight on stage. CommsControl, IdentityPill,
-           * ResetDemo, and AlertBadge stay because they're presenter
-           * controls. AUDIT pill is added so the host can drop into
-           * `/admin/audit` from any surface in two clicks.
-           *
-           * Outside stage mode, GcssMcSyncPill stays visible at every
-           * breakpoint — it is the only chrome-level "this connection
-           * is mocked" signal, and hiding it under 1280px would let the
-           * rest of the app keep reading "GCSS-MC" data sources without
-           * the operator ever seeing the REF disclosure. See
-           * .local/critiques/integrations-gcss-mc.md (P0-3). */}
-          {!stageMode && <span className="hidden xl:contents"><NodeStatus /></span>}
-          {!stageMode && <GcssMcSyncPill />}
+          {/* CompactMissionClock for the cramped 1024–1279px range — the
+           * full centred MissionClock only renders at xl+. At sm the
+           * System chip dropdown's Mission timeline row is the fallback. */}
+          {!stageMode && (
+            <span className="hidden md:inline-flex xl:hidden">
+              <MissionClock compact />
+            </span>
+          )}
+          {!stageMode && <SystemStatusChip />}
           <CommsControl />
-          {!stageMode && <span className="hidden xl:contents"><AirGapToggle /></span>}
-          {!stageMode && <span className="hidden xl:contents"><DensityToggle /></span>}
-          {stageMode && <AuditPill />}
-          <FailsafePill />
-          <ResetDemoButton />
           {!stageMode && <PushToJointButton role={role} />}
-          {!stageMode && <DraftsBadge role={role} />}
+          {!stageMode && <NotificationsChip />}
+          {stageMode && (
+            <span className="hidden md:inline-flex xl:hidden">
+              <MissionClock compact />
+            </span>
+          )}
+          {stageMode && <StageCluster />}
           {/* MDM 2026 stage-pivot — multi-presenter handoff (WP-8). The
            * 4-up chip strip sits inline with the right group only in
            * stage mode and offers one-click identity swaps so the next
-           * presenter can take the mic without re-PINning. The detailed
-           * dropdown on IdentityPill remains available for off-roster
-           * actions (sign out, presenter routes). */}
+           * presenter can take the mic without re-PINning. */}
           {stageMode && <IdentityChips currentDodid={currentUser?.dodid ?? null} />}
           <IdentityPill user={currentUser} role={role} />
-          {!stageMode && <span className="hidden xl:contents"><ModeBadge mode={operatingMode} /></span>}
-          <AlertBadge count={alertCount} />
+          {/* Stage-mode AlertBadge backstop — keeps the urgent count
+           * visible without requiring the presenter to open the
+           * NotificationsChip (which doesn't render in stage). */}
+          {stageMode && <AlertBadge count={alertCount} />}
         </div>
       </div>
     </header>
@@ -297,36 +296,6 @@ function SpireMark() {
 // audience sees the hash-chained record was being written the whole
 // time. The actual scope check on AuditView is bypassed in stage mode
 // (any role can land on the page) — see AuditView.
-function AuditPill() {
-  const nav = useNavigate();
-  return (
-    <Pressable
-      onClick={() => nav("/admin/audit")}
-      block={false}
-      aria-label="Open audit chain"
-      title="Audit · SOC view (hash-chained, append-only)"
-      className="!min-h-0 hidden h-9 shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)] sm:inline-flex"
-    >
-      <span
-        className="inline-block h-1.5 w-1.5 rounded-full"
-        style={{ background: "var(--color-success)", boxShadow: "0 0 6px var(--color-success)" }}
-        aria-hidden
-      />
-      AUDIT
-    </Pressable>
-  );
-}
-
-// MDM 2026 stage-pivot — IdentityChips: a four-up strip of the mock CAC
-// roster, rendered in stage mode immediately to the LEFT of the
-// IdentityPill. Each chip is a single-click identity swap that prefers
-// the additive `quick-switch` endpoint and falls back to the any-PIN
-// login path on 404 (matches IdentityPill.switchIdentity). The active
-// identity is highlighted with a primary outline so the audience can see
-// who's "driving" the demo. Below `xl` the strip collapses to initials
-// only to preserve TopBar real estate; the IdentityPill dropdown still
-// shows the long form. Outside stage mode the component is a render
-// no-op so the operator chrome is byte-identical to before.
 function IdentityChips({ currentDodid }: { currentDodid: string | null }) {
   const [users, setUsers] = useState<AuthUser[] | null>(null);
   const [busyDodid, setBusyDodid] = useState<string | null>(null);
@@ -336,10 +305,11 @@ function IdentityChips({ currentDodid }: { currentDodid: string | null }) {
 
   // Fetch the cert directory once on mount. Quiet-fail (just hide the
   // strip) if it errors — IdentityPill is still available for swaps.
-  // Use `directory()` not `users()` — the strip needs `role` for the
-  // tooltip + label and the trimmed PublicAuthUser shape doesn't have it.
   useEffect(() => {
     let cancelled = false;
+    // `directory()` is the post-login variant of /auth/users that returns
+    // the full AuthUser shape (role, billet, last_name) — the chips need
+    // last_name + billet to render and `swap` posts the role-aware login.
     api.auth.directory()
       .then((r) => { if (!cancelled) setUsers(r.users); })
       .catch(() => { if (!cancelled) setUsers([]); });
@@ -617,6 +587,7 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
   return (
     <div ref={wrap} className="relative shrink-0">
       <Pressable
+        data-testid="topbar-identity-pill"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -804,6 +775,18 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
             </Pressable>
           </div>}
 
+          {/* Operator settings — TopBar declutter (Task #184). The Air-gap
+           * toggle, density preference, and comms-posture summary used to
+           * each have their own pill in the right group. They're now
+           * scoped to this menu so the bar stays tight without losing the
+           * operator-only controls. AirGapToggle keeps its own role gate
+           * (returns null for roles that can't engage), so the section's
+           * header may sit above just Density + Comms for some operators.
+           * Hidden in stage mode (the cluster runs the show). */}
+          {!stageMode && (
+            <OperatorSettingsSection role={role} />
+          )}
+
           <Pressable
             role="menuitem"
             onClick={doSignOut}
@@ -822,289 +805,6 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
       )}
     </div>
   );
-}
-
-function ModeBadge({ mode }: { mode: "full" | "lite" }) {
-  const isFull = mode === "full";
-  return (
-    <div
-      className="hidden shrink-0 items-center gap-1.5 rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider md:flex"
-      style={{
-        borderColor: isFull
-          ? "color-mix(in oklab, var(--color-success) 35%, var(--color-border))"
-          : "color-mix(in oklab, var(--color-warning) 35%, var(--color-border))",
-        backgroundColor: isFull
-          ? "color-mix(in oklab, var(--color-success-muted) 15%, transparent)"
-          : "color-mix(in oklab, var(--color-warning-muted) 15%, transparent)",
-      }}
-      title={isFull ? "Local backend online" : "Reduced-feature lite mode"}
-    >
-      <span
-        className="relative flex h-2 w-2"
-        aria-hidden
-      >
-        <span
-          className={clsx(
-            "absolute inline-flex h-full w-full animate-ping rounded-full opacity-60",
-            isFull ? "bg-[var(--color-success)]" : "bg-[var(--color-warning)]",
-          )}
-        />
-        <span
-          className={clsx(
-            "relative inline-flex h-2 w-2 rounded-full",
-            isFull ? "bg-[var(--color-success)]" : "bg-[var(--color-warning)]",
-          )}
-        />
-      </span>
-      <span
-        style={{
-          color: isFull ? "var(--color-success)" : "var(--color-warning)",
-        }}
-      >
-        {isFull ? "LOCAL" : "LITE"}
-      </span>
-    </div>
-  );
-}
-
-// PULSE Risk Board "Draft Action" surface in the chrome.
-//
-// Backstory: the Draft Action modal used to fire a green toast and write
-// nothing — clicking the headline CTA proved the page was theatre. Now
-// every Draft this click POSTs to /pulse/draft-action which writes both
-// a pulse_drafts row AND an audit_log entry. This badge is the operator-
-// facing receipt: the count goes up immediately (store nonce bump), the
-// popover lists every held draft with the asset, kind, MC delta, and
-// creation time, and a Dismiss button archives the draft (writing a
-// second audit row). Click on a draft row navigates to the Risk Board
-// pre-selected on that asset so the operator can drill from "I drafted
-// X" back to "X is the asset I drafted on."
-//
-// Visible for the PULSE roles (maintenance_chief, g4, mef_commander). For
-// data_custodian / security_manager the surface they care about is the
-// SOC audit view, which already shows draft rows under the
-// pulse_draft_action / pulse_draft_dismiss kinds.
-function DraftsBadge({ role }: { role: Role }) {
-  const allowed = role === "maintenance_chief" || role === "g4" || role === "mef_commander";
-  const refreshTick = useSpireStore((s) => s.draftsRefreshTick);
-  const pushToast = useSpireStore((s) => s.pushToast);
-  const setSelectedAssetId = useSpireStore((s) => s.setSelectedAssetId);
-  const bumpDrafts = useSpireStore((s) => s.bumpDraftsRefresh);
-  const nav = useNavigate();
-  const [drafts, setDrafts] = useState<PulseDraft[]>([]);
-  const [unreachable, setUnreachable] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [dismissing, setDismissing] = useState<string | null>(null);
-  const wrap = useRef<HTMLDivElement | null>(null);
-
-  // Poll every 15s while the role is allowed; also re-fetch when the
-  // store nonce bumps (operator just hit Draft this).
-  useEffect(() => {
-    if (!allowed) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    async function tick() {
-      try {
-        const r = await api.pulse.drafts("held");
-        if (cancelled) return;
-        setDrafts(r.drafts);
-        setUnreachable(false);
-      } catch {
-        if (cancelled) return;
-        setUnreachable(true);
-      } finally {
-        if (!cancelled) timer = setTimeout(tick, 15_000);
-      }
-    }
-    tick();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [allowed, refreshTick]);
-
-  // Click-outside + Escape close the popover.
-  useEffect(() => {
-    if (!open) return;
-    function onDoc(e: MouseEvent) {
-      if (!wrap.current) return;
-      if (!wrap.current.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  if (!allowed) return null;
-
-  const count = drafts.length;
-  const tone = unreachable ? "var(--color-warning)"
-    : count === 0 ? "var(--color-text-muted)"
-    : "var(--color-primary)";
-
-  async function dismiss(draftId: string) {
-    if (dismissing) return;
-    setDismissing(draftId);
-    try {
-      await api.pulse.dismissDraft(draftId);
-      // Optimistic local strip — the next poll round-trips the source of
-      // truth back in.
-      setDrafts((prev) => prev.filter((d) => d.draft_id !== draftId));
-      bumpDrafts();
-      pushToast({ tone: "ok", text: `Draft ${draftId} dismissed`, ttlMs: 3000 });
-    } catch (e) {
-      pushToast({ tone: "error", text: `Dismiss failed: ${formatApiError(e)}` });
-    } finally {
-      setDismissing(null);
-    }
-  }
-
-  function openOnAsset(d: PulseDraft) {
-    setSelectedAssetId(d.asset_id);
-    setOpen(false);
-    nav("/pulse/risk");
-  }
-
-  return (
-    <div ref={wrap} className="relative shrink-0">
-      <Pressable
-        onClick={() => setOpen((v) => !v)}
-        block={false}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={`${count} draft action${count === 1 ? "" : "s"} held`}
-        title={unreachable
-          ? "Drafts queue unreachable — backend may be offline"
-          : count === 0
-            ? "No drafts held — Risk Board Draft Action lands here"
-            : `${count} draft action${count === 1 ? "" : "s"} held · click to review`}
-        className="!min-h-0 flex h-11 shrink-0 items-center gap-1.5 rounded-sm border bg-[var(--color-bg)] px-2 font-mono text-xs uppercase tracking-wider"
-        style={{
-          borderColor: count > 0
-            ? "color-mix(in oklab, var(--color-primary) 45%, var(--color-border))"
-            : "var(--color-border)",
-        }}
-      >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: tone }} aria-hidden>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6" />
-          <path d="M9 13h6" />
-          <path d="M9 17h4" />
-        </svg>
-        <span style={{ color: tone }}>DRAFTS</span>
-        <span className="tabular-nums" style={{ color: tone }}>
-          {String(count).padStart(2, "0")}
-        </span>
-      </Pressable>
-      {open && (
-        <div
-          role="menu"
-          aria-label="Held drafts"
-          className="absolute right-0 top-[calc(100%+6px)] z-[8500] w-[28rem] max-w-[92vw] rounded-md border border-[var(--color-border-active)] bg-[var(--color-surface)] shadow-2xl"
-        >
-          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2.5">
-            <div>
-              <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
-                Risk Board · Held Drafts
-              </div>
-              <div className="mt-0.5 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
-                Persisted with audit row · no auto-approval workflow
-              </div>
-            </div>
-            <span
-              className="rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[10px] tabular-nums tracking-widest text-[var(--color-text-secondary)]"
-              title="Held drafts in this view"
-            >
-              {count}
-            </span>
-          </div>
-          {unreachable && (
-            <div className="border-b border-[var(--color-border)] px-4 py-2 font-mono text-[11px] text-[var(--color-warning)] tracking-wide">
-              Drafts service unreachable — list may be stale.
-            </div>
-          )}
-          {count === 0 && !unreachable && (
-            <div className="px-4 py-6 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-              No drafts held. Use the Draft Action button on the PULSE Risk Board to queue one.
-            </div>
-          )}
-          {count > 0 && (
-            <ul className="max-h-[60vh] divide-y divide-[var(--color-border)] overflow-y-auto">
-              {drafts.map((d) => (
-                <li key={d.draft_id} className="p-3">
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-widest">
-                        <span className="font-semibold text-[var(--color-primary)]">
-                          {d.kind?.toUpperCase()}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => openOnAsset(d)}
-                          className="font-semibold text-[var(--color-text)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-primary)]"
-                          title="Open this asset on the Risk Board"
-                        >
-                          {d.asset_id}
-                        </button>
-                        {d.unit_name && (
-                          <span className="text-[var(--color-text-muted)]">· {d.unit_name}</span>
-                        )}
-                      </div>
-                      <div className="mt-1 font-mono text-xs text-[var(--color-text)] tracking-wide">
-                        {d.title}
-                      </div>
-                      <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                        {d.draft_id} · by {d.actor} · {formatDraftAge(d.created_at)}
-                        {d.mc_delta_pct != null && (
-                          <> · MC +{(d.mc_delta_pct * 100).toFixed(0)}</>
-                        )}
-                        {d.cost_usd != null && (
-                          <> · ${d.cost_usd.toLocaleString("en-US")}</>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => dismiss(d.draft_id)}
-                      pending={dismissing === d.draft_id}
-                      disabled={!!dismissing}
-                      title="Archive this draft (writes an audit row)"
-                    >
-                      Dismiss
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatDraftAge(iso: string): string {
-  try {
-    const t = new Date(iso).getTime();
-    if (!isFinite(t)) return iso;
-    const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
-    if (sec < 60) return `${sec}s ago`;
-    const m = Math.floor(sec / 60);
-    if (m < 60) return `${m}m ago`;
-    const h = Math.floor(m / 60);
-    if (h < 24) return `${h}h ago`;
-    const d = Math.floor(h / 24);
-    return `${d}d ago`;
-  } catch {
-    return iso;
-  }
 }
 
 function AlertBadge({ count }: { count: number }) {
@@ -1131,270 +831,9 @@ function AlertBadge({ count }: { count: number }) {
   );
 }
 
-// Air-gap posture toggle. When engaged, the StatusFooter pulses red and any
-// mutation goes through the local queue endpoint. When released, the queue
-// flushes to the master and the toggle returns to green/connected. Restricted
-// to security_manager + mef_commander since toggling air-gap is a posture
-// decision, not a routine click. Walkthrough caught a one-click toggle as
-// risky — added a confirmation modal so the operator confirms intent.
-function AirGapToggle() {
-  const role = useSpireStore((s) => s.role);
-  const airGap = useSpireStore((s) => s.airGapActive);
-  const setAirGap = useSpireStore((s) => s.setAirGap);
-  const setQueueDepth = useSpireStore((s) => s.setQueueDepth);
-  const pushToast = useSpireStore((s) => s.pushToast);
-  const queueDepth = useSpireStore((s) => s.queueDepth);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-
-  const allowed = role === "security_manager" || role === "mef_commander";
-  if (!allowed) return null;
-
-  // E1 hardening: idempotent commit. Triple-tapping the modal Engage/Release
-  // button used to fire three setAirGap mutations; now it fires one and the
-  // 250ms lockout swallows the rest.
-  const commitAction = useIdempotentAction(
-    `topbar:air-gap:${airGap ? "release" : "engage"}`,
-    async () => {
-      setConfirmOpen(false);
-      try {
-        const r = await api.system.setAirGap(!airGap, "operator-confirmed");
-        setAirGap(r.air_gap_active);
-        if (r.air_gap_active) {
-          pushToast({ tone: "warn", text: "Air-gap engaged — local writes will be queued", ttlMs: 4000 });
-        } else if (r.replayed != null) {
-          pushToast({
-            tone: "ok",
-            text: `Air-gap released — ${r.replayed} queued op${r.replayed === 1 ? "" : "s"} replayed`,
-            ttlMs: 5000,
-          });
-          setQueueDepth(0);
-        }
-      } catch (e) {
-        pushToast({ tone: "error", text: `Air-gap toggle failed: ${formatApiError(e)}` });
-      }
-    },
-  );
-
-  return (
-    <>
-      {/* E1: composes <Button> for consistent touch target (44×44 floor) +
-       * focus ring; status dot + colour palette stays unique to this chrome. */}
-      <Button
-        variant="secondary"
-        size="md"
-        onClick={() => setConfirmOpen(true)}
-        title={airGap ? "Air-gap engaged — click to release and replay queued ops" : "Click to engage air-gap mode (confirm required)"}
-        className={clsx(
-          "shrink-0 px-2.5 text-xs tracking-wider",
-          airGap
-            ? "border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_25%,transparent)] text-[var(--color-danger)]"
-            : "border-[var(--color-border)] bg-transparent text-[var(--color-text-secondary)]",
-        )}
-        leadingIcon={
-          <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
-            {airGap && (
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-danger)] opacity-60" />
-            )}
-            <span
-              className="relative inline-flex h-2 w-2 rounded-full"
-              style={{ background: airGap ? "var(--color-danger)" : "var(--color-success)" }}
-            />
-          </span>
-        }
-      >
-        AIR-GAP{airGap ? " ON" : ""}
-      </Button>
-      {confirmOpen && (
-        <div
-          className="fixed inset-0 z-[8800] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => setConfirmOpen(false)}
-          role="presentation"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="m-4 max-w-md rounded-md border border-[var(--color-warning)] bg-[var(--color-surface)] p-5 shadow-2xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="airgap-confirm-title"
-          >
-            <div id="airgap-confirm-title" className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
-              {airGap ? "Release air-gap" : "Engage air-gap"}
-            </div>
-            <h2 className="mt-1 font-sans text-lg font-semibold text-[var(--color-text)]">
-              {airGap ? "Replay queued ops and reconnect?" : "Cut outbound writes and queue locally?"}
-            </h2>
-            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-              {airGap
-                ? `Releasing will replay ${queueDepth} queued operation${queueDepth === 1 ? "" : "s"} to the upstream node and resume normal sync. Conflicts surface in Node Status as vector-clock pairs.`
-                : "Engaging will route every mutation to the local queue. SPIRE keeps operating, but partner nodes won't see your writes until release. Use during simulated SATCOM loss or real comms-degraded posture."}
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="warning"
-                onClick={() => commitAction.run()}
-                pending={commitAction.pending}
-              >
-                {airGap ? "Release" : "Engage"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-// Track-G3 density toggle. Two modes:
-//   • Dense  — current staff layout, more columns, tighter padding.
-//   • Sparse — field/iPad layout, larger tap targets, bigger type, fewer
-//     columns. Persisted per role in localStorage via the Zustand slice.
-//
-// Rendered as a compact pill dropdown to match the existing chrome rhythm.
-// GcssMcSyncPill — last-sync indicator for the GCSS-MC reference adapter
-// (Wave-1 lane #27). Polls /api/integrations/gcss-mc/last-sync every 7s
-// and shows "GCSS-MC · synced 14s ago". Click navigates to the integration
-// contract page so a judge can drill from "is the data fresh?" to "what
-// is the contract?" in one click.
-//
-// The indicator is intentionally low-contrast — the connection is mocked
-// (REFERENCE IMPLEMENTATION), so it must not read as a green production-
-// quality "everything is healthy" sticker. The label "REF" suffix and
-// the muted slate styling keep it honest.
-function GcssMcSyncPill() {
-  const nav = useNavigate();
-  const [age, setAge] = useState<number | null>(null);
-  const [environment, setEnvironment] = useState<string | null>(null);
-  const [unreachable, setUnreachable] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    async function tick() {
-      try {
-        const r = await api.system.gcssMcLastSync();
-        if (cancelled) return;
-        setAge(r.age_seconds);
-        setEnvironment(r.environment);
-        setUnreachable(false);
-      } catch {
-        if (cancelled) return;
-        setUnreachable(true);
-      } finally {
-        if (!cancelled) timer = setTimeout(tick, 7000);
-      }
-    }
-    tick();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-
-  const label = unreachable
-    ? "GCSS-MC · STALE"
-    : age == null
-      ? "GCSS-MC · syncing…"
-      : `GCSS-MC · ${formatAge(age)}`;
-
-  // Honesty rules for the dot (see .local/critiques/integrations-gcss-mc.md
-  // P0-2). Green is reserved for a real, healthy upstream link. While the
-  // backend reports REFERENCE_IMPLEMENTATION the dot is amber to match the
-  // REF chip — the SPIRE backend being reachable does NOT mean GCSS-MC is
-  // connected. Red is reserved for the SPIRE backend itself being
-  // unreachable, where we cannot vouch for sync freshness at all.
-  const isReference = environment === "REFERENCE_IMPLEMENTATION";
-  const dot = unreachable
-    ? "var(--color-danger)"
-    : isReference
-      ? "var(--color-warning)"
-      : "var(--color-success)";
-  const tone = unreachable
-    ? "var(--color-danger)"
-    : "var(--color-text-secondary)";
-
-  return (
-    <Pressable
-      onClick={() => nav("/integrations/gcss-mc")}
-      block={false}
-      aria-label={`${label} — open GCSS-MC integration contract`}
-      title={`${label}. Reference implementation — mocked link to GCSS-MC. Click to open the adapter contract.`}
-      className="!min-h-0 flex h-11 shrink-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 font-mono text-[10px] uppercase tracking-widest hover:border-[var(--color-primary)]"
-    >
-      <span
-        className="relative inline-flex h-2 w-2"
-        aria-hidden
-      >
-        <span
-          className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-50"
-          style={{ background: dot }}
-        />
-        <span
-          className="relative inline-flex h-2 w-2 rounded-full"
-          style={{ background: dot }}
-        />
-      </span>
-      <span style={{ color: tone }}>{label}</span>
-      <span
-        className="rounded-sm border px-1 text-[9px] font-semibold tracking-widest"
-        style={{
-          borderColor: "color-mix(in oklab, var(--color-warning) 45%, var(--color-border))",
-          color: "var(--color-warning)",
-          background: "color-mix(in oklab, var(--color-warning-muted) 15%, transparent)",
-        }}
-        title="Reference Implementation — connection is mocked"
-      >
-        REF
-      </span>
-    </Pressable>
-  );
-}
-
-function formatAge(seconds: number): string {
-  if (seconds < 60) return `synced ${seconds}s ago`;
-  const m = Math.floor(seconds / 60);
-  if (m < 60) return `synced ${m}m ago`;
-  const h = Math.floor(m / 60);
-  return `synced ${h}h ago`;
-}
-
-function DensityToggle() {
-  const density = useSpireStore((s) => s.density);
-  const setDensity = useSpireStore((s) => s.setDensity);
-  const next: Density = density === "dense" ? "sparse" : "dense";
-  // Label = CURRENT state, not the next one. Reviewer caught the prior
-  // build appearing to show the destination state ("DENSE" while currently
-  // sparse, click to swap). Visible text always reflects the live store
-  // value; the click action is described in the tooltip.
-  const currentLabel = density === "dense" ? "DENSE" : "SPARSE";
-  const nextLabel = next === "dense" ? "DENSE" : "SPARSE";
-  return (
-    <Button
-      variant="secondary"
-      size="md"
-      onClick={() => setDensity(next)}
-      aria-label={`Information density: currently ${currentLabel}. Click to switch to ${nextLabel}.`}
-      title={`Currently ${currentLabel}. Click to switch to ${nextLabel}.`}
-      className="px-2.5 text-xs tracking-wider border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)]"
-      leadingIcon={
-        <span aria-hidden className="text-[var(--color-text-muted)]">
-          {density === "dense" ? "▦" : "▤"}
-        </span>
-      }
-    >
-      {currentLabel}
-    </Button>
-  );
-}
-
-// "Push to Joint COP" — opens the OMS/UCI sister-service viewer in a new
-// tab. Visible to roles that can release a SECRET//REL bundle (i.e. the
-// roles whose clearance gate can satisfy the joint export endpoint). For
-// other roles the button is hidden so we don't tease an action that would
-// just spawn a tab full of "InsufficientClearance."
+// PushToJointButton — opens the OMS/UCI sister-service viewer in a new
+// tab. Visible to roles that can release a SECRET//REL bundle. Other
+// roles don't see it so we don't tease an InsufficientClearance gate.
 function PushToJointButton({ role }: { role: Role }) {
   const allowed = role === "security_manager" || role === "mef_commander" || role === "data_custodian";
   if (!allowed) return null;
@@ -1424,175 +863,187 @@ function PushToJointButton({ role }: { role: Role }) {
   );
 }
 
-// Task #25 — Reset-to-clean-demo affordance.
-//
-// Shark Tank cycles through the demo multiple times: practice, dry-run,
-// judges. Without a one-click reset the presenter has to re-seed by
-// hand, which means the next pass starts at a non-deterministic state
-// (alerts left acked, simulator triggered, air-gap maybe still on).
-//
-// Hidden for every role except the demo operator (g4) — the identity
-// the presenter signs in as. The backend gate (`require_role` against
-// {"g4"}) is the truth source; this visibility check is UX hygiene so
-// other roles don't see a button they can't use.
-//
-// `<DangerButton confirm="modal">` matches the AirGapToggle precedent
-// for one-keystroke confirms on truly destructive actions, and the
-// idempotent action wrapper prevents a triple-tap from firing three
-// resets back-to-back. The reset itself returns in well under the
-// 3-second budget the task calls for (it's a memory wipe + re-seed of
-// in-process state, not a full dataset regeneration — the dataset is
-// already deterministic under seed 42 from boot, never mutated at
-// runtime, so the next pass is bit-identical without re-running the
-// 30–60 s synthetic generator).
-// FailsafePill — Task #48 (F-01).
-//
-// The Failsafe affordance used to live only inside the /demo cockpit
-// header. The moment the presenter pressed Play, the player navigated
-// them out to /bastion / /sentry / /pulse and the on-screen Failsafe
-// button disappeared, leaving F9 as the only escape — and F9 itself was
-// route-gated to /demo + /pitch (see App.tsx, fixed in this same task).
-//
-// This pill mounts in the TopBar so it follows the presenter onto every
-// view they touch during a scripted run. It only renders when a scenario
-// is loaded so it doesn't add chrome for operators who never opened the
-// demo cockpit. The click path mirrors the cockpit button: window.confirm
-// gate (the failsafe replaces the live demo on stage — never silent),
-// then `openFullscreen()`. We deliberately don't show it while the
-// failsafe is already up — the FailsafePlayer owns its own close
-// affordance and a second trigger from the chrome would be confusing.
-function FailsafePill() {
-  const scenarioLoaded = useScenarioPlayer((s) => s.scenarioId !== null);
-  const failsafeMode = useFailsafe((s) => s.mode);
-  const openFullscreen = useFailsafe((s) => s.openFullscreen);
 
-  if (!scenarioLoaded) return null;
-  if (failsafeMode !== "off") return null;
 
-  function activate() {
-    const ok = window.confirm(
-      "Activate failsafe? The recorded backup will replace the live demo. Press OK only if the live demo has failed.",
-    );
-    if (ok) openFullscreen();
-  }
-
-  return (
-    <Pressable
-      onClick={activate}
-      block={false}
-      aria-label="Activate failsafe — replace live demo with recorded backup (F9)"
-      title="Failsafe — replace the live demo with the recorded backup (F9)"
-      className="!min-h-0 flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_12%,var(--color-surface))] px-2.5 font-mono text-[11px] font-semibold uppercase tracking-widest text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning)_22%,var(--color-surface))]"
-    >
-      <span aria-hidden>◉</span>
-      <span>Failsafe</span>
-      <kbd
-        aria-hidden
-        className="ml-0.5 hidden rounded-sm border border-[var(--color-warning)] bg-[var(--color-bg)] px-1 py-px text-[9px] tracking-wider lg:inline"
-      >
-        F9
-      </kbd>
-    </Pressable>
-  );
-}
-
-function ResetDemoButton() {
-  const role = useSpireStore((s) => s.role);
-  // MDM 2026 stage-pivot — RESET DEMO must be reachable from any role
-  // when the session is on stage. The presenter often quick-switches
-  // to Hayes (security_manager) for the SENTRY beat and then needs to
-  // reset the scenario before the BASTION cold-open without first
-  // swapping back to Reyes (g4). Outside stage mode the affordance
-  // remains operator-only.
-  const stageMode = useSpireStore((s) => s.stageMode);
-  const setAlertCount = useSpireStore((s) => s.setAlertCount);
+/**
+ * OperatorSettingsSection — embedded inside IdentityPill's dropdown.
+ *
+ * Holds the three controls that used to be standalone chips in the right
+ * group:
+ *   - Air-gap toggle (security_manager / mef_commander only)
+ *   - Information-density radio (Dense / Sparse, all roles)
+ *   - Comms posture summary — read-only, points at CommsControl chip
+ *
+ * The Air-gap toggle preserves its confirm-modal flow (the underlying
+ * setAirGap API requires a reason and the toast logs the engage/release
+ * for the SOC view). Density flips locally and persists to localStorage.
+ */
+function OperatorSettingsSection({ role }: { role: Role }) {
+  const airGapAllowed = role === "security_manager" || role === "mef_commander";
+  const airGap = useSpireStore((s) => s.airGapActive);
   const setAirGap = useSpireStore((s) => s.setAirGap);
   const setQueueDepth = useSpireStore((s) => s.setQueueDepth);
+  const queueDepth = useSpireStore((s) => s.queueDepth);
   const pushToast = useSpireStore((s) => s.pushToast);
-  const nav = useNavigate();
+  const density = useSpireStore((s) => s.density);
+  const setDensity = useSpireStore((s) => s.setDensity);
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const [airGapConfirm, setAirGapConfirm] = useState(false);
 
-  // Hook order must be stable across renders, so the visibility check
-  // moved BELOW every hook call. The component still renders nothing for
-  // non-operator roles — but every hook is called every render.
-  const action = useIdempotentAction(
-    "topbar:reset-demo",
+  const airGapAction = useIdempotentAction(
+    `topbar:air-gap:${airGap ? "release" : "engage"}`,
     async () => {
+      setAirGapConfirm(false);
       try {
-        const r = await api.system.resetDemo();
-        // Mirror the wiped state into the local store so the chrome doesn't
-        // briefly re-render with stale alert counts / air-gap chrome.
-        // (Even on partial failure, these store fields reflect the steps
-        // that DID succeed: air-gap + queue clears are unconditional.)
-        setAlertCount(0);
-        setAirGap(false);
-        setQueueDepth(0);
-        const seconds = (r.duration_ms / 1000).toFixed(2);
-        if (r.ok) {
+        const r = await api.system.setAirGap(!airGap, "operator-confirmed");
+        setAirGap(r.air_gap_active);
+        if (r.air_gap_active) {
+          pushToast({ tone: "warn", text: "Air-gap engaged — local writes will be queued", ttlMs: 4000 });
+        } else if (r.replayed != null) {
           pushToast({
             tone: "ok",
-            text: `SPIRE reset to clean demo state in ${seconds}s — alerts cleared, simulator reset, mission clock at H+0.`,
+            text: `Air-gap released — ${r.replayed} queued op${r.replayed === 1 ? "" : "s"} replayed`,
             ttlMs: 5000,
           });
-        } else {
-          // Partial reset (HTTP 207). Surface which steps failed so the
-          // presenter knows whether to retry or push past it.
-          const stepNames = r.failed_steps.map((s) => s.step).join(", ") || "unknown";
-          pushToast({
-            tone: "warn",
-            text: `Demo reset partial (${seconds}s) — ${r.failed_steps.length} step${r.failed_steps.length === 1 ? "" : "s"} failed: ${stepNames}. Other state was reset; try once more or proceed.`,
-            ttlMs: 9000,
-          });
+          setQueueDepth(0);
         }
-        // Land back on the hero dashboard so the next demo pass starts
-        // at the canonical entry surface — even on partial failure, the
-        // operator wants to see the post-reset surface.
-        nav("/", { replace: true });
       } catch (e) {
-        pushToast({
-          tone: "error",
-          text: `Reset failed: ${formatApiError(e)}`,
-        });
+        pushToast({ tone: "error", text: `Air-gap toggle failed: ${formatApiError(e)}` });
       }
     },
-    { lockoutMs: 750 },
   );
 
-  // Operator role only outside stage mode. In stage mode any role can
-  // reset the scenario between vignettes.
-  if (role !== "g4" && !stageMode) return null;
-
   return (
-    <DangerButton
-      size="md"
-      confirm="modal"
-      modalPrompt={
-        "Reset SPIRE to clean demo state — clears alerts, restarts mission " +
-        "clock, re-seeds simulator. Continue?"
-      }
-      pending={action.pending}
-      onConfirm={() => action.run()}
-      title="Return SPIRE to a known t=0 demo state (operator-only)"
-      aria-label="Reset SPIRE to clean demo state"
-      className="shrink-0 px-2.5 text-xs tracking-wider"
-      leadingIcon={
-        // Counter-clockwise arrow — the universal "reset to start" glyph.
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M3 12a9 9 0 1 0 3-6.7" />
-          <polyline points="3 4 3 10 9 10" />
-        </svg>
-      }
+    <div
+      className="border-b border-[var(--color-border)] py-1"
+      data-testid="identity-operator-settings"
     >
-      {action.pending ? "RESETTING…" : "RESET DEMO"}
-    </DangerButton>
+      <div className="px-4 pt-2 pb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+        Operator settings
+      </div>
+
+      {airGapAllowed && (
+        <div className="flex items-center justify-between gap-3 px-4 py-1.5">
+          <div className="flex min-w-0 flex-col">
+            <span className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+              Air-gap
+            </span>
+            <span className="font-mono text-[10px] tracking-wider text-[var(--color-text-muted)]">
+              {airGap
+                ? `Engaged · ${queueDepth} op${queueDepth === 1 ? "" : "s"} queued`
+                : "Released · writes pass through"}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAirGapConfirm(true)}
+            data-testid="identity-airgap-toggle"
+            className={clsx(
+              "shrink-0 rounded-sm border px-2 py-1 font-mono text-[11px] uppercase tracking-widest transition-colors",
+              airGap
+                ? "border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_25%,transparent)] text-[var(--color-danger)]"
+                : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]",
+            )}
+            aria-pressed={airGap}
+            aria-label={airGap ? "Release air-gap" : "Engage air-gap"}
+            title={airGap ? "Release air-gap and replay queued ops" : "Engage air-gap (confirm required)"}
+          >
+            {airGap ? "ENGAGED" : "RELEASE"}
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-3 px-4 py-1.5">
+        <div className="flex min-w-0 flex-col">
+          <span className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+            Density
+          </span>
+          <span className="font-mono text-[10px] tracking-wider text-[var(--color-text-muted)]">
+            {density === "dense" ? "Staff layout — more columns" : "Field layout — bigger tap targets"}
+          </span>
+        </div>
+        <div
+          role="radiogroup"
+          aria-label="Information density"
+          className="flex shrink-0 overflow-hidden rounded-sm border border-[var(--color-border)]"
+        >
+          {(["dense", "sparse"] as Density[]).map((d) => (
+            <button
+              key={d}
+              type="button"
+              role="radio"
+              aria-checked={density === d}
+              onClick={() => setDensity(d)}
+              data-testid={`identity-density-${d}`}
+              className={clsx(
+                "px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition-colors",
+                density === d
+                  ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] text-[var(--color-primary)]"
+                  : "bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
+              )}
+            >
+              {d === "dense" ? "Dense" : "Sparse"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 px-4 py-1.5">
+        <div className="flex min-w-0 flex-col">
+          <span className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+            Comms posture
+          </span>
+          <span className="font-mono text-[10px] tracking-wider text-[var(--color-text-muted)]">
+            Change posture from the COMMS chip in the top bar.
+          </span>
+        </div>
+        <span
+          className="shrink-0 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[10px] tabular-nums uppercase tracking-widest text-[var(--color-text-secondary)]"
+          aria-live="polite"
+        >
+          {ddilMode}
+        </span>
+      </div>
+
+      {airGapConfirm && (
+        <div
+          className="fixed inset-0 z-[8800] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => !airGapAction.pending && setAirGapConfirm(false)}
+          role="presentation"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="m-4 max-w-md rounded-md border border-[var(--color-warning)] bg-[var(--color-surface)] p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="airgap-id-confirm-title"
+          >
+            <div id="airgap-id-confirm-title" className="font-mono text-xs uppercase text-[var(--color-warning)] tracking-widest">
+              {airGap ? "Release air-gap" : "Engage air-gap"}
+            </div>
+            <h2 className="mt-1 font-sans text-lg font-semibold text-[var(--color-text)]">
+              {airGap ? "Replay queued ops and reconnect?" : "Cut outbound writes and queue locally?"}
+            </h2>
+            <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+              {airGap
+                ? `Releasing will replay ${queueDepth} queued operation${queueDepth === 1 ? "" : "s"} to the upstream node and resume normal sync. Conflicts surface in System chip as vector-clock pairs.`
+                : "Engaging will route every mutation to the local queue. SPIRE keeps operating, but partner nodes won't see your writes until release."}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setAirGapConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="warning"
+                onClick={() => airGapAction.run()}
+                pending={airGapAction.pending}
+              >
+                {airGap ? "Release" : "Engage"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
