@@ -16,7 +16,12 @@ from ..persistence import (
     record_pulse_draft,
     record_pulse_feedback,
 )
-from ..scoping import allowed_units, filter_assets, filter_units
+from ..scoping import (
+    allowed_units,
+    filter_assets,
+    filter_units,
+    require_role,
+)
 from ..state import (
     CanonicalDataset,
     get_dataset,
@@ -1069,12 +1074,32 @@ async def cannibalization(role: Optional[str] = None):
 _PROPOSED_MATCHES: list[dict] = []
 
 
+# Roles that are operationally allowed to propose a cannibalization. The
+# security_manager role is read-only on this surface — they review the audit
+# chain after the fact, they don't put proposals into it. Data custodians
+# don't sign work orders either, so they're not on the list.
+_PROPOSE_ROLES = frozenset({"g4", "maintenance_chief", "mef_commander"})
+
+
 @router.post("/cannibalization/propose")
 async def propose_cannibalization(request: Request, payload: dict):
     """Accept an operator-proposed cross-level. The match is NOT executed
     against the dataset (that would mutate canonical fixtures); it is logged
     to the audit chain with a PROPOSED status. A production build would add a
-    review gate + approval chain before committing."""
+    review gate + approval chain before committing.
+
+    Validation gates (Task #41 — keep fabricated proposals out of the audit
+    chain):
+      * role ∈ {g4, maintenance_chief, mef_commander}
+      * recipient_sr / donor_sr both exist in the canonical dataset
+      * recipient_sr's unit AND donor_sr's unit are inside the actor's scope
+      * the supplied NSN matches one of the recipient SR's pending requisitions
+      * recipient_sr != donor_sr (or self_cannib=True is set explicitly so the
+        intent to pull from the same SR record is on the wire)
+    """
+    role = session_role(request)
+    require_role(role, _PROPOSE_ROLES, "cannibalization_propose")
+
     recipient_sr = payload.get("recipient_sr")
     # Task #40 -- strippable donors are asset-keyed (a healthy MC hull may
     # have no open SR at all). Accept donor_asset_id as the canonical
@@ -1083,10 +1108,128 @@ async def propose_cannibalization(request: Request, payload: dict):
     donor_asset_id = payload.get("donor_asset_id")
     donor_sr = payload.get("donor_sr")
     nsn = payload.get("nsn")
+    self_cannib = bool(payload.get("self_cannib"))
+
     if not (recipient_sr and (donor_asset_id or donor_sr) and nsn):
         raise HTTPException(
             status_code=400,
             detail="recipient_sr, donor_asset_id (or donor_sr), nsn required",
+        )
+
+    ds = get_dataset()
+    sr_index = {sr.sr_number: sr for sr in ds.srs}
+    recipient = sr_index.get(recipient_sr)
+    if recipient is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "UnknownRecipient",
+                "field": "recipient_sr",
+                "value": recipient_sr,
+            },
+        )
+
+    # Resolve donor and donor unit
+    donor = None
+    donor_unit_name = None
+    if donor_asset_id:
+        asset = ds.asset(donor_asset_id)
+        if asset is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "UnknownDonorAsset",
+                    "field": "donor_asset_id",
+                    "value": donor_asset_id,
+                },
+            )
+        donor_unit_name = asset.unit_name
+        # If donor_sr is also provided, validate it
+        if donor_sr:
+            donor = sr_index.get(donor_sr)
+            if donor is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "error": "UnknownDonor",
+                        "field": "donor_sr",
+                        "value": donor_sr,
+                    },
+                )
+    elif donor_sr:
+        donor = sr_index.get(donor_sr)
+        if donor is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "UnknownDonor",
+                    "field": "donor_sr",
+                    "value": donor_sr,
+                },
+            )
+        donor_unit_name = donor.unit_name
+        donor_asset_id = donor.asset_id
+
+    # Validate recipient != donor unless self_cannib
+    is_self = False
+    if donor_sr and recipient_sr == donor_sr:
+        is_self = True
+    elif donor_asset_id and recipient.asset_id == donor_asset_id:
+        is_self = True
+
+    if is_self and not self_cannib:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "SelfCannibNotAcknowledged",
+                "remediation": (
+                    "recipient matches donor. Pass self_cannib=true "
+                    "to acknowledge the donor record is the same asset/SR."
+                ),
+            },
+        )
+
+    # Scope check
+    allowed = allowed_units(ds, role)
+    if allowed is not None:
+        out_of_scope = []
+        if recipient.unit_name not in allowed:
+            out_of_scope.append(("recipient", recipient.unit_name))
+        if donor_unit_name not in allowed:
+            out_of_scope.append(("donor", donor_unit_name))
+
+        if out_of_scope:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "OutOfScope",
+                    "action": "cannibalization_propose",
+                    "role_seen": role,
+                    "out_of_scope": out_of_scope,
+                    "scope_units": sorted(allowed),
+                },
+            )
+
+    # NSN validation
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
+    pending_nsns = {
+        r.nsn for r in recipient.requisitions
+        if r.received_date is None or (last_day and r.received_date > last_day)
+    }
+    if nsn not in pending_nsns:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "NsnMismatch",
+                "recipient_sr": recipient_sr,
+                "supplied_nsn": nsn,
+                "pending_nsns": sorted(pending_nsns),
+                "remediation": (
+                    "NSN must match one of the recipient SR's pending "
+                    "requisitions. A donor part with a different NSN cannot "
+                    "be installed on this fault."
+                ),
+            },
         )
 
     proposal = {
@@ -1095,10 +1238,12 @@ async def propose_cannibalization(request: Request, payload: dict):
         "donor_asset_id": donor_asset_id,
         "donor_sr": donor_sr,
         "nsn": nsn,
+        "self_cannib": self_cannib or is_self,
+        "recipient_unit": recipient.unit_name,
+        "donor_unit": donor_unit_name,
         "status": "PROPOSED",
         "proposed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
-    _PROPOSED_MATCHES.append(proposal)
     try:
         # persistence.py exports the audit-chain writer as `log`; alias
         # on import so the call site reads as `audit_log`. Pre-round-4
@@ -1109,13 +1254,22 @@ async def propose_cannibalization(request: Request, payload: dict):
         from ..persistence import log as audit_log
         audit_log(
             "cannibalization_propose",
-            actor=session_role(request) or "unknown",
+            actor=role,
             subject_id=proposal["proposal_id"],
             payload=proposal,
         )
-    except Exception:
-        pass
-    return {"ok": True, "proposal": proposal}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "AuditLogWriteFailed",
+                "remediation": "Audit chain write failed; proposal was not persisted. Retry once the audit store is reachable.",
+                "cause": str(exc),
+            },
+        )
+
+    _PROPOSED_MATCHES.append(proposal)
+    return {"ok": True, "proposal": proposal, "audit_persisted": True}
 
 
 # ---------------------------------------------------------------------------

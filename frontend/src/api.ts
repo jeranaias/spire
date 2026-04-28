@@ -473,7 +473,15 @@ export const api = {
     // bypassing the interceptor and silently exiting the "we work
     // when comms are yellow" demo on this page.
     cannibalizationPropose: (
-      input: { recipient_sr: string; donor_asset_id: string; nsn: string },
+      input: {
+        recipient_sr: string;
+        donor_asset_id: string;
+        // Task #41 — backend accepts donor_sr as a legacy alias alongside
+        // donor_asset_id; pass it when the donor row exposes one so the
+        // server can cross-check both identifiers in the self-cannib guard.
+        donor_sr?: string;
+        nsn: string;
+      },
       opts?: { signal?: AbortSignal },
     ) =>
       jsonFetch<{ ok: boolean; event_id?: string; impact?: string }>(

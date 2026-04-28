@@ -29,6 +29,12 @@ type MatchRow = {
   nsn: string;
   nomenclature: string;
   impact: string;
+  // Task #41 — server-side commit status. `committed` means the propose POST
+  // returned 2xx and the audit chain has the row. `pending_retry` means the
+  // optimistic row is on screen but the backend rejected (or never saw) it,
+  // so the operator must retry. Untagged = legacy / engine-verified rows.
+  commit_status?: "committed" | "pending_retry";
+  retry_reason?: string;
   // Walkthrough #42 — surface full work-order metadata.
   work_order?: {
     wo_number: string;
@@ -54,6 +60,56 @@ type DonorRow = StrippableDonor;
 
 type SortMode = "days_open" | "impact" | "unit";
 
+// Task #41 — single source of truth for "did the propose POST land in the
+// audit chain?". Returns a discriminated union so callers don't have to
+// each re-implement the resp.ok / 401 / network-error branching that the
+// previous swallow-everything implementation got wrong.
+type ProposeOutcome =
+  | { outcome: "committed" }
+  | { outcome: "unauthorized" }
+  | { outcome: "rejected"; reason: string };
+
+async function postProposeAndClassify(body: {
+  recipient_sr: string;
+  donor_sr?: string;
+  donor_asset_id?: string;
+  nsn: string;
+}): Promise<ProposeOutcome> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 15_000);
+  let resp: Response;
+  try {
+    resp = await fetch("/api/pulse/cannibalization/propose", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } catch (err) {
+    window.clearTimeout(timer);
+    const msg = err instanceof Error && err.name === "AbortError"
+      ? "Backend timed out (15s)."
+      : "Network unreachable.";
+    return { outcome: "rejected", reason: msg };
+  }
+  window.clearTimeout(timer);
+  if (resp.status === 401) return { outcome: "unauthorized" };
+  if (!resp.ok) {
+    let detail = `HTTP ${resp.status}`;
+    try {
+      const b = await resp.json();
+      const d = b?.detail;
+      if (typeof d === "string") detail = d;
+      else if (d && typeof d === "object" && typeof d.error === "string") {
+        detail = `${d.error} (${resp.status})`;
+      }
+    } catch { /* tolerant */ }
+    return { outcome: "rejected", reason: detail };
+  }
+  return { outcome: "committed" };
+}
+
 export function CannibalizationTab() {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
@@ -62,6 +118,9 @@ export function CannibalizationTab() {
   // CommsControl drain removes its id from the store.
   const ddilQueue = useSpireStore((s) => s.ddilQueue);
   const queuedIds = useMemo(() => new Set(ddilQueue.map((q) => q.id)), [ddilQueue]);
+  // Task #41 — security_manager is read-only on this surface; they review
+  // the audit chain after the fact, they don't add to it.
+  const canPropose = role !== "security_manager";
   const [data, setData] = useState<Cannibalization | null>(null);
   // Task-42 — distinguish "200 with empty list" from "5xx / network
   // failure / DDIL no-cache". Prior code .catch'd silently and left
@@ -71,6 +130,14 @@ export function CannibalizationTab() {
   const [proposedLocal, setProposedLocal] = useState<MatchRow[]>([]);
   const [confirmDonor, setConfirmDonor] = useState<{ need: NeedRow; donor: DonorRow } | null>(null);
   const [committing, setCommitting] = useState(false);
+  // Task #41 — auto-propose now POSTs each draft to the backend after a
+  // single confirm-all dialog. This holds the staged drafts between the
+  // dialog opening and the operator pressing Submit.
+  const [autoConfirm, setAutoConfirm] = useState<
+    | { drafts: { need: NeedRow; donor: DonorRow }[] }
+    | null
+  >(null);
+  const [autoSubmitting, setAutoSubmitting] = useState(false);
   // Walkthrough #43 — filter chips
   const [unitFilter, setUnitFilter] = useState<string | null>(null);
   const [partClassFilter, setPartClassFilter] = useState<string | null>(null);
@@ -188,6 +255,12 @@ export function CannibalizationTab() {
     // copy match the actual transport outcome (rather than always
     // saying "Match proposed" the way the raw fetch did).
     //
+    // Task #41 — for non-DDIL backend rejections (4xx validation, 401
+    // expired, 5xx audit-write failure) we mark the optimistic row
+    // pending_retry instead of dropping it, so the operator never
+    // walks away believing a row landed in the audit chain when it
+    // didn't.
+    //
     // We still keep a 15s client-side timeout: even the interceptor
     // won't save us from a Fly cold-start sitting on the wire.
     const ctrl = new AbortController();
@@ -195,10 +268,11 @@ export function CannibalizationTab() {
     try {
       // Task #40 — donors are strippable hulls (asset-keyed); they may be
       // MC and have no SR, so the backend accepts donor_asset_id as the
-      // canonical donor reference.
+      // canonical donor reference. Pass donor_sr too when available.
       await api.pulse.cannibalizationPropose(
         {
           recipient_sr: need.sr_number,
+          donor_sr: (donor as any).sr_number,
           donor_asset_id: donor.asset_id,
           nsn: need.needed_part.nsn,
         },
@@ -208,24 +282,27 @@ export function CannibalizationTab() {
         tone: "ok",
         text: `Match proposed · ${need.asset_id} ← ${donor.asset_id}`,
       });
+      markRowCommitted(optimisticId);
     } catch (err) {
-      const ddilTag = err instanceof ApiError ? (err.body as any)?.ddil : null;
+      const apiErr = err instanceof ApiError ? err : null;
+      const ddilTag = apiErr ? ((apiErr.body as any)?.ddil ?? null) : null;
+      const status = apiErr ? apiErr.status : 0;
       if (ddilTag === "queued") {
         // DDIL DISCONNECTED — interceptor pushed the write into the
         // local replay queue. Keep the optimistic row, tag it so the
         // Completed Matches badge reads "Queued · DDIL" until the
         // queue drains on reconnect, then auto-flips to "Replayed".
-        const localId = (err.body as any)?.local_id as string | undefined;
+        const ddilLocalId = apiErr ? ((apiErr.body as any)?.local_id as string | undefined) : undefined;
         setProposedLocal((prev) =>
           prev.map((r) =>
             r.event_id === optimisticId
-              ? { ...r, localStatus: "queued", localId }
+              ? { ...r, localStatus: "queued", localId: ddilLocalId }
               : r,
           ),
         );
         pushToast({
           tone: "warn",
-          text: `Comms denied — proposal queued for replay${localId ? ` (${localId})` : ""}.`,
+          text: `Comms denied — proposal queued for replay${ddilLocalId ? ` (${ddilLocalId})` : ""}.`,
           ttlMs: 5000,
         });
       } else if (ddilTag === "intermittent") {
@@ -239,14 +316,27 @@ export function CannibalizationTab() {
           text: "Comms intermittent — packet dropped on the wire. Re-issue the proposal.",
           ttlMs: 5000,
         });
-      } else {
-        // Real backend error (5xx, 4xx) or transport / abort. Pull the
-        // optimistic row so we don't claim success that never happened,
-        // and surface the underlying detail.
-        setProposedLocal((prev) => prev.filter((r) => r.event_id !== optimisticId));
+      } else if (status === 401) {
+        // Task #41 — session expired mid-commit. Mark the row
+        // pending_retry so it stays on screen for context, then
+        // bounce out to /auth via the store's signOut bridge.
+        markRowPendingRetry(optimisticId, "Session expired before commit landed.");
         pushToast({
-          tone: "error",
-          text: `Proposal failed — ${formatApiError(err)}`,
+          tone: "warn",
+          text: "Session expired · sign in again to recommit the proposal.",
+        });
+        useSpireStore.getState().signOut();
+      } else {
+        // Real backend rejection (4xx validation, 5xx audit failure)
+        // or transport/abort. Task #41 invariant: keep the row visible
+        // and yellow so the operator can't mistake a failed write for
+        // an audit-chain entry; surface the underlying detail in the
+        // row's badge AND in a warn toast.
+        const reason = formatApiError(err);
+        markRowPendingRetry(optimisticId, reason);
+        pushToast({
+          tone: "warn",
+          text: `Commit pending retry · ${reason}`,
           ttlMs: 5500,
         });
       }
@@ -258,13 +348,34 @@ export function CannibalizationTab() {
     }
   }
 
-  // Walkthrough #45 / Task #40 -- bulk auto-propose top strippable donor
-  // for each filtered need. Sources from the backend's strippable_donors
-  // pool so we never auto-propose another deadlined hull as a "donor".
+  function markRowPendingRetry(localId: string, reason: string) {
+    setProposedLocal((prev) =>
+      prev.map((m) =>
+        m.event_id === localId
+          ? { ...m, commit_status: "pending_retry", retry_reason: reason }
+          : m,
+      ),
+    );
+  }
+  function markRowCommitted(localId: string) {
+    setProposedLocal((prev) =>
+      prev.map((m) =>
+        m.event_id === localId ? { ...m, commit_status: "committed" } : m,
+      ),
+    );
+  }
+
+  // Walkthrough #45 / Task #40 / Task #41 -- bulk auto-propose top match per need.
+  // This used to silently fabricate frontend-only rows that the toast called
+  // "queued" while actually never POSTing anything. Now it builds a draft list,
+  // opens a single confirm-all dialog showing the count, and on confirm POSTs
+  // each one individually so every row that shows up in the matches column
+  // corresponds to an audit-chain entry (or a clearly flagged pending_retry).
+  // Sources from the backend's strippable_donors pool so we never auto-propose
+  // another deadlined hull as a "donor".
   function autoProposeTopMatches() {
     if (!data) return;
-    let count = 0;
-    const proposals: MatchRow[] = [];
+    const drafts: { need: NeedRow; donor: DonorRow }[] = [];
     for (const need of filteredNeeds) {
       const pool = data.strippable_donors?.[need.sr_number] ?? [];
       const candidates = pool.filter((d) => !crossUnitOnly || d.unit !== need.unit);
@@ -272,32 +383,114 @@ export function CannibalizationTab() {
       // Pool is already priority-sorted by the backend (long-term-NMC,
       // then PMC, then MC at high-MC unit). Prefer cross-unit ties so
       // intra-unit moves don't shadow easier cross-level transfers.
-      candidates.sort((a, b) => {
+      const sorted = [...candidates].sort((a, b) => {
         if (a.priority !== b.priority) return a.priority - b.priority;
         const aCross = a.unit !== need.unit ? 1 : 0;
         const bCross = b.unit !== need.unit ? 1 : 0;
         if (aCross !== bCross) return bCross - aCross;
         return (b.unit_mc_rate ?? 0) - (a.unit_mc_rate ?? 0);
       });
-      const isSelf = candidates[0].unit === need.unit;
-      proposals.push({
-        event_id: `CAN-LOCAL-${Date.now()}-${count}`,
-        event_date: new Date().toISOString().slice(0, 10),
-        scope: isSelf ? "self" : "cross_unit",
-        recipient: { asset_id: need.asset_id, unit: need.unit },
-        donor: { asset_id: candidates[0].asset_id, unit: candidates[0].unit },
-        nsn: need.needed_part.nsn,
-        nomenclature: need.needed_part.nomenclature,
-        impact: `Auto-proposed top match · ${need.asset_id} ← ${candidates[0].asset_id}.`,
-      });
-      count++;
+      drafts.push({ need, donor: sorted[0] });
     }
-    if (count === 0) {
+    if (drafts.length === 0) {
       pushToast({ tone: "warn", text: "No auto-match candidates available." });
       return;
     }
-    setProposedLocal((prev) => [...proposals, ...prev]);
-    pushToast({ tone: "ok", text: `${count} auto-proposals queued · operator review required.` });
+    setAutoConfirm({ drafts });
+  }
+
+  async function submitAutoDrafts() {
+    if (!autoConfirm) return;
+    setAutoSubmitting(true);
+    try {
+      const startedAt = Date.now();
+      let committed = 0;
+      let pending = 0;
+      let unauthorized = false;
+      const newRows: MatchRow[] = [];
+      for (let i = 0; i < autoConfirm.drafts.length; i++) {
+        const { need, donor } = autoConfirm.drafts[i];
+        const isSelf = need.unit === donor.unit;
+        const localId = `CAN-LOCAL-${startedAt}-${i}`;
+        const result = await postProposeAndClassify({
+          recipient_sr: need.sr_number,
+          donor_sr: (donor as any).sr_number,
+          donor_asset_id: (donor as any).asset_id,
+          nsn: need.needed_part.nsn,
+        });
+        const baseRow: MatchRow = {
+          event_id: localId,
+          event_date: new Date().toISOString().slice(0, 10),
+          scope: isSelf ? "self" : "cross_unit",
+          recipient: { asset_id: need.asset_id, unit: need.unit },
+          donor: { asset_id: donor.asset_id, unit: donor.unit },
+          nsn: need.needed_part.nsn,
+          nomenclature: need.needed_part.nomenclature,
+          impact: `Auto-proposed top match · ${need.asset_id} ← ${donor.asset_id}.`,
+        };
+        if (result.outcome === "committed") {
+          newRows.push({ ...baseRow, commit_status: "committed" });
+          committed++;
+        } else if (result.outcome === "unauthorized") {
+          newRows.push({
+            ...baseRow,
+            commit_status: "pending_retry",
+            retry_reason: "Session expired mid-batch.",
+          });
+          pending++;
+          unauthorized = true;
+          // Stop iterating: subsequent calls would also 401.
+          for (let j = i + 1; j < autoConfirm.drafts.length; j++) {
+            const skipped = autoConfirm.drafts[j];
+            newRows.push({
+              event_id: `CAN-LOCAL-${startedAt}-${j}`,
+              event_date: new Date().toISOString().slice(0, 10),
+              scope: skipped.need.unit === skipped.donor.unit ? "self" : "cross_unit",
+              recipient: { asset_id: skipped.need.asset_id, unit: skipped.need.unit },
+              donor: { asset_id: skipped.donor.asset_id, unit: skipped.donor.unit },
+              nsn: skipped.need.needed_part.nsn,
+              nomenclature: skipped.need.needed_part.nomenclature,
+              impact: `Auto-proposed top match · ${skipped.need.asset_id} ← ${skipped.donor.asset_id}.`,
+              commit_status: "pending_retry",
+              retry_reason: "Session expired before this draft was sent.",
+            });
+            pending++;
+          }
+          break;
+        } else {
+          newRows.push({
+            ...baseRow,
+            commit_status: "pending_retry",
+            retry_reason: result.reason,
+          });
+          pending++;
+        }
+      }
+      setProposedLocal((prev) => [...newRows, ...prev]);
+      if (unauthorized) {
+        pushToast({
+          tone: "warn",
+          text: `Session expired · ${committed} committed, ${pending} pending retry. Sign in to resubmit.`,
+        });
+        setAutoConfirm(null);
+        useSpireStore.getState().signOut();
+        return;
+      }
+      if (pending === 0) {
+        pushToast({
+          tone: "ok",
+          text: `${committed} auto-proposals committed to the audit chain.`,
+        });
+      } else {
+        pushToast({
+          tone: "warn",
+          text: `${committed} committed · ${pending} pending retry (yellow rows below).`,
+        });
+      }
+      setAutoConfirm(null);
+    } finally {
+      setAutoSubmitting(false);
+    }
   }
 
   return (
@@ -367,16 +560,26 @@ export function CannibalizationTab() {
               />
               Cross-unit only
             </label>
-            <Button
-              onClick={autoProposeTopMatches}
-              variant="primary"
-              size="sm"
-              className="ml-auto"
-              title="Auto-propose the top donor for each filtered need"
-            >
-              Auto-propose top matches
-            </Button>
+            {/* Task #41 — security_manager has read-only access. They review
+                the audit chain after the fact, so all write affordances on
+                this page are hidden for that role. */}
+            {canPropose && (
+              <Button
+                onClick={autoProposeTopMatches}
+                variant="primary"
+                size="sm"
+                className="ml-auto"
+                title="Auto-propose the top donor for each filtered need"
+              >
+                Auto-propose top matches
+              </Button>
+            )}
           </div>
+          {!canPropose && (
+            <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+              Read-only · security_manager reviews proposals; cannot author them.
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-2">
@@ -490,15 +693,19 @@ export function CannibalizationTab() {
                     other open faults: {d.donor_fault_classes.join(", ")}
                   </div>
                 )}
-                <div className="mt-2 flex items-center justify-end">
-                  <Button
-                    onClick={() => setConfirmDonor({ need: selectedNeed!, donor: d })}
-                    variant="primary"
-                    size="sm"
-                  >
-                    Propose
-                  </Button>
-                </div>
+                {/* Walkthrough #23 — primary CTA-styled Propose button.
+                    Task #41 — hidden for security_manager (read-only role). */}
+                {canPropose && (
+                  <div className="mt-2 flex items-center justify-end">
+                    <Button
+                      onClick={() => setConfirmDonor({ need: selectedNeed!, donor: d })}
+                      variant="primary"
+                      size="sm"
+                    >
+                      Propose
+                    </Button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -528,16 +735,25 @@ export function CannibalizationTab() {
             const isQueuedLocal = isLocal && m.localStatus === "queued";
             const stillQueued = isQueuedLocal && m.localId != null && queuedIds.has(m.localId);
             const wasReplayed = isQueuedLocal && !stillQueued;
-            const localBorder = stillQueued
+            // Task #41 — pending_retry rows render yellow so the operator
+            // can't mistake an unconfirmed commit for an audit-chain entry.
+            // pending_retry takes precedence over queued/replayed because
+            // it's the result of a backend rejection, not a transport hold.
+            const isPending = m.commit_status === "pending_retry";
+            const localBorder = isPending
               ? "color-mix(in oklab, var(--color-warning) 50%, var(--color-border))"
-              : wasReplayed
-                ? "color-mix(in oklab, var(--color-success) 45%, var(--color-border))"
-                : "color-mix(in oklab, var(--color-primary) 40%, var(--color-border))";
-            const localBackground = stillQueued
-              ? "color-mix(in oklab, var(--color-warning) 8%, var(--color-surface))"
-              : wasReplayed
-                ? "color-mix(in oklab, var(--color-success) 8%, var(--color-surface))"
-                : "color-mix(in oklab, var(--color-primary) 6%, var(--color-surface))";
+              : stillQueued
+                ? "color-mix(in oklab, var(--color-warning) 50%, var(--color-border))"
+                : wasReplayed
+                  ? "color-mix(in oklab, var(--color-success) 45%, var(--color-border))"
+                  : "color-mix(in oklab, var(--color-primary) 40%, var(--color-border))";
+            const localBackground = isPending
+              ? "color-mix(in oklab, var(--color-warning) 10%, var(--color-surface))"
+              : stillQueued
+                ? "color-mix(in oklab, var(--color-warning) 8%, var(--color-surface))"
+                : wasReplayed
+                  ? "color-mix(in oklab, var(--color-success) 8%, var(--color-surface))"
+                  : "color-mix(in oklab, var(--color-primary) 6%, var(--color-surface))";
             return (
               <div
                 key={m.event_id}
@@ -556,6 +772,11 @@ export function CannibalizationTab() {
                     {isSelf && (
                       <span className="rounded-sm border border-[var(--color-text-muted)] px-1 font-mono text-[10px] uppercase text-[var(--color-text-muted)]">
                         self
+                      </span>
+                    )}
+                    {isPending && (
+                      <span className="rounded-sm border border-[var(--color-warning)] px-1 font-mono text-[10px] uppercase text-[var(--color-warning)]">
+                        pending retry
                       </span>
                     )}
                   </div>
@@ -587,13 +808,18 @@ export function CannibalizationTab() {
                         Replayed
                       </span>
                     )}
-                    {isLocal && !isQueuedLocal && (
+                    {isLocal && !isQueuedLocal && !isPending && (
                       <span className="ml-2 rounded-sm border border-[var(--color-primary)] px-1 text-xs uppercase text-[var(--color-primary)]">
                         New
                       </span>
                     )}
                   </span>
                 </div>
+                {isPending && m.retry_reason && (
+                  <div className="mt-1 font-mono text-xs text-[var(--color-warning)]">
+                    Not in audit chain · {m.retry_reason}
+                  </div>
+                )}
                 <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
@@ -655,6 +881,103 @@ export function CannibalizationTab() {
           onConfirm={commit}
         />
       )}
+      {autoConfirm && (
+        <ConfirmAutoProposeModal
+          drafts={autoConfirm.drafts}
+          submitting={autoSubmitting}
+          onCancel={() => setAutoConfirm(null)}
+          onConfirm={submitAutoDrafts}
+        />
+      )}
+    </div>
+  );
+}
+
+// Task #41 — single confirm-all dialog for the bulk auto-propose flow.
+// Shows the count and a preview list so the operator sees exactly what they
+// are about to submit to the audit chain. Replaces the prior implementation
+// where the button silently invented frontend rows the backend never saw.
+function ConfirmAutoProposeModal({
+  drafts,
+  submitting,
+  onCancel,
+  onConfirm,
+}: {
+  drafts: { need: NeedRow; donor: DonorRow }[];
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !submitting) onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    const t = setTimeout(
+      () => dialogRef.current?.querySelector<HTMLElement>("button")?.focus(),
+      0,
+    );
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      clearTimeout(t);
+    };
+  }, [onCancel, submitting]);
+  return (
+    <div
+      className="fixed inset-0 z-[8000] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={submitting ? undefined : onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auto-propose-title"
+    >
+      <div
+        ref={dialogRef}
+        className="w-[40rem] max-w-[92vw] rounded-sm border border-[var(--color-primary)] bg-[var(--color-surface)] p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          id="auto-propose-title"
+          className="mb-2 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"
+        >
+          Confirm Auto-Propose Batch
+        </div>
+        <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)] tracking-wide">
+          Submit {drafts.length} proposal{drafts.length === 1 ? "" : "s"} to the audit chain
+        </div>
+        <div className="mb-3 spire-body-muted text-sm">
+          Each row below will be POSTed individually. Rows that the backend
+          rejects come back as <span className="text-[var(--color-warning)]">pending retry</span> in
+          the matches column — they are NOT in the audit chain until the
+          server confirms.
+        </div>
+        <div className="mb-4 max-h-64 overflow-y-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-xs">
+          {drafts.map((d, i) => (
+            <div
+              key={`${d.need.sr_number}-${d.donor.asset_id}-${i}`}
+              className="flex items-baseline justify-between border-b border-[var(--color-border)] py-1 last:border-b-0"
+            >
+              <div>
+                <span className="text-[var(--color-text)]">{d.need.asset_id}</span>
+                <span className="mx-1 text-[var(--color-text-muted)]">←</span>
+                <span className="text-[var(--color-text)]">{d.donor.asset_id}</span>
+                <span className="ml-2 text-[var(--color-text-muted)]">
+                  ({d.need.unit} ← {d.donor.unit})
+                </span>
+              </div>
+              <div className="text-[var(--color-text-muted)]">{d.need.needed_part.nsn}</div>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <Button onClick={onCancel} variant="secondary" size="sm" disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} pending={submitting} variant="primary" size="sm">
+            {submitting ? "Submitting" : `Submit ${drafts.length}`}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
