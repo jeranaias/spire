@@ -61,7 +61,7 @@ export function SentryView() {
 function SentrySubnav() {
   const nav = useNavigate();
   return (
-    <div className="h-10 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
+    <div className="h-10 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4" data-tour-id="sentry-subnav">
       <div className="flex h-full items-center gap-0">
         {tabs.map((t) => (
           <NavLink

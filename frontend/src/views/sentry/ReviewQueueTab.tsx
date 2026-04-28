@@ -225,7 +225,15 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
     );
   }
   if (!filteredQueue) {
-    return <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">Loading review queue ...</div>;
+    // T004 polish — was a single line of grey text, easily mistaken for
+    // "this view is broken" on slow first-paint. Match the loading
+    // affordance the rest of the app uses (pulsing dot + mono caps).
+    return (
+      <div className="flex h-full items-center justify-center font-mono text-sm text-[var(--color-text-secondary)] tracking-wider">
+        <span className="mr-3 inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
+        Loading review queue …
+      </div>
+    );
   }
 
   const selectedRecord = (() => {
@@ -238,7 +246,7 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
     filteredQueue.auto_cleared.length + filteredQueue.flagged.length + filteredQueue.held.length;
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden" data-tour-id="sentry-review-content">
       <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-xs tracking-wider">
         <div className="flex items-center gap-6">
           <span className="tabular-nums text-[var(--color-text-muted)]">
@@ -502,8 +510,12 @@ function ReviewColumn({
           />
         ))}
         {records.length === 0 && (
-          <div className="p-4 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            EMPTY
+          // T004 polish — terse "EMPTY" read as a fault. Replaced with a
+          // calm "no records in this column" so an operator who triaged
+          // the queue dry sees an explicit success state, not a glitch.
+          <div className="flex flex-col items-center justify-center gap-1 px-4 py-10 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            <span className="text-base text-[var(--color-text-secondary)]">∅</span>
+            <span>No records in this column</span>
           </div>
         )}
       </div>
@@ -599,7 +611,8 @@ function ReviewCard({
               onApprove();
             }}
             title="Approve (A)"
-            className="ml-auto rounded border border-[var(--color-success-muted)] px-2 py-0.5 font-mono font-semibold text-[var(--color-success)] hover:bg-[var(--color-success-muted)]"
+            aria-label={`Approve ${record.sr_number}`}
+            className="ml-auto rounded border border-[var(--color-success-muted)] px-2 py-0.5 font-mono font-semibold text-[var(--color-success)] hover:bg-[var(--color-success-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-success)]"
           >
             ✓
           </button>
@@ -609,7 +622,8 @@ function ReviewCard({
               onReject();
             }}
             title="Reject (R)"
-            className="rounded border border-[var(--color-danger-muted)] px-2 py-0.5 font-mono font-semibold text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)]"
+            aria-label={`Reject ${record.sr_number}`}
+            className="rounded border border-[var(--color-danger-muted)] px-2 py-0.5 font-mono font-semibold text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-danger)]"
           >
             ✗
           </button>
@@ -798,13 +812,13 @@ function InspectorPane({
       <div className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-3">
         <button
           onClick={onApprove}
-          className="flex-1 rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white tracking-widest"
+          className="flex-1 rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-success)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] tracking-widest"
         >
           ✓ Approve (A)
         </button>
         <button
           onClick={onReject}
-          className="flex-1 rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white tracking-widest"
+          className="flex-1 rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-danger)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] tracking-widest"
         >
           ✗ Reject (R)
         </button>

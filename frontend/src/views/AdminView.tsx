@@ -24,6 +24,7 @@ import {
 import { withRetry, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { InsufficientPrivilege } from "../components/InsufficientPrivilege";
+import { AboutFaq } from "../components/AboutFaq";
 
 export function AdminView() {
   const role = useSpireStore((s) => s.role);
@@ -42,6 +43,9 @@ export function AdminView() {
   const [feedback, setFeedback] = useState<FeedbackRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [waking, setWaking] = useState(false);
+  // About/FAQ surface (#18, #23, #24) — also reachable from Help overlay,
+  // but pilots tend to look here first when debugging "what is this thing".
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,21 +131,32 @@ export function AdminView() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
-      <div className="mb-4">
-        {/* Promoted from h2 to h1 — this view is the document, not a
-         * subsection. Single h1 per view anchors the screen-reader
-         * outline. */}
-        <h1
-          className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
-        >
-          Admin · Training Flywheel
-        </h1>
-        <div className="mt-1 spire-body-muted">
-          Every operator decision feeds the model improvement cycle. Outcomes scored against ground truth populate
-          the rolling accuracy trend; below 80% accuracy across ≥ 20 outcomes triggers a retraining recommendation.
+    <div className="flex h-full flex-col overflow-y-auto p-6" data-tour-id="admin-content">
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          {/* Promoted from h2 to h1 — this view is the document, not a
+           * subsection. Single h1 per view anchors the screen-reader
+           * outline. */}
+          <h1
+            className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
+          >
+            Admin · Training Flywheel
+          </h1>
+          <div className="mt-1 spire-body-muted">
+            Every operator decision feeds the model improvement cycle. Outcomes scored against ground truth populate
+            the rolling accuracy trend; below 80% accuracy across ≥ 20 outcomes triggers a retraining recommendation.
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setAboutOpen(true)}
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-primary)] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_15%,transparent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] tracking-widest"
+          title="What does SPIRE rely on, how is it secured, how does it talk?"
+        >
+          About SPIRE · FAQ
+        </button>
       </div>
+      {aboutOpen && <AboutFaq onClose={() => setAboutOpen(false)} />}
 
       {/* Hero stats row */}
       <div className="mb-4 grid grid-cols-4 gap-3">

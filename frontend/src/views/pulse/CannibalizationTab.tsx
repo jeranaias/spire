@@ -259,7 +259,7 @@ export function CannibalizationTab() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden" data-tour-id="pulse-cannib-content">
       <section className="flex w-5/12 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
         <div className="mb-3 flex items-start justify-between gap-2">
           <div className="min-w-0">
