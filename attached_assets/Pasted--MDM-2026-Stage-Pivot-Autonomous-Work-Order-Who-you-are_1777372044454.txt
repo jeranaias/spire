@@ -1,0 +1,379 @@
+# MDM 2026 Stage Pivot — Autonomous Work Order
+
+  ## Who you are
+  You are Replit Agent (Claude Opus 4.7) operating on the SPIRE codebase in this Replit workspace. SPIRE is a Marine Corps contested-logistics OS shipping on Fly.io at https://spire-mdm.fly.dev. The repo
+   is `jeranaias/spire` on GitHub. Master tip is what's currently deployed.
+
+  ## Why we're doing this
+  Modern Day Marine 2026 hackathon final demo is **April 30, 2026** — 8 minutes on stage in front of MARCORLOGCOM CDAO + HQMC I&L judges. The build covers 17 use cases worth of capability across
+  SENTRY/PULSE/BASTION/DHA RESCUE/Decision Bridge/Joint COP/Audit/Inference Economics/Coalition/Demo player/Pitch deck/etc. **That is way too much to cover in 8 minutes.** Showing all of it produces a
+  cluttered demo that scores 6-7 on Usability when the rest of the app deserves 9-10.
+
+  ## The pivot decision
+  We are not cutting code. We are cutting **stage surface**. We will laser-focus the demo on **four use cases out of the seventeen submitted**:
+
+  | Hackathon # | Use case | SPIRE module | Beat length |
+  |---|---|---|---|
+  | **#14** | CUI Auto-Tagging & Classification (DoDM 5200.01) | SENTRY | 90s |
+  | **#13** | Parts Demand Forecasting for Contested Logistics (Class IX, MAGTF) | PULSE | 120s |
+  | **#15** | Installation Common Operating Picture Aggregator | BASTION | 90s |
+  | **#4**  | DHA RESCUE — blood/Class VIII contested DMO sustainment | Blood vignette | 90s |
+
+  Plus a 30s cold-open and a 30s audit-chain close. **All other surfaces stay built and accessible — they just leave the chrome.** Q&A is where coalition, joint COP, inference economics, TMR automation,
+  etc. come out on demand.
+
+  ## The judging rubric (memorize this; every change must defend a category)
+
+  | Weight | Category | What scores 10/10 |
+  |---|---|---|
+  | 30% | Mission Impact | DHA RESCUE blood vignette as the emotional close. INDOPACOM DMO framing. Marines die without blood. |
+  | 25% | Technical Innovation | "One OS, one dataset, one audit chain, four use cases" thesis must be visible at first glance. |
+  | 20% | Usability & Design | The clutter has to be gone. Stage mode hides everything not in the 4-use-case spine. |
+  | 15% | Security & Sustainability | Audit-chain reveal as the closing beat. CAC/PIV + classification + air-gap visible at the right moments. |
+  | 10% | **Team Collaboration** | **Multiple Marines on stage, clean handoffs between operators, recovery from any glitch.** Not "who the customer is" — actual on-stage teamwork. |
+
+  ## Hard rules — non-negotiable
+
+  1. **NEVER push to master.** Work on branch `mdm-stage-pivot`. Open ONE PR at the end against master. Do not auto-merge.
+  2. **NEVER add Claude / Anthropic / AI / "Generated with" / "Co-Authored-By: Claude" attribution** to commits, code, comments, or files. No emojis unless explicitly asked. This is a cardinal rule.
+  3. **NEVER disclose Thornveil IP** in code, docs, comments, or commits. The scan list:
+      - `HawkStack`, `SGDR`, `WEM-Inverted`, `WEM-Diamond`, `FCOS`, `ConvNeXt`, `Anti-UAV-410`, `1.77 M`, `1.77M params`, `1.88 M`, `0.5795`, `82.95`, `82.12`, `SentryHawk`, `ForgeHawk`, `DepthHawk`,
+  `CellHawk`, `WildHawk`, `ENFORCE pillar`, `five-pillar`, `5-pillar`, `spillage scanner`, `Argus spillage`, `Tribunal cross-check`, `Hallucination probe`, `Action Gate`, `backbone family`
+      - Sanctioned mentions (in LICENSE.md / README.md / CONTRIBUTING.md only): naming products by name + capability — RigRun, HawkStack, ThermalHawk, PYROS, Mycelium — without disclosing architecture
+  mechanics. Don't add to that list.
+      - Run a final `git ls-files | xargs grep -lE '...'` scan before the PR opens.
+  4. **NEVER touch `backend/auth.py` session middleware logic.** It just landed and is locked. You may add UI calls into the auth router, not change the session contract.
+  5. **NEVER deploy to Fly.** That's master-merge gated by the user.
+  6. **VERIFY every UI claim with Playwright** against the live dev server (your built-in REPL verification subagent). Don't claim "the button works" without clicking it.
+  7. **ALWAYS keep features mounted** — Coalition tab, Joint COP, Inference Economics, etc. stay reachable by direct URL even when stage mode hides them from chrome. Q&A needs them in two clicks.
+
+  ## Persistence — use a plan file
+
+  Before doing anything, create `MDM_PIVOT_PLAN.md` at repo root with the full work-package list below as checkboxes. Update it after every completed step. This is your memory across context shifts.
+  Every commit message should reference the WP it addresses.
+
+  ## Branch hygiene
+
+  - `git checkout -b mdm-stage-pivot master`
+  - One commit per WP (or per logical sub-step inside a WP).
+  - Use the existing repo commit style: imperative subject line, sentence case, ≤72 chars. Optional dashed bullets in the body.
+  - After each commit, push the branch (`git push -u origin mdm-stage-pivot` first time, then `git push`).
+  - After all WPs done, open the PR with `gh pr create --base master --head mdm-stage-pivot` and the body specified at the bottom of this document.
+
+  ## Tech context (so you don't have to grep for it)
+
+  - Frontend: React 18 + TypeScript + Vite + React Router (HashRouter) + MapLibre GL. Lives in `frontend/`. Build: `cd frontend && npm run build`. Typecheck: `npx tsc --noEmit`.
+  - Backend: FastAPI on uvicorn, port 8700. Lives in `backend/`. Tests: `python -m pytest backend/tests/`.
+  - State store: `frontend/src/state/store.ts` (Zustand-ish, look at the file).
+  - Identities: 4 mock CACs in `backend/auth.py` — Reyes (Logistics Operator / G-4), Kowalski (Maintenance Chief), Park (Security Manager / CWO3), Hayes (MEF Commander). These are your four presenter
+  slots — see WP-8.
+  - Routes you'll touch: `frontend/src/App.tsx`, `frontend/src/components/TopBar.tsx`, `frontend/src/views/DecisionBridge.tsx`.
+  - The blood vignette already exists at `backend/scenario_blood.py` and `dataset/data/blood-h72.scenario.json` and `dataset/blood_vignette.py` — your job is to surface it, not build it.
+  - Backend health endpoint that's open to unauth probes: `/api/system/status`. Anything else under `/api/*` requires a session except `/api/auth/*`.
+  - Live URL: https://spire-mdm.fly.dev. Don't load it from code; use it for sanity checks via curl.
+  - Dev server: in this Repl, run the existing workflow that boots backend + frontend. Use the Playwright verification path against the local preview URL.
+
+  ---
+
+  ## Work packages
+
+  Each WP has: GOAL, FILES, BUILD, ACCEPTANCE (Playwright-verifiable), COMMIT MESSAGE.
+
+  ### WP-1 — Stage mode toggle (gates everything else)
+
+  **GOAL:** Add a `stageMode` boolean to the global store, hydrated from `?stage=1` query param, persisted to local storage. When `true`, hide non-demo nav from `TopBar.tsx` and non-demo tiles from
+  `DecisionBridge.tsx`. Keep all routes mounted in `App.tsx` so direct URLs still work.
+
+  **FILES:**
+  - `frontend/src/state/store.ts` — add `stageMode: boolean` and `setStageMode(v: boolean)`. Hydrate on mount from URL param, fallback to localStorage.
+  - `frontend/src/components/TopBar.tsx` — wrap presenter shortcuts, Joint nav link, Integrations link, Inference Economics link, Coalition shortcut, Transition link, Pitch link, Demo link in
+  `{!stageMode && ...}`. KEEP visible: identity pill, classification banner, AlertBadge, mission clock, comms control, the four primary nav (Decision Bridge / SENTRY / PULSE / BASTION).
+  - `frontend/src/views/DecisionBridge.tsx` — when `stageMode`, render only 4 hero tiles (SENTRY, PULSE, BASTION, **DHA RESCUE — see WP-2**). Hide Joint, Integrations, Inference Economics, Coalition,
+  Model Registry, Transition, About/Team tiles.
+
+  **BUILD:** `cd frontend && npx tsc --noEmit && npm run build`. Both must pass.
+
+  **ACCEPTANCE (verify with Playwright in your verification subagent):**
+  1. Navigate to `<dev-server>/?stage=1`. Sign in as Hayes. Confirm TopBar nav contains exactly: Decision Bridge, SENTRY, PULSE, BASTION (plus identity pill + classification + clock).
+  2. Navigate to `<dev-server>/#/coalition` directly. Page renders normally (route mounted).
+  3. Navigate to `<dev-server>/?stage=0` (or no param). Confirm full TopBar nav returns.
+  4. Reload after stage=1 — confirm stage mode persists via localStorage.
+
+  **COMMIT:** `WP-1 stage mode: ?stage=1 hides non-demo nav and tiles, routes stay mounted`
+
+  ---
+
+  ### WP-2 — Decision Bridge as the demo cover sheet
+
+  **GOAL:** Decision Bridge in stage mode is the single landing surface that frames the demo. Four hero tiles, in this order, with use-case badges visible:
+
+  1. SENTRY — "USE CASE 14 · CUI AUTO-TAGGING (DoDM 5200.01)"
+  2. PULSE — "USE CASE 13 · PARTS DEMAND FORECASTING (CONTESTED LOG)"
+  3. BASTION — "USE CASE 15 · INSTALLATION COP AGGREGATOR"
+  4. **DHA RESCUE — "USE CASE 4 · BLOOD/CLASS VIII H+72 (DMO)"** ← new tile, links to `/#/dha-rescue`
+
+  Above the tiles, render the architectural thesis as a single line:
+  > **One OS · One dataset · One audit chain · Four use cases solved.**
+
+  Below the tiles, a tight banner: "Built by [team names — leave a `{TEAM_NAME_PLACEHOLDERS}` token; user fills before stage]." Mention the warfighter customer if AboutTeamView already names it (3d MLR /
+   CLB Det / MCBH Kaneohe).
+
+  **FILES:**
+  - `frontend/src/views/DecisionBridge.tsx`
+  - New: `frontend/src/views/dha/DHARescueView.tsx` (stub for WP-6, just a placeholder + use-case header for now)
+  - `frontend/src/App.tsx` — register `/dha-rescue` route
+
+  **BUILD + ACCEPTANCE:** Playwright checks the four tiles render in stage mode, in order, with use-case badges. Click each tile, confirm it routes correctly. DHA RESCUE tile lands on a placeholder page
+  (real content in WP-6).
+
+  **COMMIT:** `WP-2 Decision Bridge stage layout: 4 hero tiles + use-case badges + thesis line`
+
+  ---
+
+  ### WP-3 — SENTRY polish for use case #14
+
+  **GOAL:** SENTRY's stage flow is upload → process → review → mark draft. Make the path visually crisp so a 90-second beat lands.
+
+  **FILES:**
+  - `frontend/src/views/SentryView.tsx` — add a small badge near the title: "USE CASE 14 · CUI AUTO-TAGGING — DoDM 5200.01".
+  - `frontend/src/views/sentry/UploadTab.tsx` — make sure "Load canonical demo dataset" button is one click away and labeled clearly. If it doesn't exist, add it (loads the existing seeded dataset).
+  - `frontend/src/views/sentry/ProcessingTab.tsx` — verify the scan-line animation is smooth at 60fps. Tier-1 / Tier-2 counters tick visibly.
+  - `frontend/src/views/sentry/ReviewQueueTab.tsx` — the aggregation-risk panel must render obviously when a held record is selected. If not visible enough, increase the prominence (border, headline
+  copy).
+  - `frontend/src/views/sentry/MarkTab.tsx` — make sure "Mark draft" produces a visible classification stamp + audit-chain entry.
+
+  **ACCEPTANCE (Playwright):**
+  1. From DecisionBridge in stage mode, click SENTRY → upload tab → "Load canonical demo dataset" → processing animation runs → review queue populates with a clear flagged-record count → click a held
+  record → aggregation-risk panel is visible above the fold.
+  2. Switch to Mark Draft tab → mark a sample → see classification stamp render + audit-chain hash visible.
+
+  **COMMIT:** `WP-3 SENTRY beat polish: use-case 14 badge, canonical-dataset shortcut, aggregation-risk prominence`
+
+  ---
+
+  ### WP-4 — PULSE polish for use case #13
+
+  **GOAL:** PULSE 120-second beat: risk board → click an asset → see ranked recommendations → approve cannibalization → audit chain entry.
+
+  **FILES:**
+  - `frontend/src/views/PulseView.tsx` — badge: "USE CASE 13 · PARTS DEMAND FORECASTING — CONTESTED LOGISTICS · CLASS IX · MAGTF".
+  - `frontend/src/views/pulse/RiskBoardTab.tsx` — top of board: a one-line subtitle "Class IX (repair parts) consumption forecast under contested OPTEMPO". Verify the ranked-recommendations panel from
+  GC-1 fires on row click.
+  - `frontend/src/views/pulse/CannibalizationTab.tsx` — verify the propose → approve flow is < 4 clicks.
+  - `frontend/src/components/RecommendPanel.tsx` — confirm impact bars + cost chips render legibly at projection resolution (judges may be 30 ft from the screen).
+
+  **ACCEPTANCE (Playwright):**
+  1. From DecisionBridge in stage mode, click PULSE → risk board renders within 1s → click highest-risk row → recommend-actions panel appears with 3-5 ranked items → click "Approve" on top recommendation
+   → cannibalization proposal lands → audit-chain entry visible.
+
+  **COMMIT:** `WP-4 PULSE beat polish: use-case 13 badge, contested-OPTEMPO subtitle, recommend-action visibility`
+
+  ---
+
+  ### WP-5 — BASTION cold-open arming for use case #15
+
+  **GOAL:** BASTION's role in the demo is the **cold open** — ThermalHawk fires, cordons drop, FPCON BRAVO→CHARLIE, fused threat appears, all within 3 seconds of stage start. Then mid-demo we return to
+  BASTION for the response checklist.
+
+  **FILES:**
+  - `frontend/src/views/BastionView.tsx` — badge: "USE CASE 15 · INSTALLATION COP — gates · utilities · emergency · weather · sensors".
+  - Verify the ThermalHawk simulate button is reachable in **one click** from a fresh page load when `?stage=1`.
+  - `frontend/src/components/MapCanvas.tsx` — verify cordon animations land smoothly on the real MapLibre layer.
+  - `frontend/src/components/FusedThreatsPanel.tsx` — confirm it renders correlation chain visually (PACS → SCADA → ThermalHawk).
+
+  **ACCEPTANCE (Playwright):**
+  1. Sign in as Hayes, navigate to `<dev-server>/?stage=1#/bastion`. Click ThermalHawk simulate. Within 3 seconds: cordons render, FPCON pill flips to CHARLIE, fused-threats card appears at top of alert
+  stream, response checklist auto-populates.
+  2. Take a screenshot at T+3s post-click and post it to chat for review.
+
+  **COMMIT:** `WP-5 BASTION cold-open: use-case 15 badge, one-click ThermalHawk arm, cordon timing verified`
+
+  ---
+
+  ### WP-6 — DHA RESCUE as a first-class surface (highest leverage WP)
+
+  **GOAL:** This is the demo's emotional anchor and the highest-impact use case in the rubric. Currently the blood vignette lives in backend (`scenario_blood.py`, `blood_vignette.py`,
+  `blood-h72.scenario.json`) but isn't a primary frontend surface. Build it.
+
+  **WHAT IT IS:** Hub-and-spoke blood/Class VIII distribution risk dashboard for an INDOPACOM DMO contingency. Hub at H, spokes at distributed forces. Days-of-supply gauges, route-risk lines,
+  refrigeration health, expiration windows, casualty assumptions, market-aware contingency-sourcing recommendations.
+
+  **FILES:**
+  - `frontend/src/views/dha/DHARescueView.tsx` — replace WP-2 stub with the real surface.
+  - New: `frontend/src/views/dha/HubSpokeMap.tsx` — MapLibre layer showing one hub + N spokes with status pills.
+  - New: `frontend/src/views/dha/DaysOfSupplyPanel.tsx` — gauge per blood product (PRBC, plasma, platelets, walking-blood-bank).
+  - New: `frontend/src/views/dha/MarketSourcingPanel.tsx` — when hub stockout projected, surface the contingency sourcing rec (commercial / host-nation alternative).
+  - Backend: confirm `/api/scenario/blood-h72` (or whatever the route is in `backend/scenario_blood.py`) returns the data shape the frontend needs. Add fields if missing.
+
+  **ACCEPTANCE (Playwright):**
+  1. From DecisionBridge in stage mode, click DHA RESCUE → page renders within 1s → hub-spoke map shows H+0 state → click "Advance to H+72" (or similar control) → map states tick forward, days-of-supply
+  gauges drop, hub goes red → market-sourcing panel surfaces 1-3 contingency recommendations → click one → see audit-chain entry recorded.
+  2. Take a screenshot at the H+72 state. Post it for review.
+
+  **COPY GUIDANCE:** the use case calls out "PRBC, plasma, platelets, walking blood bank enablers, collection kits, testing supplies, cold-chain equipment, transfusion sets, and supporting power/fuel."
+  Cover at least PRBC + plasma + platelets + walking blood bank. Don't fake the rest — say "additional consumables tracked in same model" if space tight.
+
+  **HEADLINE COPY:** "USE CASE 4 · DHA RESCUE — Blood / Class VIII sustainment under INDOPACOM DMO contestation. Predictive, not reactive."
+
+  **COMMIT:** `WP-6 DHA RESCUE first-class surface: hub-spoke map, days-of-supply, market-aware sourcing`
+
+  ---
+
+  ### WP-7 — Audit Chain Reveal closing beat
+
+  **GOAL:** The last 30 seconds of the demo is one click that reveals: every decision the operators made across SENTRY/PULSE/BASTION/DHA RESCUE in the previous 7 minutes is in a single hash-chained audit
+   log. The closing line is "**One Marine. Four decisions. One log line. No cloud.**"
+
+  **FILES:**
+  - `frontend/src/views/admin/AuditView.tsx` already exists. Add a "Stage close" button (visible only in stage mode) that filters the audit chain to the last N minutes and presents it as a clean
+  chronological list with hash links visible.
+  - The button should be reachable from the TopBar in stage mode (a small "AUDIT" pill; user clicks it as the last beat).
+  - Each row shows: time, actor (Marine name), module (SENTRY/PULSE/BASTION/DHA), action verbatim, hash prefix.
+
+  **ACCEPTANCE (Playwright):**
+  1. After running the demo flow once (use-case 14 → 13 → 15 → 4), click the AUDIT pill in TopBar. Audit view opens with at least one entry per module, all hashes chained.
+
+  **COMMIT:** `WP-7 Audit reveal: stage-mode TopBar pill, last-N-min filter, hash-chain visible`
+
+  ---
+
+  ### WP-8 — Multi-presenter handoff support (Team Collaboration 10%)
+
+  **GOAL:** The four mock CAC identities map naturally to four presenters. Make the identity round-trip flawless so handoffs on stage feel rehearsed, not glitchy.
+
+  - Reyes (G-4 / Logistics Operator) → opens SENTRY
+  - Kowalski (Maintenance Chief) → operates PULSE
+  - Park (Security Manager / CWO3) → drives BASTION + audit reveal
+  - Hayes (MEF Commander) → opens cold + closes
+
+  The user's earlier instruction: "Run identity round-trip Hayes → Park → Hayes to confirm switch roster stays correct."
+
+  **FILES:**
+  - `frontend/src/components/TopBar.tsx` — IdentityPill switch dropdown. Each render must derive the target list fresh (no stale entries on the second/third swap). Confirm the existing logic from earlier
+   stage-day fixes is still intact.
+  - Add to TopBar (stage mode only): a small four-up identity strip showing all four mock CACs as tappable chips, current one highlighted. So a presenter who's already on stage just taps the next chip.
+  - Verify the auth router accepts a `?reauth=<dodid>` param OR a one-click switch that re-issues the session cookie without going through the full cert-selection screen. (Demo time saver — the
+  cert-selection screen is great for the cold open with Hayes, but mid-demo we don't want to scroll through 4 cards every time.)
+  - Backend: `backend/auth.py` — if the one-click switch needs a new endpoint, add `/api/auth/quick-switch` that accepts `{ dodid }` from a current session, validates the DODID is in MOCK_USERS,
+  re-issues the cookie. **Do not** weaken the production-relevant auth contract — gate behind `SPIRE_DEMO_QUICK_SWITCH=1` env var.
+
+  **ACCEPTANCE (Playwright):**
+  1. Sign in as Hayes via the cert-selection screen. Click the SSgt Reyes chip. Session re-issues, header updates, role downgrades correctly. Click Kowalski. Click Park. Click Hayes. Each switch < 500ms.
+   No 401s, no flicker.
+  2. The identity round-trip Hayes → Park → Hayes shows the correct roster on every render (no stale entries).
+
+  **COMMIT:** `WP-8 Multi-presenter handoffs: stage-mode identity strip + opt-in quick-switch endpoint`
+
+  ---
+
+  ### WP-9 — Demo resilience harness (Team Collaboration 10% · resilience under pressure)
+
+  **GOAL:** Every failure mode that could happen on stage has a recovery path the team can execute in <5 seconds.
+
+  Failure modes + recoveries:
+  - **Network drops mid-demo** → F9 plays the failsafe video at `frontend/public/demo-failsafe.mp4`. Confirm: F9 binding works, video plays, audio works.
+  - **Backend goes weird** → "Reset to clean demo" button reachable from TopBar in stage mode. Hits `POST /api/system/admin/reset-demo`. Confirm the endpoint exists and works.
+  - **Cookie expires mid-demo** → On 401, frontend shows a non-blocking toast "Session expired — tap any identity chip to resume" instead of bouncing to the cert screen.
+  - **Wrong identity loaded** → Identity strip (WP-8) is the recovery.
+  - **A specific module crashes** → ErrorBoundary catches it, shows a "Reload module" link instead of white-screening.
+
+  **FILES:**
+  - `frontend/src/components/FailsafePlayer.tsx` — verify F9 binding, verify video plays, verify it can be dismissed.
+  - `frontend/src/components/ErrorBoundary.tsx` — confirm "Reload module" link works without losing session.
+  - `frontend/src/components/TopBar.tsx` — add stage-mode "Reset" button (hidden behind a confirm modal).
+  - `frontend/src/api.ts` — on 401, fire a custom event or update the store with a "resume" toast instead of redirecting.
+
+  **ACCEPTANCE (Playwright):**
+  1. Press F9 anywhere → failsafe overlay appears with video playing → press Esc → returns to app.
+  2. Click stage-mode Reset → confirm modal → confirm → backend resets → toast "demo reset" → fresh state.
+  3. Manually expire cookie (clear `spire_session`) → make a request → see resume toast (NOT redirect to cert screen).
+
+  **COMMIT:** `WP-9 Demo resilience: F9 failsafe + Reset button + 401 resume toast + ErrorBoundary reload`
+
+  ---
+
+  ### WP-10 — 8-minute Playwright timing rehearsal
+
+  **GOAL:** Run the entire demo arc as a Playwright script. Confirm each beat fits its budget. Output a timing report.
+
+  **FILES:**
+  - `scripts/demo_rehearsal.ts` (new, or the closest equivalent in the existing scripts dir) — script that:
+    1. Boots a fresh session as Hayes (cert selection).
+    2. Cold-open: navigates to BASTION, clicks ThermalHawk simulate, asserts cordons + FPCON flip + fused threat in <3s. (30s budget)
+    3. Switch to Reyes, navigate to SENTRY, click upload → process → review held record → mark draft. (90s budget)
+    4. Switch to Kowalski, navigate to PULSE, click risk board top row → recommend → approve cannibalization. (120s budget)
+    5. Switch to Park, navigate back to BASTION, walk fused-threats response checklist. (90s budget)
+    6. Switch to Hayes, navigate to DHA RESCUE, advance to H+72, surface market-sourcing rec, approve. (90s budget)
+    7. Click AUDIT pill. Assert ≥1 entry per module. (30s budget)
+  - Output: total elapsed time, per-beat elapsed, any beats over budget.
+
+  **ACCEPTANCE:** Script runs end-to-end. Total time ≤ 8 minutes. No flakes on 3 consecutive runs.
+
+  **COMMIT:** `WP-10 Playwright demo rehearsal: 8-minute end-to-end script with per-beat timing`
+
+  ---
+
+  ## After all WPs are checked off
+
+  1. Final disclosure scan: `git ls-files | xargs grep -lE 'HawkStack|SGDR|1\\.77|0\\.5795|82\\.95|82\\.12|WEM-Inverted|FCOS|ConvNeXt|five-pillar|spillage scanner|Argus spillage|Tribunal
+  cross-check|Hallucination probe|Action Gate'`. Must come back empty (or only sanctioned LICENSE/README/CONTRIBUTING/PR template hits — show those to the user).
+  2. Final typecheck: `cd frontend && npx tsc --noEmit`. Must be exit 0.
+  3. Final build: `cd frontend && npm run build`. Must succeed.
+  4. Final backend tests: `python -m pytest backend/tests/`. Must pass.
+  5. Run WP-10 rehearsal script three times. Three clean runs, total time ≤ 8 minutes each.
+  6. Update `MDM_PIVOT_PLAN.md` with all checkboxes ticked + a final "READY FOR REVIEW" note.
+
+  ## Open the PR
+
+  ```
+  gh pr create \
+    --base master \
+    --head mdm-stage-pivot \
+    --title "MDM 2026 stage pivot: 4-use-case demo spine + stage mode + DHA RESCUE surface" \
+    --body "$(cat <<'EOF'
+  ## Summary
+  Stage-mode pivot for the April 30 demo. Reduces visible chrome to the four use cases the demo will actually walk (CUI #14 / Parts #13 / I-COP #15 / DHA RESCUE #4) while keeping every other surface
+  mounted for Q&A.
+
+  ## Rubric defense
+  - **Mission Impact (30%)**: DHA RESCUE elevated to first-class surface (WP-6). Hub-spoke map, days-of-supply, market-aware sourcing.
+  - **Technical Innovation (25%)**: Decision Bridge thesis line + use-case badges (WP-2). One OS, one dataset, one audit chain.
+  - **Usability & Design (20%)**: ?stage=1 hides 8+ chrome elements (WP-1). Demo focus locked.
+  - **Security & Sustainability (15%)**: Audit-chain reveal beat (WP-7). One click at close shows the full hash chain across modules.
+  - **Team Collaboration (10%)**: Multi-presenter handoff support (WP-8). Identity strip + quick-switch endpoint. Resilience harness (WP-9): F9 failsafe + Reset + 401 resume toast.
+
+  ## Verification
+  - WP-10 Playwright rehearsal runs end-to-end in <8 minutes, three consecutive clean runs.
+  - All disclosure scans clean.
+  - Typecheck + build + backend tests green.
+  - Every WP has a corresponding commit; see MDM_PIVOT_PLAN.md for the full check-list.
+
+  ## Test plan
+  - [ ] Reviewer pulls the branch, runs `npm run dev` + backend, and walks the demo arc as Hayes.
+  - [ ] Confirms `?stage=1` hides chrome correctly.
+  - [ ] Confirms each WP's acceptance criteria pass.
+  - [ ] Reviews disclosure scan output one more time.
+
+  EOF
+  )"
+  ```
+
+  **Report back to me with the PR URL and a summary of any WP that hit a blocker, plus the timing report from WP-10.** Do not merge.
+
+  ---
+
+  ## How to think about edge cases
+
+  - If a WP needs a backend endpoint that doesn't exist, prefer adding the smallest possible additive endpoint over modifying an existing one.
+  - If a Playwright assertion fails repeatedly, screenshot the failure state and post it inline; I'll diagnose.
+  - If you discover an unrelated bug while working on a WP, note it in `MDM_PIVOT_PLAN.md` under "follow-ups" — do not fix it in this PR.
+  - If you run out of context mid-session, your last act is to update `MDM_PIVOT_PLAN.md` with the exact next step and any in-flight code state, then stop. The user will resume in a fresh chat.
+  - If a screenshot shows IP-disclosure text that wasn't in the scan list, treat it as a leak. Add the term to the scan list, fix it, document it.
+
+  ## What "done" looks like
+
+  When the user pulls `mdm-stage-pivot`, runs the dev server with `?stage=1`, and walks through the four-use-case spine end to end, the experience should feel like **a focused product demo, not a
+  hackathon kitchen sink**. Chrome is quiet. Each module declares which use case it solves. The blood vignette lands as the close. The audit reveal seals the security argument. Identity switches between
+  Marines feel rehearsed. F9 saves them if anything breaks.
+
+  Begin.

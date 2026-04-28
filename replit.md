@@ -64,7 +64,8 @@ The SPIRE application is built with a clear separation between its backend and f
 - **Slider Debounce + AbortController**: Inference Economics slider in `InferenceEconomicsTab.tsx` wraps the extrapolation POST in a 180ms debounce and AbortController so fast drags can't race themselves into a transient 502. Expected `AbortError` on superseded requests is suppressed from the UI error state.
 
 ### System Design Choices
-- **Development Environment Setup**: Frontend (Vite dev server) listens on `0.0.0.0:5000` and proxies `/api/*` to the backend. Backend (FastAPI) listens on `127.0.0.1:8000`.
+- **Development Environment Setup**: Frontend (Vite dev server) listens on `0.0.0.0:5000` and proxies `/api/*` to the backend. Backend (FastAPI) listens on `127.0.0.1:8000`. Two Replit workflows run side by side: `Frontend` (webview, port 5000) and `Backend` (console, port 8000). `vite.config.ts` already sets `server.allowedHosts: true` so the proxied iframe origin is trusted.
+- **Production / Deploy**: `vm` deployment target; build step runs `npm install && npm run build` inside `frontend/`, and the run command starts `uvicorn backend.main:app --host 0.0.0.0 --port 5000` — FastAPI then serves `frontend/dist/` from `/` and the API from `/api/*` on the same origin.
 - **CORS Configuration**: Widened (`allow_origin_regex=".*"`, `allow_credentials=False`) for Replit's proxied iframe origin.
 - **Single Source of Truth**: Backend serves as the truth source for authentication, classification, and scenario state.
 - **Modularity**: Design system primitives for classification, dedicated modules for scenario management, and separate routes for different functionalities.
