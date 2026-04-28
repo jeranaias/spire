@@ -28,11 +28,27 @@ _CACHE: Optional[dict[str, Any]] = None
 
 # Fields every beat must declare. The hook module / scenario player both
 # read these; missing them at boot is a bug, not a runtime surprise.
+#
+# `classification` is required (Task #126): each beat's narration is
+# rendered verbatim onto the cockpit, and a single screenshot needs the
+# classification stamped on the same surface. A future scenario author
+# who forgets the field would silently default the beat to CUI and
+# re-introduce the OPSEC leak Task #50 closed — so the loader rejects
+# the file at boot instead.
 _REQUIRED_BEAT_KEYS = {
     "beat_id", "event_id", "offset_min", "phase", "title",
     "view", "overlay", "narration", "expected_duration_seconds_at_1x",
-    "inject",
+    "inject", "classification",
 }
+
+# Canonical classification levels mirrored from the FE
+# (`frontend/src/components/classification/levels.ts`). The loader
+# constrains beat `classification` to this exact set — a typo
+# (`"Cui "`, `"sec"`, `"NOFORN"`) fails validation rather than
+# mis-marking a screenshot.
+ALLOWED_BEAT_CLASSIFICATIONS = frozenset({
+    "UNCLASSIFIED", "CUI", "CONFIDENTIAL", "SECRET", "TOP_SECRET", "TS_SCI",
+})
 
 # Inject kinds the backend hook module knows how to dispatch. Anything
 # else is allowed in the JSON for forward compatibility (the FE / future
@@ -66,8 +82,9 @@ class ScenarioBeat:
     # describes doctrine-shaped activity (unit IDs, base names, forward
     # PARs); the cockpit + narration overlay render it verbatim, so a
     # single screenshot needs the classification on the same surface as
-    # the prose. Defaults to "CUI" when omitted — synthetic exercise
-    # data is still controlled-unclass under DoDI 5200.48.
+    # the prose. Required by the loader (Task #126) and constrained to
+    # `ALLOWED_BEAT_CLASSIFICATIONS` so a future scenario can't omit
+    # the field and silently default the beat to CUI.
     classification: str
     raw: dict[str, Any]  # full JSON for callers that want everything
 
@@ -137,6 +154,17 @@ def _validate(data: dict[str, Any]) -> None:
                 raise ScenarioLoadError(
                     f"beat {beat['beat_id']!r} inject[{j}] must be a dict with a 'kind' field"
                 )
+        # Per-beat classification (Task #126). The required-keys check
+        # above guarantees the field is present; here we constrain it to
+        # the canonical set. Compare strict — no normalize/uppercase —
+        # so a typo (`"Cui "`, `"sec"`, `"NOFORN"`) fails loud rather
+        # than mis-stamping the cockpit.
+        cls = beat["classification"]
+        if not isinstance(cls, str) or cls not in ALLOWED_BEAT_CLASSIFICATIONS:
+            raise ScenarioLoadError(
+                f"beat {beat['beat_id']!r} classification {cls!r} is not one of "
+                f"{sorted(ALLOWED_BEAT_CLASSIFICATIONS)}"
+            )
 
 
 def beats_sorted() -> list[ScenarioBeat]:
@@ -157,7 +185,7 @@ def beats_sorted() -> list[ScenarioBeat]:
                 expected_duration_seconds_at_1x=int(raw["expected_duration_seconds_at_1x"]),
                 inject=list(raw["inject"]),
                 sources=list(raw.get("sources", [])),
-                classification=str(raw.get("classification", "CUI")),
+                classification=raw["classification"],
                 raw=raw,
             )
         )

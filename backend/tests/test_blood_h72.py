@@ -379,3 +379,109 @@ def test_seek_does_not_re_inject_w2_audit_rows():
         "seek-rewind must not push duplicate feed entries"
     assert audit_count_second == audit_count_first, \
         "seek-rewind must not write duplicate audit rows"
+
+
+# ---------------------------------------------------------------------------
+# Task #126 — schema validator must reject beats that omit `classification`
+# or declare a non-canonical value. Without these the cockpit silently
+# defaults a forgotten beat to CUI and re-introduces the OPSEC leak Task #50
+# closed.
+# ---------------------------------------------------------------------------
+
+def _minimal_valid_scenario() -> dict:
+    """A two-beat scenario the validator accepts. Tests below clone this
+    and selectively break a single beat field."""
+    return {
+        "scenario_id": "blood-h72",
+        "beats": [
+            {
+                "beat_id": "beat.h0.setup",
+                "event_id": "evt.h0.scenario_start",
+                "offset_min": 0,
+                "phase": "setup",
+                "title": "H+0 — setup",
+                "view": "cockpit",
+                "overlay": {},
+                "narration": "Setup narration.",
+                "expected_duration_seconds_at_1x": 30,
+                "inject": [],
+                "classification": "CUI",
+            },
+            {
+                "beat_id": "beat.h12.casualty_event",
+                "event_id": "evt.h12.casualty_event",
+                "offset_min": 12 * 60,
+                "phase": "shock",
+                "title": "H+12 — casualty",
+                "view": "cockpit",
+                "overlay": {},
+                "narration": "Casualty narration.",
+                "expected_duration_seconds_at_1x": 45,
+                "inject": [],
+                "classification": "SECRET",
+            },
+        ],
+    }
+
+
+def test_validator_rejects_beat_missing_classification():
+    """A future scenario author who forgets `classification` must see a
+    loud ScenarioLoadError at boot, not a silent default to CUI."""
+    from dataset import blood_vignette as bv
+
+    data = _minimal_valid_scenario()
+    # Drop `classification` from the H+12 beat — emulates a copy/paste
+    # oversight in a freshly-authored vignette.
+    del data["beats"][1]["classification"]
+
+    with pytest.raises(bv.ScenarioLoadError) as exc:
+        bv._validate(data)
+    msg = str(exc.value)
+    assert "beat.h12.casualty_event" in msg
+    assert "classification" in msg
+
+
+def test_validator_rejects_beat_with_non_canonical_classification():
+    """Typos like `"Cui "`, `"sec"`, or unknown caveats like `"NOFORN"`
+    must fail validation rather than mis-marking the cockpit. The
+    canonical set mirrors `frontend/.../classification/levels.ts`."""
+    from dataset import blood_vignette as bv
+
+    for bogus in ("Cui ", "sec", "NOFORN", "TOPSECRET", "", "secret"):
+        data = _minimal_valid_scenario()
+        data["beats"][0]["classification"] = bogus
+        with pytest.raises(bv.ScenarioLoadError) as exc:
+            bv._validate(data)
+        msg = str(exc.value)
+        assert "classification" in msg
+        assert "beat.h0.setup" in msg, f"expected beat id in message for {bogus!r}: {msg}"
+
+    # Wrong type (e.g. an int) is also rejected.
+    data = _minimal_valid_scenario()
+    data["beats"][0]["classification"] = 3
+    with pytest.raises(bv.ScenarioLoadError):
+        bv._validate(data)
+
+
+def test_validator_accepts_each_canonical_classification():
+    """Sanity: every level in ALLOWED_BEAT_CLASSIFICATIONS validates."""
+    from dataset import blood_vignette as bv
+
+    for level in bv.ALLOWED_BEAT_CLASSIFICATIONS:
+        data = _minimal_valid_scenario()
+        data["beats"][0]["classification"] = level
+        bv._validate(data)  # must not raise
+
+
+def test_canonical_scenario_still_validates():
+    """Belt-and-suspenders: the real scenario JSON shipped with the
+    repo must continue to pass validation after the new check is wired
+    up. Without this guard a stale beat would break the demo at boot."""
+    from dataset import blood_vignette as bv
+
+    data = bv.load_scenario(force_reload=True)
+    bv._validate(data)
+    for beat in data["beats"]:
+        assert beat["classification"] in bv.ALLOWED_BEAT_CLASSIFICATIONS, \
+            f"beat {beat['beat_id']!r} ships with off-spec classification " \
+            f"{beat['classification']!r}"
