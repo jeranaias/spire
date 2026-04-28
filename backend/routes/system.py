@@ -1325,26 +1325,38 @@ def _seed_audit_demo() -> None:
         ("login_success",          "maintenance_chief",  "2345678901", {"surface": "cac_pin", "source_ip": "10.42.7.22"}),
         ("login_success",          "security_manager",   "3456789012", {"surface": "cac_pin", "source_ip": "10.42.7.31"}),
         ("login_success",          "mef_commander",      "4567890123", {"surface": "cac_pin", "source_ip": "10.42.7.5"}),
-        ("sentry_review",          "data_custodian",     "SR-2026-0418-0042", {"action": "approve", "classification": "SECRET", "source_ip": "10.42.7.66"}),
-        ("sentry_review",          "data_custodian",     "SR-2026-0418-0043", {"action": "modify",  "classification": "SECRET", "note": "redact lat/long", "source_ip": "10.42.7.66"}),
-        ("sentry_review",          "data_custodian",     "SR-2026-0418-0044", {"action": "reject",  "classification": "SECRET", "source_ip": "10.42.7.66"}),
+        # Task #122: SR review/upload/llm_call seed actors are bound to one of
+        # the four real Marines in MOCK_USERS so every seeded chain row
+        # hydrates to a person (DODID + name + rank). Previously these were
+        # stamped `data_custodian`, which is a real role string but is not
+        # held by any seeded Marine, so the SOC view rendered them as
+        # "ROLE-ONLY · NO DODID" — visibly contradicting the demo claim that
+        # every action with a DODID is CAC-anchored. Splits: SECRET review
+        # rotation between g4 (Reyes, SR reviewer) and security_manager
+        # (Park, the redaction/rejection authority); upload → maintenance_chief
+        # (Kowalski, logistics data ingest); llm_call verify-mark →
+        # security_manager (Park) since classification-mark verification is
+        # his beat. Source IPs are updated to match the new actor.
+        ("sentry_review",          "g4",                 "SR-2026-0418-0042", {"action": "approve", "classification": "SECRET", "source_ip": "10.42.7.18"}),
+        ("sentry_review",          "security_manager",   "SR-2026-0418-0043", {"action": "modify",  "classification": "SECRET", "note": "redact lat/long", "source_ip": "10.42.7.31"}),
+        ("sentry_review",          "security_manager",   "SR-2026-0418-0044", {"action": "reject",  "classification": "SECRET", "source_ip": "10.42.7.31"}),
         ("pulse_feedback",         "maintenance_chief",  "AAV7A1-CLB6-019",   {"correct": True,  "note": "called the failure window correctly", "source_ip": "10.42.7.22"}),
         ("pulse_feedback",         "maintenance_chief",  "MTVR-CLB6-114",     {"correct": False, "note": "vehicle ran 12 days past prediction", "source_ip": "10.42.7.22"}),
         ("llm_call",               "g4",                 "nl-query-7c14",     {"model": "Gemma 4 26B FP8", "prompt_tokens": 412, "completion_tokens": 68, "verified_count": 3, "mismatch_count": 0, "source_ip": "10.42.7.18"}),
         ("llm_call",               "mef_commander",      "nl-query-9b21",     {"model": "Gemma 4 26B FP8", "prompt_tokens": 581, "completion_tokens": 91, "verified_count": 2, "mismatch_count": 1, "source_ip": "10.42.7.5"}),
         ("spillage_prevented",     "g4",                 "frontend.export",   {"action": "sentry.export.zip", "required_classification": "TOP_SECRET", "user_clearance": "SECRET", "user_dodid": "1234567890", "user_role": "g4", "decision": "blocked", "surface": "frontend", "source_ip": "10.42.7.18"}),
         ("spillage_prevented",     "maintenance_chief",  "frontend.export",   {"action": "pulse.export.csv",  "required_classification": "SECRET",     "user_clearance": "CUI",    "user_dodid": "2345678901", "user_role": "maintenance_chief", "decision": "blocked", "surface": "frontend", "source_ip": "10.42.7.22"}),
-        ("downgrade_blocked",      "data_custodian",     "SR-2026-0419-0011", {"original": "SECRET", "attempted": "CUI", "decision": "blocked", "source_ip": "10.42.7.66"}),
+        ("downgrade_blocked",      "g4",                 "SR-2026-0419-0011", {"original": "SECRET", "attempted": "CUI", "decision": "blocked", "source_ip": "10.42.7.18"}),
         ("comms_airgap_engaged",   "security_manager",   "comms",             {"reason": "SATCOM_DENIAL_DRILL", "queued_at_engagement": 0, "source_ip": "10.42.7.31"}),
         ("comms_queued_op_replay", "g4",                 "AGQ-9f12c4ab",      {"op_kind": "sentry_review", "actor": "g4", "result": "applied"}),
         ("comms_airgap_released",  "security_manager",   "comms",             {"replayed": 4, "source_ip": "10.42.7.31"}),
         ("incident_response",      "g4",                 "INC-2026-0421-007", {"item": "imm-2", "checked": True, "source_ip": "10.42.7.18"}),
         ("incident_response",      "g4",                 "INC-2026-0421-007", {"item": "fol-1", "checked": True, "source_ip": "10.42.7.18"}),
         ("decision_outcome_logged","maintenance_chief",  "OC-9914cab012",     {"decision_kind": "predicted_failure_action", "was_correct": True, "engine": "j2_v1"}),
-        ("batch_upload",           "data_custodian",     "BATCH-2026-0420",   {"source": "GCSS-MC.export", "record_count": 2251, "source_ip": "10.42.7.66"}),
-        ("sentry_review",          "data_custodian",     "SR-2026-0422-0061", {"action": "approve", "classification": "CUI",          "source_ip": "10.42.7.66"}),
-        ("sentry_review",          "data_custodian",     "SR-2026-0422-0062", {"action": "approve", "classification": "UNCLASSIFIED", "source_ip": "10.42.7.66"}),
-        ("llm_call",               "data_custodian",     "verify-mark-3a01",  {"model": "Gemma 4 26B FP8", "prompt_tokens": 158, "completion_tokens": 22, "verified_count": 1, "mismatch_count": 0, "source_ip": "10.42.7.66"}),
+        ("batch_upload",           "maintenance_chief",  "BATCH-2026-0420",   {"source": "GCSS-MC.export", "record_count": 2251, "source_ip": "10.42.7.22"}),
+        ("sentry_review",          "g4",                 "SR-2026-0422-0061", {"action": "approve", "classification": "CUI",          "source_ip": "10.42.7.18"}),
+        ("sentry_review",          "g4",                 "SR-2026-0422-0062", {"action": "approve", "classification": "UNCLASSIFIED", "source_ip": "10.42.7.18"}),
+        ("llm_call",               "security_manager",   "verify-mark-3a01",  {"model": "Gemma 4 26B FP8", "prompt_tokens": 158, "completion_tokens": 22, "verified_count": 1, "mismatch_count": 0, "source_ip": "10.42.7.31"}),
     ]
     for kind, actor, subject, payload in seed_events:
         audit_log(kind, actor=actor, subject_id=subject, payload=payload)
