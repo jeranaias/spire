@@ -29,9 +29,11 @@ import {
   useScenarioPlayer,
   resolveViewRoute,
   type PlayerSpeed,
+  type PlayerStatus,
 } from "../state/scenarioPlayer";
 import { useFailsafe } from "../state/failsafe";
 import { Pressable, LoadingState, ErrorState, Button } from "../components/ui";
+import { ClassificationBadge } from "../components/classification/ClassificationBadge";
 
 // Mirror of `backend/scoping.py SCENARIO_CONTROL_ROLES`. The mission-clock
 // control endpoint (play / pause / seek / reset) returns 403 for any
@@ -199,30 +201,19 @@ export function DemoView() {
         {/* ---- Header --------------------------------------------------- */}
         <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[var(--color-border)] pb-3">
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+            <p className="font-mono text-[13px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
               Scenario player · /demo
             </p>
             <h1 className="mt-1 font-sans text-xl font-semibold text-[var(--color-text)]">
               Scripted demo cockpit
             </h1>
-            <p className="mt-1 max-w-[80ch] font-sans text-[12px] text-[var(--color-text-secondary)]">
+            <p className="mt-1 max-w-[80ch] font-sans text-[13px] text-[var(--color-text-secondary)]">
               Pilots SPIRE through a scripted scenario beat-by-beat. Select a scenario, pick auto-advance or
               spacebar mode, then Play. The narration overlay follows you across views.
             </p>
           </div>
-          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            <span
-              className={
-                "rounded-sm border px-2 py-1 font-semibold " +
-                (status === "playing"
-                  ? "border-[var(--color-primary)] text-[var(--color-primary)]"
-                  : status === "complete"
-                  ? "border-[var(--color-success)] text-[var(--color-success)]"
-                  : "border-[var(--color-border-active)] text-[var(--color-text)]")
-              }
-            >
-              {status.toUpperCase()}
-            </span>
+          <div className="flex items-center gap-2 font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            <StatusPill status={status} />
             <span>· est. {totalDwellSeconds}s @ {speed}×</span>
             {/* W2 Task #39 — failsafe affordances. Rehearsal is a
               * non-destructive PIP toggle (drift check during prep);
@@ -251,7 +242,7 @@ export function DemoView() {
         {/* ---- Scenario picker + summary ------------------------------- */}
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
           <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-            <h2 className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            <h2 className="font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
               Scenario
             </h2>
             <ul className="mt-2 space-y-1.5">
@@ -270,13 +261,13 @@ export function DemoView() {
                           : "border-[var(--color-border)] bg-[var(--color-bg)] hover:border-[var(--color-border-active)]")
                       }
                     >
-                      <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text)]">
+                      <span className="font-mono text-[13px] font-semibold uppercase tracking-wider text-[var(--color-text)]">
                         {s.title}
                       </span>
-                      <span className="font-sans text-[11px] text-[var(--color-text-secondary)]">
+                      <span className="font-sans text-[13px] text-[var(--color-text-secondary)]">
                         {s.summary}
                       </span>
-                      <span className="mt-0.5 font-mono text-[9px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                      <span className="mt-0.5 font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
                         {Math.round(s.duration_minutes / 60)}h scenario time
                       </span>
                     </Pressable>
@@ -302,10 +293,10 @@ export function DemoView() {
                 <h2 className="font-sans text-sm font-semibold text-[var(--color-text)]">
                   {scenario.title}
                 </h2>
-                <p className="mt-1 max-w-[80ch] font-sans text-[12px] text-[var(--color-text-secondary)]">
+                <p className="mt-1 max-w-[80ch] font-sans text-[13px] text-[var(--color-text-secondary)]">
                   {scenario.summary}
                 </p>
-                <div className="mt-2 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                <div className="mt-2 flex flex-wrap gap-2 font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
                   <span>v{scenario.version}</span>
                   <span>·</span>
                   <span>{beats.length} beats</span>
@@ -386,7 +377,7 @@ export function DemoView() {
             <div className="flex items-center gap-3">
               <fieldset className="flex items-center gap-1.5">
                 <legend className="sr-only">Demo speed</legend>
-                <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                <span className="font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
                   Speed
                 </span>
                 {[1, 4, 16].map((r) => {
@@ -413,7 +404,7 @@ export function DemoView() {
             </div>
           </div>
           {/* Toggles row */}
-          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-[var(--color-border)] pt-3 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-[var(--color-border)] pt-3 font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-secondary)]">
             <ToggleSwitch
               label="Auto-advance"
               checked={autoAdvance}
@@ -441,8 +432,14 @@ export function DemoView() {
         </section>
 
         {/* ---- Beat list ------------------------------------------------ */}
+        {/* Task #50 — every row stamps its per-beat classification + a
+          * fixed DEMO DATA chip so a single screenshot of the cockpit
+          * self-marks (the timeline reveals "3d MLR", "Kadena",
+          * "VMFA-225" etc. verbatim through beat titles + the
+          * highlighted-beat narration card below). Type sizes bumped to
+          * 13–14px for back-row readability on a 1080p projector. */}
         <section className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-          <h2 className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+          <h2 className="font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
             Timeline
           </h2>
           <ol className="mt-2 space-y-1.5">
@@ -455,22 +452,31 @@ export function DemoView() {
                     block
                     aria-current={active ? "step" : undefined}
                     className={
-                      "!min-h-0 grid w-full grid-cols-[80px_120px_1fr_120px] items-center gap-3 rounded-sm border px-3 py-2 text-left transition-colors " +
+                      "!min-h-0 grid w-full grid-cols-[88px_110px_1fr_140px] items-center gap-3 rounded-sm border px-3 py-2 text-left transition-colors " +
                       (active
                         ? "border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))]"
                         : "border-[var(--color-border)] bg-[var(--color-bg)] hover:border-[var(--color-border-active)]")
                     }
                   >
-                    <span className="font-mono text-[11px] font-semibold tabular-nums text-[var(--color-text)]">
+                    <span className="font-mono text-[14px] font-semibold tabular-nums text-[var(--color-text)]">
                       H+{String(Math.floor(b.offset_min / 60)).padStart(3, "0")}:{String(b.offset_min % 60).padStart(2, "0")}
                     </span>
-                    <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                    <span className="font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
                       {b.phase}
                     </span>
-                    <span className="font-sans text-[12px] font-medium text-[var(--color-text)]">
-                      {b.title}
-                    </span>
-                    <span className="text-right font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+                    <div className="min-w-0 flex flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <ClassificationBadge
+                          classification={b.classification ?? "CUI"}
+                          size="lg"
+                        />
+                        <DemoDataChip />
+                      </div>
+                      <span className="font-sans text-[14px] font-medium text-[var(--color-text)]">
+                        {b.title}
+                      </span>
+                    </div>
+                    <span className="text-right font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-secondary)]">
                       {b.view} · {b.expected_duration_seconds_at_1x}s
                     </span>
                   </Pressable>
@@ -480,10 +486,19 @@ export function DemoView() {
           </ol>
           {currentBeat && (
             <div className="mt-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-              <h3 className="font-sans text-[12px] font-semibold text-[var(--color-text)]">
+              {/* Stamp ABOVE the prose so a screenshot frames classification
+                * with the leaking text, not below it. */}
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                <ClassificationBadge
+                  classification={currentBeat.classification ?? "CUI"}
+                  size="lg"
+                />
+                <DemoDataChip />
+              </div>
+              <h3 className="font-sans text-[14px] font-semibold text-[var(--color-text)]">
                 Current beat: {currentBeat.title}
               </h3>
-              <p className="mt-1 max-w-[80ch] font-sans text-[12px] text-[var(--color-text-secondary)]">
+              <p className="mt-1 max-w-[80ch] font-sans text-[14px] leading-snug text-[var(--color-text-secondary)]">
                 {currentBeat.narration}
               </p>
             </div>
@@ -491,20 +506,81 @@ export function DemoView() {
         </section>
 
         {/* ---- Hotkey legend ------------------------------------------- */}
-        <section className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+        <section className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
           <h2 className="text-[var(--color-text-muted)]">Hotkeys</h2>
-          <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3">
-            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-text)]">Space</kbd> · advance / pause</li>
-            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-text)]">→</kbd> · next beat</li>
-            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-text)]">←</kbd> · previous beat</li>
-            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-text)]">P</kbd> · play / pause</li>
-            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-text)]">N</kbd> · narration on / off</li>
-            <li><kbd className="rounded-sm border border-[var(--color-warning)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-warning)]">F9</kbd> · failsafe (recorded backup)</li>
-            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-text)]">Esc</kbd> · close failsafe</li>
+          <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3">
+            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">Space</kbd> · advance / pause</li>
+            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">→</kbd> · next beat</li>
+            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">←</kbd> · previous beat</li>
+            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">P</kbd> · play / pause</li>
+            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">N</kbd> · narration on / off</li>
+            <li><kbd className="rounded-sm border border-[var(--color-warning)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-warning)]">F9</kbd> · failsafe (recorded backup)</li>
+            <li><kbd className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-0.5 text-[var(--color-text)]">Esc</kbd> · close failsafe</li>
           </ul>
         </section>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StatusPill — Task #50 (F-05). Replaces the old border-only pill so the
+// state is legible on a colour-uncalibrated projector even from the back
+// row. Each state gets:
+//   * an icon glyph (▶ / ❚❚ / ✓ / ◐ / ○) — read at any colour calibration,
+//   * a fill (not just a border) using the state's tint,
+//   * a uniform 13px label so it's at the same size as the rest of the chrome.
+// ---------------------------------------------------------------------------
+const STATUS_GLYPH: Record<PlayerStatus, string> = {
+  idle: "○",
+  ready: "◐",
+  playing: "▶",
+  paused: "❚❚",
+  complete: "✓",
+};
+function StatusPill({ status }: { status: PlayerStatus }) {
+  const s: PlayerStatus = status ?? "idle";
+  const glyph = STATUS_GLYPH[s];
+  const tone =
+    s === "playing"
+      ? "var(--color-primary)"
+      : s === "complete"
+      ? "var(--color-success)"
+      : s === "paused"
+      ? "var(--color-warning)"
+      : "var(--color-border-active)";
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1 font-mono text-[13px] font-semibold uppercase tracking-widest text-[var(--color-text)]"
+      style={{
+        borderColor: tone,
+        background: `color-mix(in oklab, ${tone} 22%, var(--color-surface))`,
+      }}
+      aria-label={`Player status: ${s}`}
+    >
+      <span aria-hidden style={{ color: tone, fontSize: 14 }}>
+        {glyph}
+      </span>
+      {s.toUpperCase()}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DemoDataChip — Task #50 (F-08). Fixed marker that rides next to every
+// per-beat classification stamp. Synthetic units / bases / forward PARs
+// in the narration are doctrine-shaped; this chip tells anyone who frames
+// a single screenshot of the cockpit that the prose is exercise data,
+// not real OPSEC.
+// ---------------------------------------------------------------------------
+function DemoDataChip() {
+  return (
+    <span
+      className="inline-flex items-center rounded-sm border border-dashed border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-[13px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]"
+      title="Narration uses synthetic units, bases, and Class VIII PARs for the SPIRE demo. Not real operational data."
+    >
+      Demo data · not real units
+    </span>
   );
 }
 
@@ -551,9 +627,9 @@ function ToggleSwitch({
           }}
         />
       </span>
-      <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text)]">{label}</span>
+      <span className="font-mono text-[13px] uppercase tracking-widest text-[var(--color-text)]">{label}</span>
       {hint && (
-        <span className="font-sans text-[10px] normal-case text-[var(--color-text-muted)]" style={{ letterSpacing: 0 }}>
+        <span className="font-sans text-[13px] normal-case text-[var(--color-text-muted)]" style={{ letterSpacing: 0 }}>
           {hint}
         </span>
       )}

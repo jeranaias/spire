@@ -245,6 +245,11 @@ def scenario_meta() -> dict[str, Any]:
                 "expected_duration_seconds_at_1x": b.expected_duration_seconds_at_1x,
                 "inject_kinds": [a.get("kind") for a in b.inject],
                 "sources": b.sources,
+                # Per-beat classification (Task #50). The cockpit timeline
+                # rows + narration overlay stamp this so a single screenshot
+                # of the presenter UI carries the prose's classification on
+                # the same surface as the prose itself.
+                "classification": b.classification,
             }
             for b in beats
         ],
