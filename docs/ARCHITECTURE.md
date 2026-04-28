@@ -27,11 +27,10 @@ the configured RigRun host.
                      |                    |                    |
                      v                    v                    v
               +-------------+    +-----------------+   +---------------+
-              | SQLite      |    | SENTRY Tier-1   |   | RigRun proxy  |
-              | (encrypted  |    | HawkStack       |   | (Full Mode    |
-              |  at rest)   |    | classifier      |   |  only)        |
-              +-------------+    | PULSE predictor |   +---------------+
-                                 | ThermalHawk-Nano|
+              | SQLite      |    | SENTRY Tier-1   |   | LLM proxy     |
+              | (encrypted  |    | classifier      |   | (Full Mode    |
+              |  at rest)   |    | PULSE predictor |   |  only)        |
+              +-------------+    | ThermalHawk     |   +---------------+
                                  +-----------------+
 ```
 

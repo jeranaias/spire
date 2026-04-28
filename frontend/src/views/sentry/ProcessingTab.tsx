@@ -254,7 +254,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           </span>
         </div>
         <div className="mt-2 flex items-center gap-6 text-sm">
-          <Counter label="Tier 1 (HawkStack)" value={counts.tier1} total={processed} tone="primary" />
+          <Counter label="Tier 1 (Local)" value={counts.tier1} total={processed} tone="primary" />
           <Counter label="Tier 2 (LLM)" value={counts.tier2} total={processed} tone="info" />
           <div className="ml-auto flex gap-3">
             <FlagCounter label="PII" value={counts.pii} color={FLAG_COLORS.pii} />

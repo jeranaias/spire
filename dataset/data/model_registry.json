@@ -268,7 +268,7 @@
       "implementations": {
         "thornveil_proprietary_v1": {
           "kind": "trained_model",
-          "summary": "Compact (~1.77 M-param) thermal-IR detector. Architecture, training methodology, and inference helpers live in the Thornveil-licensed private package thornveil_ml.thermalhawk. Capability + outcome only are disclosed in the public SPIRE repo per LICENSE.md § 2.",
+          "summary": "Compact thermal-IR detector. Architecture, training methodology, and inference helpers live in the Thornveil-licensed private package thornveil_ml.thermalhawk. Capability + outcome only are disclosed in the public SPIRE repo per LICENSE.md § 2.",
           "provenance": {
             "publisher": "Thornveil LLC (private ML package)",
             "repo_url": "Thornveil-internal — not redistributed in SPIRE",

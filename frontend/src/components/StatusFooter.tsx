@@ -124,10 +124,10 @@ export function StatusFooter() {
     {
       label: "THERMALHAWK",
       value: thermalLive
-        ? `live · 1.77M params${thermalSizeMb ? ` · ${thermalSizeMb}MB` : ""}`
+        ? `live · Thornveil-licensed${thermalSizeMb ? ` · ${thermalSizeMb}MB` : ""}`
         : thermalWeights
         ? `weights present${thermalSizeMb ? ` (${thermalSizeMb}MB)` : ""} · sim only`
-        : "rule-based sim",
+        : "scripted sim",
       tone: thermalLive ? "ok" : thermalWeights ? "ok" : "muted",
     },
   ];

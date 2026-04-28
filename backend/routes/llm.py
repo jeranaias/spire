@@ -1,20 +1,17 @@
 """
-LLM proxy + Gemma4 client wrapper.
+LLM proxy client wrapper.
 
-All SPIRE LLM calls flow through RigRun's classification-proxy on port 8095
-which wraps Gemma 4 26B A4B FP8 with the 5-pillar ENFORCE stack:
-  - HMAC audit logging
-  - Argus spillage scanner
-  - Tribunal cross-check (SECRET+)
-  - Action Gate
-  - Hallucination probe
+All SPIRE LLM calls flow through the Thornveil-licensed safety proxy
+which wraps the upstream model with classification-aware audit + scanning.
+Pillar names, port numbers, and pillar-internal mechanics are not
+disclosed in this public repo (see LICENSE.md § 2).
 
 Headers required by the proxy:
   X-Caller-Clearance: UNCLASS
   X-Classification: UNCLASS
 
-Context window: 524288 (512K) today, 1048576 (1M) after the 500K needle
-validation passes. Do NOT advertise 1M to users until the config bump lands.
+Context window is read from `/v1/models` at call time; SPIRE does not
+hard-code the value here.
 """
 from __future__ import annotations
 
@@ -81,8 +78,8 @@ async def call_llm_chat(
 
     Every call is:
       - temperature 0 by default (demo determinism)
-      - logged to the HMAC audit chain by the proxy
-      - spillage-scanned and hallucination-probed
+      - logged to the audit chain by the proxy
+      - scanned for classification spillage and ungrounded outputs by the proxy
       - cost-telemetry'd to `inference_economics.record_call` so the
         ADMIN "Inference Economics" tab can show $/call, $/min, top
         call sites, and 180k-Marine extrapolation. Every caller MUST

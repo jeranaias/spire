@@ -93,7 +93,7 @@ export function ModelRegistryView() {
           </div>
         </div>
         <div className="shrink-0">
-          <ClassificationBadge level="UNCLASSIFIED" />
+          <ClassificationBadge classification="UNCLASSIFIED" />
         </div>
       </div>
 

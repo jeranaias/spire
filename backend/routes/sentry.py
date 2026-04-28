@@ -83,7 +83,7 @@ FLAG_OF = {
 
 def tier1_classify(text: str) -> dict:
     """Rule-based classifier stand-in. Returns flags + confidence + a
-    suggested classification level. When the trained HawkStack Tier-1
+    suggested classification level. When the trained Tier-1 classifier
     weights load, this module swaps to the model's forward pass.
 
     Confidence / routing policy (per spec §SENTRY Tier-1 cascade):

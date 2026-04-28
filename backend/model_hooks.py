@@ -17,12 +17,12 @@ Loading semantics:
     inference glue (model class, tokenizer, head) ships separately and
     consumes `STATE.sentry_model` / `STATE.pulse_model` directly.
   - ThermalHawk: presence-only by default — we record that the weights
-    file exists and report metadata, but do NOT instantiate the model
-    on boot (the architecture lives in the thermalhawk repo and the
-    1.77 M-param model would dominate cold-start). When SPIRE_THERMALHAWK_EAGER=1
-    is set we also try to import `thermalhawk.models.ThermalHawk` and
-    load the weights into it; this requires the thermalhawk package to
-    be importable (pip install -e /d/projects/thermalhawk).
+    file exists and report capability metadata, but do NOT instantiate
+    the detector on boot. When SPIRE_THERMALHAWK_EAGER=1 AND the Thornveil
+    ML package is installed, the detector is eager-loaded via
+    `thornveil_ml.thermalhawk.load_detector`. The architecture, training
+    methodology, and inference helpers live in that private package per
+    LICENSE.md § 2.
 """
 from __future__ import annotations
 
@@ -109,10 +109,9 @@ class ModelState:
         try:
             self.thermalhawk_path = str(p)
             self.thermalhawk_size_bytes = p.stat().st_size
-            # Public model card — capability + outcome only. Mechanism
-            # details (backbone family, training protocol, head design)
-            # stay with Thornveil's private ML package per LICENSE.md §2
-            # and are not disclosed in the public SPIRE repo.
+            # Public model card — capability + outcome only. Internal
+            # mechanism details stay with Thornveil's private ML package
+            # per LICENSE.md §2 and are not disclosed in the public repo.
             self.thermalhawk_metadata = {
                 "model": "ThermalHawk (Thornveil)",
                 "capability": "thermal infrared drone detection",
