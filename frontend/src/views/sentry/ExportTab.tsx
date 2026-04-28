@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type ExportResult } from "../../api";
+import { api, ApiError, type DistributionOverride, type ExportResult } from "../../api";
 import type { SentryContext } from "../SentryView";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
@@ -30,10 +30,27 @@ const FORMATS = [
 type Authority = typeof AUTHORITIES[number]["value"];
 type Format    = typeof FORMATS[number]["value"];
 
+// Task-108 — Distribution Statement override options. AUTO keeps the
+// (release, classification)-derived letter; A-F force a specific letter.
+// Per-letter blurbs come straight from DoDI 5230.24 so a Marine doesn't have
+// to leave the screen to look it up.
+const DISTRIBUTION_OPTIONS: { value: DistributionOverride; label: string; blurb: string }[] = [
+  { value: "AUTO", label: "Auto (derived)", blurb: "Let SPIRE derive A-F from release authority + classification per DoDI 5230.24." },
+  { value: "A",    label: "A — Public release",  blurb: "Approved for public release; distribution unlimited. UNCLASSIFIED only." },
+  { value: "B",    label: "B — USG agencies",    blurb: "U.S. Government agencies only. Other requests routed to the originator." },
+  { value: "C",    label: "C — USG + contractors", blurb: "U.S. Government agencies and their contractors. Further dist. originator-controlled." },
+  { value: "D",    label: "D — DoD + DoD contractors", blurb: "Department of Defense and U.S. DoD contractors only — narrower than C." },
+  { value: "E",    label: "E — DoD only",        blurb: "DoD components only. Excludes contractors." },
+  { value: "F",    label: "F — Originator-controlled", blurb: "Further dissemination only as directed by the originating office." },
+];
+
 export function ExportTab({ ctx }: { ctx: SentryContext }) {
   const role = useSpireStore((s) => s.role);
   const [authority, setAuthority] = useState<Authority>("US_ONLY");
   const [format, setFormat] = useState<Format>("xlsx");
+  // Task-108 — operator-chosen Distribution Statement letter; "AUTO" keeps
+  // the system-derived behavior (UNCLASSIFIED → A, CUI → B, SECRET+ → C).
+  const [distributionOverride, setDistributionOverride] = useState<DistributionOverride>("AUTO");
   const [includeAudit, setIncludeAudit] = useState(true);
   const [result, setResult] = useState<(ExportResult & { sample_diffs?: DiffSample[] }) | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,13 +86,15 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     // Idempotency guard — export bundles a sanitized release. Rapid
     // double-tap on "Export Sanitized Bundle" must not register two
     // distinct export bundles for the same (batch, authority, format).
-    const key = `sentry:export:${ctx.batchId ?? "no-batch"}:${authority}:${format}`;
+    const key = `sentry:export:${ctx.batchId ?? "no-batch"}:${authority}:${format}:${distributionOverride}`;
     await fireIdempotent(key, async () => {
       setLoading(true);
       try {
         // Walkthrough #6 — pass batchId so the export covers the same batch
         // the operator just processed.
-        const r = await api.sentry.export(authority, format, ctx.batchId);
+        // Task-108 — pass the operator's Distribution Statement choice so
+        // the backend can stamp / validate the letter against bundle class.
+        const r = await api.sentry.export(authority, format, ctx.batchId, distributionOverride);
         setResult(r);
         // Task-69 — clear any prior block once the build succeeds.
         setReleaseBlock(null);
@@ -148,6 +167,20 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
             text: `Unknown release authority "${detail.release_authority}". Allowed: ${(detail.allowed as string[] | undefined)?.join(", ")}.`,
             ttlMs: 7000,
           });
+        } else if (detail && detail.error === "invalid_distribution_override") {
+          // Task-108 — backend refused the operator's Distribution Statement
+          // choice (e.g. Distribution A on a SECRET bundle). Surface the
+          // doctrinal reason in a toast and leave the result panel as-is so
+          // the operator can change the dropdown and try again without losing
+          // their other selections.
+          const reason = typeof detail.reason === "string"
+            ? detail.reason
+            : `Letter ${detail.distribution_override} is not allowed on ${detail.classification ?? "this bundle"}.`;
+          pushToast({
+            tone: "error",
+            text: `Distribution ${detail.distribution_override ?? "?"} rejected · ${reason}`,
+            ttlMs: 8000,
+          });
         } else {
           pushToast({ tone: "error", text: "Export failed" });
         }
@@ -193,6 +226,40 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
           />
           <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             {DISTRIBUTION_BLURB[authority]}
+          </div>
+
+          {/* Task-108 — Distribution Statement override. Sits next to the
+              release-authority picker so the release officer can force a
+              specific letter (e.g. D on a sanitized SECRET extract) when
+              the (release, classification) tuple can't express the handling
+              constraint. AUTO keeps today's derived behavior. The blurb
+              underneath spells out the chosen letter so a Marine doesn't
+              have to look it up in DoDI 5230.24. */}
+          <div className="mt-4 border-t border-[var(--color-border)] pt-3">
+            <label
+              htmlFor="sentry-export-distribution"
+              className="mb-2 block font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
+            >
+              Distribution Statement
+            </label>
+            <select
+              id="sentry-export-distribution"
+              value={distributionOverride}
+              onChange={(e) => setDistributionOverride(e.target.value as DistributionOverride)}
+              className="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono text-sm text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+            >
+              {DISTRIBUTION_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+              {DISTRIBUTION_OPTIONS.find((o) => o.value === distributionOverride)?.blurb}
+            </div>
+            {distributionOverride !== "AUTO" && (
+              <div className="mt-1 font-mono text-xs text-[var(--color-warning)] tracking-wide">
+                Override · backend will validate against bundle classification and audit your choice.
+              </div>
+            )}
           </div>
         </div>
 
@@ -355,14 +422,36 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
               {/* Task-172 — render the letter + a one-line "why" tooltip
                   naming the dominant evidence (controlled serials, comms,
                   classification level, etc.) so an operator hovering can see
-                  *which content* drove the chosen letter. The reason
-                  doubles as a small inline caption beneath the letter so
-                  it's still visible without a hover. */}
+                  *which content* drove the chosen letter.
+                  Task-108 — when an operator forces a letter via the export
+                  dropdown, render an Override chip alongside the value, and
+                  surface the letter SPIRE would have auto-derived if it
+                  differs. */}
               <div
-                className="font-mono text-sm text-[var(--color-text)]"
+                className="font-mono text-sm text-[var(--color-text)] flex items-center gap-2"
                 title={result.distribution_reason ?? "Selected per DoDI 5230.24."}
               >
-                {result.distribution_authority ?? "—"}
+                <span>{result.distribution_authority ?? "—"}</span>
+                {result.distribution_source === "override" && (
+                  <span
+                    className="rounded-sm border px-1.5 py-[1px] font-mono text-xs font-semibold uppercase tracking-wider"
+                    style={{
+                      color: "var(--color-warning)",
+                      borderColor: "color-mix(in oklab, var(--color-warning) 50%, var(--color-border))",
+                      background: "color-mix(in oklab, var(--color-warning) 12%, transparent)",
+                    }}
+                    title={
+                      result.distribution_derived_letter && result.distribution_derived_letter !== result.distribution_letter
+                        ? `Operator override · system would have derived Distribution ${result.distribution_derived_letter}`
+                        : "Operator override · audit row recorded"
+                    }
+                  >
+                    Override
+                    {result.distribution_derived_letter && result.distribution_derived_letter !== result.distribution_letter
+                      ? ` (auto: ${result.distribution_derived_letter})`
+                      : ""}
+                  </span>
+                )}
               </div>
               <div className="text-xs text-[var(--color-text-secondary)]">
                 Controls who can access (DoDI 5230.24).

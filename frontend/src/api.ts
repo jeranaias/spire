@@ -703,7 +703,18 @@ export const api = {
     // Walkthrough #6 — pass batch_id so the export covers the same batch
     // the operator just processed (was: server fell through to canonical
     // 2,251 records when batch_id was absent).
-    export: (release = "US_ONLY", format = "xlsx", batchId?: string | null) =>
+    // Task-108 — `distributionOverride` (AUTO | A..F) lets the release
+    // authority force a Distribution Statement letter instead of accepting
+    // the (release, classification)-derived default. AUTO / undefined keeps
+    // legacy behavior; the backend still validates the choice against the
+    // bundle's classification (Distribution A is hard-blocked above
+    // UNCLASSIFIED) and writes a `distribution_override` audit row.
+    export: (
+      release = "US_ONLY",
+      format = "xlsx",
+      batchId?: string | null,
+      distributionOverride: DistributionOverride = "AUTO",
+    ) =>
       jsonFetch<ExportResult>("/sentry/export", {
         method: "POST",
         body: JSON.stringify({
@@ -711,6 +722,7 @@ export const api = {
           format,
           include_audit: true,
           batch_id: batchId ?? null,
+          distribution_override: distributionOverride,
         }),
       }),
     coalitionProfiles: () =>
@@ -2047,6 +2059,10 @@ export interface MarkResult {
   };
 }
 
+// Task-108 — operator-supplied Distribution Statement letter on the SENTRY
+// Export tab. AUTO preserves the (release, classification)-derived default.
+export type DistributionOverride = "AUTO" | "A" | "B" | "C" | "D" | "E" | "F";
+
 export interface ExportResult {
   ok: boolean;
   export_id: string;
@@ -2065,11 +2081,20 @@ export interface ExportResult {
   rel_to_caveat?: string;
   distribution_authority?: string;
   // Task-172 — content-driven letter + dominant-evidence "why". The selector
-  // now aggregates the union of `sensitive_flags_oracle` across the included
+  // aggregates the union of `sensitive_flags_oracle` across the included
   // records, so a CUI bundle with controlled-item serials gets B (not C).
+  // `distribution_letter` is the letter that actually shipped (override
+  // letter when overridden; derived letter otherwise).
   distribution_letter?: string;
   distribution_reason?: string;
   distribution_evidence_flags?: string[];
+  // Task-108 — operator-override traceability. `distribution_source` is
+  // "derived" when the system picked the letter and "override" when an
+  // operator forced one; `distribution_derived_letter` always exposes the
+  // system's pick so the result panel can render an "(auto: C)" hint when
+  // the override differs from what SPIRE would have derived.
+  distribution_derived_letter?: string;
+  distribution_source?: "derived" | "override";
   generalized_unit_markings?: boolean;
   download_url: string;
   created_at: string;

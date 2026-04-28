@@ -230,6 +230,36 @@ DISTRIBUTION_TEXT: dict[str, str] = {
 }
 
 
+# Task-108 — set of valid override letters the operator may force on the
+# Export tab via the "Distribution Statement" dropdown. "AUTO" preserves the
+# legacy derive-from-(release, classification) behavior.
+VALID_DISTRIBUTION_LETTERS: set[str] = {"A", "B", "C", "D", "E", "F"}
+
+
+def validate_distribution_override(
+    letter: str, classification: str
+) -> tuple[bool, str]:
+    """Gate an operator-supplied Distribution Statement letter against the
+    bundle's source classification per DoDI 5230.24.
+
+    Returns ``(ok, reason)``. The only hard rule today is that Distribution A
+    ("approved for public release") cannot be stamped on anything above
+    UNCLASSIFIED — that's the doctrinal lie the rest of the export pipeline
+    spent Task-70 stamping out, so we will not let an operator override back
+    into it. Everything B-F is permitted at any classification because the
+    receiving party still has to hold matching clearance to read the bundle;
+    the letter narrows audience, it doesn't downgrade content.
+    """
+    cls = (classification or "UNCLASSIFIED").upper()
+    if letter == "A" and cls != "UNCLASSIFIED":
+        return (
+            False,
+            f"Distribution A is approved-for-public-release. The bundle is "
+            f"{cls.replace('_', ' ')}; pick B/C/D/E/F or let the system derive.",
+        )
+    return True, ""
+
+
 def derive_distribution(release: str, classification: str) -> tuple[str, str]:
     """Returns (authority_label, full_statement) for an export bundle.
 
@@ -1836,6 +1866,24 @@ async def export_sanitized(request: Request, payload: dict):
     format_ = payload.get("format", "xlsx")
     include_audit = bool(payload.get("include_audit", True))
     batch_id = payload.get("batch_id")
+    # Task-108 — operator-supplied Distribution Statement override. "AUTO"
+    # (or unset) keeps the legacy derive-from-(release, classification) path;
+    # a single letter A-F forces that letter on the bundle, subject to the
+    # classification gate in validate_distribution_override().
+    distribution_override = payload.get("distribution_override")
+    if distribution_override is not None:
+        distribution_override = str(distribution_override).strip().upper()
+        if distribution_override in ("", "AUTO"):
+            distribution_override = None
+    if distribution_override is not None and distribution_override not in VALID_DISTRIBUTION_LETTERS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_distribution_override",
+                "distribution_override": distribution_override,
+                "allowed": sorted(VALID_DISTRIBUTION_LETTERS) + ["AUTO"],
+            },
+        )
 
     # Role gate runs FIRST — before any validation, work, or clearance check.
     # A non-custodian role (g4 / maintenance_chief / mef_commander) that
@@ -1964,14 +2012,12 @@ async def export_sanitized(request: Request, payload: dict):
 
     # Task-172 — Distribution Statements (A-F, who-can-access) are *content-
     # driven* per DoDI 5230.24, while REL TO is independent (handled below
-    # via REL_TO_CAVEAT). Earlier we delegated to `derive_distribution`
-    # (release × class only) and FVEY/NATO bundles all stamped "Distribution C"
-    # regardless of their actual sensitivity flags. We now aggregate the
-    # union of `sensitive_flags_oracle` across every record actually leaving
-    # the bundle (rejected records skipped) and feed that to the existing
-    # content-aware `_select_distribution` selector. A CUI bundle with
-    # controlled-item serials now correctly stamps Distribution B; SECRET
-    # stamps D; UNCLASSIFIED with no flags stamps A.
+    # via REL_TO_CAVEAT). Aggregate the union of `sensitive_flags_oracle`
+    # across every record actually leaving the bundle (rejected records
+    # skipped) and feed that to the content-aware `_select_distribution`
+    # selector. A CUI bundle with controlled-item serials now correctly
+    # stamps Distribution B; SECRET stamps D; UNCLASSIFIED with no flags
+    # stamps A.
     bundle_flag_set = _aggregate_sensitive_flags(
         [
             r for r in records
@@ -1980,9 +2026,67 @@ async def export_sanitized(request: Request, payload: dict):
         ]
     )
     bundle_flags_sorted = sorted(bundle_flag_set)
-    dist_letter, distribution = _select_distribution(bundle_class, bundle_flags_sorted)
-    dist_authority = f"Distribution {dist_letter}"
+    derived_letter, derived_statement = _select_distribution(bundle_class, bundle_flags_sorted)
+    derived_authority = f"Distribution {derived_letter}"
     distribution_reason = _distribution_reason(bundle_class, bundle_flag_set)
+
+    # Task-108 — operator can override the derived letter on a per-export
+    # basis. Validation against bundle_class still applies (e.g. Distribution
+    # A is hard-blocked above UNCLASSIFIED). When the override is honored,
+    # we build the full statement off DISTRIBUTION_TEXT[letter] and write a
+    # distinct `distribution_override` audit row so a release officer's
+    # choice is traceable to a person, time, and reason. AUTO (or unset)
+    # keeps the Task-172 content-driven derivation above.
+    distribution_source = "derived"
+    if distribution_override is not None:
+        ok, reason = validate_distribution_override(distribution_override, bundle_class)
+        if not ok:
+            audit_log(
+                "distribution_override_rejected",
+                actor=actor_role or "data_custodian",
+                subject_id=batch_id or source_label,
+                payload={
+                    "classification": bundle_class,
+                    "release_authority": release,
+                    "requested_letter": distribution_override,
+                    "derived_letter": derived_letter,
+                    "reason": reason,
+                    "user_dodid": (user or {}).get("dodid"),
+                },
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "invalid_distribution_override",
+                    "distribution_override": distribution_override,
+                    "classification": bundle_class,
+                    "reason": reason,
+                },
+            )
+        dist_letter = distribution_override
+        dist_authority = f"Distribution {dist_letter}"
+        distribution = (
+            f"DISTRIBUTION {dist_letter}: "
+            f"{DISTRIBUTION_TEXT[dist_letter]}"
+        )
+        distribution_source = "override"
+        if dist_letter != derived_letter:
+            audit_log(
+                "distribution_override",
+                actor=actor_role or "data_custodian",
+                subject_id=batch_id or source_label,
+                payload={
+                    "classification": bundle_class,
+                    "release_authority": release,
+                    "derived_letter": derived_letter,
+                    "override_letter": dist_letter,
+                    "user_dodid": (user or {}).get("dodid"),
+                },
+            )
+    else:
+        dist_letter = derived_letter
+        dist_authority = derived_authority
+        distribution = derived_statement
 
     # Task-70 — produce the dataset and redaction-report files in the format
     # the operator actually asked for. Earlier the segmented control was UI
@@ -2188,13 +2292,22 @@ async def export_sanitized(request: Request, payload: dict):
         # not hardcoded "Distribution C".
         "distribution_authority": dist_authority,
         # Task-172 — content-driven letter + dominant-evidence reason. The
-        # selector now aggregates the union of `sensitive_flags_oracle`
-        # across the included records so a CUI bundle with controlled-item
-        # serials gets B (not C). Letter is the bare A-F char; reason is a
-        # one-line "why" for the operator/audit reader.
+        # selector aggregates the union of `sensitive_flags_oracle` across
+        # the included records so a CUI bundle with controlled-item serials
+        # gets B (not C). `distribution_letter` is the bare A-F char that
+        # actually shipped (override letter when overridden, derived letter
+        # otherwise); `distribution_reason` is a one-line "why" for the
+        # auto-derived choice.
         "distribution_letter": dist_letter,
         "distribution_reason": distribution_reason,
         "distribution_evidence_flags": bundle_flags_sorted,
+        # Task-108 — distinguish operator-overridden letters from auto-
+        # derived ones in the manifest so a downstream auditor can tell a
+        # release officer's call from a system default at a glance.
+        # `distribution_derived_letter` is always the letter the system
+        # would have picked for this bundle, even when the override matches.
+        "distribution_source": distribution_source,
+        "distribution_derived_letter": derived_letter,
         "generalized_unit_markings": generalize,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
@@ -2278,6 +2391,19 @@ async def export_sanitized(request: Request, payload: dict):
         if include_audit:
             zf.writestr("audit_log.json", audit_bytes)
         zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
+        # Task-108 — README explicitly notes when a release officer chose a
+        # non-derived Distribution letter (e.g. forced D on a SECRET extract
+        # for handling reasons that the (release, classification) tuple
+        # can't express). Keeps the bundle self-describing for partners.
+        if distribution_source == "override":
+            derived_letter_for_readme = derived_authority.replace("Distribution ", "")
+            override_note = (
+                f"  (operator override — system would have derived "
+                f"Distribution {derived_letter_for_readme} from "
+                f"{release} + {bundle_class.replace('_',' ')})\n"
+            )
+        else:
+            override_note = "  (auto-derived per DoDI 5230.24)\n"
         zf.writestr("README.txt", (
             f"// CLASSIFICATION: {cls_banner_text} //\n"
             f"// Handle per DoDM 5200.01 //\n\n"
@@ -2286,7 +2412,8 @@ async def export_sanitized(request: Request, payload: dict):
             f"Release authority: {release}\n"
             f"Format:            {fmt.upper()}\n"
             f"Distribution:      {dist_authority}\n"
-            f"  {distribution}\n\n"
+            f"  {distribution}\n"
+            f"{override_note}\n"
             "Files:\n"
             f"  {dataset_filename:<24s} -- approved records with SENTRY redactions applied\n"
             f"  {redaction_filename:<24s} -- per-record change log (original -> replacement + category)\n"
@@ -2364,6 +2491,12 @@ async def export_sanitized(request: Request, payload: dict):
             "records": applied,
             "rejected": len(records) - applied,
             "classification": bundle_class,
+            # Task-108 — record both the letter that shipped and whether it
+            # was operator-overridden, so the SOC view can distinguish auto
+            # vs. release-officer choice without joining a second row.
+            "distribution_letter": dist_authority.replace("Distribution ", ""),
+            "distribution_source": distribution_source,
+            "distribution_derived_letter": derived_authority.replace("Distribution ", ""),
         },
     )
 
