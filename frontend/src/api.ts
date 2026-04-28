@@ -1947,6 +1947,12 @@ export interface ExportResult {
   // Walkthrough #5 — independent fields.
   rel_to_caveat?: string;
   distribution_authority?: string;
+  // Task-172 — content-driven letter + dominant-evidence "why". The selector
+  // now aggregates the union of `sensitive_flags_oracle` across the included
+  // records, so a CUI bundle with controlled-item serials gets B (not C).
+  distribution_letter?: string;
+  distribution_reason?: string;
+  distribution_evidence_flags?: string[];
   generalized_unit_markings?: boolean;
   download_url: string;
   created_at: string;

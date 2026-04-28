@@ -328,12 +328,26 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
                 independent fields. Render side-by-side. */}
             <div>
               <StatLabel>Distribution Authority</StatLabel>
-              <div className="font-mono text-sm text-[var(--color-text)]">
+              {/* Task-172 — render the letter + a one-line "why" tooltip
+                  naming the dominant evidence (controlled serials, comms,
+                  classification level, etc.) so an operator hovering can see
+                  *which content* drove the chosen letter. The reason
+                  doubles as a small inline caption beneath the letter so
+                  it's still visible without a hover. */}
+              <div
+                className="font-mono text-sm text-[var(--color-text)]"
+                title={result.distribution_reason ?? "Selected per DoDI 5230.24."}
+              >
                 {result.distribution_authority ?? "—"}
               </div>
               <div className="text-xs text-[var(--color-text-secondary)]">
                 Controls who can access (DoDI 5230.24).
               </div>
+              {result.distribution_reason && (
+                <div className="mt-1 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+                  Why: {result.distribution_reason}
+                </div>
+              )}
             </div>
             <div>
               <StatLabel>REL TO Caveat</StatLabel>

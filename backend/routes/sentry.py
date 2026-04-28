@@ -258,11 +258,20 @@ def _select_distribution(cls: str, flags: list[str]) -> tuple[str, str]:
     Returns (letter, full_text). Earlier code hardcoded "Distribution C" for
     every release authority, which is doctrinally wrong and any 5230.24-aware
     judge spots it instantly.
+
+    Unknown classification strings fail CLOSED to Distribution F
+    (originator-controlled) rather than dropping silently to a permissive
+    default — earlier the unknown-class branch returned B, which would
+    *broaden* a never-before-seen marking to "U.S. Government only".
     """
     flag_set = set(flags or [])
-    if cls == "TOP_SECRET":
-        # TS sits with DoD components only; broader contractor distribution
-        # requires explicit downgrade authority.
+    # TS_SCI is more restrictive than plain TOP SECRET. Treat both as E
+    # (DoD components only) — broader distribution to contractors requires
+    # explicit downgrade authority. Pre-Task-172 normalized strings included
+    # "TS_SCI" / "TS"; we accept both so a normalized bundle class flows
+    # through the same arm rather than falling to the permissive default
+    # branch (which previously returned B and under-marked SCI artifacts).
+    if cls in ("TOP_SECRET", "TS_SCI", "TS"):
         letter = "E"
     elif cls in ("SECRET", "CONFIDENTIAL"):
         letter = "D"
@@ -276,12 +285,78 @@ def _select_distribution(cls: str, flags: list[str]) -> tuple[str, str]:
             letter = "B"
         else:
             letter = "C"
-    elif cls == "UNCLASSIFIED" and not flag_set:
-        letter = "A"
-    else:
+    elif cls == "UNCLASSIFIED":
         # UNCLASSIFIED with any sensitivity flag — keep inside U.S. Government.
-        letter = "B"
+        letter = "A" if not flag_set else "B"
+    else:
+        # Fail closed on any classification string we don't recognize. F is
+        # the most restrictive A-F letter ("originator-controlled"); broader
+        # distribution requires the originator's explicit say-so. This
+        # matches the unknown-release-authority posture in `derive_distribution`.
+        letter = "F"
     return letter, DISTRIBUTION_TEXT[letter]
+
+
+# Task-172 — short, presenter-grade "why" string for the distribution letter.
+# The /export manifest and Export tab tooltip render this so an operator
+# (or auditor) can see, in one line, *which evidence* drove the chosen letter.
+# Kept tight: name the dominant flag/classification, no doctrine-lecture.
+def _distribution_reason(cls: str, flags: set[str]) -> str:
+    """One-line dominant-evidence explanation for the chosen letter.
+
+    Mirrors the branching in `_select_distribution` so the reason and the
+    letter never disagree. Pure helper; no I/O.
+    """
+    flag_set = set(flags or [])
+    # TS//SCI is more restrictive than plain TOP SECRET; the selector treats
+    # both as Distribution E. Name SCI explicitly so the reason and the
+    # letter agree (a generic "TOP SECRET" string for an SCI bundle would
+    # under-describe the doctrine driving the marking).
+    if cls in ("TS_SCI", "TS"):
+        return "TOP SECRET // SCI — DoD components only."
+    if cls == "TOP_SECRET":
+        return "TOP SECRET classification — DoD components only."
+    if cls in ("SECRET", "CONFIDENTIAL"):
+        nice = cls.replace("_", " ")
+        return f"{nice} classification — DoD + cleared U.S. DoD contractors."
+    if cls == "CUI":
+        if "controlled" in flag_set:
+            return "controlled-item serials present — kept inside U.S. Government."
+        if "pii" in flag_set and not (flag_set & {"geo", "comms"}):
+            return "PII without operational context — U.S. Government only."
+        ops = sorted(flag_set & {"geo", "comms"})
+        if ops:
+            return (
+                f"operational {' + '.join(ops)} present — broadened to "
+                "contractors who must act on it."
+            )
+        return "CUI bundle — agencies + contractors."
+    if cls == "UNCLASSIFIED":
+        if not flag_set:
+            return "no sensitive content detected — public release."
+        named = ", ".join(sorted(flag_set))
+        return f"UNCLASSIFIED with {named} flag(s) — kept inside U.S. Government."
+    # Fail-closed branch — paired with the F letter the selector returns
+    # for unrecognized classification strings. Names the unknown class so
+    # an operator/auditor sees *why* the strictest letter was picked.
+    return f"unrecognized classification {cls!r} — failing closed (originator-controlled)."
+
+
+def _aggregate_sensitive_flags(records: list[dict]) -> set[str]:
+    """Union of per-record `sensitive_flags_oracle` across an export bundle.
+
+    Task-172 — `_select_distribution` is content-aware, but the /export step
+    used to call it with an empty flag list (because the bundle aggregates
+    many records). That collapsed CUI bundles with controlled-item serials
+    to Distribution C even though DoDI 5230.24 keeps them at B. Aggregating
+    the union restores the right letter without any per-record gymnastics.
+    """
+    out: set[str] = set()
+    for r in records or []:
+        for f in (r.get("sensitive_flags_oracle") or []):
+            if f:
+                out.add(f)
+    return out
 
 
 # REL TO is a SINGLE authoritative caveat (not a stack). Latest-wins by
@@ -1012,9 +1087,10 @@ async def mark_text(payload: dict, request: Request):
 
     # Task-61 — Distribution Statement (A-F) selected from content +
     # classification per DoDI 5230.24, no longer hardcoded to "C". This is
-    # the per-text recommendation surfaced on the Mark panel; the /export
-    # endpoint uses derive_distribution(release, bundle_class) for the
-    # bundle-level letter.
+    # the per-text recommendation surfaced on the Mark panel; Task-172 wired
+    # the same `_select_distribution` selector into /export with an aggregated
+    # union of `sensitive_flags_oracle` so the bundle-level letter is also
+    # content-aware (a CUI bundle with controlled-item serials → B, not C).
     dist_letter, dist_text = _select_distribution(cls, flags)
 
     return {
@@ -1764,12 +1840,27 @@ async def export_sanitized(request: Request, payload: dict):
     if bundle_class == "TS_SCI":
         cls_banner_text = "TOP SECRET // SCI"
 
-    # Task-70 — Walkthrough #5 — Distribution Statements (A-F, who-can-access)
-    # and REL TO caveats (which-foreigns) are independent. Derive the letter
-    # from (release_authority, bundle_class) per DoDI 5230.24 instead of the
-    # earlier hardcoded "Distribution C" which mis-marked UNCLASSIFIED public-
-    # affairs releases (should be A or B).
-    dist_authority, distribution = derive_distribution(release, bundle_class)
+    # Task-172 — Distribution Statements (A-F, who-can-access) are *content-
+    # driven* per DoDI 5230.24, while REL TO is independent (handled below
+    # via REL_TO_CAVEAT). Earlier we delegated to `derive_distribution`
+    # (release × class only) and FVEY/NATO bundles all stamped "Distribution C"
+    # regardless of their actual sensitivity flags. We now aggregate the
+    # union of `sensitive_flags_oracle` across every record actually leaving
+    # the bundle (rejected records skipped) and feed that to the existing
+    # content-aware `_select_distribution` selector. A CUI bundle with
+    # controlled-item serials now correctly stamps Distribution B; SECRET
+    # stamps D; UNCLASSIFIED with no flags stamps A.
+    bundle_flag_set = _aggregate_sensitive_flags(
+        [
+            r for r in records
+            if (decisions.get(r.get("sr_number", ""), {}).get("action", "auto")
+                != "reject")
+        ]
+    )
+    bundle_flags_sorted = sorted(bundle_flag_set)
+    dist_letter, distribution = _select_distribution(bundle_class, bundle_flags_sorted)
+    dist_authority = f"Distribution {dist_letter}"
+    distribution_reason = _distribution_reason(bundle_class, bundle_flag_set)
 
     # Task-70 — produce the dataset and redaction-report files in the format
     # the operator actually asked for. Earlier the segmented control was UI
@@ -1974,6 +2065,14 @@ async def export_sanitized(request: Request, payload: dict):
         # Task-70 — derived per (release, classification) per DoDI 5230.24,
         # not hardcoded "Distribution C".
         "distribution_authority": dist_authority,
+        # Task-172 — content-driven letter + dominant-evidence reason. The
+        # selector now aggregates the union of `sensitive_flags_oracle`
+        # across the included records so a CUI bundle with controlled-item
+        # serials gets B (not C). Letter is the bare A-F char; reason is a
+        # one-line "why" for the operator/audit reader.
+        "distribution_letter": dist_letter,
+        "distribution_reason": distribution_reason,
+        "distribution_evidence_flags": bundle_flags_sorted,
         "generalized_unit_markings": generalize,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
