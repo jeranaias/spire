@@ -178,7 +178,7 @@ export function AuthView() {
             Insert smartcard. Select a certificate.
           </h1>
           <p className="mt-1 font-mono text-xs uppercase tracking-wider text-[var(--color-text-secondary)]">
-            CAC/PIV reader · 4 certificates available · OCSP responder reachable
+            CAC/PIV demo · {users ? `${users.length} certificate${users.length === 1 ? "" : "s"} loaded` : "loading certificates"} · No live PKI in this build
           </p>
         </div>
 
@@ -260,12 +260,12 @@ export function AuthView() {
                   if (error) setError(null);
                 }}
                 onKeyDown={onPinKey}
-                placeholder={selectedDodid ? "••••••" : "Select a certificate first"}
-                className="w-full rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-2 font-mono text-2xl tracking-[0.5em] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:outline-none disabled:opacity-50"
+                placeholder={selectedDodid ? "••••••" : "Pick a cert above"}
+                className={`w-full rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-2 font-mono text-2xl text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:outline-none disabled:opacity-50 ${selectedDodid ? "tracking-[0.5em]" : "tracking-normal"}`}
                 aria-describedby="pin-hint"
               />
               <div id="pin-hint" className="mt-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-                Demo: any 6 digits accepted · 3 wrong tries lock the cert in production
+                Demo: any 6 digits accepted · 5 wrong PINs lock the cert in production
               </div>
             </div>
             <Button
@@ -294,11 +294,12 @@ export function AuthView() {
           )}
         </div>
 
-        {/* Foot note */}
+        {/* Foot note — operator-relevant. Crypto/session primitives live on
+            the security/about page, not the front door. */}
         <div className="mt-6 grid gap-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] md:grid-cols-3">
-          <div>SESSION · HMAC-SHA256 · HttpOnly · SameSite=Lax</div>
-          <div className="md:text-center">RBAC · Driven by cert subject</div>
-          <div className="md:text-right">DEMO · No real PKI · No data egress</div>
+          <div>12-hour shift session · cert lockout after 5 PIN failures</div>
+          <div className="md:text-center">IL5-fit · local-first · no cloud egress</div>
+          <div className="md:text-right">DDIL drills available post-login</div>
         </div>
       </div>
     </div>
