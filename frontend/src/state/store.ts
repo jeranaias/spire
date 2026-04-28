@@ -354,6 +354,54 @@ function saveUser(user: User | null): void {
 const INITIAL_USER: User | null = loadUser();
 const INITIAL_ROLE: Role = INITIAL_USER?.role ?? DEFAULT_ROLE;
 
+// SENTRY active-batch persistence — Task #176. The backend (Task #67)
+// hardened the SENTRY pipeline so a batch survives a uvicorn restart by
+// persisting rows to SQLite, but the frontend kept the operator's current
+// `batch_id` / `job_id` only in transient component state. A hard reload —
+// common in DDIL when the operator drops to DISCONNECTED and refreshes for
+// any reason — landed them on the empty "No active job" screen even though
+// the backend still had the work.
+//
+// We persist the IDs in localStorage (so a fresh tab also rehydrates, not
+// just an in-place reload) and re-seed the store on boot. They are cleared
+// on signOut and when the operator finishes the batch via a successful
+// export — so a stale batch_id from yesterday's demo doesn't strand the
+// next operator on a 404'd job.
+const SENTRY_BATCH_KEY = "spire.sentryBatch";
+type StoredSentryBatch = { batchId: string | null; jobId: string | null };
+
+function loadSentryBatch(): StoredSentryBatch {
+  if (typeof window === "undefined") return { batchId: null, jobId: null };
+  try {
+    const raw = window.localStorage.getItem(SENTRY_BATCH_KEY);
+    if (!raw) return { batchId: null, jobId: null };
+    const parsed = JSON.parse(raw) as Partial<StoredSentryBatch>;
+    const batchId = typeof parsed?.batchId === "string" ? parsed.batchId : null;
+    const jobId = typeof parsed?.jobId === "string" ? parsed.jobId : null;
+    return { batchId, jobId };
+  } catch {
+    return { batchId: null, jobId: null };
+  }
+}
+
+function saveSentryBatch(batchId: string | null, jobId: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (batchId === null && jobId === null) {
+      window.localStorage.removeItem(SENTRY_BATCH_KEY);
+    } else {
+      window.localStorage.setItem(
+        SENTRY_BATCH_KEY,
+        JSON.stringify({ batchId, jobId }),
+      );
+    }
+  } catch {
+    /* tolerant */
+  }
+}
+
+const INITIAL_SENTRY_BATCH: StoredSentryBatch = loadSentryBatch();
+
 export const useSpireStore = create<SpireState>((set) => ({
   currentUser: INITIAL_USER,
   role: INITIAL_ROLE,
@@ -362,8 +410,8 @@ export const useSpireStore = create<SpireState>((set) => ({
   alertSeverityCounts: {},
   selectedUnitId: null,
   selectedBuildingId: null,
-  sentryBatchId: null,
-  sentryJobId: null,
+  sentryBatchId: INITIAL_SENTRY_BATCH.batchId,
+  sentryJobId: INITIAL_SENTRY_BATCH.jobId,
   selectedAssetId: null,
   fpcon: "BRAVO",
   commsState: "CONNECTED",
@@ -394,6 +442,10 @@ export const useSpireStore = create<SpireState>((set) => ({
   },
   signOut: () => {
     saveUser(null);
+    // Drop the persisted SENTRY batch handles too — Task #176. The next
+    // operator at this seat shouldn't inherit a stale `batch_id` /
+    // `job_id` after a CAC swap.
+    saveSentryBatch(null, null);
     // Reset transient view selections so the next operator doesn't inherit
     // the previous one's drill-down context.
     set({
@@ -411,7 +463,13 @@ export const useSpireStore = create<SpireState>((set) => ({
   setAlertSeverityCounts: (alertSeverityCounts) => set({ alertSeverityCounts }),
   setSelectedUnitId: (selectedUnitId) => set({ selectedUnitId }),
   setSelectedBuildingId: (selectedBuildingId) => set({ selectedBuildingId }),
-  setSentryBatch: (sentryBatchId, sentryJobId) => set({ sentryBatchId, sentryJobId }),
+  setSentryBatch: (sentryBatchId, sentryJobId) => {
+    // Persist to localStorage so a hard reload (or a fresh tab opened
+    // mid-workflow) rehydrates the operator straight back into their
+    // in-flight job — Task #176.
+    saveSentryBatch(sentryBatchId, sentryJobId);
+    set({ sentryBatchId, sentryJobId });
+  },
   setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
   setFpcon: (fpcon) => set({ fpcon }),
   setCommsState: (commsState) => set({ commsState }),

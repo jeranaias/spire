@@ -41,6 +41,12 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     issues: string[];
   } | null>(null);
   const pushToast = useSpireStore((s) => s.pushToast);
+  // Task #176 — clear the persisted SENTRY batch handles when this
+  // export succeeds. The operator is done with the batch; leaving the
+  // localStorage IDs in place would strand the next session on a stale
+  // batch (or worse, on a different operator's batch after CAC swap
+  // didn't sign out cleanly).
+  const setSentryBatch = useSpireStore((s) => s.setSentryBatch);
 
   if (role !== "data_custodian" && role !== "security_manager") {
     return (
@@ -66,6 +72,11 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         setResult(r);
         // Task-69 — clear any prior block once the build succeeds.
         setReleaseBlock(null);
+        // Task #176 — operator finished the batch. Drop the persisted
+        // batch / job IDs so a reload after this point lands them on
+        // Upload (the natural next-batch start) instead of replaying a
+        // job that's already been shipped.
+        setSentryBatch(null, null);
         const cls = r.classification ?? "CUI";
         // Toast carries a click-through link so the operator never wonders
         // "where did the file go?" after a successful export. Reviewer caught
