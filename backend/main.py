@@ -13,7 +13,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +32,11 @@ from .routes.copilot import router as copilot_router
 from .routes.integrations import router as integrations_router
 from .routes.joint import router as joint_router
 from .routes.decision_bridge import router as decision_bridge_router
+from .scoping import (
+    BASTION_VIEW_ROLES,
+    PULSE_VIEW_ROLES,
+    require_view_scope,
+)
 
 
 @asynccontextmanager
@@ -84,9 +89,28 @@ app.middleware("http")(session_middleware)
 
 app.include_router(auth_router,   prefix="/api/auth",   tags=["auth"])
 app.include_router(system_router, prefix="/api/system", tags=["system"])
-app.include_router(pulse_router,  prefix="/api/pulse",  tags=["pulse"])
+
+# View-level role gates (Task #77). Mounted at the router include so every
+# route under the prefix is gated without per-handler edits. Mirrors
+# `VIEW_SCOPE` in `frontend/src/state/store.ts`; drift is caught by
+# `backend/tests/test_role_gates.py`. SENTRY-wide and Admin-wide gates
+# are not applied as include-level deps because those routers carry
+# routes whose role permissions vary by endpoint (per-route `require_role`
+# already covers them); the broad PULSE / BASTION surfaces have uniform
+# view-level role lists, so the cleanest enforcement is here.
+app.include_router(
+    pulse_router,
+    prefix="/api/pulse",
+    tags=["pulse"],
+    dependencies=[Depends(require_view_scope("/pulse", PULSE_VIEW_ROLES))],
+)
 app.include_router(sentry_router, prefix="/api/sentry", tags=["sentry"])
-app.include_router(bastion_router, prefix="/api/bastion", tags=["bastion"])
+app.include_router(
+    bastion_router,
+    prefix="/api/bastion",
+    tags=["bastion"],
+    dependencies=[Depends(require_view_scope("/bastion", BASTION_VIEW_ROLES))],
+)
 app.include_router(llm_router,    prefix="/api/llm",    tags=["llm"])
 app.include_router(copilot_router, prefix="/api/copilot", tags=["copilot"])
 app.include_router(integrations_router, prefix="/api/integrations", tags=["integrations"])
