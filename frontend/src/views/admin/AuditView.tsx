@@ -191,13 +191,17 @@ export function AuditView() {
   const [error, setError]         = useState<string | null>(null);
   const [waking, setWaking]       = useState<boolean>(false);
   const [openRow, setOpenRow]     = useState<AuditEntry | null>(null);
-  // Task #136 — loadedAt + manual refresh affordance to match the
-  // Model Registry / PULSE / SENTRY pages. Tracking a small bump
-  // counter (rather than swapping to useFreshFetch wholesale) keeps
-  // the existing abortable + debounced + polled fetch logic intact;
-  // the counter is just one more dependency on the cold-load
-  // effect and ticks whenever the operator clicks ↻ Refresh or the
-  // ErrorState retry button.
+  // Task #136 + Task #85 (F12) — loadedAt + manual refresh affordance to
+  // match the Model Registry / PULSE / SENTRY pages, AND the in-place
+  // retry path that keeps the SOC analyst's filter chips / search /
+  // pagination intact when the cold-load path 502s on a degraded SATCOM
+  // link. Tracking a small bump counter (rather than swapping to
+  // useFreshFetch wholesale) keeps the existing abortable + debounced +
+  // polled fetch logic intact; the counter is just one more dependency
+  // on the cold-load effect and ticks whenever the operator clicks
+  // ↻ Refresh or the ErrorState's Retry button. This subsumes the
+  // Task #85 `retryNonce` — `refreshCounter` is the single in-place
+  // re-fetch trigger.
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
   const [refreshCounter, setRefreshCounter] = useState<number>(0);
   // `ddilMode` already declared above (alongside the cadence multiplier
@@ -298,8 +302,10 @@ export function AuditView() {
       cancelled = true;
       controller.abort();
     };
-    // refreshCounter is part of the dep set so the manual ↻ Refresh and
-    // the ErrorState retry both re-enter this effect.
+    // refreshCounter is part of the dep set so the manual ↻ Refresh,
+    // the DDIL-reconnect bump, and the ErrorState's Retry button (Task
+    // #85 / F12) all re-enter this effect in place — no full route
+    // reload that would wipe the SOC analyst's filter chips.
   }, [queryParams, refreshCounter]);
 
   // Task #136 — auto-refresh on DDIL reconnect. When the operator
@@ -459,10 +465,13 @@ export function AuditView() {
         title="Audit Query Offline"
         description="Audit chain query endpoint did not respond."
         detail={error}
-        // Task #136 — `refresh()` re-runs the cold-load path
-        // through withRetry so the SOC analyst keeps their filter
-        // chips, search string, page, and selected row instead of
-        // losing them to a window.location.reload().
+        // Task #136 + Task #85 (F12) — `refresh()` re-runs the cold-load
+        // path through withRetry so the SOC analyst keeps their filter
+        // chips, search string, time window, page, and selected row
+        // instead of losing them to a window.location.reload(). A
+        // successful retry clears `error` and renders the table; a
+        // still-failing retry surfaces the same ErrorState with the
+        // latest detail (formatApiError keeps the copy operator-readable).
         onRetry={refresh}
         retrying={waking}
       />
