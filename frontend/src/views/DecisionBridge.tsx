@@ -138,8 +138,19 @@ function Sparkline({ values, width = 88, height = 24 }: { values: number[]; widt
 }
 
 // ---------------------------------------------------------------------------
-// Tile chassis — single source of truth for tile chrome so each tile reads
-// like a single semantic Pressable region.
+// Tile chassis — splits the tile into a header Pressable (generic drill) and
+// a body slot whose children manage their own click semantics. This is the
+// fix for the F-01 finding: a row inside the body needs to be its own
+// <button> so it can drill to the specific item, which is impossible if the
+// whole tile is one outer <button> (button-in-button is invalid HTML and
+// every click collapses to the outer drill).
+//
+// The contract for callers:
+//   - Header click  → generic onDrill (handled here)
+//   - Body content  → caller renders rows as <Pressable> for per-row drill,
+//                     OR wraps chrome states (loading/empty) in <TileChromePressable>
+//                     so the tile body still drills generically when there
+//                     are no rows.
 // ---------------------------------------------------------------------------
 interface TileProps {
   label: string;
@@ -151,17 +162,19 @@ interface TileProps {
 }
 function Tile({ label, drillLabel, onDrill, rightSlot, className, children }: TileProps) {
   return (
-    <Pressable
-      onClick={onDrill}
-      aria-label={`${label} — ${drillLabel}`}
-      block
+    <div
       className={
         "group flex h-full flex-col overflow-hidden rounded-md border border-[var(--color-border)] " +
         "bg-[var(--color-surface)] hover:border-[var(--color-border-active)] " +
+        "focus-within:border-[var(--color-border-active)] " +
         (className ?? "")
       }
     >
-      <header className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
+      <Pressable
+        onClick={onDrill}
+        aria-label={`${label} — ${drillLabel}`}
+        className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2 hover:bg-[color-mix(in_oklab,var(--color-bg)_45%,transparent)]"
+      >
         <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
           {label}
         </span>
@@ -169,8 +182,64 @@ function Tile({ label, drillLabel, onDrill, rightSlot, className, children }: Ti
           {rightSlot}
           <span aria-hidden>→ {drillLabel}</span>
         </span>
-      </header>
+      </Pressable>
       <div className="flex flex-1 min-h-0 flex-col px-3 py-2">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Body wrapper for chrome states (loading / empty / non-row tile bodies)
+ * that should still trigger the tile's generic drill. Renders a Pressable
+ * that fills the body so a click anywhere on the chrome area drills.
+ *
+ * Do NOT wrap <ErrorState> in this — ErrorState contains its own Buttons,
+ * and nesting <button> inside <button> is invalid HTML.
+ */
+function TileChromePressable({
+  onDrill,
+  ariaLabel,
+  className,
+  children,
+}: {
+  onDrill: () => void;
+  ariaLabel: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Pressable
+      onClick={onDrill}
+      aria-label={ariaLabel}
+      className={
+        "flex flex-1 min-h-0 flex-col rounded-sm hover:bg-[color-mix(in_oklab,var(--color-bg)_30%,transparent)] " +
+        (className ?? "")
+      }
+    >
+      {children}
+    </Pressable>
+  );
+}
+
+/**
+ * Mouse-only filler that absorbs clicks on the empty body space *below*
+ * the rows in a populated row-style tile (alerts/shortages/MC%) and routes
+ * them to the tile's generic drill. The header Pressable already provides
+ * the keyboard / screen-reader path to the same destination, so this
+ * filler is hidden from assistive tech (`aria-hidden`) and removed from
+ * tab order (`tabIndex={-1}`) — keyboard users still tab through header +
+ * row buttons cleanly, mouse users get the "click any chrome to drill"
+ * affordance the bridge promises.
+ */
+function TileBodyFiller({ onDrill }: { onDrill: () => void }) {
+  return (
+    <Pressable
+      onClick={onDrill}
+      aria-hidden
+      tabIndex={-1}
+      className="mt-1 flex-1 min-h-0 cursor-pointer rounded-sm"
+    >
+      <span className="sr-only">Open</span>
     </Pressable>
   );
 }
@@ -194,18 +263,26 @@ function MissionTile({ mission, error }: { mission: DecisionBridgeMission | null
   const tone = FPCON_TONE[fpcon] ?? FPCON_TONE.BRAVO;
   const dtg = formatDtg(now);
 
+  const drill = () => nav("/bastion");
+
   return (
     <Tile
       label="FPCON · Mission Clock"
       drillLabel="BASTION"
-      onDrill={() => nav("/bastion")}
+      onDrill={drill}
     >
       {error && !mission ? (
         <ErrorState title="Mission strap unavailable" description={error} />
       ) : !mission ? (
-        <LoadingState label="Loading mission strap" />
+        <TileChromePressable onDrill={drill} ariaLabel="Mission strap loading — open BASTION">
+          <LoadingState label="Loading mission strap" />
+        </TileChromePressable>
       ) : (
-        <div className="flex flex-1 min-h-0 flex-col gap-2">
+        <TileChromePressable
+          onDrill={drill}
+          ariaLabel={`FPCON ${tone.label} · ${mission.installation_name} — open BASTION`}
+          className="gap-2"
+        >
           <div className="flex items-center gap-3">
             <div
               className="flex h-14 min-w-[64px] items-center justify-center rounded-sm border px-3 font-mono text-2xl font-bold tracking-widest"
@@ -233,7 +310,7 @@ function MissionTile({ mission, error }: { mission: DecisionBridgeMission | null
               {mission.mission_objective}
             </p>
           ) : null}
-        </div>
+        </TileChromePressable>
       )}
     </Tile>
   );
@@ -286,37 +363,50 @@ function AlertsTile({
       {error && !data ? (
         <ErrorState title="Alerts unavailable" description={error} />
       ) : !data ? (
-        <LoadingState label="Loading alerts" />
+        <TileChromePressable onDrill={() => drillToAlert()} ariaLabel="Alerts loading — open BASTION">
+          <LoadingState label="Loading alerts" />
+        </TileChromePressable>
       ) : data.alerts.length === 0 ? (
-        <EmptyState title="All clear" description="No open alerts in scope." />
+        <TileChromePressable onDrill={() => drillToAlert()} ariaLabel="No open alerts — open BASTION">
+          <EmptyState title="All clear" description="No open alerts in scope." />
+        </TileChromePressable>
       ) : (
+        <>
         <ul className="flex flex-col gap-1.5">
-          {data.alerts.map((a) => (
-            <li
-              key={a.id}
-              className="flex items-start gap-2 rounded-sm border-l-2 px-2 py-1"
-              style={{
-                borderLeftColor: SEVERITY_ACCENT[a.severity] ?? "var(--color-text-muted)",
-                background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
-              }}
-            >
-              <span
-                className="font-mono text-[10px] font-semibold uppercase tracking-widest"
-                style={{ color: SEVERITY_ACCENT[a.severity] ?? "var(--color-text-muted)" }}
-              >
-                {a.severity}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
-                  {a.title}
-                </div>
-                <div className="truncate font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                  {a.source}{a.unit ? ` · ${a.unit}` : ""} · {relTime(a.timestamp)}
-                </div>
-              </div>
-            </li>
-          ))}
+          {data.alerts.map((a) => {
+            const accent = SEVERITY_ACCENT[a.severity] ?? "var(--color-text-muted)";
+            return (
+              <li key={a.id}>
+                <Pressable
+                  onClick={() => drillToAlert(a)}
+                  aria-label={`${a.severity} · ${a.title}${a.unit ? ` · ${a.unit}` : ""} — open in BASTION`}
+                  className="flex items-start gap-2 rounded-sm border-l-2 px-2 py-1 hover:bg-[color-mix(in_oklab,var(--color-text)_8%,transparent)]"
+                  style={{
+                    borderLeftColor: accent,
+                    background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
+                  }}
+                >
+                  <span
+                    className="font-mono text-[10px] font-semibold uppercase tracking-widest"
+                    style={{ color: accent }}
+                  >
+                    {a.severity}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+                      {a.title}
+                    </div>
+                    <div className="truncate font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                      {a.source}{a.unit ? ` · ${a.unit}` : ""} · {relTime(a.timestamp)}
+                    </div>
+                  </div>
+                </Pressable>
+              </li>
+            );
+          })}
         </ul>
+        <TileBodyFiller onDrill={() => drillToAlert()} />
+        </>
       )}
     </Tile>
   );
@@ -355,50 +445,60 @@ function ShortagesTile({
       {error && !data ? (
         <ErrorState title="Shortages unavailable" description={error} />
       ) : !data ? (
-        <LoadingState label="Loading shortages" />
+        <TileChromePressable onDrill={() => drill()} ariaLabel="Shortages loading — open PULSE forecast">
+          <LoadingState label="Loading shortages" />
+        </TileChromePressable>
       ) : data.shortages.length === 0 ? (
-        <EmptyState title="No projected shortages" description="Stocks above minimum across watched classes." />
+        <TileChromePressable onDrill={() => drill()} ariaLabel="No projected shortages — open PULSE forecast">
+          <EmptyState title="No projected shortages" description="Stocks above minimum across watched classes." />
+        </TileChromePressable>
       ) : (
+        <>
         <ul className="flex flex-col gap-1.5">
           {data.shortages.map((s) => {
             const badge = SHORTAGE_BADGE[s.kind];
             const tone = stockoutTone(s.hours_to_stockout);
             return (
-              <li
-                key={`${s.kind}-${s.item}`}
-                className="flex items-center gap-2 rounded-sm border-l-2 px-2 py-1"
-                style={{
-                  borderLeftColor: tone,
-                  background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
-                }}
-              >
-                <span
-                  className="rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest"
-                  style={{ color: badge.tone, border: `1px solid ${badge.tone}` }}
-                  aria-label={s.label}
+              <li key={`${s.kind}-${s.item}`}>
+                <Pressable
+                  onClick={() => drill(s)}
+                  aria-label={`${s.label} ${s.item}${s.drill_unit ? ` · ${s.drill_unit}` : ""} · H+${s.hours_to_stockout}h — open in PULSE forecast`}
+                  className="flex items-center gap-2 rounded-sm border-l-2 px-2 py-1 hover:bg-[color-mix(in_oklab,var(--color-text)_8%,transparent)]"
+                  style={{
+                    borderLeftColor: tone,
+                    background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
+                  }}
                 >
-                  {badge.label}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
-                    {s.item}
+                  <span
+                    className="rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest"
+                    style={{ color: badge.tone, border: `1px solid ${badge.tone}` }}
+                    aria-hidden
+                  >
+                    {badge.label}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+                      {s.item}
+                    </div>
+                    <div className="truncate font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                      {s.drill_unit ?? "—"}
+                      {s.open_requisitions ? ` · ${s.open_requisitions} open req` : ""}
+                    </div>
                   </div>
-                  <div className="truncate font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                    {s.drill_unit ?? "—"}
-                    {s.open_requisitions ? ` · ${s.open_requisitions} open req` : ""}
+                  <div
+                    className="font-mono text-[12px] font-semibold tabular-nums tracking-wider"
+                    style={{ color: tone }}
+                    aria-hidden
+                  >
+                    H+{s.hours_to_stockout}h
                   </div>
-                </div>
-                <div
-                  className="font-mono text-[12px] font-semibold tabular-nums tracking-wider"
-                  style={{ color: tone }}
-                  aria-label={`Hours to stockout: ${s.hours_to_stockout}`}
-                >
-                  H+{s.hours_to_stockout}h
-                </div>
+                </Pressable>
               </li>
             );
           })}
         </ul>
+        <TileBodyFiller onDrill={() => drill()} />
+        </>
       )}
     </Tile>
   );
@@ -431,10 +531,15 @@ function McTile({
       {error && !data ? (
         <ErrorState title="MC% unavailable" description={error} />
       ) : !data ? (
-        <LoadingState label="Loading readiness" />
+        <TileChromePressable onDrill={() => drill()} ariaLabel="MC% loading — open PULSE">
+          <LoadingState label="Loading readiness" />
+        </TileChromePressable>
       ) : data.units.length === 0 ? (
-        <EmptyState title="No units in scope" />
+        <TileChromePressable onDrill={() => drill()} ariaLabel="No units in scope — open PULSE">
+          <EmptyState title="No units in scope" />
+        </TileChromePressable>
       ) : (
+        <>
         <ul className="flex flex-col gap-1.5">
           {data.units.map((u) => {
             const tone = mcTone(u.current_mc_rate);
@@ -444,41 +549,49 @@ function McTile({
               : deltaPct < 0
                 ? "var(--color-danger)"
                 : "var(--color-text-muted)";
+            const ratePct = (u.current_mc_rate * 100).toFixed(1);
+            const deltaSign = deltaPct >= 0 ? "+" : "";
             return (
-              <li
-                key={u.unit}
-                className="flex items-center gap-3 rounded-sm border-l-2 px-2 py-1.5"
-                style={{
-                  borderLeftColor: tone,
-                  background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
-                }}
-              >
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
-                    {u.unit}
-                  </div>
-                  <div className="truncate font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                    {u.mc_count}/{u.asset_total} MC
-                  </div>
-                </div>
-                <Sparkline values={u.sparkline_7d} />
-                <div
-                  className="w-12 text-right font-mono text-[14px] font-semibold tabular-nums"
-                  style={{ color: tone }}
+              <li key={u.unit}>
+                <Pressable
+                  onClick={() => drill(u)}
+                  aria-label={`${u.unit} · ${ratePct}% MC · 7-day delta ${deltaSign}${deltaPct.toFixed(1)} pp — open in PULSE`}
+                  className="flex items-center gap-3 rounded-sm border-l-2 px-2 py-1.5 hover:bg-[color-mix(in_oklab,var(--color-text)_8%,transparent)]"
+                  style={{
+                    borderLeftColor: tone,
+                    background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
+                  }}
                 >
-                  {(u.current_mc_rate * 100).toFixed(1)}%
-                </div>
-                <div
-                  className="w-14 text-right font-mono text-[11px] tabular-nums"
-                  style={{ color: deltaTone }}
-                  aria-label={`7-day delta ${deltaPct.toFixed(1)} percentage points`}
-                >
-                  {deltaPct >= 0 ? "+" : ""}{deltaPct.toFixed(1)} pp
-                </div>
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
+                      {u.unit}
+                    </div>
+                    <div className="truncate font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                      {u.mc_count}/{u.asset_total} MC
+                    </div>
+                  </div>
+                  <Sparkline values={u.sparkline_7d} />
+                  <div
+                    className="w-12 text-right font-mono text-[14px] font-semibold tabular-nums"
+                    style={{ color: tone }}
+                    aria-hidden
+                  >
+                    {ratePct}%
+                  </div>
+                  <div
+                    className="w-14 text-right font-mono text-[11px] tabular-nums"
+                    style={{ color: deltaTone }}
+                    aria-hidden
+                  >
+                    {deltaSign}{deltaPct.toFixed(1)} pp
+                  </div>
+                </Pressable>
               </li>
             );
           })}
         </ul>
+        <TileBodyFiller onDrill={() => drill()} />
+        </>
       )}
     </Tile>
   );
@@ -497,12 +610,13 @@ function AuditTile({
   const nav = useNavigate();
   const tone = data?.chain_ok ? "var(--color-success)" : "var(--color-danger)";
   const statusLabel = data?.chain_ok ? "INTACT" : "BROKEN";
+  const drill = () => nav("/admin");
 
   return (
     <Tile
       label="Audit Health (5s)"
       drillLabel="ADMIN"
-      onDrill={() => nav("/admin")}
+      onDrill={drill}
       rightSlot={
         data ? (
           <span
@@ -517,9 +631,15 @@ function AuditTile({
       {error && !data ? (
         <ErrorState title="Audit health unavailable" description={error} />
       ) : !data ? (
-        <LoadingState label="Loading audit" />
+        <TileChromePressable onDrill={drill} ariaLabel="Audit health loading — open ADMIN">
+          <LoadingState label="Loading audit" />
+        </TileChromePressable>
       ) : (
-        <div className="flex flex-1 flex-col gap-3">
+        <TileChromePressable
+          onDrill={drill}
+          ariaLabel={`Audit chain ${statusLabel} · ${data.events_per_minute.toFixed(1)} events/min — open ADMIN`}
+          className="gap-3"
+        >
           <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col">
               <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -574,7 +694,7 @@ function AuditTile({
               {data.last_entry_kind ? <> · last: <span className="text-[var(--color-text-secondary)]">{data.last_entry_kind}</span></> : null}
             </div>
           ) : null}
-        </div>
+        </TileChromePressable>
       )}
     </Tile>
   );
