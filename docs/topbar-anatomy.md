@@ -84,8 +84,16 @@ right group. JointCOP button is `hidden xl:inline-flex` — the menu's
 CompactMissionClock disappears at sm — the chrome is too cramped for
 the chip. The System chip's "Mission timeline" dropdown row is the
 only access path at this width and fires the
-`spire:open-mission-clock` event to expand the clock from the System
-chip's stacking context. Tabs wrap. Tagline truncates.
+`spire:open-mission-clock` event. Tabs wrap. Tagline truncates.
+
+**sm fallback limitation**: at sm the full MissionClock is unmounted
+(it lives at `xl:flex` in the centred slot) and the compact chip is
+hidden, so the `spire:open-mission-clock` event has no listener — the
+System chip dropdown still shows the live timeline read-out (status,
+H+offset, scenario phase) which is the visibility-only fallback. Full
+clock controls (play/pause, scrub, beat selection) require widening
+the viewport to ≥768px so the compact chip remounts. This is an
+explicit declutter trade-off documented here.
 
 ## Rationale
 
