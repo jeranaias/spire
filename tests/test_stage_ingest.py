@@ -169,8 +169,19 @@ class TestStageIngestRoute:
         # Actor is the security_manager who POSTed.
         assert body["actor"]["role"] == "security_manager"
         assert body["actor"]["dodid"] == "3456789012"
-        # The three named slots round-trip back as source_files.
+        # The three named slots round-trip back as source_files, each
+        # carrying name/bytes/rows_parsed so the hero card can show the
+        # operator a per-file row count alongside the byte size.
         assert set(body["source_files"]) == {"header", "sr_parts", "due_in"}
+        for slot in ("header", "sr_parts", "due_in"):
+            sf = body["source_files"][slot]
+            assert {"name", "bytes", "rows_parsed"} <= set(sf), sf
+            assert isinstance(sf["rows_parsed"], int) and sf["rows_parsed"] >= 0
+        # The 6-row header fixture has 5 Maintenance-CM rows + 1 PMCS row;
+        # the parsed-row count is row count of the CSV, not the post-PMCS
+        # filter, so it should be 6 (5 + 1 PMCS, all 6 are parsed before
+        # the cm_only filter drops the PMCS row).
+        assert body["source_files"]["header"]["rows_parsed"] == 6
         # PMCS filtering is reported.
         assert body["ingest_report"]["rows_filtered_pmcs"] == 1
         # Trailing-period normalization happened on at least 2 rows.

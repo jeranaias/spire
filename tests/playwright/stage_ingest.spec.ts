@@ -170,11 +170,27 @@ test.describe("Stage live-ingest mode (Task #183)", () => {
     page,
   }) => {
     await forceEmptyOrFail(page);
-    await gotoHash(page, "#/sentry/upload");
+    // SENTRY upload+processing remain reachable in empty-boot mode
+    // (Task #177 batch-classification path is additive). The
+    // data-dependent tabs (review/mark/export/coalition) are gated.
+    // Hit /sentry/review to assert the placeholder on a gated route.
+    await gotoHash(page, "#/sentry/review");
     const placeholder = page.getByTestId("awaiting-ingest-sentry");
     await expect(placeholder).toBeVisible();
     await expect(placeholder).toContainText(/SENTRY/i);
     await expect(placeholder).toContainText(/Awaiting GCSS-MC ingest/i);
+  });
+
+  test("SENTRY upload tab remains reachable when empty (additive Task #177 path)", async ({
+    page,
+  }) => {
+    await forceEmptyOrFail(page);
+    // Empty-boot mode must not regress the existing SENTRY batch-
+    // classification flow. The Upload tab is the entry point and
+    // must render its own UI even with no GCSS-MC dataset present.
+    await gotoHash(page, "#/sentry/upload");
+    const placeholder = page.getByTestId("awaiting-ingest-sentry");
+    await expect(placeholder).toHaveCount(0);
   });
 
   test("Shift+F8 failsafe restores the seed-42 baseline", async ({ page }) => {

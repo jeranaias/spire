@@ -291,6 +291,18 @@ export function StageIngestHero({ onIngested, caption = "GCSS-MC INGEST" }: Stag
                 {slot.status === "valid" && (
                   <span className="font-mono text-[var(--color-success)]">
                     ✓ {slot.file.name} · {fmtBytes(slot.file.size)}
+                    {ingest.phase === "ready" &&
+                      ingest.result.source_files[key]?.rows_parsed != null && (
+                        <span
+                          data-testid={`stage-ingest-rows-${key}`}
+                          className="ml-2 rounded-sm border border-[var(--color-success-muted)] px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-[var(--color-success)]"
+                        >
+                          {ingest.result.source_files[
+                            key
+                          ].rows_parsed.toLocaleString()}{" "}
+                          rows parsed
+                        </span>
+                      )}
                   </span>
                 )}
                 {slot.status === "error" && (
@@ -323,15 +335,56 @@ export function StageIngestHero({ onIngested, caption = "GCSS-MC INGEST" }: Stag
           {(ingest.phase === "parsing" ||
             ingest.phase === "validating" ||
             ingest.phase === "hydrating") && (
-            <span
+            <div
               data-testid="stage-ingest-progress"
               data-phase={ingest.phase}
-              className="font-mono uppercase tracking-widest text-[var(--color-warning)]"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={
+                ingest.phase === "parsing"
+                  ? 33
+                  : ingest.phase === "validating"
+                  ? 66
+                  : 90
+              }
+              aria-label="Stage ingest progress"
+              className="flex min-w-[260px] flex-col gap-1"
             >
-              {ingest.phase === "parsing" && "Parsing CSVs…"}
-              {ingest.phase === "validating" && "Validating schema…"}
-              {ingest.phase === "hydrating" && "Hydrating dataset…"}
-            </span>
+              <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-[var(--color-warning)]">
+                <span>
+                  {ingest.phase === "parsing" && "Parsing CSVs"}
+                  {ingest.phase === "validating" && "Validating schema"}
+                  {ingest.phase === "hydrating" && "Hydrating dataset"}
+                </span>
+                <span className="tabular-nums">
+                  {ingest.phase === "parsing"
+                    ? "33%"
+                    : ingest.phase === "validating"
+                    ? "66%"
+                    : "90%"}
+                </span>
+              </div>
+              <div
+                className="h-1.5 w-full overflow-hidden rounded-sm border border-[var(--color-border)]"
+                style={{ background: "var(--color-bg)" }}
+              >
+                <div
+                  data-testid="stage-ingest-progress-fill"
+                  className="h-full transition-all duration-300 ease-out"
+                  style={{
+                    width:
+                      ingest.phase === "parsing"
+                        ? "33%"
+                        : ingest.phase === "validating"
+                        ? "66%"
+                        : "90%",
+                    background: "var(--color-warning)",
+                    boxShadow: "0 0 6px var(--color-warning)",
+                  }}
+                />
+              </div>
+            </div>
           )}
           {ingest.phase === "ready" && (
             <span className="font-mono uppercase tracking-widest text-[var(--color-success)]">

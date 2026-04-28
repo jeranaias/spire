@@ -648,15 +648,34 @@ async def stage_ingest(
         ingest_hash=ingest_hash,
     )
 
+    # Per-file parsed-row counts for the operator-facing hero card.
+    # `_count_csv_rows` is the same helper the parser uses, so the
+    # number we report matches what _do_parse actually consumed.
+    header_rows = _count_csv_rows(header_text)
+    sr_parts_rows = _count_csv_rows(sr_parts_text)
+    due_in_rows = _count_csv_rows(due_in_text)
+
     return {
         "ok": True,
         "ingest_hash": ingest_hash,
         "elapsed_ms": int(elapsed * 1000),
         "actor": {"role": actor_role, "dodid": actor_dodid},
         "source_files": {
-            "header": {"name": header.filename, "bytes": len(header_bytes)},
-            "sr_parts": {"name": sr_parts.filename, "bytes": len(sr_parts_bytes)},
-            "due_in": {"name": due_in.filename, "bytes": len(due_in_bytes)},
+            "header": {
+                "name": header.filename,
+                "bytes": len(header_bytes),
+                "rows_parsed": header_rows,
+            },
+            "sr_parts": {
+                "name": sr_parts.filename,
+                "bytes": len(sr_parts_bytes),
+                "rows_parsed": sr_parts_rows,
+            },
+            "due_in": {
+                "name": due_in.filename,
+                "bytes": len(due_in_bytes),
+                "rows_parsed": due_in_rows,
+            },
         },
         "counts": {
             "units": len(new_ds.units),

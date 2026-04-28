@@ -837,7 +837,10 @@ export interface StageIngestResult {
   ingest_hash: string;
   elapsed_ms: number;
   actor: { role: string; dodid: string | null };
-  source_files: Record<"header" | "sr_parts" | "due_in", { name: string; bytes: number }>;
+  source_files: Record<
+    "header" | "sr_parts" | "due_in",
+    { name: string; bytes: number; rows_parsed: number }
+  >;
   counts: DatasetStatus["counts"];
   ingest_report: {
     rows_total: number;
