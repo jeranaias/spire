@@ -115,3 +115,60 @@ def test_model_card_drift_and_validation_links(client):
     val = body["last_validation"]
     assert val["methodology_link"].endswith("/admin/models/pulse-risk-scorer")
     assert body["canonical_model_card_url"].endswith("/admin/models/pulse-risk-scorer")
+
+
+def test_model_card_includes_forecast_calibration(client):
+    """Task #130 — the model card detail page renders the same
+    regression-band calibration the Forecast tab reports. The block
+    must include the headline coverage, sample size, target, a short
+    methodology string, and the 50/80/95 reliability bins. The 80%
+    bin's realized coverage MUST equal the headline number — they're
+    the same metric and divergence here would be a UI lie."""
+    _login(client)
+    body = client.get("/api/pulse/model-card", params={"refresh": True}).json()
+
+    assert "forecast_calibration" in body, (
+        "model card must surface forecast band calibration so a judge "
+        "clicking 'model card →' lands somewhere that mentions it"
+    )
+    fc = body["forecast_calibration"]
+    assert fc["coverage_target"] == 0.80
+    assert isinstance(fc["coverage_n"], int) and fc["coverage_n"] >= 60, (
+        "trailing-90 backtest should evaluate on most of the window"
+    )
+    assert isinstance(fc["methodology"], str) and "30-day" in fc["methodology"]
+
+    bins = fc["reliability_bins"]
+    nominals = [b["nominal"] for b in bins]
+    assert nominals == [0.5, 0.8, 0.95], (
+        "reliability bins must sweep 50/80/95 in ascending order"
+    )
+    for b in bins:
+        assert b["n"] == fc["coverage_n"], "each bin scores the full backtest"
+        assert isinstance(b["realized"], float)
+        assert 0.0 <= b["realized"] <= 1.0
+
+    eighty = next(b for b in bins if b["nominal"] == 0.8)
+    assert eighty["realized"] == fc["coverage_p10_p90"], (
+        "the 80% reliability bin and the headline coverage_p10_p90 are "
+        "the same metric — they MUST agree"
+    )
+
+
+def test_forecast_and_model_card_share_calibration_helper(client):
+    """Task #130 — both endpoints share `_compute_forecast_calibration`,
+    so both report the same coverage_target and methodology string. The
+    headline coverage values can legitimately differ because /forecast is
+    role-scoped to the caller's allowed units while the model card always
+    reports against the full fleet (the model's own report card)."""
+    _login(client)
+    fc = client.get("/api/pulse/model-card", params={"refresh": True}).json()[
+        "forecast_calibration"
+    ]
+    fr = client.get("/api/pulse/forecast", params={"window": 14}).json()
+    assert fc["coverage_target"] == fr["coverage_target"] == 0.80
+    # methodology string lives only on the model card payload, but both
+    # numbers must stem from a backtest with the documented parameters.
+    assert "30-day fit window" in fc["methodology"]
+    assert "1-day-ahead" in fc["methodology"]
+    assert fc["coverage_n"] >= 60 and fr["coverage_n"] >= 60

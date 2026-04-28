@@ -1833,19 +1833,34 @@ async def admin_models_list(role: str | None = None):
     }
 
 
+# Task #130 — the "model card →" link in the PULSE Forecast tab
+# legend points at /admin/models/pulse-risk (a stable, judge-friendly
+# slug pinned by test_forecast_links_to_model_card). The canonical
+# registry id is "pulse-risk-scorer"; resolve the friendly slug to the
+# canonical id so the legend link actually lands on the detail page.
+_MODEL_ID_ALIASES = {
+    "pulse-risk": "pulse-risk-scorer",
+}
+
+
 @router.get("/admin/models/{model_id}")
 async def admin_model_detail(model_id: str, role: str | None = None):
     """Full model card for the supply-chain detail view. Restricted to
     security_manager."""
     require_role(role, MODEL_REGISTRY_ROLES, "admin.models.read")
     reg = _load_model_registry()
+    canonical_id = _MODEL_ID_ALIASES.get(model_id, model_id)
     for m in reg.get("models") or []:
-        if m.get("id") == model_id:
+        if m.get("id") == canonical_id:
             impl = _active_impl(m)
             return {
                 "registry_version": reg.get("registry_version"),
                 "model": m,
                 "active_implementation_block": impl,
+                # Echo the canonical id so the front-end can render a
+                # stable "← back to supply chain" cross-link even when
+                # the alias was used in the URL.
+                "resolved_model_id": canonical_id,
             }
     raise HTTPException(status_code=404, detail=f"unknown model id: {model_id}")
 

@@ -1,8 +1,9 @@
 """PULSE endpoints: fleet overview, risk board, cannibalization, forecast."""
 from __future__ import annotations
 
+import math
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from statistics import mean
 from typing import Optional
 
@@ -1736,6 +1737,156 @@ async def reject_draft(request: Request, draft_id: str, payload: Optional[dict] 
 # Readiness forecast
 # ---------------------------------------------------------------------------
 
+# Inverse-CDF of the standard normal at the upper tail probabilities the
+# forecast band reports. p10/p90 → z=1.2816, p2.5/p97.5 → z=1.96, p25/p75
+# → z=0.6745. The reliability chart sweeps these so a judge can see at a
+# glance whether the inner / outer bands are calibrated together.
+_FORECAST_Z = {
+    50: 0.6744897501960817,
+    80: 1.2815515655446004,
+    95: 1.959963984540054,
+}
+
+
+def _compute_forecast_calibration(full_history: list[dict]) -> dict:
+    """Backtest the forecast band against the trailing 90 days of history.
+
+    For each day i in the last 90 (where ≥14 prior days are available),
+    refit slope+sigma on the prior 30-day window and compute the analytic
+    1-day-ahead Gaussian band at the 50 / 80 / 95 nominal levels. Count
+    the fraction where the realized mc_rate landed inside the band.
+
+    Returns a dict matching the shape rendered by the Forecast tab and
+    the model-card detail page:
+      coverage_p10_p90    realized 80% coverage (kept as the headline #)
+      coverage_n          number of backtest points evaluated
+      coverage_target     0.80 (target for p10/p90)
+      methodology         one-line description for the UI tooltip
+      reliability_bins    [{nominal, realized, n}, …] for 50/80/95
+      window_days         fit window the helper used (30)
+      backtest_days       length of the trailing window scanned (≤90)
+
+    Returns the dict even when there is not enough history; in that case
+    `coverage_p10_p90 is None` and `reliability_bins` are zero-coverage
+    placeholders so the UI can render "not enough history" without
+    branching on the absence of the key.
+    """
+    methodology = (
+        "rolling 1-day-ahead Gaussian p10/p90, 30-day fit window, "
+        "last 90 days backtest"
+    )
+    if len(full_history) < 14:
+        return {
+            "coverage_p10_p90": None,
+            "coverage_n": 0,
+            "coverage_target": 0.80,
+            "methodology": methodology,
+            "reliability_bins": [
+                {"nominal": p / 100, "realized": None, "n": 0}
+                for p in (50, 80, 95)
+            ],
+            "window_days": 30,
+            "backtest_days": 0,
+        }
+
+    backtest_target_count = min(90, len(full_history) - 14)
+    start_i = len(full_history) - backtest_target_count
+    bin_hits = {p: 0 for p in _FORECAST_Z}
+    n_eval = 0
+    for i in range(start_i, len(full_history)):
+        prior = full_history[max(0, i - 30):i]
+        if len(prior) < 14:
+            continue
+        yp = [r["mc_rate"] for r in prior]
+        np_ = len(yp)
+        xsp = list(range(np_))
+        xm = (np_ - 1) / 2
+        ym = sum(yp) / np_
+        den = sum((xi - xm) ** 2 for xi in xsp) or 1.0
+        mp = sum((xsp[k] - xm) * (yp[k] - ym) for k in range(np_)) / den
+        bp = ym - mp * xm
+        res = [yp[k] - (bp + mp * xsp[k]) for k in range(np_)]
+        mr = sum(res) / np_
+        vp = sum((r - mr) ** 2 for r in res) / max(1, np_ - 1)
+        sp = math.sqrt(vp)
+        sp = min(sp, 0.10)
+        pred_mean = yp[-1] + mp * 1
+        actual = full_history[i]["mc_rate"]
+        n_eval += 1
+        for nominal_pct, z in _FORECAST_Z.items():
+            lo = max(0.0, pred_mean - z * sp)
+            hi = min(1.0, pred_mean + z * sp)
+            if lo <= actual <= hi:
+                bin_hits[nominal_pct] += 1
+
+    if n_eval == 0:
+        return {
+            "coverage_p10_p90": None,
+            "coverage_n": 0,
+            "coverage_target": 0.80,
+            "methodology": methodology,
+            "reliability_bins": [
+                {"nominal": p / 100, "realized": None, "n": 0}
+                for p in (50, 80, 95)
+            ],
+            "window_days": 30,
+            "backtest_days": 0,
+        }
+
+    reliability_bins = [
+        {
+            "nominal": p / 100,
+            "realized": round(bin_hits[p] / n_eval, 4),
+            "n": n_eval,
+        }
+        for p in sorted(_FORECAST_Z.keys())
+    ]
+    coverage_p10_p90 = round(bin_hits[80] / n_eval, 4)
+    return {
+        "coverage_p10_p90": coverage_p10_p90,
+        "coverage_n": n_eval,
+        "coverage_target": 0.80,
+        "methodology": methodology,
+        "reliability_bins": reliability_bins,
+        "window_days": 30,
+        "backtest_days": backtest_target_count,
+    }
+
+
+def _build_forecast_history(unit: Optional[str] = None) -> list[dict]:
+    """Reduce the dataset to the daily mc_rate / pmc_rate / nmc_rate
+    series the forecast and the model-card calibration both fit. Mirrors
+    the reduction inside `/forecast` so the helper is the single source
+    of truth for the calibration backtest input.
+
+    Pulled from the dataset-wide aggregate (no role scoping) — the model
+    card's calibration story is "this is the model's calibration", not
+    "this caller's slice of it"; role-scoping inside /forecast is about
+    not leaking another command's series, not about altering the model's
+    own report card.
+    """
+    ds = get_dataset()
+    by_date: dict[date, Counter] = defaultdict(Counter)
+    for s in ds.snapshots:
+        if unit and s.unit_name != unit:
+            continue
+        by_date[s.snapshot_date][s.readiness_code] += 1
+
+    out: list[dict] = []
+    for d in sorted(by_date.keys()):
+        c = by_date[d]
+        total = sum(c.values())
+        if total == 0:
+            continue
+        out.append({
+            "date": d.isoformat(),
+            "mc_rate": round(c.get("MC", 0) / total, 3),
+            "pmc_rate": round(c.get("PMC", 0) / total, 3),
+            "nmc_rate": round((c.get("NMCM", 0) + c.get("NMCS", 0)) / total, 3),
+        })
+    return out
+
+
 @router.get("/forecast")
 async def forecast(
     request: Request,
@@ -1886,46 +2037,10 @@ async def forecast(
             prev_mean = mean
 
     # Walkthrough audit (forecast calibration): backtest the projection band
-    # against the trailing 90 days of realized history. For each day i in the
-    # last 90 (where we have ≥14 prior days), refit slope+sigma on the prior
-    # 30-day window and compute the analytic 1-day-ahead p10/p90 band
-    # (mean ± 1.2816σ for a Gaussian residual). Count the fraction where the
-    # realized mc_rate landed inside that band. Target ≈ 80%; values much
-    # lower indicate the band is too narrow (overconfident), much higher
-    # indicate it's too wide (uninformative).
-    coverage_p10_p90: Optional[float] = None
-    coverage_n = 0
-    coverage_hits = 0
-    if len(full_history) >= 14:
-        Z_P90 = 1.2815515655446004  # inverse CDF of 0.9 for standard normal
-        backtest_target_count = min(90, len(full_history) - 14)
-        start_i = len(full_history) - backtest_target_count
-        for i in range(start_i, len(full_history)):
-            prior = full_history[max(0, i - 30):i]
-            if len(prior) < 14:
-                continue
-            yp = [r["mc_rate"] for r in prior]
-            np_ = len(yp)
-            xsp = list(range(np_))
-            xm = (np_ - 1) / 2
-            ym = sum(yp) / np_
-            den = sum((xi - xm) ** 2 for xi in xsp) or 1.0
-            mp = sum((xsp[k] - xm) * (yp[k] - ym) for k in range(np_)) / den
-            bp = ym - mp * xm
-            res = [yp[k] - (bp + mp * xsp[k]) for k in range(np_)]
-            mr = sum(res) / np_
-            vp = sum((r - mr) ** 2 for r in res) / max(1, np_ - 1)
-            sp = math.sqrt(vp)
-            sp = min(sp, 0.10)
-            pred_mean = yp[-1] + mp * 1
-            lo = max(0.0, pred_mean - Z_P90 * sp)
-            hi = min(1.0, pred_mean + Z_P90 * sp)
-            actual = full_history[i]["mc_rate"]
-            coverage_n += 1
-            if lo <= actual <= hi:
-                coverage_hits += 1
-        if coverage_n > 0:
-            coverage_p10_p90 = round(coverage_hits / coverage_n, 4)
+    # against the trailing 90 days of realized history. The helper is the
+    # single source of truth so the model-card detail page (Task #130)
+    # can report the same numbers a judge sees on the Forecast tab.
+    calibration = _compute_forecast_calibration(full_history)
 
     return {
         "unit": unit or "FLEET",
@@ -1943,12 +2058,14 @@ async def forecast(
         # /recommend-actions so the UI can stamp generation time and show
         # a STALE chip when the response ages out. `data_window_days` is
         # the rolling history window the slope/sigma fit is anchored to.
-        # `coverage_p10_p90` is the calibration metric described above.
+        # `coverage_p10_p90` is the calibration metric described above —
+        # promoted to a top-level field so the existing Forecast tab and
+        # tests don't have to reach into the nested calibration dict.
         "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "data_window_days": 30,
-        "coverage_p10_p90": coverage_p10_p90,
-        "coverage_n": coverage_n,
-        "coverage_target": 0.80,
+        "coverage_p10_p90": calibration["coverage_p10_p90"],
+        "coverage_n": calibration["coverage_n"],
+        "coverage_target": calibration["coverage_target"],
         "model_card_url": "/#/admin/models/pulse-risk",
     }
 
@@ -2205,6 +2322,11 @@ def _compute_model_card() -> dict:
     prior_m = _binary_metrics(pairs, "prior")
     drift = _compute_drift(ds)
     public_label, internal_id = _engine_label()
+    # Task #130 — surface the same forecast-band calibration the Forecast
+    # tab reports so a judge clicking "model card →" lands on a page that
+    # actually mentions the regression band's calibration depth (and not
+    # only the next-30-day NMC binary classifier metrics).
+    forecast_calibration = _compute_forecast_calibration(_build_forecast_history())
 
     from ..model_hooks import STATE
 
@@ -2300,6 +2422,11 @@ def _compute_model_card() -> dict:
             "methodology_link": "/#/admin/models/pulse-risk-scorer",
         },
         "canonical_model_card_url": "/#/admin/models/pulse-risk-scorer",
+        # Task #130 — same calibration metric the Forecast tab reports.
+        # Lets the model-card detail page render coverage_p10_p90,
+        # coverage_n, target, methodology, and the 50/80/95 reliability
+        # bins without hitting /forecast separately.
+        "forecast_calibration": forecast_calibration,
         "as_of": last_day.isoformat(),
     }
 

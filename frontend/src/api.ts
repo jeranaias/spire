@@ -1451,6 +1451,10 @@ export interface ModelRegistryDetailResponse {
   registry_version?: string;
   model: ModelRegistryDetail;
   active_implementation_block: ModelImplementation | null;
+  // Task #130 — backend resolves friendly slugs (e.g. "pulse-risk")
+  // to the canonical registry id ("pulse-risk-scorer") so the legend
+  // link in PULSE Forecast lands on a real detail page.
+  resolved_model_id?: string;
 }
 
 export interface FeedbackRecord {
@@ -1845,6 +1849,19 @@ export interface ModelCard {
     methodology_link: string;
   };
   canonical_model_card_url: string;
+  // Task #130 — same calibration metric the Forecast tab reports.
+  // Lets the model-card detail page render the regression-band coverage
+  // (and its 50/80/95 reliability bins) without a second round-trip
+  // to /forecast.
+  forecast_calibration?: {
+    coverage_p10_p90: number | null;
+    coverage_n: number;
+    coverage_target: number;
+    methodology: string;
+    reliability_bins: { nominal: number; realized: number | null; n: number }[];
+    window_days: number;
+    backtest_days: number;
+  };
   as_of: string;
 }
 

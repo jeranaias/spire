@@ -8,9 +8,11 @@
  * Restricted to security_manager. Inline guard mirrors the backend
  * MODEL_REGISTRY_ROLES gate.
  */
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   api,
+  type ModelCard,
   type ModelImplementation,
 } from "../../api";
 import { useSpireStore } from "../../state/store";
@@ -19,6 +21,13 @@ import { Button, ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
 import { useRegistryFetch } from "./useRegistryFetch";
 import { DdilFreshnessBanner, FreshnessHeader, RefreshErrorBanner } from "./RegistryFreshness";
+
+// Task #130 — when this detail page is the PULSE risk scorer, also
+// fetch the in-PULSE model card so we can surface the regression-band
+// calibration (`coverage_p10_p90`, reliability bins) the Forecast tab
+// reports. Both `pulse-risk` (legend slug) and `pulse-risk-scorer`
+// (canonical id) resolve here; either should render the panel.
+const PULSE_RISK_MODEL_IDS = new Set(["pulse-risk", "pulse-risk-scorer"]);
 
 export function ModelDetailView() {
   const role = useSpireStore((s) => s.role);
@@ -50,6 +59,41 @@ export function ModelDetailView() {
     () => api.system.adminModelDetail(modelId),
     `model:${modelId}`,
   );
+
+  // Task #130 — additionally fetch the in-PULSE model card when this
+  // detail page is the PULSE risk scorer, so we can show the same
+  // forecast-band calibration the Forecast tab reports. Failure here
+  // is non-fatal: if /pulse/model-card is down the registry data
+  // still renders, the calibration panel just falls back to a hint
+  // pointing at the Forecast tab.
+  const isPulseRisk = PULSE_RISK_MODEL_IDS.has(modelId);
+  const [pulseCard, setPulseCard] = useState<ModelCard | null>(null);
+  const [pulseCardError, setPulseCardError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isPulseRisk) {
+      setPulseCard(null);
+      setPulseCardError(null);
+      return;
+    }
+    let cancelled = false;
+    setPulseCard(null);
+    setPulseCardError(null);
+    api.pulse
+      .modelCard()
+      .then((c) => {
+        if (!cancelled) setPulseCard(c);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setPulseCardError(
+            e instanceof Error ? e.message : "calibration unavailable",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPulseRisk, modelId]);
 
   if (error && !data) {
     return (
@@ -124,6 +168,10 @@ export function ModelDetailView() {
       )}
 
       {active && <ImplementationCard impl={active} headline="Active" />}
+
+      {isPulseRisk && (
+        <ForecastCalibrationPanel card={pulseCard} error={pulseCardError} />
+      )}
 
       {alternates.length > 0 && (
         <div className="mt-4">
@@ -408,4 +456,191 @@ function formatDollars(v: number): string {
   if (v === 0) return "$0.00";
   if (v < 0.01) return `$${v.toFixed(5)}`;
   return `$${v.toFixed(4)}`;
+}
+
+/**
+ * Task #130 — render the same calibration metric the Forecast tab
+ * shows (`coverage_p10_p90`, `coverage_n`, target, methodology) plus a
+ * compact 50/80/95 reliability table so a judge clicking
+ * "model card →" lands somewhere that actually mentions the
+ * regression-band depth.
+ *
+ * Renders three states honestly:
+ *   - loading   (PULSE model card hasn't returned yet)
+ *   - error     (call failed — surface the message + Forecast cross-link)
+ *   - data      (full panel: headline coverage tile + reliability table)
+ */
+function ForecastCalibrationPanel({
+  card,
+  error,
+}: {
+  card: ModelCard | null;
+  error: string | null;
+}) {
+  const fc = card?.forecast_calibration;
+  return (
+    <div className="mt-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
+          Forecast band calibration
+        </div>
+        <Link
+          to="/pulse/forecast"
+          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest hover:text-[var(--color-primary)]"
+        >
+          PULSE · Forecast →
+        </Link>
+      </div>
+
+      {!card && !error && (
+        <div className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+          Loading calibration …
+        </div>
+      )}
+
+      {error && !card && (
+        <div className="font-mono text-xs tracking-wider text-[var(--color-warning)]">
+          Calibration unavailable · {error}. The same metric is rendered
+          live on{" "}
+          <Link
+            to="/pulse/forecast"
+            className="text-[var(--color-primary)] underline-offset-2 hover:underline"
+          >
+            PULSE · Forecast
+          </Link>
+          .
+        </div>
+      )}
+
+      {card && fc && <CalibrationBody fc={fc} />}
+
+      {card && !fc && (
+        <div className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+          Backend did not report forecast_calibration on this card. Refresh
+          the page or check{" "}
+          <Link
+            to="/pulse/forecast"
+            className="text-[var(--color-primary)] underline-offset-2 hover:underline"
+          >
+            PULSE · Forecast
+          </Link>{" "}
+          for the live number.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalibrationBody({
+  fc,
+}: {
+  fc: NonNullable<ModelCard["forecast_calibration"]>;
+}) {
+  const cov = fc.coverage_p10_p90;
+  const target = fc.coverage_target ?? 0.8;
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+        <div className="mb-2 font-mono text-[11px] uppercase text-[var(--color-text-muted)] tracking-widest">
+          Headline coverage (p10 / p90)
+        </div>
+        {cov == null ? (
+          <div className="font-mono text-xs tracking-wider text-[var(--color-text-muted)]">
+            Not enough history (need ≥14 days) — target{" "}
+            {(target * 100).toFixed(0)}%
+          </div>
+        ) : (
+          <div className="flex items-baseline gap-3">
+            <span
+              className="font-mono text-2xl font-semibold tabular-nums"
+              style={{ color: coverageColor(cov, target) }}
+            >
+              {(cov * 100).toFixed(1)}%
+            </span>
+            <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+              of last {fc.coverage_n} days inside band · target{" "}
+              {(target * 100).toFixed(0)}%
+            </span>
+          </div>
+        )}
+        <div className="mt-3 font-mono text-[11px] leading-snug text-[var(--color-text-muted)] tracking-wide">
+          Method · {fc.methodology}
+        </div>
+      </div>
+
+      <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+        <div className="mb-2 font-mono text-[11px] uppercase text-[var(--color-text-muted)] tracking-widest">
+          Reliability — predicted vs realized coverage
+        </div>
+        <table className="w-full font-mono text-xs">
+          <thead>
+            <tr className="text-left text-[var(--color-text-muted)]">
+              <th className="px-1 py-0.5 font-normal uppercase tracking-widest">
+                Nominal
+              </th>
+              <th className="px-1 py-0.5 text-right font-normal uppercase tracking-widest">
+                Realized
+              </th>
+              <th className="px-1 py-0.5 text-right font-normal uppercase tracking-widest">
+                Δ
+              </th>
+              <th className="px-1 py-0.5 text-right font-normal uppercase tracking-widest">
+                n
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {fc.reliability_bins.map((b) => {
+              const realized = b.realized;
+              const delta =
+                realized != null ? realized - b.nominal : null;
+              return (
+                <tr
+                  key={b.nominal}
+                  className="border-t border-[var(--color-border)]"
+                >
+                  <td className="px-1 py-1 tabular-nums text-[var(--color-text-secondary)]">
+                    {(b.nominal * 100).toFixed(0)}%
+                  </td>
+                  <td
+                    className="px-1 py-1 text-right tabular-nums"
+                    style={{
+                      color:
+                        realized != null
+                          ? coverageColor(realized, b.nominal)
+                          : "var(--color-text-muted)",
+                    }}
+                  >
+                    {realized != null
+                      ? `${(realized * 100).toFixed(1)}%`
+                      : "—"}
+                  </td>
+                  <td className="px-1 py-1 text-right tabular-nums text-[var(--color-text-muted)]">
+                    {delta != null
+                      ? `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}pt`
+                      : "—"}
+                  </td>
+                  <td className="px-1 py-1 text-right tabular-nums text-[var(--color-text-muted)]">
+                    {b.n}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="mt-3 font-mono text-[11px] leading-snug text-[var(--color-text-muted)] tracking-wide">
+          On-target if realized lands within ±7pt of nominal. The 80%
+          row mirrors the headline reading from the Forecast tab.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function coverageColor(realized: number, nominal: number): string {
+  const delta = Math.abs(realized - nominal);
+  if (delta <= 0.07) return "var(--color-success)";
+  if (delta <= 0.15) return "var(--color-warning)";
+  return "var(--color-danger)";
 }
