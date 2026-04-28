@@ -269,7 +269,12 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
     if (!open) return;
     if (allCertUsers !== null && !certFetchFailed) return;
     let cancelled = false;
-    api.auth.users()
+    // Use the authenticated `directory()` variant — the unauthenticated
+    // `users()` endpoint strips role/billet/last_name (Task #27 / F1)
+    // and the swap menu needs those to render the role label and the
+    // post-swap toast. The session cookie is present here, so the
+    // backend returns the full `AuthUser` records.
+    api.auth.directory()
       .then((r) => {
         if (cancelled) return;
         setAllCertUsers(r.users);

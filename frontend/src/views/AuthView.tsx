@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { api, type AuthUser } from "../api";
-import { ROLE_LABELS, useSpireStore } from "../state/store";
+import { api, type PublicAuthUser } from "../api";
+import { useSpireStore } from "../state/store";
 import { Button, Pressable, ErrorState, EmptyState, useIdempotentAction } from "../components/ui";
 
 // CAC/PIV cert-selection splash. No app chrome — this surface IS the
@@ -15,7 +15,7 @@ export function AuthView() {
   const signIn = useSpireStore((s) => s.signIn);
   const currentUser = useSpireStore((s) => s.currentUser);
 
-  const [users, setUsers] = useState<AuthUser[] | null>(null);
+  const [users, setUsers] = useState<PublicAuthUser[] | null>(null);
   const [usersErr, setUsersErr] = useState<string | null>(null);
   const [selectedDodid, setSelectedDodid] = useState<string | null>(null);
   const [pin, setPin] = useState("");
@@ -311,16 +311,22 @@ function CertCard({
   selected,
   onPick,
 }: {
-  user: AuthUser;
+  user: PublicAuthUser;
   selected: boolean;
   onPick: () => void;
 }) {
-  const role = user.role;
+  // OPSEC: cert tile renders only the fields a real CAC reader surfaces
+  // pre-sign-in — name, rank, branch, masked DODID, cert metadata. We
+  // deliberately omit clearance, role, billet, unit, and parent_command
+  // here so a judge or passer-by glancing at the splash cannot infer
+  // who holds TS//SCI vs SECRET, who's the security manager, etc.
+  // Those fields are stripped server-side in `backend/auth.list_users`
+  // for unauthenticated callers; this UI matches that contract.
   return (
     <Pressable
       onClick={onPick}
       aria-pressed={selected}
-      aria-label={`Select certificate for ${user.name}, ${user.billet}`}
+      aria-label={`Select certificate for ${user.name}`}
       className="group !min-h-0 text-left transition-transform"
       style={{ transform: selected ? "translateY(-1px)" : undefined }}
     >
@@ -359,20 +365,13 @@ function CertCard({
               {user.branch}
             </div>
           </div>
-          <div className="mt-0.5 truncate font-mono text-xs uppercase tracking-wider text-[var(--color-text-secondary)]">
-            {user.billet} · {user.unit}
-          </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] tracking-wider text-[var(--color-text-muted)]">
             <span>DODID {maskDodid(user.dodid)}</span>
-            <span aria-hidden>·</span>
-            <span>{user.clearance}</span>
-            <span aria-hidden>·</span>
-            <span>{ROLE_LABELS[role]}</span>
           </div>
           <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--color-border)] pt-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            <span>{user.cert_issuer ?? "DOD ID CA"}</span>
-            <span>SN {user.cert_serial ?? "—"}</span>
-            <span>EXP {user.cert_expires ?? "—"}</span>
+            <span className="truncate">{user.cert_issuer ?? "DOD ID CA"}</span>
+            <span className="truncate">SN {user.cert_serial ?? "—"}</span>
+            <span className="truncate">EXP {user.cert_expires ?? "—"}</span>
           </div>
         </div>
         {selected && (
@@ -394,10 +393,15 @@ function CertSkeleton() {
   );
 }
 
-// Mask DODID like the real CAC reader does — first 3, last 2 visible.
+// Mask DODID the same way DEERS / a real CAC reader does on the
+// cert-selection screen — last 4 visible, everything else masked. The
+// previous "first 3, last 2" mask leaked far more entropy than the
+// regulation-standard "last 4" pattern operators recognize from CACs,
+// LES forms, and PIV certs. Task #27 / auth-cac-splash F6.
 function maskDodid(dodid: string): string {
-  if (!dodid || dodid.length < 5) return dodid;
-  return `${dodid.slice(0, 3)}•••${dodid.slice(-2)}`;
+  if (!dodid) return dodid;
+  if (dodid.length <= 4) return dodid;
+  return `${"•".repeat(dodid.length - 4)}${dodid.slice(-4)}`;
 }
 
 function SpireObelisk() {
