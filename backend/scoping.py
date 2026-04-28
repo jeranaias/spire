@@ -100,7 +100,7 @@ MODEL_REGISTRY_ROLES     = frozenset({"security_manager"})
 PULSE_VIEW_ROLES   = frozenset({"maintenance_chief", "g4", "mef_commander"})
 BASTION_VIEW_ROLES = frozenset({"mef_commander", "g4", "security_manager", "maintenance_chief"})
 ADMIN_VIEW_ROLES   = frozenset({"security_manager"})
-SENTRY_VIEW_ROLES  = frozenset({"data_custodian", "security_manager"})
+SENTRY_VIEW_ROLES  = frozenset({"data_custodian", "security_manager", "maintenance_chief", "g4"})
 
 VIEW_ROLES: dict[str, frozenset[str]] = {
     "/pulse":   PULSE_VIEW_ROLES,

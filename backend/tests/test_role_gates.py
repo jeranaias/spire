@@ -49,7 +49,7 @@ from backend.state import get_dataset
 # allowlist as `/admin` itself; they are listed explicitly so a future
 # split (e.g. broadening `/admin/models` to a second role) is caught.
 EXPECTED_VIEW_SCOPE: dict[str, frozenset[str]] = {
-    "/sentry":       frozenset({"data_custodian", "security_manager"}),
+    "/sentry":       frozenset({"data_custodian", "security_manager", "maintenance_chief", "g4"}),
     "/pulse":        frozenset({"maintenance_chief", "g4", "mef_commander"}),
     "/bastion":      frozenset({"mef_commander", "g4", "security_manager", "maintenance_chief"}),
     "/admin":        frozenset({"security_manager"}),

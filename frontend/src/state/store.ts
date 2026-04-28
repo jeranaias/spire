@@ -242,7 +242,17 @@ export const ROLE_DEFAULT_VIEW: Record<Role, string> = {
 // overlay's role-scope panel didn't list it as a view at all (the row
 // for ADMIN never rendered, even for the role that owns it).
 export const VIEW_SCOPE: Record<string, Role[]> = {
-  "/sentry":  ["data_custodian", "security_manager"],
+  // Task #175 — unit-scoped operator roles (maintenance_chief, g4) are
+  // admitted to /sentry so the backend's per-billet record scoping
+  // (Task #67: job_status / review_queue filtered to the operator's
+  // unit and parents, e.g. Maintenance Chief → CLB-6) becomes
+  // user-visible. Without these roles in scope the "Showing N of M
+  // records · <Unit> only · scoped to your billet" footer in the
+  // Processing tab never renders for the personas it was built for —
+  // the FE route guard bounces them to ROLE_DEFAULT_VIEW first.
+  // Per-tab write authority (Mark / Export / Coalition) is still
+  // gated to data_custodian / security_manager inside each tab.
+  "/sentry":  ["data_custodian", "security_manager", "maintenance_chief", "g4"],
   "/pulse":   ["maintenance_chief", "g4", "mef_commander"],
   "/bastion": ["mef_commander", "g4", "security_manager", "maintenance_chief"],
   "/admin":   ["security_manager"],
