@@ -206,6 +206,15 @@ def _class_ix_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict]
     age regardless of mission impact, which is how `PAINT, CARC GREEN`
     landed in the Hayes lead slot. Routine reqs are still surfaced
     deeper in PULSE — they're just not bridge-grade.
+
+    Per Task #120 each surviving aggregate also exposes the breakdown
+    that justifies its place on the bridge — `nmcs_sr_count` /
+    `pmc_sr_count` (Deadlined vs Degraded SRs feeding this NSN) and
+    `max_age_days` (oldest open requisition) — so the front-end chip
+    can answer "why is this part here?" without a second round-trip.
+    Counts are scoped to the same `allowed` units that gate the row
+    itself, so post-scope filters (Hayes / Reyes / Kowalski / Park)
+    see counts that match what their unit produced.
     """
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
     by_nsn: dict[str, dict] = {}
@@ -213,7 +222,9 @@ def _class_ix_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict]
     for sr in ds.srs:
         if allowed is not None and sr.unit_name not in allowed:
             continue
-        sr_is_mission_essential = sr.condition in _MISSION_ESSENTIAL_SR_CONDITIONS
+        is_nmcs = sr.condition == "Deadlined"
+        is_pmc = sr.condition == "Degraded"
+        sr_is_mission_essential = is_nmcs or is_pmc
         for r in sr.requisitions:
             # Open requisitions only — anything received before the last
             # dataset day is no longer a pending shortage.
@@ -232,11 +243,23 @@ def _class_ix_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict]
                 # NMCS-blocking req is enough to put the part on the
                 # bridge.
                 "mission_essential": False,
+                # Per-SR sets so we count distinct mission-essential SRs
+                # (not requisition line-items) backing this NSN.
+                "nmcs_srs": set(),
+                "pmc_srs": set(),
             })
             entry["units"].add(sr.unit_name)
             entry["open_count"] += 1
             if sr_is_mission_essential:
                 entry["mission_essential"] = True
+                # Sets are naturally idempotent: a single SR with several
+                # line-items for the same NSN still counts as one SR in
+                # the chip's tally, even if it shows up multiple times
+                # in the inner requisitions loop.
+                if is_nmcs:
+                    entry["nmcs_srs"].add(sr.sr_number)
+                elif is_pmc:
+                    entry["pmc_srs"].add(sr.sr_number)
             age = (today.date() - ordered).days if ordered else 0
             if age > entry["max_age_days"]:
                 entry["max_age_days"] = age
@@ -270,6 +293,13 @@ def _class_ix_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict]
             "open_requisitions": e["open_count"],
             "hours_to_stockout": int(lead_hours),
             "drill_unit": next(iter(e["units"]), None) if e["units"] else None,
+            # Justification fields — feed the bridge tile's "why is this
+            # row here?" chip. NMCS = Deadlined SR count, PMC = Degraded
+            # SR count, max_age_days = oldest open requisition (drives
+            # the hours-to-stockout calc). Counts are SR-distinct.
+            "nmcs_sr_count": len(e["nmcs_srs"]),
+            "pmc_sr_count": len(e["pmc_srs"]),
+            "max_age_days": e["max_age_days"],
         })
     items.sort(key=lambda x: x["hours_to_stockout"])
     return items[:top]

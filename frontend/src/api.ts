@@ -2251,6 +2251,12 @@ export interface DecisionBridgeShortage {
   open_requisitions?: number;
   hours_to_stockout: number;
   drill_unit: string | null;
+  // Class IX justification — populated only for class_ix rows.
+  // Tells the operator *why* an NSN landed on the bridge: the NMCS /
+  // PMC SR counts feeding it and the oldest open requisition's age.
+  nmcs_sr_count?: number;
+  pmc_sr_count?: number;
+  max_age_days?: number;
 }
 
 export interface DecisionBridgeShortages {

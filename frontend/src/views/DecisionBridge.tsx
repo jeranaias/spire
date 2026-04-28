@@ -105,6 +105,64 @@ function stockoutTone(hours: number): string {
   return "var(--color-text-secondary)";
 }
 
+// ---------------------------------------------------------------------------
+// Shortage justification — Task #120.
+//
+// The Forecasted Shortages tile drops non-mission-essential Class IX
+// requisitions before picking the top slot, but a surviving row reads as
+// authoritative without showing why. This helper formats the per-NSN
+// NMCS / PMC SR counts plus the oldest open requisition age into a
+// single-line chip the operator can scan in <1s and trust the row.
+//
+// Returns null when the row has no justification fields (Class VIII /
+// Class III rows are deterministic synth, not requisition-derived).
+// ---------------------------------------------------------------------------
+interface ShortageJustification {
+  /** Visible chip text, e.g. "3 NMCS / 2 PMC SRs · oldest 22d". */
+  text: string;
+  /** Long description for the title attribute / a11y. */
+  title: string;
+  /** Aria-friendly version that expands the abbreviations. */
+  aria: string;
+  /** Tone driven by SR severity mix — NMCS dominant ⇒ danger. */
+  tone: string;
+}
+function shortageJustification(s: DecisionBridgeShortage): ShortageJustification | null {
+  if (s.kind !== "class_ix") return null;
+  const nmcs = s.nmcs_sr_count ?? 0;
+  const pmc = s.pmc_sr_count ?? 0;
+  const oldest = s.max_age_days ?? 0;
+  // No mission-essential SRs and no aged stack → nothing to justify; the
+  // backend filters these out today, but be defensive: better to omit
+  // the chip than to print "0 NMCS / 0 PMC".
+  if (nmcs === 0 && pmc === 0 && oldest === 0) return null;
+  // Build the count fragment. We always include both bands when at
+  // least one is non-zero so the operator can see the mix at a glance
+  // (e.g. "3 NMCS / 0 PMC" reads differently from just "3 NMCS").
+  const countFragment = (nmcs > 0 || pmc > 0)
+    ? `${nmcs} NMCS / ${pmc} PMC SR${nmcs + pmc === 1 ? "" : "s"}`
+    : null;
+  const ageFragment = oldest > 0 ? `oldest ${oldest}d` : null;
+  const text = [countFragment, ageFragment].filter(Boolean).join(" · ");
+  // Tone scale: any NMCS in the mix bumps to danger (a Deadlined asset
+  // is the loudest signal); pure PMC reads as warning; aged-only with
+  // no mission-essential SRs (rare — wouldn't have made it past the
+  // backend filter) reads muted.
+  const tone = nmcs > 0
+    ? "var(--color-danger)"
+    : pmc > 0
+      ? "var(--color-warning)"
+      : "var(--color-text-secondary)";
+  const aria = [
+    nmcs > 0 ? `${nmcs} non-mission-capable supply ${nmcs === 1 ? "request" : "requests"}` : null,
+    pmc > 0 ? `${pmc} partially mission-capable ${pmc === 1 ? "request" : "requests"}` : null,
+    oldest > 0 ? `oldest open requisition ${oldest} days` : null,
+  ].filter(Boolean).join(", ");
+  const title = `Why this part is on the bridge: ${aria || text}. ` +
+    "Click to drill into the requisitions in PULSE.";
+  return { text, title, aria, tone };
+}
+
 /** MC% rate → tone. < 60% = danger, 60-70% = warning, ≥ 70% = success. */
 function mcTone(rate: number): string {
   if (rate < 0.60) return "var(--color-danger)";
@@ -518,7 +576,15 @@ function ShortagesTile({
       setSelectedUnitId(s.drill_unit);
       // Pass the unit through router state, not the URL — keeps unit
       // names out of copy-pasted/share-screened URLs (forecast-leak F-15).
-      nav("/pulse/forecast", { state: { unit: s.drill_unit } });
+      // Task #120 — also pass the NSN when the row carries one so the
+      // PULSE requisition list can land pre-filtered to the same NSN
+      // that the bridge chip just justified.
+      nav("/pulse/forecast", {
+        state: {
+          unit: s.drill_unit,
+          ...(s.nsn ? { nsn: s.nsn } : {}),
+        },
+      });
     } else {
       nav("/pulse/forecast");
     }
@@ -546,11 +612,16 @@ function ShortagesTile({
           {data.shortages.map((s) => {
             const badge = SHORTAGE_BADGE[s.kind];
             const tone = stockoutTone(s.hours_to_stockout);
+            const justification = shortageJustification(s);
             return (
               <li key={`${s.kind}-${s.item}`}>
                 <Pressable
                   onClick={() => drill(s)}
-                  aria-label={`${s.label} ${s.item}${s.drill_unit ? ` · ${s.drill_unit}` : ""} · H+${s.hours_to_stockout}h — open in PULSE forecast`}
+                  aria-label={
+                    `${s.label} ${s.item}${s.drill_unit ? ` · ${s.drill_unit}` : ""} · H+${s.hours_to_stockout}h` +
+                    (justification ? ` · ${justification.aria}` : "") +
+                    (s.nsn ? ` — open requisitions for NSN ${s.nsn} in PULSE` : " — open in PULSE forecast")
+                  }
                   className="flex items-center gap-2 rounded-sm border-l-2 px-2 py-1 hover:bg-[color-mix(in_oklab,var(--color-text)_8%,transparent)]"
                   style={{
                     borderLeftColor: tone,
@@ -572,6 +643,30 @@ function ShortagesTile({
                       {s.drill_unit ?? "—"}
                       {s.open_requisitions ? ` · ${s.open_requisitions} open req` : ""}
                     </div>
+                    {/* Task #120 — justification chip. Tells the operator
+                     *  why this NSN earned its bridge slot (NMCS/PMC SR
+                     *  counts + oldest open req age). The chip is not its
+                     *  own <button> — nested buttons are invalid HTML and
+                     *  the rest of the bridge avoids them. The parent row
+                     *  Pressable already carries the same NSN through its
+                     *  drill (router state), so a click anywhere on the
+                     *  row — chip included — lands on PULSE filtered to
+                     *  this part. */}
+                    {justification ? (
+                      <div
+                        className="mt-0.5 inline-flex max-w-full items-center gap-1 truncate rounded-sm border px-1.5 py-[1px] font-mono text-[10px] uppercase tracking-widest"
+                        style={{
+                          color: justification.tone,
+                          borderColor: `color-mix(in oklab, ${justification.tone} 45%, var(--color-border))`,
+                          background: `color-mix(in oklab, ${justification.tone} 8%, transparent)`,
+                        }}
+                        title={justification.title}
+                        aria-hidden
+                      >
+                        {justification.text}
+                        <span aria-hidden style={{ opacity: 0.7 }}>›</span>
+                      </div>
+                    ) : null}
                   </div>
                   <div
                     className="font-mono text-[12px] font-semibold tabular-nums tracking-wider"
