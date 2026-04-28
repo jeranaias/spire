@@ -1447,7 +1447,20 @@ export interface MarkResult {
     status: "ok" | "warn" | "block";
     issues: string[];
   };
-  audit: { engine: string; timestamp: string };
+  audit: {
+    engine: string;
+    engine_version?: string;
+    timestamp: string;
+    // Chain index returned by the backend's append-only audit table.
+    // Lets the right-pane "Audit trail" panel render the same row id
+    // an investigator sees in the audit-log viewer.
+    chain_index?: number;
+    chain_subject?: string;
+    input_hash?: string;
+    actor_dodid?: string;
+    actor_name?: string;
+    actor_role?: string;
+  };
 }
 
 export interface ExportResult {

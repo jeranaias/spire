@@ -249,12 +249,16 @@ def log(kind: str, *, actor: str = "system", subject_id: Optional[str] = None, p
             "prev_hash": prev_hash,
         }
         self_hash = hashlib.sha256((prev_hash + _canonical(entry)).encode()).hexdigest()
-        c.execute(
+        cur = c.execute(
             "INSERT INTO audit_log(ts, actor, kind, subject_id, payload, prev_hash, self_hash) VALUES (?,?,?,?,?,?,?)",
             (ts, actor, kind, subject_id or "", entry["payload"], prev_hash, self_hash),
         )
+        # `id` is the chain index — the position of this entry in the
+        # append-only audit table. Surfaces in returned dicts so callers can
+        # show "chain entry #N" to operators without a follow-up query.
         return {
-            "ts": ts, "actor": actor, "kind": kind, "subject_id": subject_id or "",
+            "id": cur.lastrowid, "ts": ts, "actor": actor, "kind": kind,
+            "subject_id": subject_id or "",
             "prev_hash": prev_hash, "self_hash": self_hash,
         }
 
