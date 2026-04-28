@@ -208,7 +208,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   // common widths. Marine-shorthand fits without ellipsis; the unit
   // assignment surfaces in the role brief and on the StatusStrip.
   maintenance_chief: "Maint Chief",
-  g4: "G-4 / 2d MLG",
+  g4: "G-4 / 3d MLR",
   mef_commander: "MEF Commander",
   data_custodian: "Data Custodian",
   security_manager: "Security Mgr",

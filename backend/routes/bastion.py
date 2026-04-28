@@ -796,17 +796,17 @@ async def simulate_thermalhawk_detection(
     ds_unit_names = {u.name for u in ds.units}
     allowed = allowed_units(ds, actor_role)
     user_unit = user.get("unit")
-    # Derive target unit from operator identity:
-    #   1. If the user's home unit is a leaf BASTION unit AND it's in
-    #      scope, use it. (g4 Reyes -> CLB-6.)
-    #   2. Else if the role is restricted, take the lowest-name unit in
-    #      scope so the choice is deterministic.
-    #   3. Else (unrestricted role with a parent-command unit field —
-    #      mef_commander Hayes' "II MEF", security_manager Park's
-    #      "2d MLG"), default to "CLB-6", the canonical demo unit. The
-    #      sim is a presenter beat; CLB-6 is the storyline target.
+    # Derive target unit from operator identity. Order:
+    #   1. User's home unit if it's a leaf BASTION unit AND in scope.
+    #   2. "CLB-6" (canonical demo target) if in scope. Catches identities
+    #      whose home unit is a parent command or a non-dataset unit
+    #      (e.g. Reyes/Kowalski "CLB-Det", Hayes "III MEF").
+    #   3. Lowest-name unit in scope (deterministic) if CLB-6 is filtered out.
+    #   4. "CLB-6" as a final fallback when no scope is computed.
     if user_unit in ds_unit_names and (allowed is None or user_unit in allowed):
         target_unit = user_unit
+    elif allowed is None or "CLB-6" in allowed:
+        target_unit = "CLB-6"
     elif allowed:
         target_unit = sorted(allowed)[0]
     else:
