@@ -1097,9 +1097,20 @@ function PushToJointButton({ role, user }: { role: Role; user: User | null }) {
   const roleLabel = ROLE_LABELS[role];
 
   return (
+    // Task #330 — surface the JOINT COP affordance on smaller screens
+    // too. Previously `hidden xl:inline-flex` clipped this to viewports
+    // ≥1280px, so a maintenance chief on a 1024×768 iPad in a motor
+    // pool never saw the button (and therefore never saw the
+    // pre-flight panel that explains why their role can't push to
+    // joint). `hidden lg:inline-flex` brings it down to ≥1024px so
+    // both the 1024-tier laptops/tablets and the 1440-tier desks get
+    // the inline CTA. The pre-flight panel itself already carries
+    // `max-w-[92vw]` so it can't horizontally clip at the smaller
+    // viewport, and the `top-[calc(100%+6px)]` anchor keeps it pinned
+    // under the button rather than the StatusStrip below.
     <div
       ref={wrap}
-      className="relative hidden shrink-0 xl:inline-flex"
+      className="relative hidden shrink-0 lg:inline-flex"
       data-testid="push-to-joint-wrap"
     >
       <Button

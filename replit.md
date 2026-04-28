@@ -2,14 +2,14 @@
 
 ## Overview
 
-SPIRE (Sustainment, Prediction, Intelligence, Readiness Engine) is a contested-logistics operating system designed to provide sustainment, prediction, intelligence, and readiness capabilities, originally built for USMC pilots. The project aims to offer a robust operating system for contested logistics environments. (The "S" was reframed from "Sanitization" to "Sustainment" in Task #94 so the splash tagline leads with logistics framing rather than reading as hygiene/decon to a Marine audience; the SENTRY data-sanitization feature is unchanged.)
+SPIRE (Sustainment, Prediction, Intelligence, Readiness Engine) is a contested-logistics operating system designed to provide sustainment, prediction, intelligence, and readiness capabilities, originally built for USMC pilots. The project aims to offer a robust operating system for contested logistics environments.
 
 Key capabilities include:
 - Generating synthetic canonical datasets.
 - Providing a REST API and a dynamic frontend.
 - Implementing a comprehensive authentication system with role-based access control.
 - Managing classification and export controls for sensitive data.
-- Integrating with external logistics systems (GCSS-MC, OMS-UCI, MIL-STD-6016).
+- Integrating with external logistics systems.
 - Simulating communication states for disaster preparedness drills.
 - Maintaining a model registry for AI/ML supply chain transparency.
 - Offering a "Decision Bridge" dashboard for critical decision-making.
@@ -34,12 +34,12 @@ The SPIRE application features a clear separation between its backend and fronte
 - **Charting**: Recharts for data representation.
 - **State Management**: Zustand for reactive state management.
 - **Routing**: React Router for navigation.
-- **Authentication UI**: CAC cert-selection splash at `/#/auth` with mocked Marine roles.
-- **TopBar**: Features identity pill, role badge, sign-out, and specific operational indicators like `GcssMcSyncPill` and `MissionClock`. The `JOINT COP` push action (Task #103) is always rendered for operator chrome at xl+ but is disabled (with a tooltip naming Park / Hayes) for roles outside `JOINT_RELEASE_ROLES` so a maintenance chief who clicks it gets a real explanation instead of a silent 403 in a fresh tab. For release-authority roles, the click surfaces an inline pre-flight panel — current operator (rank + last name), role, allowed status, classification marking that will be stamped (`SECRET // REL TO USA, FVEY`), and subscription model (`TOPIC_FULL_MAGTF`) — with a primary `Open partner viewer` confirm before the JLTC tab opens.
-- **Classification Display**: `ClassificationBadge.tsx` for visual representation of data classification levels.
-- **Joint COP Preview**: Faux Navy/Joint "JLTC" shell (`JointPreviewView`) with a distinct steel-blue palette and fouled-anchor mark. Hardened for the contested fight (Task #79): JLTC topbar surfaces a 4-state SPIRE comms control (CONN/LIM/INT/DISC) wired to `useSpireStore.ddilMode` so the shared API interceptor's latency / packet-loss / cache effects apply to this tab too. Auto-refreshes the OMS/UCI export on a comms-aware cadence (30s default, 60s on LIMITED, polling suspended on DISCONNECTED with the cached payload still rendered behind a red "STALE — DISCONNECTED · last good pull T-Ns" stripe). A fixed "what's hot now" 4-cell strip (worst alert, worst MC unit, C3/C4 unit count, active alert count) sits between topbar and tables for ≤5-second glance reads. Pulled/Published pills now show relative `T-Ns` ages that tick at 1Hz. Projection legibility pass: classification banner 18px bold; field values and table cells 14px. ErrorPanel hint corrected — any SECRET-cleared operator can pull (no longer claims only Security Manager / MEF Commander), and a 401 surfaces an actionable "Sign in to SPIRE" link instead of the generic clearance hint.
-- **Decision Bridge**: 6x2 grid layout designed to fit without vertical scroll at 1920x1080 resolution.
-- **Stage Mode (MDM 2026 pivot)**: `?stage=1` query param activates an 8-minute demo UI that collapses SPIRE to four hero use-case tiles (SENTRY, PULSE, BASTION, DHA RESCUE). Persists in `sessionStorage`, hydrated in `main.tsx` before first paint, gated throughout TopBar/DecisionBridge/AuditView. Adds `/dha-rescue` route, AUDIT pill, and an additive `POST /api/auth/quick-switch` endpoint (env-gated by `SPIRE_DEMO_QUICK_SWITCH=1`) for presenter role-hopping without PIN re-entry. Presenter rehearsal aid at `scripts/demo_rehearsal.ts`.
+- **Authentication UI**: CAC cert-selection splash with mocked Marine roles.
+- **TopBar**: Features identity display, role badges, sign-out, and operational indicators. Includes a push action for joint operations (JLTC).
+- **Classification Display**: Visual representation of data classification levels.
+- **Joint COP Preview**: Faux Navy/Joint "JLTC" shell with distinct branding and comms control for contested environments.
+- **Decision Bridge**: 6x2 grid layout optimized for common resolutions.
+- **Stage Mode**: Activates a demo UI for hero use cases (SENTRY, PULSE, BASTION, DHA RESCUE) with presenter role-hopping.
 
 ### Technical Implementations
 - **Backend Framework**: FastAPI (Python 3.12) for high-performance API services.
@@ -73,13 +73,13 @@ The SPIRE application features a clear separation between its backend and fronte
 - **BASTION COP Role-Scoping Indicator (Task #116)**: `/api/bastion/cop` includes a `scoping` block (`{buildings_hidden, ecps_hidden, rally_points_hidden, reason, full_view_roles}`) built by `backend/scoping.py::cop_scoping_summary`. The COP card in `frontend/src/views/BastionView.tsx` renders a muted "(N hidden — MEF Commander / Security Mgr only)" suffix beside the buildings/ECPs/RP counts whenever a scoped role has had records elided, with a tooltip explaining the reason and naming the full-view roles. Closes the silent-truncation gap left by Task #55 so a Maintenance Chief reading "0 ECPs" understands those records were withheld rather than absent.
 
 ### System Design Choices
-- **Development Environment**: Frontend (Vite dev server on `0.0.0.0:5000`) proxies API requests to Backend (FastAPI on `127.0.0.1:8000`), running side-by-side in Replit.
-- **Production Deployment**: `uvicorn backend.main:app --host 0.0.0.0 --port 5000` serves the frontend build from `/` and API from `/api/*`. Deployment is via a single Docker container.
+- **Development Environment**: Frontend (Vite dev server) proxies API requests to Backend (FastAPI) in Replit.
+- **Production Deployment**: Single Docker container serving frontend build and API.
 - **CORS Configuration**: Widened for Replit's proxied iframe origin.
-- **Single Source of Truth**: Backend serves as the authoritative source for authentication, classification, and scenario state.
-- **Modularity**: Designed with clear modules for classification, scenario management, and distinct functionalities.
-- **Determinism**: Canonical seeded dataset ensures consistent content across boots, with deterministic runtime artifacts.
-- **Security**: Strict role-based gating, audit logging, and classification enforcement are central to the system's security posture.
+- **Single Source of Truth**: Backend is authoritative for authentication, classification, and scenario state.
+- **Modularity**: Clear modules for classification, scenario management, and functionalities.
+- **Determinism**: Canonical seeded dataset ensures consistent content and deterministic runtime artifacts.
+- **Security**: Strict role-based gating, audit logging, and classification enforcement.
 
 ## External Dependencies
 
@@ -90,7 +90,7 @@ The SPIRE application features a clear separation between its backend and fronte
 - **Zustand**: State-management solution.
 - **React Router**: Declarative routing for React.
 - **Uvicorn**: ASGI server for FastAPI.
-- **GCSS-MC**: External logistics system (reference integration).
+- **GCSS-MC**: External logistics system.
 - **OMS-UCI**: External system for Joint COP export.
 - **MIL-STD-6016 (Link 16)**: External standard for Joint COP export.
 - **Gemma 4 26B FP8**: Self-hosted LLM model (`copilot-llm`).
