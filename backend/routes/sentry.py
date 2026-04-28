@@ -53,6 +53,7 @@ try:
     from dataset.coalition import (  # type: ignore[import-not-found]
         list_profiles, classify_record, apply_redactions, apply_redactions_with_spans,
         partner_units_for, profiles as _coalition_profiles,
+        release_manifest as _coalition_release_manifest,
     )
     _COALITION_AVAILABLE = True
 except Exception:
@@ -1646,10 +1647,26 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
         else:
             blocked_units_count += 1
 
-    # Sample SR-level scoping: walk first 50 NMCS SRs.
+    # Pre-compute the profile's classification ceiling rank so the loop
+    # below can flag records whose source classification is *above* the
+    # ceiling (the cause of the F1 banner-tint signal on the frontend).
+    # Rank-based, not last-element-based, so it survives an unsorted
+    # authorized_classifications list — the JSON convention is ascending
+    # but we don't want a re-ordered profile to silently mis-rank.
+    auth_cls_view = profile_data.get("authorized_classifications", []) or ["UNCLASSIFIED"]
+    ceiling_rank = 0
+    ceiling_label = "UNCLASSIFIED"
+    for _c in auth_cls_view:
+        _rk = classification_rank(_c)
+        if _rk >= ceiling_rank:
+            ceiling_rank = _rk
+            ceiling_label = normalize_classification(_c)
+
+    # Sample SR-level scoping: walk first 200 SRs.
     sample_srs: list[dict] = []
     sr_allowed = 0
     sr_blocked = 0
+    sr_over_ceiling = 0
     for sr in ds.srs[:200]:
         rec = {
             "sr_number": sr.sr_number,
@@ -1665,6 +1682,18 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
             "category": "readiness_summary",
         }
         decision = classify_record(profile_key, rec)
+        rec_cls = rec.get("detected_classification") or "UNCLASSIFIED"
+        # Count over-ceiling only when classification is the actual blocker —
+        # i.e., the record's source classification rank exceeds the profile
+        # ceiling AND classify_record's first failing reason is classification.
+        # This keeps the F1 red-tint signal aligned with the "exceeds the
+        # <CEILING> ceiling" warning copy in the confirmation modal, instead
+        # of double-counting records that were going to be blocked for
+        # unit_parent / category reasons anyway.
+        if classification_rank(rec_cls) > ceiling_rank and (
+            not decision.allowed and "exceeds profile ceiling" in decision.reason
+        ):
+            sr_over_ceiling += 1
         if decision.allowed:
             sr_allowed += 1
             redacted, spans = apply_redactions_with_spans(rec, decision.redactions_applied)
@@ -1693,6 +1722,9 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
         "partners": profile_data["partners"],
         "distribution_statement": profile_data["distribution_statement"],
         "authorized_classifications": profile_data["authorized_classifications"],
+        # Explicit, rank-derived ceiling so the frontend doesn't have to assume
+        # the authorized_classifications array is sorted ascending.
+        "classification_ceiling": ceiling_label,
         "caveats_applied": profile_data.get("caveats_applied", []),
         "embargo_days_after_event": profile_data.get("embargo_days_after_event", 0),
         "scope": {
@@ -1701,6 +1733,7 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
             "sample_srs_allowed": sr_allowed,
             "sample_srs_blocked": sr_blocked,
             "sample_srs_total_inspected": min(200, len(ds.srs)),
+            "sample_srs_over_ceiling": sr_over_ceiling,
         },
         "allowed_units": allowed_units_list,
         "sample_records": sample_srs,
@@ -1753,6 +1786,34 @@ async def coalition_release(
         audit_subject=profile_key,
     )
 
+    # F13 — compute the release manifest hash before we write the audit row
+    # so an investigator can later prove *what* shipped, not just that
+    # something did. The hash covers the sorted in-scope SR IDs + the
+    # profile's redaction policy + the profile key. Two clicks for the same
+    # profile against an unchanged dataset produce the same digest, which
+    # is exactly the property an after-action review needs.
+    ds = get_dataset()
+    unit_parent_map: dict[str, str] = {u.name: u.parent for u in ds.units}
+    manifest_records = [
+        {
+            "sr_number": sr.sr_number,
+            "asset_id": sr.asset_id,
+            "unit_name": sr.unit_name,
+            "unit_parent": unit_parent_map.get(sr.unit_name, ""),
+            "equipment_type": sr.equipment_type,
+            "fault_component": sr.fault_component,
+            "tm_reference": sr.tm_reference,
+            "serial_number": sr.serial_number,
+            "remark": sr.remark_text,
+            "detected_classification": sr.detected_classification or "UNCLASSIFIED",
+            "category": "readiness_summary",
+        }
+        for sr in ds.srs
+    ]
+    manifest = _coalition_release_manifest(profile_key, manifest_records)
+    manifest_sha256 = manifest["manifest_sha256"]
+    record_count = manifest["record_count"]
+
     release_id = f"REL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     audit_log(
         "sentry_coalition_release",
@@ -1763,6 +1824,9 @@ async def coalition_release(
             "partners": profile_data["partners"],
             "distribution": profile_data["distribution_statement"],
             "classification": release_cls,
+            "manifest_sha256": manifest_sha256,
+            "record_count": record_count,
+            "redactions": sorted(profile_data.get("field_redactions", [])),
         },
     )
     return {
@@ -1774,6 +1838,8 @@ async def coalition_release(
         "caveats_applied": profile_data.get("caveats_applied", []),
         "classification": release_cls,
         "audit_logged": True,
+        "manifest_sha256": manifest_sha256,
+        "record_count": record_count,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
