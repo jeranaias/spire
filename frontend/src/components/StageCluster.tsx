@@ -1,14 +1,22 @@
 /**
- * StageCluster — single-bordered cluster for the three stage-only
- * presenter affordances (Failsafe / Reset Demo / Audit). Replaces the
- * three side-by-side pills with one rounded container so the right
- * group stops reading like a stack of identical-weight chips.
+ * StageCluster — single-bordered cluster for the Failsafe / Reset Demo /
+ * Audit affordances. Replaces three side-by-side pills with one rounded
+ * container so the right group reads as a single "stage controls" slot.
  *
- * Each button keeps its existing onClick + tooltip and respects its
- * existing role/scenario gating; the cluster itself only renders in
- * stage mode (operator mode renders nothing). Composition keeps the
- * gates honest: FailsafePill returns null when no scenario is loaded,
- * ResetDemoButton respects role + stage gates, AuditPill is stage-only.
+ * The cluster honours each button's original gating so the operator
+ * surface stays byte-equivalent to before the declutter:
+ *
+ *   - Failsafe: visible when a scenario is loaded and the failsafe is
+ *     off (independent of stage mode).
+ *   - Reset:    visible for `role === "g4"` outside stage mode; visible
+ *     for any role inside stage mode (mirrors original ResetDemoButton).
+ *   - Audit:    visible at all times. Stage mode bypasses the AuditView
+ *     scope check (see AuditView), but the chrome rule is unchanged.
+ *
+ * The cluster renders nothing when none of its buttons are visible (so a
+ * non-g4 operator with no scenario loaded never sees an empty rounded
+ * shell). When only Audit is visible the cluster still renders — that
+ * matches the pre-declutter chrome where AuditPill always rendered.
  *
  * The cluster sits in one slot of the right group's visual budget — the
  * task's "at most 5 visible chips" target counts this container as one,
@@ -20,10 +28,10 @@ import { api } from "../api";
 import { formatApiError } from "../api-retry";
 import { useFailsafe } from "../state/failsafe";
 import { useScenarioPlayer } from "../state/scenarioPlayer";
-import { useSpireStore } from "../state/store";
+import { useSpireStore, type Role } from "../state/store";
 import { useIdempotentAction } from "./ui";
 
-export function StageCluster() {
+export function StageCluster({ role }: { role: Role }) {
   const stageMode = useSpireStore((s) => s.stageMode);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAirGap = useSpireStore((s) => s.setAirGap);
@@ -68,12 +76,6 @@ export function StageCluster() {
     { lockoutMs: 750 },
   );
 
-  if (!stageMode) return null;
-
-  // Stage-mode reset is allowed for any role (matches ResetDemoButton's
-  // stage relaxation). Outside stage mode the StageCluster doesn't render
-  // at all so the role gate falls back to ResetDemoButton's operator-only
-  // path is irrelevant here.
   function activateFailsafe() {
     if (!scenarioLoaded || failsafeMode !== "off") return;
     const ok = window.confirm(
@@ -82,33 +84,51 @@ export function StageCluster() {
     if (ok) openFullscreen();
   }
 
-  const failsafeAvailable = scenarioLoaded && failsafeMode === "off";
+  // Original gating preserved exactly. See file header for the table.
+  const showFailsafe = scenarioLoaded && failsafeMode === "off";
+  const showReset = stageMode || role === "g4";
+  const showAudit = true;
 
-  return (
-    <div
-      role="group"
-      aria-label="Stage controls — failsafe, reset, audit"
-      data-testid="stage-cluster"
-      className="inline-flex h-9 shrink-0 items-stretch overflow-hidden rounded-sm border border-[var(--color-warning)] bg-[var(--color-surface)] font-mono text-[11px] uppercase tracking-widest"
-    >
+  if (!showFailsafe && !showReset && !showAudit) return null;
+
+  // Stage mode shows the warning-bordered cluster (matches pre-declutter
+  // dramatic chrome). Operator mode uses the standard border so the
+  // cluster doesn't shout at non-presenters who only ever click Audit.
+  const borderClass = stageMode
+    ? "border-[var(--color-warning)]"
+    : "border-[var(--color-border)]";
+  const dividerClass = stageMode
+    ? "bg-[color-mix(in_oklab,var(--color-warning)_40%,transparent)]"
+    : "bg-[var(--color-border)]";
+
+  // Build the children list so we can interleave dividers without leaving
+  // a leading or trailing separator when buttons are hidden.
+  const children: React.ReactNode[] = [];
+  if (showFailsafe) {
+    children.push(
       <button
+        key="failsafe"
         type="button"
         onClick={activateFailsafe}
-        disabled={!failsafeAvailable}
         aria-label="Activate failsafe — replace live demo with recorded backup (F9)"
-        title={
-          failsafeAvailable
-            ? "Failsafe — replace the live demo with the recorded backup (F9)"
-            : "Failsafe unavailable — load a scenario first"
-        }
+        title="Failsafe — replace the live demo with the recorded backup (F9)"
         data-testid="stage-cluster-failsafe"
-        className="flex items-center gap-1.5 px-2.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:text-[var(--color-warning)] enabled:hover:bg-[color-mix(in_oklab,var(--color-warning)_20%,var(--color-surface))]"
+        className="flex items-center gap-1.5 px-2.5 transition-colors text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning)_20%,var(--color-surface))]"
       >
         <span aria-hidden>◉</span>
         <span className="hidden xl:inline">Failsafe</span>
-      </button>
-      <span className="w-px self-stretch bg-[color-mix(in_oklab,var(--color-warning)_40%,transparent)]" aria-hidden />
+      </button>,
+    );
+  }
+  if (showReset) {
+    if (children.length > 0) {
+      children.push(
+        <span key="div-reset" className={`w-px self-stretch ${dividerClass}`} aria-hidden />,
+      );
+    }
+    children.push(
       <button
+        key="reset"
         type="button"
         onClick={() => setResetConfirm(true)}
         disabled={resetAction.pending}
@@ -122,9 +142,18 @@ export function StageCluster() {
           <polyline points="3 4 3 10 9 10" />
         </svg>
         <span className="hidden xl:inline">{resetAction.pending ? "Resetting…" : "Reset"}</span>
-      </button>
-      <span className="w-px self-stretch bg-[color-mix(in_oklab,var(--color-warning)_40%,transparent)]" aria-hidden />
+      </button>,
+    );
+  }
+  if (showAudit) {
+    if (children.length > 0) {
+      children.push(
+        <span key="div-audit" className={`w-px self-stretch ${dividerClass}`} aria-hidden />,
+      );
+    }
+    children.push(
       <button
+        key="audit"
         type="button"
         onClick={() => nav("/admin/audit")}
         aria-label="Open audit chain — SOC view"
@@ -138,7 +167,19 @@ export function StageCluster() {
           aria-hidden
         />
         <span className="hidden xl:inline">Audit</span>
-      </button>
+      </button>,
+    );
+  }
+
+  return (
+    <div
+      role="group"
+      aria-label="Stage controls — failsafe, reset, audit"
+      data-testid="stage-cluster"
+      data-stage-mode={stageMode ? "1" : "0"}
+      className={`inline-flex h-9 shrink-0 items-stretch overflow-hidden rounded-sm border ${borderClass} bg-[var(--color-surface)] font-mono text-[11px] uppercase tracking-widest`}
+    >
+      {children}
 
       {resetConfirm && (
         <div

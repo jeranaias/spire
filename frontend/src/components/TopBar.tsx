@@ -192,24 +192,22 @@ export function TopBar() {
          * + Reset + Audit) and keeps the AlertBadge backstop so a stage
          * presenter sees the alert count even with the dropdown closed. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
-          {/* CompactMissionClock for the cramped 1024–1279px range — the
-           * full centred MissionClock only renders at xl+. At sm the
-           * System chip dropdown's Mission timeline row is the fallback. */}
-          {!stageMode && (
-            <span className="hidden md:inline-flex xl:hidden">
-              <MissionClock compact />
-            </span>
-          )}
+          {/* CompactMissionClock for everything below xl. The full centred
+           * MissionClock only renders at xl+; below xl the chip rides the
+           * right group at every breakpoint (sm and md/lg) so operators
+           * always have a visible, click-to-open clock. */}
+          <span className="inline-flex xl:hidden">
+            <MissionClock compact />
+          </span>
           {!stageMode && <SystemStatusChip />}
           <CommsControl />
           {!stageMode && <PushToJointButton role={role} />}
           {!stageMode && <NotificationsChip />}
-          {stageMode && (
-            <span className="hidden md:inline-flex xl:hidden">
-              <MissionClock compact />
-            </span>
-          )}
-          {stageMode && <StageCluster />}
+          {/* StageCluster handles its own per-button gating so it renders
+           * in operator mode too (Audit always, Reset for g4, Failsafe
+           * when scenario loaded). The cluster styling adapts: warning
+           * border in stage mode, neutral border in operator mode. */}
+          <StageCluster role={role} />
           {/* MDM 2026 stage-pivot — multi-presenter handoff (WP-8). The
            * 4-up chip strip sits inline with the right group only in
            * stage mode and offers one-click identity swaps so the next

@@ -1,19 +1,28 @@
-import { test, expect } from "@playwright/test";
-import { signIn, SECURITY_MANAGER_DODID } from "./_helpers";
+import { test, expect, type Page } from "@playwright/test";
+import { signIn, SECURITY_MANAGER_DODID, TEST_DODID } from "./_helpers";
 
 // Task #184 TopBar declutter — verify the spine survives 1024 → 2560 and
 // the consolidated chips render the right surface for operator vs stage
 // mode. We do NOT assert the exact text of every chip (their content is
 // driven by live state and the scenario clock); we assert structural
 // invariants — chip presence, tagline truncation, numerals removed,
-// MissionClock visibility, and that the IdentityPill dropdown holds the
-// migrated Air-gap + Density + Comms posture rows.
+// MissionClock visibility, StageCluster composition, and that the
+// IdentityPill dropdown holds the migrated Air-gap + Density + Comms
+// posture rows.
 
 const BREAKPOINTS = {
-  md: { width: 1024, height: 900 },
-  lg: { width: 1440, height: 900 },
-  xl: { width: 1920, height: 1080 },
+  sm:  { width: 640,  height: 900 },
+  md:  { width: 1024, height: 900 },
+  lg:  { width: 1440, height: 900 },
+  xl:  { width: 1920, height: 1080 },
+  hd:  { width: 2560, height: 1440 },
 } as const;
+
+async function enableStageMode(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try { window.localStorage.setItem("spire.stageMode", "1"); } catch {}
+  });
+}
 
 test.describe("TopBar declutter (Task #184)", () => {
   test("xl+ shows the full spine: System + Notif + Comms + IdPill", async ({ page }) => {
@@ -23,7 +32,6 @@ test.describe("TopBar declutter (Task #184)", () => {
     await expect(page.getByTestId("system-status-chip")).toBeVisible();
     await expect(page.getByTestId("notifications-chip")).toBeVisible();
     await expect(page.getByTestId("topbar-identity-pill")).toBeVisible();
-    // CommsControl renders an aria-labelled chip — match by accessible name.
     await expect(page.getByRole("button", { name: /comms/i }).first()).toBeVisible();
   });
 
@@ -31,8 +39,6 @@ test.describe("TopBar declutter (Task #184)", () => {
     await page.setViewportSize(BREAKPOINTS.md);
     await signIn(page);
     await expect(page.getByTestId("mission-clock-compact")).toBeVisible();
-    // Full mission-clock element is wrapped in `xl:block hidden` so it's
-    // present in the DOM but not visible at md.
     const full = page.getByTestId("mission-clock");
     if (await full.count()) {
       await expect(full).toBeHidden();
@@ -47,6 +53,62 @@ test.describe("TopBar declutter (Task #184)", () => {
     if (await compact.count()) {
       await expect(compact).toBeHidden();
     }
+  });
+
+  test("sm shows CompactMissionClock so the clock is always one click away", async ({ page }) => {
+    // The original declutter hid the clock entirely below md; the sm
+    // fallback now keeps the compact chip visible at every width below
+    // xl so an operator on a narrow surface still has a reachable clock.
+    await page.setViewportSize(BREAKPOINTS.sm);
+    await signIn(page);
+    await expect(page.getByTestId("mission-clock-compact")).toBeVisible();
+  });
+
+  test("MissionClock dropdown opens and is not clipped by neighbouring chrome", async ({ page }) => {
+    // PR #181 fix: the header sits at z-[60] so the MissionClock dropdown
+    // (z-[8500] inside the header) is no longer covered by view content.
+    // We open the dropdown and assert the menu is visible — if any
+    // surrounding stacking context (StatusStrip, banners, etc.) clipped
+    // it the toBeVisible() check would fail.
+    await page.setViewportSize(BREAKPOINTS.xl);
+    await signIn(page);
+    const clock = page.getByTestId("mission-clock");
+    await expect(clock).toBeVisible();
+    await clock.click();
+    const menu = page.getByRole("menu", { name: /mission clock controls/i });
+    await expect(menu).toBeVisible();
+    // Sanity: the menu is wider than 0px and present in the layout.
+    const box = await menu.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThan(50);
+  });
+
+  test("System chip dropdown surfaces all three underlying statuses", async ({ page }) => {
+    await page.setViewportSize(BREAKPOINTS.xl);
+    await signIn(page);
+    // Dismiss any racing onboarding modal so the chip click isn't
+    // intercepted (see IdentityPill spec for the same dance).
+    await page.keyboard.press("Escape");
+    await page.getByTestId("system-status-chip").click();
+    const panel = page.getByTestId("system-status-panel");
+    await expect(panel).toBeVisible();
+    // The consolidated chip merged NodeStatus (sync), GcssMcSyncPill
+    // (gcss), and ModeBadge (the mode value renders as the node label
+    // "MLG-NODE-0 · <mode>"). Each surface is named in the panel.
+    await expect(panel).toContainText(/sync/i);
+    await expect(panel).toContainText(/gcss/i);
+    await expect(panel).toContainText(/MLG-NODE-0/);
+  });
+
+  test("md (1024px) keeps the critical chips visible — survives the cramped breakpoint", async ({ page }) => {
+    await page.setViewportSize(BREAKPOINTS.md);
+    await signIn(page);
+    // The whole point of the declutter: at 1024 the spine still holds.
+    await expect(page.getByTestId("topbar-root")).toBeVisible();
+    await expect(page.getByTestId("system-status-chip")).toBeVisible();
+    await expect(page.getByTestId("notifications-chip")).toBeVisible();
+    await expect(page.getByRole("button", { name: /comms/i }).first()).toBeVisible();
+    await expect(page.getByTestId("mission-clock-compact")).toBeVisible();
+    await expect(page.getByTestId("topbar-identity-pill")).toBeVisible();
   });
 
   test("tab labels do not carry numerals (01/02/...) anywhere in the bar", async ({ page }) => {
@@ -64,6 +126,38 @@ test.describe("TopBar declutter (Task #184)", () => {
     // tabs that always render as NavLinks for g4.
     await expect(topbar.getByRole("link", { name: /^PULSE$/i }).first()).toBeVisible();
     await expect(topbar.getByRole("link", { name: /^BASTION$/i }).first()).toBeVisible();
+  });
+
+  test("stage mode at lg shows StageCluster with Reset (relaxed) + Audit grouped", async ({ page }) => {
+    await page.setViewportSize(BREAKPOINTS.lg);
+    await enableStageMode(page);
+    // Reset is g4-only outside stage mode; in stage mode it relaxes to
+    // any role. Sign in as Park (security_manager) to verify the relax.
+    await signIn(page, SECURITY_MANAGER_DODID);
+    const cluster = page.getByTestId("stage-cluster");
+    await expect(cluster).toBeVisible();
+    await expect(cluster).toHaveAttribute("data-stage-mode", "1");
+    // Reset relaxes for any role in stage mode; Audit is unconditional.
+    await expect(cluster.getByTestId("stage-cluster-reset")).toBeVisible();
+    await expect(cluster.getByTestId("stage-cluster-audit")).toBeVisible();
+    // Failsafe is gated on a loaded scenario (same gate as the original
+    // chrome). The spec doesn't trigger one, so the button is absent —
+    // exactly what the old TopBar did. We assert the gate, not presence.
+    await expect(cluster.getByTestId("stage-cluster-failsafe")).toHaveCount(0);
+  });
+
+  test("operator mode preserves Audit (always) — Failsafe and Reset stay role-gated", async ({ page }) => {
+    // Reyes (g4) — Audit always visible, Reset visible for g4. Failsafe
+    // requires a scenario to be loaded, which the spec doesn't trigger,
+    // so we only assert it's NOT visible (matches the old chrome).
+    await page.setViewportSize(BREAKPOINTS.lg);
+    await signIn(page, TEST_DODID);
+    const cluster = page.getByTestId("stage-cluster");
+    await expect(cluster).toBeVisible();
+    await expect(cluster).toHaveAttribute("data-stage-mode", "0");
+    await expect(cluster.getByTestId("stage-cluster-audit")).toBeVisible();
+    await expect(cluster.getByTestId("stage-cluster-reset")).toBeVisible();
+    await expect(cluster.getByTestId("stage-cluster-failsafe")).toHaveCount(0);
   });
 
   test("IdentityPill menu hosts Operator settings (Air-gap, Density, Comms)", async ({ page }) => {

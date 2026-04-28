@@ -75,15 +75,18 @@ right group. JointCOP button is `hidden xl:inline-flex` — the menu's
 
 ```
 ┌──────────────────────────────────┐
-│ SPIRE · UNCLASS                  │
-│ SENTRY PULSE BASTION ADMIN       │
-│ [System][Notif][Comms][IdPill ▾] │
+│ SPIRE · UNCLASS                       │
+│ SENTRY PULSE BASTION ADMIN            │
+│ [Clock chip][System][Notif][Comms]    │
+│ [Stage cluster?][IdPill ▾]            │
 └──────────────────────────────────┘
 ```
 
-MissionClock disappears entirely; the menu's mission row owns the
-"open the clock" affordance via the `spire:open-mission-clock` event.
-Tabs wrap. Tagline truncates.
+CompactMissionClock rides the right group at every breakpoint below
+xl, so the operator always has a visible click-to-open clock — the
+`spire:open-mission-clock` event and the System chip menu's mission
+timeline row are belt-and-suspenders fallbacks. Tabs wrap. Tagline
+truncates.
 
 ## Rationale
 
@@ -95,13 +98,13 @@ Tabs wrap. Tagline truncates.
 | AlertBadge (operator)     | `NotificationsChip` Alerts tab                    |
 | AlertBadge (stage)        | Backstop kept in stage mode for the dramatic ping |
 | DraftsBadge               | `NotificationsChip` Drafts tab                    |
-| FailsafePill              | `StageCluster` Failsafe icon                      |
-| ResetDemoButton           | `StageCluster` Reset icon                         |
-| AuditPill                 | `StageCluster` Audit icon                         |
+| FailsafePill              | `StageCluster` Failsafe icon (gated as before: scenario loaded + failsafe off, both modes) |
+| ResetDemoButton           | `StageCluster` Reset icon (gated as before: g4 in operator mode, any role in stage mode) |
+| AuditPill                 | `StageCluster` Audit icon (always visible, both modes) |
 | AirGapToggle              | IdentityPill → Operator settings → Air-gap row    |
 | DensityToggle             | IdentityPill → Operator settings → Density radio  |
 | CommsControl              | Stays in right group (single posture chip)        |
-| MissionClock              | Stays mid; `compact` variant for `md`/`lg`        |
+| MissionClock              | `compact` chip below xl (sm/md/lg), full clock at xl+ |
 | PushToJointButton         | Right group, `xl+` only                           |
 | Tab numerals (`01/02/...`)| Removed — labels carry the meaning                |
 
