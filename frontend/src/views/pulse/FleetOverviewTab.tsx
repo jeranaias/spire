@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type FleetOverview, type BastionCOPUnit } from "../../api";
 import { withRetry } from "../../api-retry";
@@ -6,6 +6,7 @@ import { MetricCard } from "../../components/MetricCard";
 import { Heatmap } from "../../components/Heatmap";
 import { AlertCard } from "../../components/AlertCard";
 import { useSpireStore } from "../../state/store";
+import { Button, IconButton, Pressable, ErrorState, LoadingState } from "../../components/ui";
 
 type View = "heatmap" | "map";
 
@@ -20,32 +21,18 @@ export function FleetOverviewTab() {
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("heatmap");
   const [hideEmptyColumns, setHideEmptyColumns] = useState(true);
-  // Race-guard parity: monotonic generation tokens guard against late-
-  // arriving stale responses overwriting fresh ones when role swaps
-  // faster than the network resolves. Two refs because the fleet and
-  // BASTION COP fetches run in parallel and resolve independently.
-  const overviewGenRef = useRef(0);
-  const copGenRef = useRef(0);
 
   useEffect(() => {
     setData(null);
     setError(null);
-    const myOverviewGen = ++overviewGenRef.current;
-    const myCopGen = ++copGenRef.current;
-    const ctrl = new AbortController();
     // Walkthrough audit: prior code surfaced raw 502 HTML body
     // ('<html>...502 Bad Gateway...</html>') as the error string,
     // which dumped HTML markup straight into the UI. Use withRetry so
     // transient deploy 5xx self-heal, and on terminal failure show a
     // human-readable message instead of the upstream HTML.
-    withRetry(() => api.pulse.fleetOverview(ctrl.signal))
-      .then((d) => {
-        if (myOverviewGen !== overviewGenRef.current) return;
-        setData(d);
-      })
+    withRetry(() => api.pulse.fleetOverview())
+      .then(setData)
       .catch((e) => {
-        if (myOverviewGen !== overviewGenRef.current) return;
-        if (e?.name === "AbortError") return;
         const raw = String(e);
         // If the upstream is HTML (502/504 from nginx), don't surface
         // tags; show a posture line instead.
@@ -54,17 +41,7 @@ export function FleetOverviewTab() {
           : raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
         setError(friendly);
       });
-    api.bastion.cop(ctrl.signal)
-      .then((c) => {
-        if (myCopGen !== copGenRef.current) return;
-        setCopUnits(c.units);
-      })
-      .catch((e) => {
-        if (myCopGen !== copGenRef.current) return;
-        if (e?.name === "AbortError") return;
-        setCopUnits([]);
-      });
-    return () => ctrl.abort();
+    api.bastion.cop().then((c) => setCopUnits(c.units)).catch(() => setCopUnits([]));
   }, [role]);
 
   // Walkthrough #3, #51 — canonical MC rate by unit name from BASTION COP.
@@ -86,9 +63,14 @@ export function FleetOverviewTab() {
   if (error) {
     return (
       <div className="flex h-full items-center justify-center p-12">
-        <div className="rounded border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-danger)]">
-          Failed to load fleet overview: {error}
-        </div>
+        <ErrorState
+          variant="panel"
+          title="Failed to load fleet overview"
+          description="The Pulse fleet overview API did not return. Network/backend may be cycling."
+          detail={error}
+          onRetry={() => window.location.reload()}
+          retryLabel="Reload"
+        />
       </div>
     );
   }
@@ -117,7 +99,7 @@ export function FleetOverviewTab() {
   }
 
   return (
-    <div className="flex h-full" data-tour-id="pulse-overview-content">
+    <div className="flex h-full">
       {/* Walkthrough #14 — outer container scrolls so KPI + narrative + heatmap
        * all stay reachable. Inner heatmap retains its own scroll for cols. */}
       <div className="flex flex-1 flex-col overflow-y-auto p-4">
@@ -162,12 +144,14 @@ export function FleetOverviewTab() {
             </span>{" "}
             <span className="text-[var(--color-text)]">{narrative.text}</span>
             {narrative.unit && (
-              <button
+              <Button
                 onClick={() => nav(`/pulse/risk?unit=${encodeURIComponent(narrative.unit!)}`)}
-                className="ml-2 font-mono text-xs uppercase text-[var(--color-primary)] hover:underline tracking-wider"
+                variant="ghost"
+                size="sm"
+                className="ml-2 text-[var(--color-primary)] hover:underline"
               >
                 View top contributors →
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -313,12 +297,13 @@ function ViewTabs({ value, onChange }: { value: View; onChange: (v: View) => voi
       {tabs.map((t, i) => {
         const active = t.value === value;
         return (
-          <button
+          <Pressable
             key={t.value}
             role="tab"
             aria-selected={active}
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(t.value)}
+            block={false}
             onKeyDown={(e) => {
               if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
                 e.preventDefault();
@@ -335,7 +320,7 @@ function ViewTabs({ value, onChange }: { value: View; onChange: (v: View) => voi
             }
           >
             {t.label}
-          </button>
+          </Pressable>
         );
       })}
     </div>
@@ -559,7 +544,9 @@ function ConusMap({ data, canonicalMc }: { data: FleetOverview; canonicalMc: Map
           >
             <div className="mb-2 flex items-center justify-between">
               <div className="font-mono text-xs uppercase text-[var(--color-text)] tracking-widest">{c.label}</div>
-              <button onClick={() => setOpenCluster(null)} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">✕</button>
+              <IconButton onClick={() => setOpenCluster(null)} aria-label="Close cluster" variant="ghost" size="sm">
+                <span aria-hidden>✕</span>
+              </IconButton>
             </div>
             <div className="flex flex-col gap-1">
               {c.units.map((u) => (
@@ -648,12 +635,12 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 }
 
 export function LoadingOverlay({ message }: { message: string }) {
+  // Thin compatibility wrapper around the LoadingState primitive so the
+  // existing call-sites (RiskBoard detail pane, Cannibalization tab) keep
+  // their import path while now rendering the chassis primitive.
   return (
     <div className="flex h-full items-center justify-center p-12">
-      <div className="flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wider">
-        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
-        {message}
-      </div>
+      <LoadingState size="page" label={message} />
     </div>
   );
 }

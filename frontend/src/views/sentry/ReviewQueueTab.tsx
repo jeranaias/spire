@@ -5,6 +5,15 @@ import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
 import { useSpireStore } from "../../state/store";
 import type { Role } from "../../state/store";
+import {
+  Button,
+  IconButton,
+  ErrorState,
+  EmptyState,
+  LoadingState,
+  fireIdempotent,
+  pushUndoToast,
+} from "../../components/ui";
 
 type Column = "auto_cleared" | "flagged" | "held";
 type Action = "approve" | "reject";
@@ -89,36 +98,44 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
     };
   }, [queue, resolved]);
 
+  // Wrapped in fireIdempotent — triple-tapping Approve on the same SR
+  // emits exactly one /review request. Keyed per (sr, action) so a
+  // subsequent Reject on the same SR after Approve is a different key
+  // and is allowed through.
   const resolveOne = useCallback(
-    async (sr: string, action: Action) => {
-      setResolved((prev) => ({ ...prev, [sr]: action }));
-      try {
-        await api.sentry.review(sr, action);
-        pushToast({
-          tone: action === "approve" ? "ok" : "warn",
-          text: `${sr} ${action === "approve" ? "approved" : "rejected"}`,
-          undo: {
-            label: "Undo",
+    async (sr: string, action: Action) =>
+      fireIdempotent(`sentry:review:${sr}:${action}`, async () => {
+        setResolved((prev) => ({ ...prev, [sr]: action }));
+        try {
+          await api.sentry.review(sr, action);
+          // Destructive contract: route through pushUndoToast so the
+          // ≥5s undo floor is enforced (the store's default TTL is 3s,
+          // which is below the W0 spec).
+          pushUndoToast({
+            tone: action === "approve" ? "ok" : "warn",
+            text: `${sr} ${action === "approve" ? "approved" : "rejected"}`,
             onUndo: () => {
               setResolved((prev) => {
                 const next = { ...prev };
                 delete next[sr];
                 return next;
               });
-              api.sentry.review(sr, action === "approve" ? "reject" : "approve").catch(() => {});
+              fireIdempotent(
+                `sentry:review:${sr}:${action === "approve" ? "reject" : "approve"}`,
+                () => api.sentry.review(sr, action === "approve" ? "reject" : "approve"),
+              ).catch(() => {});
             },
-          },
-        });
-      } catch (err) {
-        // Roll back on failure
-        setResolved((prev) => {
-          const next = { ...prev };
-          delete next[sr];
-          return next;
-        });
-        pushToast({ tone: "error", text: `Failed to ${action} ${sr}` });
-      }
-    },
+          });
+        } catch (err) {
+          // Roll back on failure
+          setResolved((prev) => {
+            const next = { ...prev };
+            delete next[sr];
+            return next;
+          });
+          pushToast({ tone: "error", text: `Failed to ${action} ${sr}` });
+        }
+      }),
     [pushToast],
   );
 
@@ -135,19 +152,42 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
       if (!items || items.length === 0) return;
       setBulkRunning(true);
       pushToast({ tone: "info", text: `Processing ${items.length} records…`, ttlMs: 5000 });
+      // Capture the SR list so the undo handler can revert resolved-state
+      // and emit a counter-action without re-reading column state.
+      const srNumbers = items.map((r) => r.sr_number as string);
       // Optimistic bulk: mark all resolved immediately, fire in parallel.
       setResolved((prev) => {
         const next = { ...prev };
-        for (const r of items) next[r.sr_number] = action;
+        for (const sr of srNumbers) next[sr] = action;
         return next;
       });
       try {
         await Promise.all(
-          items.map((r) => api.sentry.review(r.sr_number, action).catch(() => null)),
+          srNumbers.map((sr) =>
+            fireIdempotent(`sentry:review:${sr}:${action}`, () =>
+              api.sentry.review(sr, action),
+            ).catch(() => null),
+          ),
         );
-        pushToast({
+        // Destructive contract: bulk approve/reject also gets an undo toast
+        // with the ≥5s floor. Undo fires the inverse review on every SR
+        // (idempotent-keyed) and clears local resolved state.
+        pushUndoToast({
           tone: action === "approve" ? "ok" : "warn",
           text: `${items.length} records ${action === "approve" ? "approved" : "rejected"}`,
+          onUndo: () => {
+            const inverse: Action = action === "approve" ? "reject" : "approve";
+            setResolved((prev) => {
+              const next = { ...prev };
+              for (const sr of srNumbers) delete next[sr];
+              return next;
+            });
+            for (const sr of srNumbers) {
+              fireIdempotent(`sentry:review:${sr}:${inverse}`, () =>
+                api.sentry.review(sr, inverse),
+              ).catch(() => {});
+            }
+          },
         });
       } finally {
         setBulkRunning(false);
@@ -196,42 +236,31 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
   }, []);
 
   if (!ctx.batchId) {
-    return <Empty msg="No processed batch. Load + process one first." />;
+    return (
+      <div className="flex h-full items-center justify-center p-12">
+        <EmptyState
+          title="No processed batch"
+          description="Load and process a batch from the Upload tab to populate the review queue."
+        />
+      </div>
+    );
   }
   if (loadError) {
     return (
       <div className="flex h-full items-center justify-center p-12">
-        <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
-          <div
-            className="font-mono text-xs uppercase text-[var(--color-danger)] tracking-widest"
-          >
-            Review queue failed to load
-          </div>
-          <div className="mt-2 spire-body text-sm">
-            Backend rejected the queue request. This is usually a stale role scope —
-            switch role and back, or click retry.
-          </div>
-          <div className="mt-3 break-words font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            {loadError}
-          </div>
-          <button
-            onClick={() => setRetryCount((n) => n + 1)}
-            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
-          >
-            Retry
-          </button>
-        </div>
+        <ErrorState
+          title="Review queue failed to load"
+          description="Backend rejected the queue request. This is usually a stale role scope — switch role and back, or click retry."
+          detail={loadError}
+          onRetry={() => setRetryCount((n) => n + 1)}
+        />
       </div>
     );
   }
   if (!filteredQueue) {
-    // T004 polish — was a single line of grey text, easily mistaken for
-    // "this view is broken" on slow first-paint. Match the loading
-    // affordance the rest of the app uses (pulsing dot + mono caps).
     return (
-      <div className="flex h-full items-center justify-center font-mono text-sm text-[var(--color-text-secondary)] tracking-wider">
-        <span className="mr-3 inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
-        Loading review queue …
+      <div className="flex h-full items-center justify-center">
+        <LoadingState size="page" label="Loading review queue …" />
       </div>
     );
   }
@@ -246,7 +275,7 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
     filteredQueue.auto_cleared.length + filteredQueue.flagged.length + filteredQueue.held.length;
 
   return (
-    <div className="flex h-full flex-col overflow-hidden" data-tour-id="sentry-review-content">
+    <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-xs tracking-wider">
         <div className="flex items-center gap-6">
           <span className="tabular-nums text-[var(--color-text-muted)]">
@@ -275,17 +304,9 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
           </span>
         </div>
         {queue && queue.aggregation_risks.length > 0 && (
-          <button
-            onClick={() => setShowAggregation((v) => !v)}
-            className={clsx(
-              "rounded-sm border px-2 py-[2px] font-semibold uppercase transition-colors",
-              showAggregation
-                ? "border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_25%,var(--color-surface))] text-[var(--color-warning)]"
-                : "border-[var(--color-warning)] text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_15%,transparent)]",
-            )}
-          >
+          <Button onClick={() => setShowAggregation((v) => !v)} variant="warning" size="sm">
             {queue.aggregation_risks.length} aggregation risk{queue.aggregation_risks.length === 1 ? "" : "s"}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -401,25 +422,21 @@ function BulkConfirmModal({
           log. Individual undo is still available per-record from toasts.
         </div>
         <div className="mt-4 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-sm border border-[var(--color-border)] px-3 py-1.5 font-mono text-xs font-semibold uppercase text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] tracking-wider"
-          >
+          <Button onClick={onCancel} variant="secondary" size="sm">
             Cancel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             onClick={onConfirm}
+            variant="primary"
+            size="sm"
             className={clsx(
-              "rounded-sm px-4 py-1.5 font-mono text-xs font-semibold uppercase text-white tracking-wider",
               action === "approve"
-                ? "border border-[var(--color-success)] bg-[var(--color-success)] hover:brightness-110"
-                : "border border-[var(--color-danger)] bg-[var(--color-danger)] hover:brightness-110",
+                ? "border-[var(--color-success)] bg-[var(--color-success)] hover:brightness-110"
+                : "border-[var(--color-danger)] bg-[var(--color-danger)] hover:brightness-110",
             )}
           >
             Confirm {verb} {count.toLocaleString("en-US")}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -489,13 +506,9 @@ function ReviewColumn({
           <span className="font-mono text-sm tabular-nums text-[var(--color-text-muted)]">({records.length})</span>
         </div>
         {bulkAction && records.length > 0 && (
-          <button
-            onClick={onBulk}
-            disabled={bulkRunning}
-            className="rounded-sm border border-[var(--color-border-active)] px-2 py-[2px] font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] disabled:opacity-40 tracking-wider"
-          >
-            {bulkRunning ? "…" : bulkAction}
-          </button>
+          <Button onClick={onBulk} disabled={bulkRunning} pending={bulkRunning} variant="secondary" size="sm">
+            {bulkAction}
+          </Button>
         )}
       </div>
       <div className="flex-1 overflow-y-auto p-2">
@@ -510,12 +523,8 @@ function ReviewColumn({
           />
         ))}
         {records.length === 0 && (
-          // T004 polish — terse "EMPTY" read as a fault. Replaced with a
-          // calm "no records in this column" so an operator who triaged
-          // the queue dry sees an explicit success state, not a glitch.
-          <div className="flex flex-col items-center justify-center gap-1 px-4 py-10 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            <span className="text-base text-[var(--color-text-secondary)]">∅</span>
-            <span>No records in this column</span>
+          <div className="p-4 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            EMPTY
           </div>
         )}
       </div>
@@ -605,28 +614,26 @@ function ReviewCard({
               {f}
             </span>
           ))}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onApprove();
-            }}
+          <IconButton
+            onClick={(e) => { e.stopPropagation(); onApprove(); }}
+            aria-label="Approve"
             title="Approve (A)"
-            aria-label={`Approve ${record.sr_number}`}
-            className="ml-auto rounded border border-[var(--color-success-muted)] px-2 py-0.5 font-mono font-semibold text-[var(--color-success)] hover:bg-[var(--color-success-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-success)]"
+            variant="secondary"
+            size="sm"
+            className="ml-auto border-[var(--color-success-muted)] text-[var(--color-success)] hover:bg-[var(--color-success-muted)]"
           >
-            ✓
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onReject();
-            }}
+            <span aria-hidden>✓</span>
+          </IconButton>
+          <IconButton
+            onClick={(e) => { e.stopPropagation(); onReject(); }}
+            aria-label="Reject"
             title="Reject (R)"
-            aria-label={`Reject ${record.sr_number}`}
-            className="rounded border border-[var(--color-danger-muted)] px-2 py-0.5 font-mono font-semibold text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-danger)]"
+            variant="secondary"
+            size="sm"
+            className="border-[var(--color-danger-muted)] text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)]"
           >
-            ✗
-          </button>
+            <span aria-hidden>✗</span>
+          </IconButton>
         </div>
       </div>
     </div>
@@ -650,6 +657,9 @@ function InspectorPane({
   // Walkthrough #31 — per-record audit-entry viewer modal so the audit
   // chain claims in the chrome are backed by inspectable artifacts.
   const [auditOpen, setAuditOpen] = useState(false);
+  // W1 #30 — gate the model-card cross-link on role; supply-chain page
+  // is restricted to security_manager.
+  const role = useSpireStore((s) => s.role);
   const highlights: { start: number; end: number; category: string }[] = record.highlights || [];
   const remark: string = record.remark || "";
   const segments: { text: string; category?: string }[] = [];
@@ -682,12 +692,9 @@ function InspectorPane({
               {record.unit_name} · {record.equipment_type}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-          >
-            ✕
-          </button>
+          <IconButton onClick={onClose} aria-label="Close inspector" variant="ghost" size="sm">
+            <span aria-hidden>✕</span>
+          </IconButton>
         </div>
       </div>
       <div className="flex flex-col gap-4 p-4">
@@ -786,6 +793,19 @@ function InspectorPane({
             <span className="font-mono tabular-nums text-[var(--color-text-secondary)]">
               confidence {(record.confidence ?? 0).toFixed(2)}
             </span>
+            {/* W1 #30 — cross-link from the SENTRY classifier surface to
+             * the canonical model card. The supply-chain page is gated
+             * to security_manager, so render the link only for that role
+             * to avoid sending other operators to InsufficientPrivilege. */}
+            {role === "security_manager" && (
+              <a
+                href="#/admin/models/sentry-classifier"
+                className="font-mono text-xs uppercase tracking-widest text-[var(--color-primary)] hover:underline"
+                title="Open the SENTRY classifier model card (supply chain, FedRAMP, validation history)"
+              >
+                Model card →
+              </a>
+            )}
             {record.routing_locked && (
               <span
                 className="ml-auto font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
@@ -800,28 +820,28 @@ function InspectorPane({
 
       {/* Walkthrough #31 — audit-chain viewer button. */}
       <div className="px-4 pb-2">
-        <button
-          type="button"
-          onClick={() => setAuditOpen(true)}
-          className="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
-        >
+        <Button onClick={() => setAuditOpen(true)} variant="secondary" size="sm" fullWidth>
           ↧ View audit chain entry for {record.sr_number}
-        </button>
+        </Button>
       </div>
 
       <div className="sticky bottom-0 z-10 flex items-center gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-        <button
+        <Button
           onClick={onApprove}
-          className="flex-1 rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-success)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] tracking-widest"
+          variant="secondary"
+          fullWidth
+          className="border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white"
         >
           ✓ Approve (A)
-        </button>
-        <button
+        </Button>
+        <Button
           onClick={onReject}
-          className="flex-1 rounded-sm border border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_30%,var(--color-surface))] px-3 py-2 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-danger)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] tracking-widest"
+          variant="secondary"
+          fullWidth
+          className="border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_30%,var(--color-surface))] text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white"
         >
           ✗ Reject (R)
-        </button>
+        </Button>
       </div>
 
       {auditOpen && (
@@ -865,16 +885,24 @@ function AuditChainModal({ subjectId, onClose }: { subjectId: string; onClose: (
               Subject: {subjectId}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          >
-            ✕
-          </button>
+          <IconButton onClick={onClose} aria-label="Close audit chain" variant="ghost" size="sm">
+            <span aria-hidden>✕</span>
+          </IconButton>
         </div>
         <div className="max-h-[64vh] overflow-y-auto p-4 font-mono text-xs">
           {error && (
-            <div className="text-[var(--color-danger)]">Failed to load audit: {error}</div>
+            <ErrorState
+              variant="inline"
+              title="Audit chain unavailable"
+              description="Failed to load audit chain."
+              detail={error}
+              onRetry={() => {
+                setError(null);
+                api.sentry.auditFor(subjectId)
+                  .then((r) => setData(r))
+                  .catch((e) => setError(formatApiError(e)));
+              }}
+            />
           )}
           {!error && !data && <div className="text-[var(--color-text-muted)]">Loading …</div>}
           {data && data.entries.length === 0 && (
@@ -931,12 +959,9 @@ function AggregationRiskPanel({
         >
           Aggregation Risk Matrix · {risks.length} findings
         </div>
-        <button
-          onClick={onClose}
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)] hover:text-[var(--color-text)] tracking-wider"
-        >
+        <Button onClick={onClose} variant="ghost" size="sm">
           Hide ✕
-        </button>
+        </Button>
       </div>
       <div className="overflow-auto">
         <table className="min-w-full border-collapse font-mono text-xs">
@@ -1002,10 +1027,3 @@ function AggregationRiskPanel({
   );
 }
 
-function Empty({ msg }: { msg: string }) {
-  return (
-    <div className="flex h-full items-center justify-center p-12 text-sm text-[var(--color-text-muted)]">
-      {msg}
-    </div>
-  );
-}

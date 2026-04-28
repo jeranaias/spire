@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type SystemStatus } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
+import { Pressable } from "./ui";
 
 // Audit hash + classification posture pin to fixed positions in the footer
 // so they're always readable. The marquee carries only the rotating
@@ -123,10 +124,10 @@ export function StatusFooter() {
     {
       label: "THERMALHAWK",
       value: thermalLive
-        ? `live · Thornveil-licensed${thermalSizeMb ? ` · ${thermalSizeMb}MB` : ""}`
+        ? `live · 1.77M params${thermalSizeMb ? ` · ${thermalSizeMb}MB` : ""}`
         : thermalWeights
         ? `weights present${thermalSizeMb ? ` (${thermalSizeMb}MB)` : ""} · sim only`
-        : "scripted sim",
+        : "rule-based sim",
       tone: thermalLive ? "ok" : thermalWeights ? "ok" : "muted",
     },
   ];
@@ -314,23 +315,24 @@ function AuditHash({ full, short }: { full: string; short: string }) {
   }
 
   return (
-    <button
-      type="button"
+    // Pressable normally enforces a 44px minimum, but the StatusFooter is
+    // intentionally a 32px-tall information density bar. Override
+    // `min-h` to 0 to keep the chip in-line; focus-visible ring + a11y
+    // attributes still apply.
+    <Pressable
       onClick={copy}
       disabled={!ready}
+      block={false}
       title={ready ? `Click to copy full SHA-256 fingerprint · ${full}` : "Audit chain fingerprint pending"}
       aria-label={ready ? "Copy full audit chain fingerprint" : "Audit fingerprint pending"}
-      // Fixed character width via inline-block + tabular-nums so the chip
-      // never causes ticker text to reflow on poll updates. Enter/Space
-      // already trigger button onClick by default, so keyboard works.
-      className="hidden tabular-nums text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:underline focus-visible:underline disabled:cursor-default disabled:opacity-60 lg:inline-block"
+      className="hidden !min-h-0 tabular-nums text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:underline focus-visible:underline disabled:cursor-default disabled:opacity-60 lg:inline-block"
       style={{ minWidth: "9ch", textAlign: "left" }}
     >
       {display}
       {ready && (
         <span aria-hidden className="ml-1 text-[var(--color-text-muted)]">⎘</span>
       )}
-    </button>
+    </Pressable>
   );
 }
 

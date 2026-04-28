@@ -1,4 +1,5 @@
 import { useSpireStore, type Toast, type ToastTone } from "../state/store";
+import { IconButton, Pressable } from "./ui";
 
 const TONE_ACCENT: Record<ToastTone, string> = {
   ok: "var(--color-success)",
@@ -60,15 +61,16 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
         {toast.text}
       </span>
       {toast.undo && (
-        <button
+        <Pressable
           onClick={() => {
             toast.undo!.onUndo();
             onDismiss();
           }}
-          className="font-mono text-xs uppercase text-[var(--color-primary)] hover:underline tracking-wider"
+          block={false}
+          className="!min-h-0 font-mono text-xs uppercase text-[var(--color-primary)] hover:underline tracking-wider"
         >
           {toast.undo.label}
-        </button>
+        </Pressable>
       )}
       {toast.link && (
         <a
@@ -80,13 +82,9 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
           {toast.link.label} ↗
         </a>
       )}
-      <button
-        onClick={onDismiss}
-        className="font-mono text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-        aria-label="Dismiss"
-      >
+      <IconButton onClick={onDismiss} aria-label="Dismiss toast">
         ✕
-      </button>
+      </IconButton>
     </div>
   );
 }

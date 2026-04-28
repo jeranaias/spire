@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
 import { withRetry, pollWithBackoff, formatApiError } from "../api-retry";
@@ -6,6 +6,15 @@ import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
 import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
+import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
+import {
+  Button,
+  IconButton,
+  ErrorState,
+  LoadingState,
+  fireIdempotent,
+  pushUndoToast,
+} from "../components/ui";
 
 const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: "#ef4444",
@@ -64,6 +73,8 @@ export function BastionView() {
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAlertSeverityCounts = useSpireStore((s) => s.setAlertSeverityCounts);
   const setSelectedUnitIdGlobal = useSpireStore((s) => s.setSelectedUnitId);
+  const selectedBuildingIdGlobal = useSpireStore((s) => s.selectedBuildingId);
+  const setSelectedBuildingIdGlobal = useSpireStore((s) => s.setSelectedBuildingId);
   const [cop, setCop] = useState<BastionCOP | null>(null);
   const [alerts, setAlerts] = useState<BastionAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<BastionAlert | null>(null);
@@ -200,42 +211,86 @@ export function BastionView() {
   // Per-alert action — ack / snooze / resolve. Optimistic update so the
   // operator sees the row move (or vanish) immediately; if the backend
   // rejects, the next poll restores ground truth.
+  //
+  // E1 hardening:
+  //   • Each (id, action) pair is deduped via fireIdempotent so a fat-finger
+  //     double-tap on Resolve fires once, not twice. Lockout of 250 ms.
+  //   • Resolve is destructive: defer the API call by 5s and show an
+  //     UndoToast. Operator gets a one-click reversal window before the row
+  //     leaves the system. Undo restores the alert locally; if the backend
+  //     poll has already removed it (rare), the next refresh reconciles.
   async function alertAction(id: string, action: "ack" | "snooze" | "resolve" | "unack") {
-    setAlerts((prev) =>
-      prev
-        .map((a) => {
-          if (a.id !== id) return a;
-          if (action === "resolve") return null;
-          if (action === "unack") return { ...a, _state: undefined };
-          if (action === "ack") {
-            return {
-              ...a,
-              _state: { status: "acknowledged" as const, at: new Date().toISOString() },
-            };
+    const dedupKey = `bastion:alert:${id}:${action}`;
+    return fireIdempotent(dedupKey, async () => {
+      if (action === "resolve") {
+        const target = alerts.find((a) => a.id === id);
+        if (!target) return;
+        // Optimistic remove from local stream.
+        setAlerts((prev) => prev.filter((a) => a.id !== id));
+        if (selectedAlert?.id === id) setSelectedAlert(null);
+
+        let undone = false;
+        pushUndoToast({
+          text: `Resolved · ${target.title}`,
+          onUndo: () => {
+            undone = true;
+            // Snap the row back into the stream; the next poll will overwrite
+            // with the canonical server-side state if it differs.
+            setAlerts((prev) => [target, ...prev]);
+            if (selectedAlert?.id === id) setSelectedAlert(target);
+            pushToast({ tone: "ok", text: "Resolve undone", ttlMs: 2500 });
+          },
+        });
+
+        // Defer the actual mutation 5s so the undo window is honoured.
+        window.setTimeout(async () => {
+          if (undone) return;
+          try {
+            await api.bastion.alertAction(id, "resolve");
+            refreshAlerts();
+          } catch (e) {
+            pushToast({ tone: "error", text: `Resolve failed — ${formatApiError(e)}` });
+            refreshAlerts();
           }
-          if (action === "snooze") {
-            const until = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-            return {
-              ...a,
-              _state: {
-                status: "snoozed" as const,
-                at: new Date().toISOString(),
-                snooze_until: until,
-              },
-            };
-          }
-          return a;
-        })
-        .filter((a): a is BastionAlert => a !== null),
-    );
-    if (selectedAlert?.id === id && action === "resolve") setSelectedAlert(null);
-    try {
-      await api.bastion.alertAction(id, action);
-      refreshAlerts();
-    } catch (e) {
-      pushToast({ tone: "error", text: `Alert action failed — ${formatApiError(e)}` });
-      refreshAlerts();
-    }
+        }, 5000);
+        return;
+      }
+
+      // Non-destructive paths (ack / snooze / unack) commit immediately.
+      setAlerts((prev) =>
+        prev
+          .map((a) => {
+            if (a.id !== id) return a;
+            if (action === "unack") return { ...a, _state: undefined };
+            if (action === "ack") {
+              return {
+                ...a,
+                _state: { status: "acknowledged" as const, at: new Date().toISOString() },
+              };
+            }
+            if (action === "snooze") {
+              const until = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+              return {
+                ...a,
+                _state: {
+                  status: "snoozed" as const,
+                  at: new Date().toISOString(),
+                  snooze_until: until,
+                },
+              };
+            }
+            return a;
+          })
+          .filter((a): a is BastionAlert => a !== null),
+      );
+      try {
+        await api.bastion.alertAction(id, action);
+        refreshAlerts();
+      } catch (e) {
+        pushToast({ tone: "error", text: `Alert action failed — ${formatApiError(e)}` });
+        refreshAlerts();
+      }
+    });
   }
 
   const setFpcon = useSpireStore((s) => s.setFpcon);
@@ -243,12 +298,6 @@ export function BastionView() {
 
   // Detect new alerts arriving in the poll so we can scan-line the row.
   const prevAlertIdsRef = useRef<Set<string>>(new Set());
-  // Track the active scan-line clear timer so we can cancel it when the
-  // component unmounts mid-flight, or when a fresh batch lands while the
-  // previous 700ms window is still pending. Without this, a stale
-  // setRecentAlertIds(new Set()) can fire after unmount (React warns),
-  // and back-to-back batches race each other for the clear.
-  const scanLineTimerRef = useRef<number | null>(null);
   useEffect(() => {
     const prev = prevAlertIdsRef.current;
     const fresh = new Set<string>();
@@ -257,26 +306,10 @@ export function BastionView() {
     }
     if (fresh.size > 0) {
       setRecentAlertIds(fresh);
-      if (scanLineTimerRef.current != null) {
-        window.clearTimeout(scanLineTimerRef.current);
-      }
-      scanLineTimerRef.current = window.setTimeout(() => {
-        setRecentAlertIds(new Set());
-        scanLineTimerRef.current = null;
-      }, 700);
+      window.setTimeout(() => setRecentAlertIds(new Set()), 700);
     }
     prevAlertIdsRef.current = new Set(alerts.map((a) => a.id));
   }, [alerts]);
-
-  // Unmount-time cleanup for the scan-line timer.
-  useEffect(() => {
-    return () => {
-      if (scanLineTimerRef.current != null) {
-        window.clearTimeout(scanLineTimerRef.current);
-        scanLineTimerRef.current = null;
-      }
-    };
-  }, []);
 
   // ThermalHawk sim trigger. Used to live as an in-column button (#37
   // moved it). Now the map agent owns the SIMULATE button in the COP
@@ -286,7 +319,15 @@ export function BastionView() {
   // the side-effects (FPCON CHARLIE, sim state, alert refresh) co-located
   // with the alert column that owns the response panel.
   const triggerThermalHawk = useCallback(async () => {
-    const s = await api.bastion.simulateThermalHawk("CLB-6");
+    // Idempotent: keyed per unit so a triple-tap on SIMULATE never spawns
+    // two concurrent ThermalHawk incidents. Falls through silently when
+    // the lockout window suppresses the duplicate.
+    const s = await fireIdempotent(
+      "bastion:sim:thermalhawk:CLB-6",
+      () => api.bastion.simulateThermalHawk("CLB-6"),
+      500,
+    );
+    if (!s) return;
     setSim(s);
     setSelectedAlert(s.alert);
     setSelectedUnit("CLB-6");
@@ -351,18 +392,28 @@ export function BastionView() {
     if (unitAlerts.length > 0) setSelectedAlert(unitAlerts[0]);
   }
 
-  // Drill-from-alert. Clicking an alert with a unit reference promotes the
-  // unit selection (which drives the MapCanvas flyTo via UNIT_BUILDING and
-  // lights the unit pin) and stamps the store so any other consumer can
-  // react to the operator's drill intent. If the alert has no unit but
-  // does have a grid (e.g. ThermalHawk targets a building), we lean on the
-  // existing `flyToBuilding` derivation below.
+  // Drill-from-alert. Run the deterministic alert→building resolver so
+  // every alert lands the operator on a real building, not a silent
+  // no-op. Precedence (see resolveAlertTarget):
+  //   1. unit's home_building   2. exact grid match   3. nearest named
+  //   building inside the same MGRS 1km square (projected metres).
+  //
+  // Unit selection is promoted only when the alert references a unit;
+  // otherwise we *clear* it so a non-unit alert (e.g. a grid-only
+  // weather/UAS hit) doesn't leave a stale unit ring on the map.
+  // selectedBuildingId is shared global state so the building focus
+  // survives view transitions and a future cross-view drill.
   function onAlertClick(a: BastionAlert) {
     setSelectedAlert(a);
     if (a.unit) {
       setSelectedUnit(a.unit);
       setSelectedUnitIdGlobal(a.unit);
+    } else {
+      setSelectedUnit(null);
+      setSelectedUnitIdGlobal(null);
     }
+    const target = resolveAlertTarget(a, cop);
+    setSelectedBuildingIdGlobal(target.buildingId);
   }
 
   const simTargetBuilding = useMemo(() => {
@@ -370,12 +421,13 @@ export function BastionView() {
     return resolveHomeBuilding(cop, sim.alert.unit) ?? undefined;
   }, [sim, cop]);
 
-  // When an alert is selected, derive a "fly to" target building:
-  // - Alerts with a `unit` map to that unit's home building
-  // - Alerts with a `grid` fall back to the nearest named building (future)
+  // When an alert is selected, derive a "fly to" target building via the
+  // shared resolver (unit_home → exact grid → nearest in same 1km square).
+  // Closes the existing TODO around the "nearest named building" fallback
+  // so a grid-only alert no longer silently no-ops on the map.
   const flyToBuilding = useMemo(() => {
     if (!selectedAlert) return null;
-    return resolveHomeBuilding(cop, selectedAlert.unit);
+    return resolveAlertTarget(selectedAlert, cop).buildingId;
   }, [selectedAlert, cop]);
 
   // Active vs acknowledged partition + filter strip + free-text search.
@@ -407,60 +459,38 @@ export function BastionView() {
 
   if (copError && !cop) {
     return (
-      <div className="flex h-full items-center justify-center p-12">
-        <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
-          <div
-            className="font-mono text-xs uppercase text-[var(--color-danger)] tracking-widest"
-          >
-            Installation Offline
-          </div>
-          <div className="mt-2 spire-body text-sm">
-            BASTION schematic unreachable after 4 attempts. Backend may be cycling — wait a moment, then switch role to retry.
-          </div>
-          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            {copError}
-          </div>
-          <button
-            onClick={() => {
-              // Force a re-fetch by toggling the role useEffect. Simplest path:
-              // request the same role; the effect dependency triggers because
-              // we set state inside.
-              setCop(null);
-              setCopError(null);
-              setWaking(true);
-              withRetry(() => api.bastion.cop(), {
-                onAttempt: (attempt) => setWaking(attempt > 1),
-              })
-                .then((c) => {
-                  setCop(c);
-                  setWaking(false);
-                })
-                .catch((e) => {
-                  setCopError(formatApiError(e));
-                  setWaking(false);
-                });
-            }}
-            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
+      <ErrorState
+        title="Installation Offline"
+        description="BASTION schematic unreachable after 4 attempts. Backend may be cycling — wait a moment, then switch role to retry."
+        detail={copError}
+        onRetry={() => {
+          // Force a re-fetch by toggling the role useEffect. Simplest path:
+          // request the same role; the effect dependency triggers because
+          // we set state inside.
+          setCop(null);
+          setCopError(null);
+          setWaking(true);
+          withRetry(() => api.bastion.cop(), {
+            onAttempt: (attempt) => setWaking(attempt > 1),
+          })
+            .then((c) => {
+              setCop(c);
+              setWaking(false);
+            })
+            .catch((e) => {
+              setCopError(formatApiError(e));
+              setWaking(false);
+            });
+        }}
+      />
     );
   }
   if (!cop) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-secondary)]">
-        <div className="flex items-center gap-3 font-mono text-sm tracking-wider">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
-          {waking ? "Waking up — one moment" : "Loading installation schematic ..."}
-        </div>
-      </div>
-    );
+    return <LoadingState size="page" label="Loading installation schematic..." waking={waking} />;
   }
 
   return (
-    <div className="flex h-full overflow-hidden" data-tour-id="bastion-content">
+    <div className="flex h-full overflow-hidden">
       {/* Left sidebar: alert stream */}
       <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
         <AlertStreamHeader
@@ -518,14 +548,15 @@ export function BastionView() {
           )}
           {ackedAlerts.length > 0 && (
             <div className="mt-3 border-t border-[var(--color-border)] pt-2">
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowAcked((v) => !v)}
-                className="flex w-full items-center justify-between rounded-sm px-2 py-1 font-mono text-xs uppercase tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                className="w-full justify-between px-2 text-[10px] tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                trailingIcon={<span aria-hidden>{showAcked ? "▾" : "▸"}</span>}
               >
-                <span>Acknowledged ({ackedAlerts.length})</span>
-                <span aria-hidden>{showAcked ? "▾" : "▸"}</span>
-              </button>
+                Acknowledged ({ackedAlerts.length})
+              </Button>
               {showAcked &&
                 dedupeAlerts(ackedAlerts).map((a) => (
                   <AlertRow
@@ -567,6 +598,8 @@ export function BastionView() {
           selectedUnit={selectedUnit}
           onUnitClick={onUnitClick}
           flyToBuilding={flyToBuilding}
+          selectedBuildingId={selectedBuildingIdGlobal}
+          onBuildingClick={(id) => setSelectedBuildingIdGlobal(id)}
           simActive={!!sim}
           simTargetBuilding={simTargetBuilding}
           simCordons={sim?.cordon_zones}
@@ -649,8 +682,9 @@ export function BastionView() {
             >
               Sim Controls
             </span>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="md"
               onClick={() => {
                 window.dispatchEvent(new CustomEvent("spire:simulate-thermalhawk"));
               }}
@@ -660,12 +694,12 @@ export function BastionView() {
                   ? "Simulation already active — resolve via the response panel"
                   : "Dispatch a synthetic ThermalHawk UAS detection · escalates FPCON to CHARLIE for the duration"
               }
-              className="inline-flex h-9 items-center gap-2 rounded-sm border border-dashed border-[var(--color-border-active)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-text)] backdrop-blur transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-50 tracking-widest"
+              className="border-dashed border-[var(--color-border-active)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] backdrop-blur"
+              leadingIcon={<span aria-hidden className="text-[var(--color-primary)]">▶</span>}
             >
-              <span aria-hidden className="text-[var(--color-primary)]">▶</span>
-              <span className="text-[var(--color-text-muted)]">Simulate</span>
-              <span>ThermalHawk</span>
-            </button>
+              <span className="text-[var(--color-text-muted)] mr-1">Simulate</span>
+              ThermalHawk
+            </Button>
           </div>
         )}
 
@@ -686,15 +720,16 @@ export function BastionView() {
             >
               Sim Active
             </span>
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="md"
               onClick={() => setConfirmResolve(true)}
               title="Resolve simulation · drop FPCON BRAVO and clear cordon overlays"
-              className="inline-flex h-9 items-center gap-2 rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,transparent)] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-success)] backdrop-blur transition-colors hover:bg-[color-mix(in_oklab,var(--color-success-muted)_50%,transparent)] tracking-widest"
+              className="border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,transparent)] text-[var(--color-success)] backdrop-blur hover:bg-[color-mix(in_oklab,var(--color-success-muted)_50%,transparent)]"
+              leadingIcon={<span aria-hidden>✓</span>}
             >
-              <span aria-hidden>✓</span>
-              <span>Resolve sim</span>
-            </button>
+              Resolve sim
+            </Button>
           </div>
         )}
 
@@ -783,19 +818,16 @@ function ResolveSimConfirm({
           forces, and target reticle.
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="inline-flex h-10 min-w-[88px] items-center justify-center rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-4 font-mono text-xs font-semibold uppercase text-[var(--color-text)] tracking-widest hover:bg-[var(--color-surface-hover)]"
-            autoFocus
-          >
+          <Button variant="secondary" onClick={onCancel} autoFocus>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
             onClick={onConfirm}
-            className="inline-flex h-10 min-w-[120px] items-center justify-center rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-4 font-mono text-xs font-semibold uppercase text-white tracking-widest hover:opacity-90"
+            className="border-[var(--color-success)] bg-[var(--color-success)] text-white hover:opacity-90"
           >
             Resolve
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -851,30 +883,11 @@ function AlertRow({
   const glyph = SEVERITY_GLYPH[alert.severity] || SEVERITY_GLYPH.INFO;
   const acked = alert._state?.status === "acknowledged";
   const snoozed = alert._state?.status === "snoozed";
-  // Keyboard accessibility: AlertRow is the primary BASTION drill-down
-  // affordance. A `<div onClick>` is mouse-only and skipped by Tab —
-  // an operator on a hardened keyboard-only watch-floor station can't
-  // reach the alert detail at all. We keep `<div>` (rather than a real
-  // `<button>`) because the row contains nested action buttons (Ack,
-  // Snooze, Resolve) and a button-inside-button is invalid HTML;
-  // role + tabIndex + Enter/Space handler give the same semantics.
-  const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onClick();
-    }
-  };
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      aria-label={`${alert.severity} ${alert.source}: ${alert.title}`}
       onClick={onClick}
-      onKeyDown={handleKeyDown}
       className={clsx(
         "relative mb-1.5 cursor-pointer overflow-hidden rounded-sm border-l-4 bg-[var(--color-surface)] px-2 py-1.5 transition-colors",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]",
         selected ? "border border-[var(--color-primary)]" : "border-r border-t border-b border-[var(--color-border)]",
         acked && "opacity-60",
       )}
@@ -938,45 +951,54 @@ function AlertRow({
           className="mt-1.5 flex gap-1.5"
           onClick={(e) => e.stopPropagation()}
         >
+          {/* Row actions composed via <Button> primitives. The visual
+           * compactness (h-7, text-[10px]) is preserved via className
+           * overrides while inheriting focus rings and consistent disabled
+           * styling. Touch targets remain ≥36px in this dense alert list
+           * — operators on the desktop staff view, not the field iPad. */}
           {onAck && !acked && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={onAck}
-              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+              className="h-7 px-2 text-[10px] tracking-widest"
               title="Acknowledge — moves to the Acknowledged group"
             >
               Ack
-            </button>
+            </Button>
           )}
           {onSnooze && !snoozed && !acked && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={onSnooze}
-              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)]"
+              className="h-7 px-2 text-[10px] tracking-widest hover:border-[var(--color-warning)] hover:text-[var(--color-warning)]"
               title="Snooze 1h — row resurfaces if still open"
             >
               Snooze 1h
-            </button>
+            </Button>
           )}
           {onUnack && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={onUnack}
-              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+              className="h-7 px-2 text-[10px] tracking-widest"
               title="Move back to active alerts"
             >
               Un-ack
-            </button>
+            </Button>
           )}
           {onResolve && (
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={onResolve}
-              className="rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_25%,transparent)] px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white"
+              className="h-7 px-2 text-[10px] tracking-widest border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_25%,transparent)] text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white"
               title="Resolve — drops from the open count"
             >
               Resolve
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -1043,15 +1065,14 @@ function AlertStreamHeader({
             + (severityCounts?.MODERATE ?? 0) + (severityCounts?.LOW ?? 0) + (severityCounts?.INFO ?? 0);
           const count = opt === "ALL" ? total : (severityCounts?.[opt] ?? 0);
           return (
-            <button
+            <Button
               key={opt}
-              type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onSevFilter(opt)}
               className={clsx(
-                "rounded-sm border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest transition-colors",
-                active
-                  ? "bg-[var(--color-bg)] text-[var(--color-text)]"
-                  : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]",
+                "h-7 rounded-sm border px-2 text-[10px] tracking-widest",
+                active ? "bg-[var(--color-bg)] text-[var(--color-text)]" : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]",
                 count === 0 && opt !== "ALL" ? "opacity-50" : "",
               )}
               style={{
@@ -1062,7 +1083,7 @@ function AlertStreamHeader({
               aria-label={`${opt} · ${count}`}
             >
               {opt} <span className="ml-1 tabular-nums opacity-70">{count}</span>
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -1258,12 +1279,14 @@ function ResponsePanel({
             </div>
             <div className="mt-0.5 text-sm font-semibold">{alert.title}</div>
           </div>
-          <button
+          <IconButton
+            aria-label="Close response panel"
             onClick={onClose}
-            className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+            variant="ghost"
+            size="md"
           >
-            ✕
-          </button>
+            <span aria-hidden>✕</span>
+          </IconButton>
         </div>
       </div>
 
@@ -1402,8 +1425,9 @@ function ResponsePanel({
                 return (
                   <li key={i} className="flex items-center gap-2">
                     <span className="font-mono text-[var(--color-text)]">{n.who}</span>
-                    <button
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={(e) => {
                         // stopPropagation guards against any future ancestor
                         // click handler swallowing the event before it lands.
@@ -1412,7 +1436,7 @@ function ResponsePanel({
                       }}
                       disabled={isSent}
                       title={isSent ? `Already sent to ${n.who}` : `Send draft notification to ${n.who} · audit logged`}
-                      className="ml-auto rounded border px-2 py-1 font-mono text-xs font-semibold uppercase tracking-wider transition-colors disabled:cursor-not-allowed"
+                      className="ml-auto"
                       style={{
                         borderColor: isSent ? "var(--color-success)" : "var(--color-primary)",
                         background: isSent
@@ -1422,7 +1446,7 @@ function ResponsePanel({
                       }}
                     >
                       {isSent ? `✓ Sent ${n.who}` : "Send Draft"}
-                    </button>
+                    </Button>
                   </li>
                 );
               })}
@@ -1448,13 +1472,15 @@ function ResponsePanel({
               ))}
             </div>
             {onResolveSim && (
-              <button
+              <Button
+                variant="secondary"
+                size="md"
                 onClick={onResolveSim}
-                className="mt-3 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-success)] transition-colors hover:bg-[var(--color-success)] hover:text-white tracking-widest"
+                className="mt-3 border-[var(--color-success)] bg-[color-mix(in_oklab,var(--color-success-muted)_30%,var(--color-surface))] text-[var(--color-success)] hover:bg-[var(--color-success)] hover:text-white"
                 title="Mark the simulated incident resolved · drops FPCON back to BRAVO and clears cordons"
               >
                 ✓ Resolve sim · drop FPCON
-              </button>
+              </Button>
             )}
           </section>
         )}
@@ -1602,16 +1628,19 @@ function G4CommandSummary({
             </div>
           )}
           {topAlerts.map((a) => (
-            <button
+            <Button
               key={a.id}
-              type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onAlertClick(a)}
-              className="flex items-baseline gap-2 rounded-sm px-1 py-[1px] text-left hover:bg-[var(--color-surface-hover)]"
+              className="h-6 justify-start gap-2 px-1 text-left"
+              leadingIcon={
+                <span
+                  className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: SEVERITY_COLOR[a.severity] || SEVERITY_COLOR.INFO }}
+                />
+              }
             >
-              <span
-                className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{ background: SEVERITY_COLOR[a.severity] || SEVERITY_COLOR.INFO }}
-              />
               <span
                 className="truncate font-mono text-[var(--color-text)]"
                 style={{ fontSize: "var(--text-sm)", maxWidth: "10rem" }}
@@ -1619,7 +1648,7 @@ function G4CommandSummary({
               >
                 {a.title}
               </span>
-            </button>
+            </Button>
           ))}
         </div>
       </div>

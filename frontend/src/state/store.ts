@@ -1,7 +1,5 @@
 import { create } from "zustand";
 
-import { mintSession, clearSession } from "../api";
-
 export type Role =
   | "maintenance_chief"
   | "g4"
@@ -18,6 +16,28 @@ export type ToastTone = "ok" | "info" | "warn" | "error";
 // where tap targets and breathing room matter more than info per square inch.
 export type Density = "dense" | "sparse";
 
+// CAC/PIV identity payload. Matches `backend/auth.MOCK_USERS` shape — the
+// load-bearing contract every Wave 1 lane reads. Additions only, no
+// renames: once a downstream lane pins against a field name it stays.
+export interface User {
+  dodid: string;
+  name: string;
+  first_name: string;
+  last_name: string;
+  rank: string;
+  rank_long?: string;
+  billet: string;
+  unit: string;
+  parent_command?: string;
+  branch: string;
+  clearance: string;
+  role: Role;
+  initials: string;
+  cert_issuer?: string;
+  cert_serial?: string;
+  cert_expires?: string;
+}
+
 export interface Toast {
   id: string;
   tone: ToastTone;
@@ -31,7 +51,31 @@ export interface Toast {
 
 export type CommsState = "CONNECTED" | "DEGRADED" | "DISCONNECTED";
 
+// DDIL mode (Disconnected, Degraded, Intermittent, Limited) — operator-
+// controlled simulation that drives the API client interceptor. CONNECTED is
+// the steady state and a passthrough; the other three each apply distinct
+// effects (latency / loss / queue+cache). Distinct from `commsState` (which
+// reflects backend-truth link health) and from `airGapActive` (a server-side
+// posture toggle gated to security_manager). DDIL is local theater — it
+// never reaches the backend, so it works in any operator role and is safe
+// to stamp at will during demos / drills.
+export type DdilMode = "CONNECTED" | "LIMITED" | "INTERMITTENT" | "DISCONNECTED";
+
+export interface DdilQueuedWrite {
+  id: string;
+  method: string;
+  path: string;
+  body?: unknown;
+  queuedAt: string;
+  actor: string;
+}
+
 export interface SpireState {
+  // CAC/PIV identity — null until the operator clears the cert-selection
+  // splash. Every Wave 1 lane reads from here. `role` mirrors
+  // `currentUser.role` and exists for backward-compat with views that
+  // already destructure `role` directly.
+  currentUser: User | null;
   role: Role;
   operatingMode: OperatingMode;
   alertCount: number;
@@ -43,7 +87,13 @@ export interface SpireState {
   // it wants the map to focus on; MapCanvas reads via the BastionView
   // wiring (selectedUnit + flyToBuilding). The store version exists so a
   // future cross-view drill can survive role / view changes.
+  //
+  // selectedUnitId and selectedBuildingId are independent — an operator
+  // commonly wants both ("unit X currently in building Y"). They are NOT
+  // modelled as mutually exclusive; the alert-target resolver and the
+  // direct building-click handler each write only the building field.
   selectedUnitId: string | null;
+  selectedBuildingId: string | null;
 
   // SENTRY batch context — hoisted out of SentryView local state so that
   // switching operator role via the TopBar dropdown (which unmounts the
@@ -64,23 +114,73 @@ export interface SpireState {
   airGapActive: boolean;
   queueDepth: number;
 
+  // B4 Mission clock + scenario timeline. Single source of truth for "what
+  // time is it in the war game" — every view that wants to render a
+  // phase-aware overlay reads from here. Hydrated by `<MissionClock>` at
+  // 1Hz (4Hz when running fast). The clock element is the only writer.
+  scenarioRunning: boolean;
+  scenarioRate: number;
+  scenarioOffsetMin: number;
+  scenarioOffsetLabel: string;
+  scenarioPhase: string;
+  scenarioMaxOffsetMin: number;
+  scenarioFiredEventIds: string[];
+
+  // W1 DDIL dramatization. Operator-controlled simulation; client-side only.
+  // The API client interceptor reads `ddilMode` and applies latency / loss /
+  // queue+cache effects. Pending writes accumulate in `ddilQueue` while
+  // DISCONNECTED; cached GET responses live in `ddilCache` so DISCONNECTED
+  // reads can serve from last-known-good with a stale-data badge.
+  ddilMode: DdilMode;
+  ddilQueue: DdilQueuedWrite[];
+  ddilCache: Record<string, { body: unknown; cachedAt: number }>;
+  ddilSyncing: boolean;
+  ddilLastSyncAt: number | null;
+  ddilDrillActive: boolean;
+  // Last cache hit served to a caller while DISCONNECTED. Used by the
+  // DDIL freshness badge so the operator can see at a glance how stale
+  // the data on screen actually is ("cached from H+xx:xx, n minutes
+  // stale" per the W1 brief).
+  ddilLastCacheHit: { key: string; cachedAt: number; servedAt: number } | null;
+
   // Toast queue.
   toasts: Toast[];
 
   // Track-G3 — density toggle. Persisted per role in localStorage.
   density: Density;
 
+  signIn: (user: User) => void;
+  signOut: () => void;
   setRole: (r: Role) => void;
   setOperatingMode: (m: OperatingMode) => void;
   setAlertCount: (n: number) => void;
   setAlertSeverityCounts: (counts: Record<string, number>) => void;
   setSelectedUnitId: (id: string | null) => void;
+  setSelectedBuildingId: (id: string | null) => void;
   setSentryBatch: (batchId: string | null, jobId: string | null) => void;
   setSelectedAssetId: (id: string | null) => void;
   setFpcon: (level: SpireState["fpcon"]) => void;
   setCommsState: (s: CommsState) => void;
   setAirGap: (active: boolean) => void;
   setQueueDepth: (n: number) => void;
+  setScenario: (s: {
+    running: boolean;
+    rate: number;
+    offsetMin: number;
+    offsetLabel: string;
+    phase: string;
+    maxOffsetMin: number;
+    firedEventIds: string[];
+  }) => void;
+  setDdilMode: (m: DdilMode) => void;
+  enqueueDdilWrite: (w: Omit<DdilQueuedWrite, "id" | "queuedAt">) => DdilQueuedWrite;
+  removeDdilWrite: (id: string) => void;
+  clearDdilQueue: () => void;
+  cacheDdilRead: (key: string, body: unknown) => void;
+  noteDdilCacheHit: (key: string, cachedAt: number) => void;
+  setDdilSyncing: (b: boolean) => void;
+  setDdilLastSyncAt: (n: number | null) => void;
+  setDdilDrillActive: (b: boolean) => void;
   setDensity: (d: Density) => void;
   pushToast: (t: Omit<Toast, "id">) => string;
   dismissToast: (id: string) => void;
@@ -123,6 +223,11 @@ export const VIEW_SCOPE: Record<string, Role[]> = {
   "/pulse":   ["maintenance_chief", "g4", "mef_commander"],
   "/bastion": ["mef_commander", "g4", "security_manager", "maintenance_chief"],
   "/admin":   ["security_manager"],
+  "/admin/audit": ["security_manager"],
+  // W1 #30 — Model supply-chain page lives under the admin role gate.
+  // Sub-routes inherit the same scope so a deep-linked /admin/models/:id
+  // hits the same overlay as bare /admin for non-security_manager.
+  "/admin/models": ["security_manager"],
 };
 
 function uid(): string {
@@ -153,57 +258,52 @@ function saveDensity(d: Density): void {
 
 const DEFAULT_ROLE: Role = "mef_commander";
 
-// Deep-link initial role.
-//
-// Decision: a `?role=…` query param on the *initial* page load is honored,
-// then the param is wiped from the URL so the Zustand store is the sole
-// source of truth from that point forward. Subsequent role swaps (dropdown)
-// must NEVER repopulate the URL — the TopBar's nav() with `replace:true`
-// to ROLE_DEFAULT_VIEW already strips any stale query string. This keeps
-// shareable deep-links working (`?role=g4#/bastion`) without letting URL
-// state diverge from store state for the rest of the session.
-//
-// If the param is invalid or absent, fall back to the default. Whichever
-// path we take, we strip `role` from the live URL so a refresh inherits
-// only the route, never a phantom role.
-// Walkthrough audit: the role used to reset to the default on every
-// page reload. An operator picking 'Security Mgr', refreshing, and
-// being kicked back to MEF Commander is a real frustration. Persist
-// last-selected role in localStorage so refresh keeps the seat.
-// URL `?role=X` still wins (single-link override for demos), and
-// nothing about scope-enforcement changes — the backend always honors
-// X-User-Role per request.
-const ROLE_KEY = "spire.role";
-function readInitialRole(): Role {
-  if (typeof window === "undefined") return DEFAULT_ROLE;
+// CAC identity persistence. The signed HttpOnly cookie is the server's
+// source of truth; sessionStorage is a same-tab cache so refresh skips an
+// extra `/api/auth/me` round-trip and the UI re-paints instantly with the
+// previous identity. If the cookie is absent or expired the next /api call
+// will 401 and the auth gate redirects back to the cert-selection screen.
+const USER_KEY = "spire.currentUser";
+
+function loadUser(): User | null {
+  if (typeof window === "undefined") return null;
   try {
-    const url = new URL(window.location.href);
-    const raw = url.searchParams.get("role");
-    if (raw && (raw in ROLE_LABELS)) {
-      // Strip the param from the visible URL so it doesn't get echoed
-      // by future navs / share-link readers / hard reloads.
-      url.searchParams.delete("role");
-      const cleaned = url.pathname + (url.search ? url.search : "") + url.hash;
-      window.history.replaceState({}, "", cleaned);
-      try { window.localStorage.setItem(ROLE_KEY, raw); } catch { /* tolerant */ }
-      return raw as Role;
+    const raw = window.sessionStorage.getItem(USER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as User;
+    if (!parsed || typeof parsed !== "object" || !parsed.dodid || !parsed.role) {
+      return null;
     }
-    const stored = window.localStorage.getItem(ROLE_KEY);
-    if (stored && (stored in ROLE_LABELS)) return stored as Role;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveUser(user: User | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (user) {
+      window.sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+    } else {
+      window.sessionStorage.removeItem(USER_KEY);
+    }
   } catch {
     /* tolerant */
   }
-  return DEFAULT_ROLE;
 }
 
-const INITIAL_ROLE: Role = readInitialRole();
+const INITIAL_USER: User | null = loadUser();
+const INITIAL_ROLE: Role = INITIAL_USER?.role ?? DEFAULT_ROLE;
 
 export const useSpireStore = create<SpireState>((set) => ({
+  currentUser: INITIAL_USER,
   role: INITIAL_ROLE,
   operatingMode: "full",
   alertCount: 0,
   alertSeverityCounts: {},
   selectedUnitId: null,
+  selectedBuildingId: null,
   sentryBatchId: null,
   sentryJobId: null,
   selectedAssetId: null,
@@ -211,31 +311,80 @@ export const useSpireStore = create<SpireState>((set) => ({
   commsState: "CONNECTED",
   airGapActive: false,
   queueDepth: 0,
+  scenarioRunning: false,
+  scenarioRate: 1,
+  scenarioOffsetMin: 0,
+  scenarioOffsetLabel: "H+000:00",
+  scenarioPhase: "Pre-conflict",
+  scenarioMaxOffsetMin: 96 * 60,
+  scenarioFiredEventIds: [],
+  ddilMode: "CONNECTED",
+  ddilQueue: [],
+  ddilCache: {},
+  ddilSyncing: false,
+  ddilLastSyncAt: null,
+  ddilDrillActive: false,
+  ddilLastCacheHit: null,
   toasts: [],
   density: typeof window !== "undefined" ? loadDensity() : "dense",
-  setRole: (role) => {
-    try { window.localStorage.setItem(ROLE_KEY, role); } catch { /* tolerant */ }
-    set({ role });
-    // Drop the previous persona's bearer FIRST so any in-flight request
-    // that lands between this set and the mint resolving falls back to
-    // an unauthenticated call (401) instead of silently using the
-    // outgoing role's token. Then mint the fresh bearer for the new
-    // persona; subsequent jsonFetch calls pick it up from module state.
-    clearSession();
-    void mintSession(role).catch((err) => {
-      console.warn("[SPIRE] session mint failed for role swap", role, err);
+  signIn: (user) => {
+    saveUser(user);
+    set({ currentUser: user, role: user.role });
+  },
+  signOut: () => {
+    saveUser(null);
+    // Reset transient view selections so the next operator doesn't inherit
+    // the previous one's drill-down context.
+    set({
+      currentUser: null,
+      selectedUnitId: null,
+      selectedBuildingId: null,
+      sentryBatchId: null,
+      sentryJobId: null,
+      selectedAssetId: null,
     });
   },
+  setRole: (role) => set({ role }),
   setOperatingMode: (operatingMode) => set({ operatingMode }),
   setAlertCount: (alertCount) => set({ alertCount }),
   setAlertSeverityCounts: (alertSeverityCounts) => set({ alertSeverityCounts }),
   setSelectedUnitId: (selectedUnitId) => set({ selectedUnitId }),
+  setSelectedBuildingId: (selectedBuildingId) => set({ selectedBuildingId }),
   setSentryBatch: (sentryBatchId, sentryJobId) => set({ sentryBatchId, sentryJobId }),
   setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
   setFpcon: (fpcon) => set({ fpcon }),
   setCommsState: (commsState) => set({ commsState }),
   setAirGap: (airGapActive) => set({ airGapActive }),
   setQueueDepth: (queueDepth) => set({ queueDepth }),
+  setScenario: (s) =>
+    set({
+      scenarioRunning: s.running,
+      scenarioRate: s.rate,
+      scenarioOffsetMin: s.offsetMin,
+      scenarioOffsetLabel: s.offsetLabel,
+      scenarioPhase: s.phase,
+      scenarioMaxOffsetMin: s.maxOffsetMin,
+      scenarioFiredEventIds: s.firedEventIds,
+    }),
+  setDdilMode: (ddilMode) => set({ ddilMode }),
+  enqueueDdilWrite: (w) => {
+    const entry: DdilQueuedWrite = {
+      ...w,
+      id: `DDIL-${uid().toUpperCase()}`,
+      queuedAt: new Date().toISOString(),
+    };
+    set((s) => ({ ddilQueue: [...s.ddilQueue, entry] }));
+    return entry;
+  },
+  removeDdilWrite: (id) => set((s) => ({ ddilQueue: s.ddilQueue.filter((q) => q.id !== id) })),
+  clearDdilQueue: () => set({ ddilQueue: [] }),
+  cacheDdilRead: (key, body) =>
+    set((s) => ({ ddilCache: { ...s.ddilCache, [key]: { body, cachedAt: Date.now() } } })),
+  noteDdilCacheHit: (key, cachedAt) =>
+    set({ ddilLastCacheHit: { key, cachedAt, servedAt: Date.now() } }),
+  setDdilSyncing: (ddilSyncing) => set({ ddilSyncing }),
+  setDdilLastSyncAt: (ddilLastSyncAt) => set({ ddilLastSyncAt }),
+  setDdilDrillActive: (ddilDrillActive) => set({ ddilDrillActive }),
   setDensity: (density) => {
     saveDensity(density);
     set({ density });

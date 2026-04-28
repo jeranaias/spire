@@ -5,6 +5,8 @@ import { formatApiError } from "../../api-retry";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
+import { Pressable } from "../../components/ui";
+import { ClassifiedExport } from "../../components/classification";
 
 const RELEASE_AUTHS = [
   { value: "US_ONLY", label: "U.S." },
@@ -136,13 +138,14 @@ export function MarkTab() {
 
         <div className="mb-2 flex flex-wrap gap-2">
           {SAMPLES.map((s) => (
-            <button
+            <Pressable
               key={s.label}
               onClick={() => loadSample(s.text)}
+              block={false}
               className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
             >
               {s.label}
-            </button>
+            </Pressable>
           ))}
         </div>
 
@@ -203,42 +206,60 @@ export function MarkTab() {
                 <span className="mx-2 text-[var(--color-border-active)]">│</span>
                 Release: <span className="text-[var(--color-text)]">{result.release_authority_requested}</span>
               </div>
-              <button
-                onClick={async () => {
-                  setDownloading(true);
-                  try {
-                    const text = textareaRef.current?.value ?? "";
-                    const attest = {
-                      input_hash: await sha256(text),
-                      recommended_marking: result.recommended_classification,
-                      caveats: result.caveats_recommended,
-                      confidence: result.confidence,
-                      evidence: result.evidence,
-                      release_compatibility: result.release_compatibility,
-                      engine: result.audit.engine,
-                      timestamp: result.audit.timestamp,
-                      release_authority: release,
-                    };
-                    const blob = new Blob([JSON.stringify(attest, null, 2)], { type: "application/json" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `spire_mark_attestation_${Date.now()}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    pushToast({ tone: "ok", text: "Attestation downloaded" });
-                  } finally {
-                    setDownloading(false);
+              <div className="ml-auto">
+                <ClassifiedExport
+                  classification={result.recommended_classification}
+                  caveats={result.caveats_recommended}
+                  action="sentry.mark.attestation"
+                  label="↓ Attestation"
+                  pendingLabel="…"
+                  loading={downloading}
+                  disabled={result.release_compatibility?.status === "block"}
+                  disabledReason={
+                    result.release_compatibility?.status === "block"
+                      ? "Cannot generate attestation while release is blocked."
+                      : undefined
                   }
-                }}
-                className="ml-auto rounded-sm border border-[var(--color-border)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] tracking-widest"
-                disabled={result.release_compatibility?.status === "block"}
-                title={result.release_compatibility?.status === "block"
-                  ? "Cannot generate attestation while release is blocked."
-                  : undefined}
-              >
-                {downloading ? "…" : "↓ Attestation"}
-              </button>
+                  onExport={async (cls) => {
+                    setDownloading(true);
+                    try {
+                      const text = textareaRef.current?.value ?? "";
+                      // Visible classification banner stamped at the top of
+                      // the attestation file. Top-level field on the JSON so
+                      // any downstream parser can route by sensitivity
+                      // without inspecting nested rules.
+                      const banner = cls === "TS_SCI" ? "TOP SECRET // SCI" : cls.replace("_", " ");
+                      const attest = {
+                        _classification: cls,
+                        _classification_banner: `// CLASSIFICATION: ${banner} //`,
+                        _handling: "Handle per DoDM 5200.01",
+                        input_hash: await sha256(text),
+                        recommended_marking: result.recommended_classification,
+                        caveats: result.caveats_recommended,
+                        confidence: result.confidence,
+                        evidence: result.evidence,
+                        release_compatibility: result.release_compatibility,
+                        engine: result.audit.engine,
+                        timestamp: result.audit.timestamp,
+                        release_authority: release,
+                      };
+                      const blob = new Blob([JSON.stringify(attest, null, 2)], { type: "application/json" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      // Filename inherits classification so the marking is
+                      // visible on disk before the file is ever opened.
+                      const safeCls = cls.replace(/\//g, "_");
+                      a.download = `spire_${safeCls}_mark_attestation_${Date.now()}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      pushToast({ tone: "ok", text: `Attestation downloaded · ${banner}` });
+                    } finally {
+                      setDownloading(false);
+                    }
+                  }}
+                />
+              </div>
             </div>
 
             <section className="mb-4">

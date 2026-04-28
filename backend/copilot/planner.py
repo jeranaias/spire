@@ -122,9 +122,13 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
             tool_choice="auto",
             temperature=0.1,
             max_tokens=600,
+            tier="tier2_mid",
+            call_site="copilot_plan",
+            role=role,
         )
         content = (result.get("content") or "").strip()
         usage = result.get("usage") or {}
+        economics = result.get("economics") or {}
         # If the proxy returned tool_calls, parse them out of the raw response.
         raw = result.get("raw") or {}
         choice0 = (raw.get("choices") or [{}])[0]
@@ -148,6 +152,7 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
             "steps": steps,
             "engine": "Gemma4 via RigRun proxy",
             "tokens_used": usage.get("total_tokens"),
+            "economics": economics or None,
         }
     except Exception as e:  # noqa: BLE001
         err = str(e)
@@ -169,9 +174,17 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
                     messages=messages,
                     temperature=0.1,
                     max_tokens=400,
+                    # No-tools fallback uses tier1 since we're not asking
+                    # the model to function-call any more — cheaper rung
+                    # is sufficient when we're only producing prose.
+                    tier="tier1_small",
+                    call_site="copilot_plan",
+                    role=role,
+                    route="fallback",
                 )
                 content = (result.get("content") or "").strip()
                 usage = result.get("usage") or {}
+                economics = result.get("economics") or {}
                 # Run rule-based intent extraction in parallel for tool steps.
                 rb = _rule_based_plan(text, role, plan_id, error="")
                 cleaned = _strip_json_dump(content)
@@ -188,11 +201,32 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
                     "steps": rb["steps"],
                     "engine": "Gemma4 via RigRun proxy (no-tools fallback)",
                     "tokens_used": usage.get("total_tokens"),
+                    "economics": economics or None,
                 }
             except Exception as e2:  # noqa: BLE001
                 err = f"{err} | retry: {e2}"
         # Final fallback — rule-based intent routing only.
-        return _rule_based_plan(text, role, plan_id, error=err)
+        plan = _rule_based_plan(text, role, plan_id, error=err)
+        # Tier-0 economics: rule-engine produced the plan, $0 spent.
+        from ..inference_economics import record_call
+        rule_entry = record_call(
+            tier="tier0_rule",
+            model="deterministic regex / lookup",
+            input_tokens=0, output_tokens=0,
+            latency_ms=0.0, call_site="copilot_plan",
+            route="fallback", role=role,
+        )
+        plan["economics"] = {
+            "tier": "tier0_rule",
+            "model": rule_entry["model"],
+            "call_site": "copilot_plan",
+            "route": "fallback",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_usd": 0.0,
+            "latency_ms": 0.0,
+        }
+        return plan
 
 
 async def execute(plan_id: str, steps: list, role: str) -> dict:
@@ -252,6 +286,10 @@ async def summarize(panel: str, data: dict, role: str) -> str:
             messages=[{"role": "system", "content": sys}, {"role": "user", "content": user}],
             temperature=0.2,
             max_tokens=200,
+            # Panel summary is a 2-sentence Q→A — tier1 SLM is plenty.
+            tier="tier1_small",
+            call_site="copilot_panel_summary",
+            role=role,
         )
         return (result.get("content") or "").strip()
     except Exception as e:  # noqa: BLE001

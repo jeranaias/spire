@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { api, type ExportResult } from "../../api";
+import { api, ApiError, type ExportResult } from "../../api";
 import type { SentryContext } from "../SentryView";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
+import { Pressable, fireIdempotent } from "../../components/ui";
+import { ClassifiedExport, ClassificationBadge } from "../../components/classification";
 
 const AUTHORITIES = [
   { value: "US_ONLY",  label: "U.S. Only" },
@@ -41,30 +43,55 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   }
 
   async function doExport() {
-    setLoading(true);
-    try {
-      // Walkthrough #6 — pass batchId so the export covers the same batch
-      // the operator just processed.
-      const r = await api.sentry.export(authority, format, ctx.batchId);
-      setResult(r as any);
-      // Toast carries a click-through link so the operator never wonders
-      // "where did the file go?" after a successful export. Reviewer caught
-      // the celebratory toast having no destination.
-      pushToast({
-        tone: "ok",
-        text: `✓ Export ${r.export_id} · ${(r.records_exported ?? 0).toLocaleString("en-US")} records · ${((r.bytes ?? 0) / 1024).toFixed(1)} KB`,
-        link: r.download_url ? { label: "Download", href: r.download_url } : undefined,
-        ttlMs: 6000,
-      });
-    } catch (err) {
-      pushToast({ tone: "error", text: "Export failed" });
-    } finally {
-      setLoading(false);
-    }
+    // Idempotency guard — export bundles a sanitized release. Rapid
+    // double-tap on "Export Sanitized Bundle" must not register two
+    // distinct export bundles for the same (batch, authority, format).
+    const key = `sentry:export:${ctx.batchId ?? "no-batch"}:${authority}:${format}`;
+    await fireIdempotent(key, async () => {
+      setLoading(true);
+      try {
+        // Walkthrough #6 — pass batchId so the export covers the same batch
+        // the operator just processed.
+        const r = await api.sentry.export(authority, format, ctx.batchId);
+        setResult(r);
+        const cls = r.classification ?? "CUI";
+        // Toast carries a click-through link so the operator never wonders
+        // "where did the file go?" after a successful export. Reviewer caught
+        // the celebratory toast having no destination.
+        pushToast({
+          tone: "ok",
+          text: `✓ Export ${r.export_id} · ${cls} · ${(r.records_exported ?? 0).toLocaleString("en-US")} records · ${((r.bytes ?? 0) / 1024).toFixed(1)} KB`,
+          link: r.download_url ? { label: "Download", href: r.download_url } : undefined,
+          ttlMs: 6000,
+        });
+      } catch (err: unknown) {
+        // Surface the spillage event distinctly when the backend gate fires.
+        const detail = err instanceof ApiError && err.body && typeof err.body === "object" ? (err.body as { detail?: Record<string, string> }).detail : undefined;
+        if (detail && detail.error === "InsufficientClearance") {
+          pushToast({
+            tone: "error",
+            text: `Spillage prevented · backend blocked ${detail.action} (need ${detail.required_classification}, you have ${detail.user_clearance}).`,
+            ttlMs: 7000,
+          });
+        } else {
+          pushToast({ tone: "error", text: "Export failed" });
+        }
+      } finally {
+        setLoading(false);
+      }
+    }, 500);
   }
 
+  // The bundle classification is auto-inherited from the source records
+  // server-side. Until the operator runs an export we don't know what the
+  // bundle will mark; default to SECRET because canonical batches always
+  // contain at least one SECRET-tier record (the redaction report itself
+  // surfaces them). This is the gate the FE primitive renders against —
+  // the backend re-checks on every /export and /download call.
+  const expectedBundleClass = result?.classification ?? "SECRET";
+
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6" data-tour-id="sentry-export-content">
+    <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-4">
         <h2
           className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
@@ -120,28 +147,33 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         </div>
       </div>
 
-      <div>
-        <button
-          onClick={doExport}
-          disabled={loading || !ctx.batchId}
-          className="rounded-sm border border-[var(--color-success)] bg-[var(--color-success)] px-6 py-2 font-mono text-base font-semibold uppercase text-white hover:brightness-110 disabled:opacity-50 tracking-widest"
-        >
-          {loading ? "Building bundle …" : "Export Sanitized Bundle"}
-        </button>
-        {!ctx.batchId && (
-          <span className="ml-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            Requires a processed batch.
-          </span>
-        )}
+      <div className="flex items-center gap-4">
+        <ClassifiedExport
+          classification={expectedBundleClass}
+          action="sentry.export"
+          label="Export Sanitized Bundle"
+          pendingLabel="Building bundle …"
+          loading={loading}
+          disabled={!ctx.batchId}
+          disabledReason="Requires a processed batch."
+          onExport={doExport}
+        />
+        <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+          Bundle classification auto-inherits from source · {expectedBundleClass}
+        </span>
       </div>
 
       {result && (
         <div className="mt-6 rounded-md border border-[var(--color-success-muted)] bg-[color-mix(in_oklab,var(--color-success-muted)_15%,var(--color-surface))] p-4">
           <div className="mb-3 flex items-baseline justify-between">
             <h4
-              className="font-mono text-base font-semibold uppercase text-[var(--color-success)] tracking-widest"
+              className="font-mono text-base font-semibold uppercase text-[var(--color-success)] tracking-widest flex items-center gap-3"
             >
-              Export Prepared
+              <span>Export Prepared</span>
+              <ClassificationBadge
+                classification={result.classification ?? "CUI"}
+                size="md"
+              />
             </h4>
             <span
               className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide"
@@ -268,7 +300,7 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
               key={d.sr_number}
               className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]"
             >
-              <button
+              <Pressable
                 onClick={() => setExpanded(open ? null : d.sr_number)}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left"
               >
@@ -291,7 +323,7 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                   ))}
                   <span className="ml-1 font-mono text-[var(--color-text-muted)]">{open ? "▾" : "▸"}</span>
                 </div>
-              </button>
+              </Pressable>
               {open && (
                 <div className="grid grid-cols-2 gap-0 border-t border-[var(--color-border)]">
                   <div className="border-r border-[var(--color-border)] p-3">

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useSpireStore, VIEW_SCOPE, ROLE_LABELS, ROLE_DEFAULT_VIEW } from "../state/store";
 import { useNavigate } from "react-router-dom";
+import { Button } from "./ui";
 
 interface Props {
   // Route prefix — "/sentry", "/pulse", "/bastion"
@@ -47,12 +48,9 @@ export function ScopeGuard({ view, children }: Props) {
           In production, SPIRE honours role-based access control via CAC token
           and Keycloak role mapping. This overlay simulates that enforcement.
         </div>
-        <button
-          onClick={() => nav(home)}
-          className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-wider"
-        >
+        <Button onClick={() => nav(home)} size="sm">
           Return to {home}
-        </button>
+        </Button>
       </div>
     </div>
   );

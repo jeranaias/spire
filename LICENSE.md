@@ -214,7 +214,7 @@ HACKATHON PRODUCTS (Gov't owned)          THORNVEIL DEPENDENCIES (Thornveil owne
 ─────────────────────────────────         ────────────────────────────────────────
 
 SENTRY Frontend ──────────────────────►   RigRun (classification routing, safety proxy)
-SENTRY Text Classifier* ──────────────►   HawkStack (Thornveil training methodology)
+SENTRY Text Classifier* ──────────────►   HawkStack (training methodology, SGDR protocol)
 SENTRY Regex Library ─────────────────►   (no dependency — standalone)
 SENTRY Sanitization Engine ───────────►   (no dependency — standalone)
 SENTRY Coalition Release Engine ──────►   (no dependency — standalone)
@@ -222,7 +222,7 @@ SENTRY Coalition Release Engine ──────►   (no dependency — stand
 PULSE Dashboard ──────────────────────►   (no dependency — standalone)
 PULSE Risk Scoring (rule-based) ──────►   (no dependency — standalone)
 PULSE Monte Carlo Forecast ───────────►   (no dependency — standalone)
-PULSE Failure Predictor* ─────────────►   HawkStack (Thornveil training methodology)
+PULSE Failure Predictor* ─────────────►   HawkStack (training methodology, SGDR protocol)
 PULSE Cannibalization Engine ─────────►   (no dependency — standalone)
 PULSE Recommend-Actions (GC-1) ───────►   (no dependency — standalone; reads
                                            Thornveil-authored
@@ -231,10 +231,9 @@ PULSE Recommend-Actions (GC-1) ───────►   (no dependency — sta
 
 BASTION Frontend ─────────────────────►   RigRun (SPIRO copilot via NL query)
 BASTION Incident Response Engine ─────►   (no dependency — standalone)
-BASTION ThermalHawk Live Inference ───►   ThermalHawk (Thornveil-licensed
-                                           detector + weights, loaded
-                                           via the Thornveil ML package
-                                           on licensed deploys only)
+BASTION ThermalHawk Live Inference ───►   ThermalHawk (capability-tier weights;
+                                           vendored architecture loaded by
+                                           backend/ml/thermalhawk_wem.py)
 BASTION Sensor Fusion ────────────────►   (no dependency — standalone)
 BASTION Air-Gap Mode (GC-7) ──────────►   (no dependency — standalone)
 BASTION Distributed Sync (GC-2) ──────►   (no dependency — standalone)
@@ -243,16 +242,16 @@ SPIRO Operator Copilot ───────────────►   RigRun
                                            classification-aware proxy on
                                            Thornveil-managed compute)
 
-* Models trained during the event are gov't owned; the Thornveil training
-  methodology used to produce them is Thornveil IP. The gov't may retrain
-  models using any methodology of its choosing.
+* Models trained during the event are gov't owned; the training methodology
+  (HawkStack/SGDR protocol) used to produce them is Thornveil IP. The gov't
+  may retrain models using any methodology of its choosing.
 ```
 
 ---
 
 ## 6. Models Trained During the Event
 
-Any neural network model **trained during the hackathon** (27–30 April 2026) is government-owned work product, regardless of whether Thornveil training methodology was used to produce it. This includes:
+Any neural network model **trained during the hackathon** (27–30 April 2026) is government-owned work product, regardless of whether Thornveil training methodology (HawkStack, SGDR) was used to produce it. This includes:
 
 - SENTRY text sensitivity classifier (~100K parameters)
 - PULSE equipment failure predictor (~8K parameters)

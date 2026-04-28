@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 
-from ..auth import current_role, current_role_optional
+from ..auth import session_role
 from ..persistence import (
     DATA_DIR as PERSIST_DIR,
     decisions_for_batch,
@@ -26,8 +26,10 @@ from ..persistence import (
     store_uploaded_batch,
 )
 from ..scoping import (
-    require_role,
-    AUDIT_READ_ROLES, COALITION_RELEASE_ROLES, SENTRY_VIEW_ROLES,
+    _normalize_classification as normalize_classification,
+    classification_rank,
+    require_clearance,
+    require_no_downgrade,
 )
 from ..state import get_dataset
 
@@ -241,23 +243,20 @@ def _sr_to_record(sr) -> dict:
 
 
 @router.get("/demo-batch")
-async def demo_batch(limit: int = 500, role: str = Depends(current_role)):
+async def demo_batch(limit: int = 500):
     """Seed a batch from the canonical dataset. Called by the SENTRY view when
-    the user clicks "Use canonical dataset" instead of uploading a file.
-    Sentry surfaces are gated to data_custodian / security_manager."""
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.view")
+    the user clicks "Use canonical dataset" instead of uploading a file."""
     records = _records_from_canonical(limit=limit)
     batch = _new_batch(record_source="canonical_demo", records=records)
     return _public_batch(batch)
 
 
 @router.post("/upload")
-async def upload(file: UploadFile = File(...), role: str = Depends(current_role)):
+async def upload(file: UploadFile = File(...)):
     """Accept a CSV/XLSX/JSON upload, parse with pandas/openpyxl, detect schema,
     and stage as a batch. Schema mapping runs a fuzzy match from user columns
     onto SPIRE's canonical SR schema. Raw bytes persist to SQLite so a rerun
     after restart works without re-upload."""
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.upload")
     raw = await file.read()
     filename = file.filename or "upload.bin"
     try:
@@ -352,14 +351,12 @@ def _parse_upload(raw: bytes, filename: str) -> tuple[list[dict], dict]:
 
 
 @router.post("/mark")
-async def mark_text(payload: dict = Body(default={}),
-                    role: str = Depends(current_role)):
+async def mark_text(payload: dict):
     """Upstream marking recommender. Accepts a free-text paragraph, returns
     the recommended classification + explanation without any LLM.
 
     Payload: {"text": "...", "release_authority": "US_ONLY"}.
     """
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.mark")
     text = payload.get("text", "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
@@ -445,8 +442,7 @@ async def mark_text(payload: dict = Body(default={}),
 # ---------------------------------------------------------------------------
 
 @router.post("/process/{batch_id}")
-async def start_processing(batch_id: str, role: str = Depends(current_role)):
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.process")
+async def start_processing(batch_id: str):
     batch = _BATCHES.get(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="batch not found")
@@ -650,8 +646,7 @@ async def start_processing(batch_id: str, role: str = Depends(current_role)):
 
 
 @router.get("/jobs/{job_id}")
-async def job_status(job_id: str, role: str = Depends(current_role)):
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.jobs")
+async def job_status(job_id: str):
     for batch in _BATCHES.values():
         if job_id in batch["jobs"]:
             j = batch["jobs"][job_id]
@@ -676,8 +671,7 @@ async def job_status(job_id: str, role: str = Depends(current_role)):
 # ---------------------------------------------------------------------------
 
 @router.get("/review-queue/{batch_id}")
-async def review_queue(batch_id: str, role: str = Depends(current_role)):
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.review_queue")
+async def review_queue(batch_id: str):
     batch = _BATCHES.get(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="batch not found")
@@ -717,15 +711,45 @@ async def review_queue(batch_id: str, role: str = Depends(current_role)):
 
 
 @router.post("/review/{sr_number}/{action}")
-async def review_action(sr_number: str, action: str,
-                        payload: Optional[dict] = Body(default=None),
-                        role: str = Depends(current_role)):
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.review")
+async def review_action(
+    sr_number: str,
+    action: str,
+    request: Request,
+    payload: Optional[dict] = None,
+):
     if action not in ("approve", "reject", "modify"):
         raise HTTPException(status_code=400, detail="action must be approve|reject|modify")
     payload = payload or {}
+    role = session_role(request) or "data_custodian"
     note = payload.get("note", "")
-    # actor_role is bearer-resolved; payload role claim is ignored.
+
+    # Downgrade-write block. If the modify payload tries to lower an
+    # artifact's classification (e.g. SECRET → CUI on a held record), we
+    # raise 403 + audit `downgrade_blocked`. The formal downgrade-with-
+    # justification flow is out of scope for this lane — surface only.
+    new_cls = payload.get("new_classification")
+    if action == "modify" and new_cls:
+        prev_cls = "UNCLASSIFIED"
+        # Look the prior classification up across processed batches; the
+        # most recent oracle/detected wins. Permissive default keeps the
+        # gate from spuriously firing on records we can't locate.
+        for batch in _BATCHES.values():
+            for r in batch.get("records", []):
+                if r.get("sr_number") == sr_number:
+                    prev_cls = (
+                        r.get("detected_classification_oracle")
+                        or r.get("source_classification")
+                        or "UNCLASSIFIED"
+                    )
+                    break
+        require_no_downgrade(
+            prev_cls,
+            new_cls,
+            actor=role,
+            action="sentry.review.modify_classification",
+            subject_id=sr_number,
+        )
+
     record_sentry_decision(sr_number, action, actor_role=role, note=note)
     return {"ok": True, "sr_number": sr_number, "action": action}
 
@@ -734,12 +758,10 @@ _EXPORTS: dict = {}  # export_id -> zip bytes + metadata
 
 
 @router.post("/export")
-async def export_sanitized(payload: dict = Body(default={}),
-                           role: str = Depends(current_role)):
+async def export_sanitized(request: Request, payload: dict):
     """Build a real downloadable zip: sanitized dataset XLSX + redaction
     report + audit trail snapshot. Stored in-memory under an export_id;
     GET /download/{export_id} streams the bytes."""
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.export")
     release = payload.get("release_authority", "US_ONLY")
     format_ = payload.get("format", "xlsx")
     include_audit = bool(payload.get("include_audit", True))
@@ -760,14 +782,55 @@ async def export_sanitized(payload: dict = Body(default={}),
     sr_numbers = [r.get("sr_number") for r in records if r.get("sr_number")]
     decisions = decisions_for_batch(sr_numbers) if sr_numbers else {}
 
+    # ---------------------------------------------------------------
+    # Bundle classification — auto-inherit from the highest source
+    # classification in the included records. The redaction report
+    # itself surfaces what got removed, so even a "sanitized" bundle
+    # carries source-level sensitivity for the operator handling it.
+    # The frontend gate uses the same field on `result.classification`
+    # to render the badge + block ineligible operators on download.
+    # ---------------------------------------------------------------
+    bundle_rank = 0
+    bundle_class = "UNCLASSIFIED"
+    for r in records:
+        cand = (
+            r.get("detected_classification_oracle")
+            or r.get("source_classification")
+            or "UNCLASSIFIED"
+        )
+        rk = classification_rank(cand)
+        if rk > bundle_rank:
+            bundle_rank = rk
+            bundle_class = normalize_classification(cand)
+
+    # Backend gate (truth source). The FE primitive mirrors this — but a
+    # url-hacked direct call still terminates here with 403 + audit.
+    user = getattr(request.state, "user", None)
+    bundle_class = require_clearance(
+        user,
+        bundle_class,
+        action="sentry.export",
+        audit_actor=(user or {}).get("role") if user else session_role(request),
+    )
+
     # Apply release-authority overlay: generalize unit designators for NATO/FVEY
     generalize = release in ("NATO", "FVEY", "SPECIFIC")
+
+    # Visible classification banner — required on every classified
+    # artifact per DoDM 5200.01. Pure-text, monospaced, top of file.
+    cls_banner_text = bundle_class.replace("_", " ")
+    if bundle_class == "TS_SCI":
+        cls_banner_text = "TOP SECRET // SCI"
 
     # Build the sanitized dataset XLSX in memory
     from openpyxl import Workbook
     wb = Workbook()
     ws = wb.active
     ws.title = "Sanitized Dataset"
+    # Row 1: visible classification banner spanning the column width.
+    ws.append([f"// CLASSIFICATION: {cls_banner_text} //"])
+    ws.append([f"// Handle per DoDM 5200.01 — Distribution: {release} //"])
+    ws.append([])  # spacer row
     headers = [
         "SR Number", "Open Date", "Unit", "Equipment", "TAMCN", "NSN", "Serial",
         "Job Status", "Condition", "Component", "TM Ref", "Maint Level",
@@ -813,15 +876,21 @@ async def export_sanitized(payload: dict = Body(default={}),
     redaction_wb = Workbook()
     rw = redaction_wb.active
     rw.title = "Redaction Report"
+    rw.append([f"// CLASSIFICATION: {cls_banner_text} //"])
+    rw.append([])
     for row in redactions:
         rw.append(row)
     redaction_bytes = io.BytesIO()
     redaction_wb.save(redaction_bytes)
     redaction_bytes.seek(0)
 
-    # Audit log snapshot (JSON)
+    # Audit log snapshot (JSON) — stamped at the top with the bundle's
+    # classification so downstream parsers can route by sensitivity
+    # without re-reading the manifest.
     from ..persistence import recent_entries, verify_chain
     audit_snapshot = {
+        "classification": bundle_class,
+        "classification_banner": f"// CLASSIFICATION: {cls_banner_text} //",
         "chain": verify_chain(),
         "recent_entries": recent_entries(limit=500),
         "captured_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
@@ -840,6 +909,10 @@ async def export_sanitized(payload: dict = Body(default={}),
     # records_input + source_label so the operator sees exactly which
     # records the bundle covers.
     manifest = {
+        # Top-level so downstream tooling can route by classification
+        # without parsing the per-record dataset.
+        "classification": bundle_class,
+        "classification_banner": f"// CLASSIFICATION: {cls_banner_text} //",
         "batch_source": source_label,
         "release_authority": release,
         "format": format_,
@@ -935,29 +1008,42 @@ async def export_sanitized(payload: dict = Body(default={}),
             zf.writestr("audit_log.json", audit_bytes)
         zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
         zf.writestr("README.txt", (
+            f"// CLASSIFICATION: {cls_banner_text} //\n"
+            f"// Handle per DoDM 5200.01 //\n\n"
             "SPIRE sanitized export bundle.\n\n"
+            f"Classification: {cls_banner_text}\n"
             f"Release authority: {release}\n"
             f"Distribution: {distribution}\n\n"
             "Files:\n"
             "  sanitized_dataset.xlsx  -- approved records with SENTRY redactions applied\n"
             "  redaction_report.xlsx   -- per-record change log (original -> replacement + category)\n"
             "  audit_log.json          -- hash-chained audit trail snapshot at export time\n"
-            "  MANIFEST.json           -- structured metadata for automated ingestion\n"
+            "  MANIFEST.json           -- structured metadata for automated ingestion\n\n"
+            f"// CLASSIFICATION: {cls_banner_text} //\n"
         ).encode("utf-8"))
     buf.seek(0)
 
+    # Filename inherits the bundle classification so a glance at the
+    # download path tells the operator what they're handling.
+    safe_cls = bundle_class.replace("/", "_")
     _EXPORTS[export_id] = {
         "bytes": buf.getvalue(),
-        "filename": f"spire_sanitized_{export_id}.zip",
+        "filename": f"spire_{safe_cls}_sanitized_{export_id}.zip",
+        "classification": bundle_class,
         "manifest": manifest,
         "created_at": manifest["created_at"],
     }
 
     audit_log(
         "sentry_export",
-        actor=role,
+        actor=session_role(request) or "data_custodian",
         subject_id=export_id,
-        payload={"release": release, "records": applied, "rejected": len(records) - applied},
+        payload={
+            "release": release,
+            "records": applied,
+            "rejected": len(records) - applied,
+            "classification": bundle_class,
+        },
     )
 
     return {
@@ -965,6 +1051,10 @@ async def export_sanitized(payload: dict = Body(default={}),
         "export_id": export_id,
         "filename": _EXPORTS[export_id]["filename"],
         "bytes": len(_EXPORTS[export_id]["bytes"]),
+        # Echo classification on the response so the FE badge can render
+        # the actual bundle marking (not just the operator-supplied default).
+        "classification": bundle_class,
+        "classification_banner": f"// CLASSIFICATION: {cls_banner_text} //",
         "download_url": f"/api/sentry/download/{export_id}",
         "sample_diffs": sample_diffs,
         **manifest,
@@ -976,16 +1066,15 @@ async def export_sanitized(payload: dict = Body(default={}),
 # ---------------------------------------------------------------------------
 
 @router.get("/coalition/profiles")
-async def coalition_profiles(role: str = Depends(current_role)):
+async def coalition_profiles():
     """Return summaries of every coalition release profile for the partner picker."""
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.coalition.profiles")
     if not _COALITION_AVAILABLE:
         raise HTTPException(status_code=503, detail="coalition profiles unavailable")
     return {"profiles": list_profiles()}
 
 
 @router.get("/coalition/{profile_key}")
-async def coalition_view(profile_key: str, role: str = Depends(current_role)):
+async def coalition_view(profile_key: str, role: Optional[str] = None):
     """Live partner-scoped view of the canonical dataset.
 
     Walks units, assets, SRs, requisitions, and cannibalization events,
@@ -996,7 +1085,6 @@ async def coalition_view(profile_key: str, role: str = Depends(current_role)):
 
     This is the GC-5 demo: 'show me what JSDF sees right now' — the
     output is what we'd send across the wire on a coalition release."""
-    require_role(role, SENTRY_VIEW_ROLES, "sentry.coalition.view")
     if not _COALITION_AVAILABLE:
         raise HTTPException(status_code=503, detail="coalition profiles unavailable")
     profile_data = _coalition_profiles().get("profiles", {}).get(profile_key)
@@ -1094,31 +1182,58 @@ async def coalition_view(profile_key: str, role: str = Depends(current_role)):
 
 
 @router.post("/coalition/{profile_key}/release")
-async def coalition_release(profile_key: str,
-                            payload: Optional[dict] = Body(default=None),
-                            role: str = Depends(current_role)):
+async def coalition_release(
+    profile_key: str,
+    request: Request,
+    payload: Optional[dict] = None,
+):
     """Generate a release-package event for the selected coalition profile.
     Hashes a manifest of what would ship and writes the event to the audit
     chain so a security manager can later inspect every coalition release.
 
     Server-side gate: only data_custodian or security_manager may release.
-    Actor is bearer-resolved (signed session token) — payload `actor_role`
-    is no longer trusted."""
-    require_role(role, COALITION_RELEASE_ROLES, "sentry.coalition.release")
+    Without this, any role could execute an FVEY release on the live deploy
+    (verified during adversarial audit, fileable as bug #6)."""
+    from ..scoping import require_role, COALITION_RELEASE_ROLES
     if not _COALITION_AVAILABLE:
         raise HTTPException(status_code=503, detail="coalition profiles unavailable")
+    payload = payload or {}
+    actor = session_role(request)
+    require_role(actor, COALITION_RELEASE_ROLES, "sentry.coalition.release")
     profile_data = _coalition_profiles().get("profiles", {}).get(profile_key)
     if not profile_data:
         raise HTTPException(status_code=404, detail=f"unknown profile {profile_key}")
+
+    # Coalition release inherits the highest classification the partner is
+    # authorized to receive (per the profile). The operator's clearance must
+    # meet or exceed it before the release packet leaves the enclave.
+    auth_cls = profile_data.get("authorized_classifications", []) or ["UNCLASSIFIED"]
+    release_cls = "UNCLASSIFIED"
+    release_rank = 0
+    for c in auth_cls:
+        rk = classification_rank(c)
+        if rk > release_rank:
+            release_rank = rk
+            release_cls = normalize_classification(c)
+    user = getattr(request.state, "user", None)
+    release_cls = require_clearance(
+        user,
+        release_cls,
+        action="sentry.coalition.release",
+        audit_actor=actor,
+        audit_subject=profile_key,
+    )
+
     release_id = f"REL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     audit_log(
         "sentry_coalition_release",
-        actor=role,
+        actor=actor,
         subject_id=release_id,
         payload={
             "profile": profile_key,
             "partners": profile_data["partners"],
             "distribution": profile_data["distribution_statement"],
+            "classification": release_cls,
         },
     )
     return {
@@ -1128,20 +1243,19 @@ async def coalition_release(profile_key: str,
         "partners": profile_data["partners"],
         "distribution_statement": profile_data["distribution_statement"],
         "caveats_applied": profile_data.get("caveats_applied", []),
+        "classification": release_cls,
         "audit_logged": True,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 
 @router.get("/audit/{subject_id}")
-async def audit_for_subject(subject_id: str, limit: int = 50,
-                            role: str = Depends(current_role)):
+async def audit_for_subject(subject_id: str, limit: int = 50):
     """Walkthrough #31 — per-record audit-entry viewer. Returns the chain
     entries (hash, prev_hash, ts, actor, payload) for the requested
     subject so operators can verify the audit trail without leaving
     the inspector pane.
     """
-    require_role(role, AUDIT_READ_ROLES, "sentry.audit.read")
     rows = entries_for_subject(subject_id, limit=limit)
     return {
         "subject_id": subject_id,
@@ -1151,14 +1265,32 @@ async def audit_for_subject(subject_id: str, limit: int = 50,
 
 
 @router.get("/download/{export_id}")
-async def download_export(export_id: str):
+async def download_export(export_id: str, request: Request):
     entry = _EXPORTS.get(export_id)
     if not entry:
         raise HTTPException(status_code=404, detail="export not found or expired")
+    # Re-check on download. Even though the operator was cleared at the
+    # build call, identity may have rotated between build and stream — and
+    # an enumeration attack on EXP-IDs would otherwise hand any signed-in
+    # user the bytes. Reuse the same gate so the audit chain emits an
+    # identical spillage_prevented event on either surface.
+    user = getattr(request.state, "user", None)
+    require_clearance(
+        user,
+        entry.get("classification", "UNCLASSIFIED"),
+        action="sentry.download",
+        audit_subject=export_id,
+    )
+    cls_header = entry.get("classification", "UNCLASSIFIED")
     return StreamingResponse(
         io.BytesIO(entry["bytes"]),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{entry["filename"]}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{entry["filename"]}"',
+            # Visible classification on the wire — surfaces in CLI/curl
+            # output so even non-UI consumers see the marking.
+            "X-Classification": cls_header,
+        },
     )
 
 

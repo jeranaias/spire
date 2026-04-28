@@ -1,5 +1,11 @@
 """
-Role-based data scoping.
+Role-based data scoping + classification clearance gating.
+
+Classification gates are co-located with role gates because they share the
+same shape (raise 403 + structured detail + audit trail entry). The numeric
+rank model — UNCLAS=0 → TS//SCI=5 — is the truth source the frontend gate
+mirrors; the backend always re-checks because the FE primitive is UX, not
+authorization.
 
 Every request can pass `?role=<role>` and the backend filters the records
 that role is allowed to see. This makes the TopBar role dropdown actually
@@ -33,13 +39,193 @@ AIRGAP_ROLES             = frozenset({"security_manager", "mef_commander"})
 COALITION_RELEASE_ROLES  = frozenset({"data_custodian", "security_manager"})
 ADMIN_TELEMETRY_ROLES    = frozenset({"security_manager"})
 AUDIT_READ_ROLES         = frozenset({"security_manager"})
+# Mission-clock playback controls (B4). Operator-class roles only — the
+# clock is a piece of demo plumbing, not an analyst surface.
+SCENARIO_CONTROL_ROLES   = frozenset({"security_manager", "mef_commander", "g4"})
 
-# Module-wide view scope. Mirrors frontend `VIEW_SCOPE` in store.ts so an
-# operator who URL-hops into a module they shouldn't see gets a 403 from
-# the API the same way the ScopeGuard overlay redirects them in the UI.
-PULSE_VIEW_ROLES   = frozenset({"maintenance_chief", "g4", "mef_commander"})
-SENTRY_VIEW_ROLES  = frozenset({"data_custodian", "security_manager"})
-BASTION_VIEW_ROLES = frozenset({"mef_commander", "g4", "security_manager", "maintenance_chief"})
+# Model registry / supply-chain page (W1 task #30). The model card surface
+# enumerates every model SPIRE uses with its provenance, hosting target,
+# vendor jurisdiction, and validation history. The data is mostly public
+# but exposing 'who runs what model where' to lower roles invites
+# adversary mining of the SPIRE supply chain — gate it to security_manager.
+MODEL_REGISTRY_ROLES     = frozenset({"security_manager"})
+
+
+# ---------------------------------------------------------------------------
+# Classification / clearance ranking — the truth source for export gates.
+# ---------------------------------------------------------------------------
+
+# UNCLAS=0 monotone up to TS//SCI=5. Order chosen so `next_rank >= prev_rank`
+# is the monotonic-write check and `user_rank >= artifact_rank` is the
+# clearance check. Aligned with frontend `levels.ts` so a single mental model
+# governs both layers.
+CLEARANCE_RANK: dict[str, int] = {
+    "UNCLASSIFIED": 0,
+    "CUI":          1,
+    "CONFIDENTIAL": 2,
+    "SECRET":       3,
+    "TOP_SECRET":   4,
+    "TS_SCI":       5,
+}
+
+
+def _normalize_classification(raw: Optional[str]) -> str:
+    """Collapse common spelling variants to canonical keys.
+
+    Accepts "TS//SCI", "TOP SECRET//SCI", "TS_SCI", "Top Secret", "FOUO",
+    "controlled", etc. Returns one of the CLEARANCE_RANK keys; unknowns map
+    to UNCLASSIFIED so the gate stays permissive for benign records (the
+    real classified content always passes through `tier1_classify` upstream).
+    """
+    if not raw:
+        return "UNCLASSIFIED"
+    s = str(raw).strip().upper().replace(" ", "_").replace("/", "_")
+    while "__" in s:
+        s = s.replace("__", "_")
+    if "SCI" in s and ("TS" in s or "TOP_SECRET" in s):
+        return "TS_SCI"
+    if "TOP_SECRET" in s or s == "TS":
+        return "TOP_SECRET"
+    if "SECRET" in s and "TOP" not in s:
+        return "SECRET"
+    if "CONFIDENTIAL" in s:
+        return "CONFIDENTIAL"
+    if s == "CUI" or "CONTROLLED" in s or s == "FOUO":
+        return "CUI"
+    if "UNCLAS" in s:
+        return "UNCLASSIFIED"
+    return "UNCLASSIFIED"
+
+
+def classification_rank(raw: Optional[str]) -> int:
+    return CLEARANCE_RANK[_normalize_classification(raw)]
+
+
+def clearance_rank(raw: Optional[str]) -> int:
+    # Same lattice as artifact classification — kept as a separate name so
+    # call sites read intentionally ("user clearance" vs "artifact class").
+    return CLEARANCE_RANK[_normalize_classification(raw)]
+
+
+def meets_clearance(user: Optional[dict], required: str) -> bool:
+    if not user:
+        return False
+    return clearance_rank(user.get("clearance")) >= classification_rank(required)
+
+
+def require_clearance(
+    user: Optional[dict],
+    required: str,
+    action: str,
+    *,
+    audit_actor: Optional[str] = None,
+    audit_subject: Optional[str] = None,
+) -> str:
+    """Backend export-gate truth source.
+
+    Raises 403 + emits a `spillage_prevented` audit entry when the
+    operator's clearance rank is below the artifact's classification rank.
+    Returns the normalized classification string on success so callers can
+    persist it on the artifact / bundle metadata.
+    """
+    canonical = _normalize_classification(required)
+    if user is None:
+        # Should never happen behind session_middleware, but defend anyway.
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Unauthenticated",
+                "action": action,
+                "required_classification": canonical,
+            },
+        )
+    user_clearance = _normalize_classification(user.get("clearance"))
+    if clearance_rank(user_clearance) < classification_rank(canonical):
+        # Append-only spillage record. Lazy-import to avoid the persistence
+        # module pulling SQLite at scoping import time (CLI tools that touch
+        # scoping.py shouldn't trigger DB init).
+        try:
+            from .persistence import log as audit_log  # noqa: WPS433
+            audit_log(
+                "spillage_prevented",
+                actor=audit_actor or user.get("role") or "unknown",
+                subject_id=audit_subject or action,
+                payload={
+                    "action": action,
+                    "user_dodid": user.get("dodid"),
+                    "user_role": user.get("role"),
+                    "user_clearance": user_clearance,
+                    "required_classification": canonical,
+                    "decision": "blocked",
+                    "surface": "backend",
+                },
+            )
+        except Exception:
+            # Never let an audit-write failure mask the 403 — we still
+            # block the spillage; the chain just temporarily lost a row.
+            pass
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "InsufficientClearance",
+                "action": action,
+                "required_classification": canonical,
+                "user_clearance": user_clearance,
+                "user_role": user.get("role"),
+            },
+        )
+    return canonical
+
+
+def require_no_downgrade(
+    prev: Optional[str],
+    new: Optional[str],
+    *,
+    actor: str,
+    action: str,
+    subject_id: Optional[str] = None,
+) -> str:
+    """Block monotonic-write violations.
+
+    Classification can only be raised or held — never lowered — without an
+    explicit downgrade-with-justification flow. That flow is out of scope
+    for this lane; this helper surfaces the block (403 + audit) so the
+    UI can render the message cleanly.
+    """
+    new_canonical = _normalize_classification(new)
+    if prev is None:
+        return new_canonical
+    if classification_rank(new_canonical) < classification_rank(prev):
+        try:
+            from .persistence import log as audit_log  # noqa: WPS433
+            audit_log(
+                "downgrade_blocked",
+                actor=actor,
+                subject_id=subject_id or action,
+                payload={
+                    "action": action,
+                    "prev_classification": _normalize_classification(prev),
+                    "attempted_classification": new_canonical,
+                    "decision": "blocked",
+                    "reason": "monotonic_write_violation",
+                },
+            )
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "DowngradeBlocked",
+                "action": action,
+                "prev_classification": _normalize_classification(prev),
+                "attempted_classification": new_canonical,
+                "remediation": (
+                    "Classification is monotonic. Raise via standard write or "
+                    "open the formal downgrade-with-justification request."
+                ),
+            },
+        )
+    return new_canonical
 
 
 def require_role(role: Optional[str], allowed: frozenset[str], action: str) -> str:

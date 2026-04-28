@@ -17,6 +17,7 @@ import {
 } from "../api";
 import { pollWithBackoff, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
+import { Button, IconButton, Pressable } from "./ui";
 
 const CMP_COLOR: Record<string, string> = {
   equal: "var(--color-success)",
@@ -164,9 +165,10 @@ export function NodeStatus() {
 
   return (
     <>
-      <button
+      <Pressable
         onClick={() => setOpen(true)}
-        className="inline-flex h-11 min-w-[44px] shrink-0 items-center gap-2 whitespace-nowrap rounded-sm border px-2 font-mono text-xs uppercase transition-colors tracking-wider"
+        block={false}
+        className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-sm border px-2 font-mono text-xs uppercase transition-colors tracking-wider"
         style={{
           borderColor: hasConflicts ? "var(--color-danger)" : "var(--color-border)",
           background: hasConflicts ? "color-mix(in oklab, var(--color-danger-muted) 28%, transparent)" : "transparent",
@@ -197,7 +199,7 @@ export function NodeStatus() {
             {conflicts.length}
           </span>
         )}
-      </button>
+      </Pressable>
 
       {open && (
         <div
@@ -223,12 +225,9 @@ export function NodeStatus() {
                   Works offline; replays on restore.
                 </div>
               </div>
-              <button
-                onClick={() => setOpen(false)}
-                className="rounded px-2 py-1 font-mono text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-              >
+              <IconButton onClick={() => setOpen(false)} aria-label="Close sync drawer">
                 ✕
-              </button>
+              </IconButton>
             </div>
 
             {/* Vector clocks side-by-side */}
@@ -251,13 +250,15 @@ export function NodeStatus() {
               <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
                 {state.events_logged} events logged
               </span>
-              <button
+              <Button
                 onClick={seed}
-                className="ml-auto rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_25%,transparent)] px-2 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_40%,transparent)] tracking-wider"
+                variant="warning"
+                size="sm"
+                className="ml-auto"
                 title="Inject a deliberate conflict for demo / training"
               >
                 Seed Demo Conflict
-              </button>
+              </Button>
             </div>
 
             {/* Pending conflicts */}
@@ -370,12 +371,9 @@ function ConflictSide({
         <span className="text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
           {label}
         </span>
-        <button
-          onClick={onPick}
-          className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-2 py-[1px] text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
-        >
+        <Button onClick={onPick} variant="primary" size="sm">
           Pick
-        </button>
+        </Button>
       </div>
       <div className="mt-1 text-xs">
         <div className="text-[var(--color-text)]">{ev?.actor || "—"}</div>

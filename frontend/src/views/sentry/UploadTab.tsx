@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { api, type SentryBatch } from "../../api";
 import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
+import { Button, fireIdempotent } from "../../components/ui";
 
 export function UploadTab({ ctx }: { ctx: SentryContext }) {
   const nav = useNavigate();
@@ -72,7 +73,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
     // Walkthrough #17 — vertical scroll bottomed out at Process Batch on
     // shorter viewports. min-h-0 + pb-12 gutter keeps the action row
     // reachable; outer is the explicit scroll container.
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6 pb-12" data-tour-id="sentry-upload-content">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6 pb-12">
       <div className="mb-4">
         <h2 className="text-lg font-semibold">Data ingestion</h2>
         <div className="text-xs text-[var(--color-text-muted)]">
@@ -100,13 +101,9 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
         <div className="mt-1 text-xs text-[var(--color-text-muted)]">
           Accepted: .csv, .xlsx, .json, .txt
         </div>
-        <button
-          onClick={loadCanonical}
-          disabled={loading}
-          className="mt-3 rounded border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
-        >
-          {loading ? "Loading ..." : "Load canonical dataset"}
-        </button>
+        <Button onClick={loadCanonical} disabled={loading} pending={loading} size="sm" className="mt-3">
+          Load canonical dataset
+        </Button>
         {error && <div className="mt-2 text-xs text-[var(--color-danger)]">{error}</div>}
       </div>
 
@@ -200,11 +197,18 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
           </section>
 
           <div className="flex items-center gap-3">
-            <button
+            <Button
               onClick={async () => {
                 setLoading(true);
                 try {
-                  const job = await api.sentry.process(batch.batch_id);
+                  // Idempotent per batch id so a triple-tap on Process never
+                  // launches the engine twice.
+                  const job = await fireIdempotent(
+                    `sentry:process:${batch.batch_id}`,
+                    () => api.sentry.process(batch.batch_id),
+                    500,
+                  );
+                  if (!job) return;
                   ctx.setJob(job.job_id);
                   nav("/sentry/processing");
                 } catch (e) {
@@ -214,10 +218,10 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
                 }
               }}
               disabled={loading}
-              className="rounded border border-[var(--color-primary)] bg-[var(--color-primary)] px-6 py-2 text-sm font-medium text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
+              pending={loading}
             >
-              {loading ? "Starting ..." : "Process batch"}
-            </button>
+              Process batch
+            </Button>
             <span className="text-xs text-[var(--color-text-muted)]">
               Tier-1 pattern engine runs first; ambiguous records escalate to the language-model gate.
             </span>

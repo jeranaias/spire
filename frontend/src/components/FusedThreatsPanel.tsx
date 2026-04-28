@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { api, type FusedThreat } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
+import { Pressable } from "./ui";
 
 const SEV_COLOR: Record<string, string> = {
   CRITICAL: "var(--color-danger)",
@@ -101,7 +102,7 @@ export function FusedThreatsPanel({
               key={t.id}
               className="border-b border-[var(--color-border)] last:border-b-0"
             >
-              <button
+              <Pressable
                 onClick={() => {
                   setExpanded((prev) => {
                     const n = new Set(prev);
@@ -155,7 +156,7 @@ export function FusedThreatsPanel({
                     ))}
                   </div>
                 </div>
-              </button>
+              </Pressable>
 
               {open && (
                 <div className="bg-[var(--color-surface)] px-3 py-2">
