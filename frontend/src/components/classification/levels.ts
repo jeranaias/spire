@@ -37,7 +37,7 @@ export const CLASS_RANK: Record<Classification, number> = {
   TS_SCI: 5,
 };
 
-// CAPCO color — same palette as the global ClassificationBand. Solid color
+// CAPCO color — same palette as the global ClassificationBannerStrip. Solid color
 // blocks, no decorative gradient. Matches DoDM 5200.01 / ICS 700-1 swatches.
 export const CLASS_COLOR: Record<Classification, { bg: string; fg: string }> = {
   UNCLASSIFIED: { bg: "#007A33", fg: "#FFFFFF" },

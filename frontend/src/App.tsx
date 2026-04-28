@@ -3,7 +3,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { TopBar } from "./components/TopBar";
 import { StatusFooter } from "./components/StatusFooter";
 import { StatusStrip } from "./components/StatusStrip";
-import { ClassificationBand } from "./components/ClassificationBand";
+import { ClassificationBannerStrip } from "./components/ClassificationBannerStrip";
 import { ToastLane } from "./components/ToastLane";
 import { NarrationOverlay } from "./components/NarrationOverlay";
 import { ScenarioPlayerHost } from "./components/ScenarioPlayerHost";
@@ -162,8 +162,12 @@ export default function App() {
       <a href="#main" className="sr-only sr-only-focusable">
         Skip to main content
       </a>
+      {/* W2 Task #28 — DoDM 5200.01-V2 page-level marking. Top strip
+       * carries the FPCON badge (session state); bottom strip is the
+       * plain marking band so a screenshot escaping its chrome still
+       * shows the disclaimer top + bottom. */}
+      <ClassificationBannerStrip position="top" showFpcon />
       <TopBar />
-      <ClassificationBand />
       <StatusStrip />
       <main
         id="main"
@@ -182,6 +186,9 @@ export default function App() {
         </ErrorBoundary>
       </main>
       <StatusFooter />
+      {/* W2 Task #28 — bottom marking band. Plain (no FPCON) so it
+       * stays legible under any density / marquee scroll. */}
+      <ClassificationBannerStrip position="bottom" />
       <ToastLane />
       {/* W2 Task #37 — scripted scenario player. Host is render-less
        * (timer + nav + hotkeys); the overlay is the operator-facing

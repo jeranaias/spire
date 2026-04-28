@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { api, type PublicAuthUser } from "../api";
 import { useSpireStore } from "../state/store";
 import { Button, Pressable, ErrorState, EmptyState, useIdempotentAction } from "../components/ui";
+import { ClassificationBannerStrip } from "../components/ClassificationBannerStrip";
 
 // CAC/PIV cert-selection splash. No app chrome — this surface IS the
 // front door. Four mocked Marines render as smartcards; pick one, enter
@@ -137,30 +138,40 @@ export function AuthView() {
   }
 
   return (
+    // Column flex so the page-level marking strips pin to the very top
+    // and very bottom of the viewport (DoDM 5200.01-V2). The auth surface
+    // sits outside the App shell, so we mount the strips here directly —
+    // the previous 10-px DEMO ENVIRONMENT chip in the corner was invisible
+    // on a projector at 30ft (W2 task #28, auth-splash review F2 + F12).
+    // h-screen + flex-1 + overflow-y-auto on the inner pane keeps both
+    // strips locked to the viewport edges; only the cert pane scrolls.
     <div
-      className="flex h-full min-h-screen w-full items-center justify-center overflow-y-auto px-6 py-10"
+      className="flex h-screen w-full flex-col"
       style={{
         background:
           "radial-gradient(120% 80% at 50% 0%, color-mix(in oklab, var(--color-primary) 12%, var(--color-bg)) 0%, var(--color-bg) 60%, #04060c 100%)",
       }}
     >
-      <div className="mx-auto w-full max-w-5xl">
-        {/* Banner row — classification + DoD framing */}
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <div
-            className="rounded-sm border px-3 py-1 font-mono text-xs uppercase tracking-widest"
-            style={{
-              borderColor: "color-mix(in oklab, var(--color-primary) 50%, transparent)",
-              background: "color-mix(in oklab, var(--color-primary) 12%, transparent)",
-              color: "var(--color-primary)",
-            }}
-          >
-            DoD CAC/PIV Authentication
+      <ClassificationBannerStrip position="top" />
+      <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-10">
+        <div className="mx-auto w-full max-w-5xl">
+          {/* Banner row — DoD framing chip kept; the page-level marking
+           * is now carried by the strips at top + bottom. */}
+          <div className="mb-6 flex items-center justify-between gap-4">
+            <div
+              className="rounded-sm border px-3 py-1 font-mono text-xs uppercase tracking-widest"
+              style={{
+                borderColor: "color-mix(in oklab, var(--color-primary) 50%, transparent)",
+                background: "color-mix(in oklab, var(--color-primary) 12%, transparent)",
+                color: "var(--color-primary)",
+              }}
+            >
+              DoD CAC/PIV Authentication
+            </div>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+              SPIRE · Contested Logistics Engine
+            </div>
           </div>
-          <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            SPIRE · Contested Logistics Engine · DEMO ENVIRONMENT
-          </div>
-        </div>
 
         {/* Brand block */}
         <div className="mb-8 flex items-center gap-4">
@@ -306,7 +317,9 @@ export function AuthView() {
           <div className="md:text-center">IL5-fit · local-first · no cloud egress</div>
           <div className="md:text-right">DDIL drills available post-login</div>
         </div>
+        </div>
       </div>
+      <ClassificationBannerStrip position="bottom" />
     </div>
   );
 }
