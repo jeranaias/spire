@@ -343,6 +343,27 @@ export function ForecastTab() {
     ? data!.threshold : 0.85;
   const chartUsable = !!data && series.length > 0 && data.history.length > 0 && data.projection.length > 0;
 
+  // Task #114 — plain-English caption under the probability KPI so the
+  // operator (and any quick-scanning judge) doesn't have to translate
+  // "P(recovery)=9%, red" into "recovery unlikely" in their head. The
+  // caption is derived from the same direction-aware `goodness` value
+  // that drives `kpiTone`, so the words always agree with the color.
+  // A goodness < 0.5 split (matches the danger boundary) keeps the
+  // wording binary — borderline (warning) cases still read in the
+  // direction the color is leaning, which is what the eye is already
+  // doing anyway.
+  const horizonDays = Number(horizon);
+  const thresholdPct = (thresholdSafe * 100).toFixed(0);
+  const kpiCaption = !dataLoaded
+    ? null
+    : startsBelow
+    ? goodness >= 0.5
+      ? `recovery likely in next ${horizonDays} days`
+      : `recovery unlikely in next ${horizonDays} days`
+    : goodness >= 0.5
+    ? `holding above ${thresholdPct}% in ${horizonDays} days`
+    : `expected to drop below ${thresholdPct}% within ${horizonDays} days`;
+
   return (
     // overflow-y-auto on the outer container so the chart + 3 KPIs + Recommend
     // Actions all stay reachable. Reviewer caught: <main> has overflow:hidden
@@ -660,6 +681,18 @@ export function ForecastTab() {
             {(endCross * 100).toFixed(0)}
             <span className="ml-0.5 text-base text-[var(--color-text-muted)]">%</span>
           </div>
+          {/* Task #114 — plain-English caption sits directly under the
+           * big percentage so the eye reads number → caption → color in
+           * one sweep. Monospaced + muted so it doesn't compete with
+           * the headline number, but is right there when scanning. */}
+          {kpiCaption && (
+            <div
+              className="mt-1 font-mono text-xs text-[var(--color-text-muted)] tracking-wider"
+              data-testid="forecast-kpi-caption"
+            >
+              {kpiCaption}
+            </div>
+          )}
         </div>
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
           <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
