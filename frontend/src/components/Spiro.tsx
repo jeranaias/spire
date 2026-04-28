@@ -113,18 +113,41 @@ export function Spiro() {
     if (open) requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
 
-  async function send() {
-    const t = text.trim();
+  // Walk the message log backwards to find the most recent assistant
+  // turn that proposed tools but the operator never executed. That
+  // proposal is forwarded to the planner so a follow-up "go" / "do it"
+  // consents to it instead of forcing a re-plan.
+  function lastUnexecutedProposal(): PlanStep[] | null {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.kind === "user") continue;
+      if (m.kind === "result") return null;
+      if (m.kind === "plan") {
+        if (m.status === "approved" || m.status === "cancelled") return null;
+        return m.plan.steps;
+      }
+      if (m.kind === "answer" || m.kind === "error") continue;
+    }
+    return null;
+  }
+
+  async function send(overrideText?: string) {
+    const t = (overrideText ?? text).trim();
     if (!t || pending) return;
     const userMsg: ChatMessage = { id: uid(), kind: "user", text: t, at: Date.now() };
     setMessages((m) => [...m, userMsg]);
-    setText("");
+    if (!overrideText) setText("");
     setPending("plan");
     try {
       const r = await fetch("/api/copilot/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: t, role, view: location.pathname }),
+        body: JSON.stringify({
+          text: t,
+          role,
+          view: location.pathname,
+          prior_proposal: lastUnexecutedProposal(),
+        }),
       });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       const j = (await r.json()) as SpiroPlan;
@@ -388,7 +411,7 @@ export function Spiro() {
         )}
 
         <div className="flex flex-col gap-2.5">
-          {messages.map((m) => {
+          {messages.map((m, i) => {
             if (m.kind === "user") {
               return (
                 <div key={m.id} className="self-end max-w-[88%] rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_15%,var(--color-bg))] px-3 py-1.5 font-mono text-xs leading-relaxed text-[var(--color-text)]">
@@ -397,13 +420,25 @@ export function Spiro() {
               );
             }
             if (m.kind === "answer") {
+              // Quick-action chips appear under the most-recent answer
+              // only — gives the operator a click-out from a chat dead end
+              // ("Stand by. State your requirement.") into a real plan.
+              const isLatestAnswer = i === messages.length - 1;
               return (
                 <div key={m.id} className="self-start max-w-[92%] rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--color-text)]">
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <div className="font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] tracking-widest">◆ SPIRO</div>
                     <CostBadge econ={m.economics} />
                   </div>
-                  {m.text}
+                  <div>{m.text}</div>
+                  {isLatestAnswer && pending === null && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <QuickChip label="Status" onClick={() => send("where do I start?")} disabled={pending !== null} />
+                      <QuickChip label="Predict failures" onClick={() => send("predict failures in 14 days")} disabled={pending !== null} />
+                      <QuickChip label="Recommend actions" onClick={() => send("what should I do about my fleet?")} disabled={pending !== null} />
+                      <QuickChip label="Run all" onClick={() => send("go")} disabled={pending !== null} />
+                    </div>
+                  )}
                 </div>
               );
             }
@@ -574,7 +609,7 @@ export function Spiro() {
             Enter to send · Shift+Enter for newline
           </span>
           <Button
-            onClick={send}
+            onClick={() => send()}
             disabled={!text.trim()}
             pending={pending === "plan"}
             variant="primary"
@@ -585,6 +620,23 @@ export function Spiro() {
         </div>
       </div>
     </aside>
+  );
+}
+
+// QuickChip — small click-out shown under the latest SPIRO answer when
+// the model returned prose instead of a plan. Lets the operator dispatch
+// a deterministic intent ("status", "predict failures", "recommend
+// actions", "run all") without having to retype.
+function QuickChip({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-primary)] transition-colors hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {label}
+    </button>
   );
 }
 
