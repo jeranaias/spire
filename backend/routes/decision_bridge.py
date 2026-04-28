@@ -104,21 +104,61 @@ async def mission():
 _SEV_RANK = {"CRITICAL": 4, "HIGH": 3, "MODERATE": 2, "LOW": 1, "INFO": 0}
 
 
+# Bridge tile only ever surfaces alerts inside this rolling window. Older
+# rows (e.g. a SENTRY mismark dated nine months back because the underlying
+# SR was opened then) still appear deeper in BASTION, but they have no
+# business pretending to be live decision context on the bridge.
+_BRIDGE_ALERT_MAX_AGE_DAYS = 30
+
+
 @router.get("/alerts")
 async def alerts_top(role: Optional[str] = None, limit: int = Query(3, ge=1, le=10)):
     """Top-N alerts ordered by severity, then recency. Wraps the BASTION
     alert builder so the tile and the BASTION view agree on shape and
     counts.
+
+    The bridge applies two extra filters on top of the BASTION feed:
+
+    1. Recency cutoff — alerts older than `_BRIDGE_ALERT_MAX_AGE_DAYS`
+       (anchored to the dataset day, since SR-derived alerts inherit
+       `sr.open_date` for their timestamp) are dropped from the bridge.
+       Without this, MODERATE SENTRY mismarks dated ~12 months back leak
+       into the second/third slot and make the dashboard read as stale.
+    2. Within each severity band, sort by timestamp DESCENDING (most
+       recent first) instead of ascending. Combined with the recency
+       cutoff this guarantees the top three rows are both current and
+       severity-correct.
     """
     # Inline import to avoid module-level cycle with bastion's dataset hooks.
     from .bastion import alerts as bastion_alerts  # type: ignore[attr-defined]
     result = await bastion_alerts(limit=max(limit, 30), role=role)  # type: ignore[misc]
     items = list(result.get("alerts", []) or [])
-    items.sort(key=lambda a: (-_SEV_RANK.get(a.get("severity", "INFO"), 0), a.get("timestamp", "")))
+
+    # Recency cutoff anchored to the dataset day so the bridge behaves
+    # consistently across demo replays (where wall-clock != dataset day).
+    ds = get_dataset()
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
+    if last_day is not None:
+        cutoff_dt = datetime.combine(last_day, datetime.min.time()) - timedelta(days=_BRIDGE_ALERT_MAX_AGE_DAYS)
+        cutoff_iso = cutoff_dt.isoformat(timespec="seconds") + "Z"
+        items = [a for a in items if a.get("timestamp", "") >= cutoff_iso]
+
+    # Stable two-pass sort: timestamp DESC first, then severity DESC.
+    # Python's sort is stable, so within each severity the most recent
+    # alert lands in slot 1 of that band.
+    items.sort(key=lambda a: a.get("timestamp", ""), reverse=True)
+    items.sort(key=lambda a: _SEV_RANK.get(a.get("severity", "INFO"), 0), reverse=True)
+
+    # Severity counts must match the post-filter view, otherwise the tile's
+    # count badge claims rows that no longer appear in the bridge feed.
+    sev_counts: dict[str, int] = {}
+    for a in items:
+        sev_counts[a["severity"]] = sev_counts.get(a["severity"], 0) + 1
+
     return {
         "alerts": items[:limit],
-        "severity_counts": result.get("severity_counts", {}),
-        "total": result.get("total", len(items)),
+        "severity_counts": sev_counts,
+        "total": len(items),
         "as_of": _now_iso(),
     }
 
@@ -144,16 +184,36 @@ def _stable_int(seed: str, lo: int, hi: int) -> int:
     return lo + (n % (hi - lo + 1))
 
 
+# SR conditions that mark a requisition as mission-essential. "Deadlined"
+# corresponds to NMCS (the asset is down), "Degraded" corresponds to PMC
+# (the asset can fight but a primary capability is impaired). Anything
+# else ("Minor", "Supply", "Service") is a routine corrective action —
+# CARC paint touch-ups, lube-order top-offs, depot-paperwork rework — and
+# has no place leading the Forecasted Shortages tile on the bridge.
+_MISSION_ESSENTIAL_SR_CONDITIONS = {"Deadlined", "Degraded"}
+
+
 def _class_ix_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict]:
     """Aggregate open requisitions by NSN. Hours-to-stockout is the wait
     between request and projected receipt (longer waits = more imminent
-    consumption pressure on the unit's working stock)."""
+    consumption pressure on the unit's working stock).
+
+    Only NSNs that are mission-essential — i.e. tied to at least one
+    Deadlined (NMCS) or Degraded (PMC) Service Request — survive into
+    the bridge tile. The earlier heuristic let aged Minor-condition
+    requisitions (corrosion-control paint, primer, cleaning supplies)
+    bubble to the top because hours-to-stockout grows with requisition
+    age regardless of mission impact, which is how `PAINT, CARC GREEN`
+    landed in the Hayes lead slot. Routine reqs are still surfaced
+    deeper in PULSE — they're just not bridge-grade.
+    """
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
     by_nsn: dict[str, dict] = {}
     today = datetime.utcnow()
     for sr in ds.srs:
         if allowed is not None and sr.unit_name not in allowed:
             continue
+        sr_is_mission_essential = sr.condition in _MISSION_ESSENTIAL_SR_CONDITIONS
         for r in sr.requisitions:
             # Open requisitions only — anything received before the last
             # dataset day is no longer a pending shortage.
@@ -167,9 +227,16 @@ def _class_ix_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict]
                 "open_count": 0,
                 "max_age_days": 0,
                 "first_ordered": ordered,
+                # An NSN aggregate is mission-essential if ANY of its
+                # contributing SRs is Deadlined / Degraded — a single
+                # NMCS-blocking req is enough to put the part on the
+                # bridge.
+                "mission_essential": False,
             })
             entry["units"].add(sr.unit_name)
             entry["open_count"] += 1
+            if sr_is_mission_essential:
+                entry["mission_essential"] = True
             age = (today.date() - ordered).days if ordered else 0
             if age > entry["max_age_days"]:
                 entry["max_age_days"] = age
@@ -178,6 +245,8 @@ def _class_ix_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict]
 
     items: list[dict] = []
     for nsn, e in by_nsn.items():
+        if not e["mission_essential"]:
+            continue
         # Hours-to-stockout heuristic:
         #   nominal MILSTRIP lead time = 17 days (~408h) for medium-priority
         #   resupply. The longer the requisition has been open, the closer
