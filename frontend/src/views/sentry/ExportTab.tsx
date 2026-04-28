@@ -85,15 +85,32 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         // job that's already been shipped.
         setSentryBatch(null, null);
         const cls = r.classification ?? "CUI";
-        // Toast carries a click-through link so the operator never wonders
-        // "where did the file go?" after a successful export. Reviewer caught
-        // the celebratory toast having no destination.
-        pushToast({
-          tone: "ok",
-          text: `✓ Export ${r.export_id} · ${cls} · ${(r.records_exported ?? 0).toLocaleString("en-US")} records · ${((r.bytes ?? 0) / 1024).toFixed(1)} KB`,
-          link: r.download_url ? { label: "Download", href: r.download_url } : undefined,
-          ttlMs: 6000,
-        });
+        const warnings = r.release_warnings ?? [];
+        // Task #101 — when the doctrinal release-compatibility gate
+        // returned warnings (e.g. SECRET → FVEY without an explicit
+        // downgrade caveat) the bundle was built but the operator must
+        // confirm release authority before forwarding. Escalate the
+        // celebratory toast to a warn tone so the requirement follows
+        // the operator off-page (the on-page banner alone isn't enough
+        // if they navigate away after submitting).
+        if (warnings.length > 0) {
+          pushToast({
+            tone: "warn",
+            text: `✓ Built ${r.export_id} · ${cls} → ${r.release_authority ?? authority} · release review required (downgrade authority must confirm before forwarding).`,
+            link: r.download_url ? { label: "Download", href: r.download_url } : undefined,
+            ttlMs: 9000,
+          });
+        } else {
+          // Toast carries a click-through link so the operator never wonders
+          // "where did the file go?" after a successful export. Reviewer caught
+          // the celebratory toast having no destination.
+          pushToast({
+            tone: "ok",
+            text: `✓ Export ${r.export_id} · ${cls} · ${(r.records_exported ?? 0).toLocaleString("en-US")} records · ${((r.bytes ?? 0) / 1024).toFixed(1)} KB`,
+            link: r.download_url ? { label: "Download", href: r.download_url } : undefined,
+            ttlMs: 6000,
+          });
+        }
       } catch (err: unknown) {
         // Surface the spillage event distinctly when the backend gate fires.
         const detail = err instanceof ApiError && err.body && typeof err.body === "object" ? (err.body as { detail?: Record<string, unknown> }).detail : undefined;
