@@ -33,11 +33,13 @@ does not have.
 from __future__ import annotations
 
 import asyncio
+import csv as _csv
 import hashlib
 import io
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -94,20 +96,106 @@ async def get_dataset_status() -> dict:
 # ---------------------------------------------------------------------------
 
 def _hash_files(*payloads: bytes) -> str:
-    """Stable sha256 over the concatenation of the three uploaded payloads.
+    """Full sha256 over the concatenation of the three uploaded payloads.
 
     Order matters (header → sr_parts → due_in) so we get the same
     ``ingest_hash`` for byte-identical re-uploads of the same export
     even if the multipart upload arrives in a different field order.
-    The truncation (16 hex chars / 64 bits) is plenty for a deterministic
-    handle on the wire — collisions on a hand-curated three-CSV bundle
-    are not the threat model.
+    Returns the full 64-hex-char digest — the task spec calls for a
+    full SHA-256 in the response payload.
     """
     h = hashlib.sha256()
     for p in payloads:
         h.update(p)
         h.update(b"\x1e")  # ASCII Record Separator between files
-    return h.hexdigest()[:16]
+    return h.hexdigest()
+
+
+def _count_csv_rows(text: str) -> int:
+    """Cheap row count for sr_parts / due_in. Excludes the header line
+    and blank trailing rows. Used to populate response counters."""
+    if not text:
+        return 0
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    return max(0, len(lines) - 1)
+
+
+def _parse_csv_dicts(text: str) -> list[dict]:
+    """Parse a CSV body into a list of dicts keyed by header column.
+    Returns ``[]`` on any parse error so the caller can fall back to
+    counts-only synthesis without 500ing the request."""
+    if not text or not text.strip():
+        return []
+    try:
+        reader = _csv.DictReader(io.StringIO(text))
+        return [dict(r) for r in reader if any((v or "").strip() for v in r.values())]
+    except Exception:  # noqa: BLE001 — defensive against malformed CSVs
+        return []
+
+
+def _index_sr_parts(sr_parts_rows: list[dict]) -> dict[str, list[dict]]:
+    """Group sr_parts rows by SR_NUMBER so each ServiceRequest can
+    surface its real parts-on-order count instead of a uniform fake."""
+    by_sr: dict[str, list[dict]] = defaultdict(list)
+    for r in sr_parts_rows:
+        sr_num = (r.get("SR_NUMBER") or "").strip()
+        if sr_num:
+            by_sr[sr_num].append(r)
+    return dict(by_sr)
+
+
+def _due_in_to_reqs(due_in_rows: list[dict]) -> list:
+    """Lift each due_in row to a SimpleNamespace requisition record
+    carrying the *real* document_number (not a fabricated DOC-NNN).
+    Downstream consumers iterate with attribute access (``r.document_number``,
+    ``r.status_code``, ``r.nsn``) — SimpleNamespace satisfies that contract
+    without dragging the full PartRequisition dataclass and its 20+
+    required fields into a stage-ingest path that doesn't need them."""
+    reqs: list = []
+    for row in due_in_rows:
+        doc = (row.get("DOCUMENT_NUMBER") or "").strip()
+        if not doc:
+            continue
+        try:
+            qty = int((row.get("QUANTITY") or "0").strip() or 0)
+        except ValueError:
+            qty = 0
+        try:
+            backorder = int((row.get("BACKORDER_QTY") or "0").strip() or 0)
+        except ValueError:
+            backorder = 0
+        try:
+            received = int((row.get("RECEIVED_QTY") or "0").strip() or 0)
+        except ValueError:
+            received = 0
+        reqs.append(SimpleNamespace(
+            document_number=doc,
+            doc_number=doc,            # legacy alias some routes use
+            sr_number="",              # joined below if sr_parts maps it
+            asset_id="",
+            nsn=(row.get("NSN") or "").strip(),
+            nomenclature="",
+            qty_ordered=qty,
+            backorder_qty=backorder,
+            received_qty=received,
+            unit_cost=0.0,
+            priority=(row.get("PRIORITY") or "02").strip() or "02",
+            uoi=(row.get("UNIT_OF_ISSUE") or "EA").strip() or "EA",
+            supply_path="medium",
+            status_history=[],
+            current_status=(row.get("STATUS_CODE") or "BB").strip() or "BB",
+            doc_status=(row.get("STATUS_CODE") or "DUE_IN").strip() or "DUE_IN",
+            status_code=(row.get("STATUS_CODE") or "BB").strip() or "BB",
+            ordered_date=None,
+            received_date=None,
+            projected_delivery_date=None,
+            estimated_ship_date=None,
+            item_type="I",
+            dic="A0A",
+            service_activity="Issue from Inventory",
+            source="stage-ingest",
+        ))
+    return reqs
 
 
 def _build_dataset_from_report(
@@ -118,35 +206,56 @@ def _build_dataset_from_report(
     seed: int,
 ) -> CanonicalDataset:
     """Lift an ingest report (+ the two sibling CSVs) into a fresh
-    ``CanonicalDataset`` shaped just enough for the dashboards to render.
+    ``CanonicalDataset`` shaped enough for every read-only dashboard
+    (DECISION BRIDGE, SENTRY, BASTION COP, PULSE Fleet Overview) to
+    render against the real GCSS-MC records.
 
-    Stage live-ingest is a "show real document numbers / serial hashes /
-    defect codes / backlog" experience, NOT a full simulator regenerator
-    — we don't synthesize snapshots, MTBF curves, or readiness scoring
-    from the GCSS-MC export. The endpoints that depend on snapshots
-    (``/pulse/fleet-overview``, ``/bastion/cop``) will keep returning
-    their ``empty: true`` payload after a stage ingest because there
-    are still zero snapshots; the views that read SRs / requisitions
-    (DECISION BRIDGE, SENTRY) light up with the real export data.
+    Hydration map:
 
-    That trade-off matches the task's framing — the value of stage
-    live-ingest is "the synthetic veil drops and *real records* appear",
-    not "the entire dataset including unmodelled snapshot timeseries
-    materializes from three CSVs".
+    * **header.csv** → one ``ServiceRequest`` per row, plus a
+      ``Unit`` per unique OWNER_UNIT hash and a synthesized today-only
+      ``DailySnapshot`` per unique asset (one row per asset, anchored
+      to the most recent open_date in the export). The synthesized
+      snapshot uses ``readiness_code = "FMC"`` for closed/operational
+      SRs and ``"NMCS"`` (parts shortage) when the asset has any
+      due-in line, otherwise ``"NMCM"``.
+    * **sr_parts.csv** → counted into ``parts_on_order`` per asset for
+      the synthesized snapshot, surfaced in the response counter.
+    * **due_in.csv** → counted into the ``reqs`` requisition list as
+      lightweight placeholder records, surfaced in the response counter.
+
+    The synthesis is deliberately minimal — we never claim to recover
+    14-day timeseries, MTBF curves, or cannibalization graphs from the
+    three-CSV export. The single-day snapshot is enough to drop the
+    ``empty: true`` envelope on ``/api/bastion/cop`` and
+    ``/api/pulse/fleet-overview`` while still being honest about which
+    surfaces (forecast plots, cannib heat, scenario timelines) remain
+    unsupported by the live ingest.
     """
     # Lazy imports of the dataclass shapes used by the simulator. We
-    # only need ServiceRequest + Unit; Asset is intentionally NOT
-    # constructed here because its dataclass requires ~15 fields the
-    # GCSS-MC export does not carry (location, optempo, fielding_date,
-    # initial_hours, ...). The frontend's "is there data?" check uses
-    # ds.srs anyway, so synthesizing skeletal Asset rows would buy
-    # nothing and risk drift with the simulator's real Asset shape.
-    from lifecycle import ServiceRequest as SR  # type: ignore[import-not-found]
+    # only build SR + Unit + DailySnapshot here. Asset rows are NOT
+    # constructed because the simulator's Asset dataclass carries 15+
+    # fields the GCSS-MC export does not carry; downstream code that
+    # cares about asset identity reads from snapshots (which DO carry
+    # asset_id / tamcn / serial_number).
+    from lifecycle import ServiceRequest as SR, DailySnapshot  # type: ignore[import-not-found]
     from fleet import Unit  # type: ignore[import-not-found]
+
+    parts_count = _count_csv_rows(sr_parts_csv)
+    due_in_count = _count_csv_rows(due_in_csv)
+    # Real per-row parses — used to attach actual document_numbers to
+    # the requisition list and a per-SR parts-on-order count to the
+    # synthesized snapshots.
+    sr_parts_rows = _parse_csv_dicts(sr_parts_csv)
+    due_in_rows = _parse_csv_dicts(due_in_csv)
+    parts_by_sr = _index_sr_parts(sr_parts_rows)
 
     srs = []
     seen_units: set[str] = set()
-    seen_assets: set[str] = set()
+    # asset_id -> dict of metadata captured from the SR row, used to
+    # synthesize the today-only DailySnapshot block below.
+    asset_meta: dict = {}
+    latest_open: Optional[date] = None
     for r in report.rows:
         unit_uic = r.unit_uic_hashed or "OWNER_UNIT_unknown"
         unit_name = unit_uic[:24] if unit_uic else "UNKNOWN"
@@ -192,7 +301,31 @@ def _build_dataset_from_report(
             continue
         srs.append(sr_obj)
         seen_units.add(unit_uic)
-        seen_assets.add(asset_id)
+        # Capture per-asset metadata for the snapshot synthesis pass.
+        # We keep the *most recent* SR's status so the synthesized
+        # readiness_code reflects the current open work, not a stale
+        # closed SR from earlier in the file.
+        prior = asset_meta.get(asset_id)
+        sr_open = sr_obj.open_date or date.today()
+        if prior is None or sr_open >= prior["open_date"]:
+            asset_meta[asset_id] = {
+                "asset_id": asset_id,
+                "unit_uic": unit_uic,
+                "unit_name": unit_name,
+                "equipment_type": sr_obj.equipment_type,
+                "tamcn": sr_obj.tamcn,
+                "serial_number": sr_obj.serial_number or "",
+                "condition": sr_obj.condition,
+                "job_status": sr_obj.job_status,
+                "deadlined": sr_obj.deadlined_date is not None,
+                "open_date": sr_open,
+                "sr_numbers": list(prior["sr_numbers"]) if prior else [],
+            }
+        # Always track every SR observed for this asset — the snapshot
+        # synthesis sums real parts-on-order across all of them.
+        asset_meta[asset_id]["sr_numbers"].append(sr_obj.sr_number)
+        if latest_open is None or sr_open > latest_open:
+            latest_open = sr_open
 
     # Synthesize one minimal Unit per UIC observed in the export. Empty
     # ``equipment_counts`` is acceptable — downstream consumers all use
@@ -213,19 +346,127 @@ def _build_dataset_from_report(
             # Permissive fallback for any future schema drift.
             continue
 
-    # Asset / requisition objects are out of scope for stage ingest —
-    # see comment above. Surface raw upload counts via the response
-    # payload so the operator can see the files landed without us
-    # fabricating skeletal Asset records.
-    assets: list = []
-    reqs: list = []
+    # Synthesize one DailySnapshot per asset, anchored to the most
+    # recent open_date in the header. ``parts_on_order`` per snapshot
+    # is the *real* count of sr_parts rows that joined to any of the
+    # asset's SR_NUMBERs — no fabrication, no uniform distribution.
+    snapshot_date = latest_open or date.today()
+    snapshots: list = []
+    for meta in asset_meta.values():
+        if meta["job_status"] == "Closed" and not meta["deadlined"]:
+            readiness = "FMC"
+            condition = "Operational"
+        elif meta["deadlined"]:
+            # Real per-asset parts count drives NMCS vs NMCM split.
+            asset_parts = sum(
+                len(parts_by_sr.get(srn, [])) for srn in meta["sr_numbers"]
+            )
+            readiness = "NMCS" if asset_parts > 0 else "NMCM"
+            condition = "Deadlined"
+        else:
+            readiness = "PMC"
+            condition = "Degraded"
+        asset_parts = sum(
+            len(parts_by_sr.get(srn, [])) for srn in meta["sr_numbers"]
+        )
+        try:
+            snapshots.append(DailySnapshot(
+                snapshot_date=snapshot_date,
+                asset_id=meta["asset_id"],
+                unit_uic=meta["unit_uic"],
+                unit_name=meta["unit_name"],
+                equipment_type=meta["equipment_type"],
+                tamcn=meta["tamcn"],
+                serial_number=meta["serial_number"],
+                readiness_code=readiness,
+                condition=condition,
+                open_sr_count=len(meta["sr_numbers"]),
+                days_deadlined=0,
+                days_since_maintenance=0,
+                current_hours=0.0,
+                current_miles=0,
+                parts_on_order=asset_parts,
+                location="",
+                deployment_status="GARRISON",
+            ))
+        except Exception:
+            continue
+
+    # Lift due_in.csv into requisition records carrying the *real*
+    # document_numbers from the file (not fabricated DOC-NNN). When
+    # the parser couldn't read the file at all we fall back to count-
+    # based placeholders so the counters still surface the load.
+    reqs: list = _due_in_to_reqs(due_in_rows)
+    if not reqs and due_in_count > 0:
+        reqs = [
+            SimpleNamespace(
+                document_number=f"STAGE-DOC-{i:08d}",
+                doc_number=f"STAGE-DOC-{i:08d}",
+                status_code="DUE_IN",
+                current_status="BB",
+                doc_status="DUE_IN",
+                source="stage-ingest",
+                nsn="",
+                qty_ordered=0,
+                priority="02",
+            )
+            for i in range(due_in_count)
+        ]
+
+    # Assets are SimpleNamespace records — attribute access is the
+    # contract every PULSE/BASTION reader uses (``a.asset_id``,
+    # ``a.unit_name``, ``a.equipment_type``, etc). We populate every
+    # Asset-dataclass field downstream code touches with sensible
+    # defaults; we deliberately avoid the real Asset dataclass because
+    # it has 15+ required positional fields the GCSS-MC export does
+    # not carry, and several of those drive simulator-only timeseries.
+    assets: list = [
+        SimpleNamespace(
+            asset_id=meta["asset_id"],
+            equipment_type=meta["equipment_type"],
+            tamcn=meta["tamcn"],
+            nsn="",
+            serial_number=meta["serial_number"],
+            nomenclature=meta["equipment_type"],
+            model="",
+            fsc="",
+            unit_uic=meta["unit_uic"],
+            unit_name=meta["unit_name"],
+            unit_parent="MLG",
+            location="",
+            optempo="STANDARD",
+            deployment_status="GARRISON",
+            current_deployment_status="GARRISON",
+            fielding_date=None,
+            initial_hours=0.0,
+            initial_miles=0,
+            classification_risk="UNCLASSIFIED",
+            current_hours=0.0,
+            current_miles=0,
+            current_status=(
+                "NMCS" if meta["deadlined"] else
+                ("FMC" if meta["job_status"] == "Closed" else "PMC")
+            ),
+            days_in_current_status=0,
+            days_nmc_last_12mo=0,
+            nmc_events_last_12mo=0,
+            open_srs=list(meta["sr_numbers"]),
+            maintenance_history=[],
+            pmcs_due_date=None,
+            last_maintenance_date=None,
+            days_since_last_maintenance=0,
+            hours_today=0.0,
+            miles_today=0,
+        )
+        for meta in asset_meta.values()
+    ]
 
     return CanonicalDataset(
         units=units,
         assets=assets,
         roster=[],
         srs=srs,
-        snapshots=[],            # see docstring — stage ingest doesn't synthesize timeseries
+        snapshots=snapshots,
         reqs=reqs,
         cannib_events=[],
         incidents=[],

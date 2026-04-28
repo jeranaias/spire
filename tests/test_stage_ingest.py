@@ -161,8 +161,9 @@ class TestStageIngestRoute:
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["ok"] is True
-        # Ingest hash is sha256-trunc-16 — 16 hex chars.
-        assert len(body["ingest_hash"]) == 16
+        # Ingest hash is full sha256 — 64 hex chars.
+        assert len(body["ingest_hash"]) == 64
+        assert all(c in "0123456789abcdef" for c in body["ingest_hash"])
         # The 5 Maintenance-CM rows in header.csv all land — PMCS row dropped.
         assert body["counts"]["srs"] == 5
         # Actor is the security_manager who POSTed.
@@ -224,6 +225,19 @@ class TestEmptyEnvelopeRoutes:
 # ---------------------------------------------------------------------------
 
 class TestStageFailsafe:
+    def test_reset_demo_allows_stage_operator_role(self, park_client):
+        """Stage-ingest operators (data_custodian, security_manager)
+        must be able to fire the Shift+F8 failsafe — RESET_DEMO_ROLES
+        was extended for Task #183 so the on-stage failsafe path is
+        usable by the same Marines who run the ingest."""
+        state_mod.init_empty_dataset()
+        resp = park_client.post("/api/system/admin/reset-demo")
+        # Stage operator must succeed — this is the regression the
+        # reviewer flagged. 403 here means the failsafe is broken.
+        assert resp.status_code == 200, resp.text
+        assert state_mod.is_dataset_empty() is False
+        assert state_mod.dataset_status()["counts"]["srs"] > 0
+
     def test_reset_demo_restores_seed_baseline(self, g4_client):
         # Stage an empty dataset, then verify reset-demo flips it back.
         state_mod.init_empty_dataset()
@@ -345,6 +359,45 @@ class TestStageIngestRobustness:
         assert "empty" not in body or body.get("empty") is not True
         # Populated FleetOverview carries heatmap + equipment_types.
         assert "heatmap" in body or "hero_metrics" in body, body
+
+    def test_reqs_carry_real_document_numbers(self, park_client):
+        """The due_in.csv document_numbers ride through to the dataset
+        reqs list — no fabricated DOC-NNN. Confirms finding #2 of the
+        review (real records driving downstream dashboards)."""
+        from backend import state as st_mod
+        state_mod.init_empty_dataset()
+        ing = park_client.post("/api/system/stage-ingest", files=_csv_files())
+        assert ing.status_code == 200
+        ds = st_mod.get_dataset()
+        assert len(ds.reqs) >= 1
+        doc_numbers = {getattr(r, "document_number", None) for r in ds.reqs}
+        # Every doc number is a real one from due_in.csv (starts with
+        # DOCUMENT_NUMBER_ per the sanitized fixture), never the
+        # fabricated STAGE-DOC-/DOC-NNN fallback.
+        assert all(
+            d and d.startswith("DOCUMENT_NUMBER_") for d in doc_numbers
+        ), f"unexpected doc numbers: {doc_numbers}"
+
+    def test_assets_have_attribute_access(self, park_client):
+        """ds.assets entries must support attribute access (a.asset_id,
+        a.unit_name, a.equipment_type) — that's the contract every
+        PULSE/BASTION reader uses. Confirms finding #3 of the review."""
+        from backend import state as st_mod
+        state_mod.init_empty_dataset()
+        park_client.post("/api/system/stage-ingest", files=_csv_files())
+        ds = st_mod.get_dataset()
+        assert len(ds.assets) >= 1
+        for a in ds.assets:
+            # Each of these would AttributeError on a plain dict —
+            # the test catches the regression the reviewer flagged.
+            assert isinstance(a.asset_id, str) and a.asset_id
+            assert isinstance(a.unit_name, str)
+            assert isinstance(a.equipment_type, str)
+            assert hasattr(a, "current_hours")
+            assert hasattr(a, "open_srs")
+        # CanonicalDataset.asset() index must roundtrip.
+        first = ds.assets[0]
+        assert ds.asset(first.asset_id) is first
 
     def test_post_ingest_dataset_status_carries_provenance(self, park_client):
         """After stage-ingest, /api/system/dataset-status surfaces the

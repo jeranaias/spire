@@ -379,7 +379,7 @@ async def audit(request: Request, limit: int = 50, role: str | None = None):
 # roles, the BE rejects with 403 if anyone forges the call.
 # ---------------------------------------------------------------------------
 
-RESET_DEMO_ROLES = frozenset({"g4"})
+RESET_DEMO_ROLES = frozenset({"g4", "data_custodian", "security_manager"})
 
 
 @router.post("/admin/force-empty")
