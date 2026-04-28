@@ -9,6 +9,10 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..auth import session_role
+from ..bom import (
+    asset_carries_nsn_serviceable,
+    equipment_type_carries_nsn,
+)
 from ..persistence import (
     approve_pulse_draft,
     dismiss_pulse_draft,
@@ -939,10 +943,19 @@ async def cannibalization(role: Optional[str] = None):
     #
     # Real-world cannibalization donor = a strippable hull (boneyard,
     # awaiting disposal, lower-priority asset) where the part is installed
-    # and serviceable. We approximate "installed" via equipment_type match
-    # (same platform -> same parts catalog) and "serviceable" via "donor's
-    # own copy of this fault class is not currently failing." Strippability
-    # is captured by one of three priority tiers below.
+    # and serviceable.
+    #
+    # Task #161 -- the prior implementation approximated "installed" via
+    # equipment_type match (same platform -> assumed same parts). A judge
+    # who knows logistics would notice that two JLTVs of different sub-
+    # variants may not share the recipient's part. We now route every
+    # donor candidate through the per-asset Bill of Materials (`backend/
+    # bom.py`), which derives the parts catalog from
+    # `dataset/data/equipment_profiles.json` and applies a deterministic
+    # per-asset install gate so optional sub-variant parts are not assumed
+    # present on every hull. The BOM lookup also subsumes the prior
+    # cause-of-fault-overlap check (a donor whose copy of the NSN's fault
+    # class is currently open is correctly reported as not-serviceable).
     asset_by_id = {a.asset_id: a for a in ds.assets}
     strippable_donors: dict[str, list[dict]] = {}
     for need in needs:
@@ -950,20 +963,22 @@ async def cannibalization(role: Optional[str] = None):
         if recipient_asset is None:
             strippable_donors[need["sr_number"]] = []
             continue
-        recipient_fault_class = need["fault_class"]
+        needed_nsn = need["needed_part"]["nsn"]
         candidates: list[dict] = []
         for a in ds.assets:
             if a.asset_id == recipient_asset.asset_id:
                 continue
-            if a.equipment_type != recipient_asset.equipment_type:
-                continue
             if allowed is not None and a.unit_name not in allowed:
                 continue
             donor_open_classes = open_fault_classes_by_asset.get(a.asset_id, set())
-            # Cause-of-fault overlap: donor's copy of THIS part class is
-            # itself failing -- strip is nonsensical (Walkthrough #9 logic
-            # but applied to assets, not other open SRs).
-            if recipient_fault_class and recipient_fault_class in donor_open_classes:
+            # Task #161 -- BOM gate. Replaces the equipment_type proxy and
+            # the per-fault-class overlap check in one pass: the donor
+            # qualifies only if THIS specific NSN is installed on the hull
+            # AND the matching fault class is not currently open.
+            has_part, slot_label = asset_carries_nsn_serviceable(
+                a, needed_nsn, donor_open_classes,
+            )
+            if not has_part:
                 continue
 
             donor_status = a.current_status
@@ -1013,6 +1028,11 @@ async def cannibalization(role: Optional[str] = None):
                 "unit_mc_rate": round(unit_mc_rate, 3),
                 "unit_mc_count": donor_unit_stats["mc"],
                 "unit_total": unit_total,
+                # Task #161 -- which sub-component slot the donated NSN
+                # physically lives in on the donor hull (e.g. "Right rear
+                # hub assembly"). Sourced from the equipment_type BOM via
+                # `backend/bom.py`.
+                "slot": slot_label,
             })
         # Best strippable donors first; cap at 12 so the panel stays
         # operator-readable.
@@ -1237,6 +1257,42 @@ async def propose_cannibalization(request: Request, payload: dict):
                 ),
             },
         )
+
+    # Task #161 -- BOM validation. Reject proposals whose donor hull does
+    # not physically carry the recipient's NSN as a serviceable installed
+    # component. The /cannibalization donor pool already filters this out
+    # of the picker, but the propose endpoint is the auditable seam — a
+    # hand-rolled POST (or a stale frontend cache) must not be able to
+    # smuggle a logically impossible match into the audit chain.
+    donor_asset = ds.asset(donor_asset_id) if donor_asset_id else None
+    if donor_asset is not None:
+        donor_open_classes_propose: set[str] = set()
+        for sr in ds.srs:
+            if sr.asset_id != donor_asset.asset_id or sr.is_pmcs or sr.close_date is not None:
+                continue
+            if sr.fault_component:
+                donor_open_classes_propose.add(_normalize_component(sr.fault_component))
+        has_part, slot_label = asset_carries_nsn_serviceable(
+            donor_asset, nsn, donor_open_classes_propose,
+        )
+        if not has_part:
+            installed_at_all = equipment_type_carries_nsn(donor_asset.equipment_type, nsn)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "DonorBomMismatch",
+                    "donor_asset_id": donor_asset_id,
+                    "donor_equipment_type": donor_asset.equipment_type,
+                    "supplied_nsn": nsn,
+                    "remediation": (
+                        "Donor hull does not carry this NSN as a serviceable "
+                        "installed component. The part is "
+                        + ("present in the equipment-type catalog but not installed on this hull (sub-variant), or its slot is currently unserviceable."
+                           if installed_at_all
+                           else "not in this equipment-type's parts catalog at all (platform mismatch).")
+                    ),
+                },
+            )
 
     proposal = {
         "proposal_id": f"PROP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",

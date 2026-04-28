@@ -1088,6 +1088,10 @@ export interface StrippableDonor {
   unit_mc_rate: number;
   unit_mc_count: number;
   unit_total: number;
+  // Task #161 -- sub-component slot the donated NSN physically lives in on
+  // the donor hull (e.g. "Right rear hub assembly"). Sourced from the
+  // equipment_type BOM via backend/bom.py.
+  slot?: string;
 }
 
 export interface Cannibalization {

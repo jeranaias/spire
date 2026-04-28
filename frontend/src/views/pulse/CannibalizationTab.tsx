@@ -821,7 +821,7 @@ export function CannibalizationTab() {
           </h3>
           <div className="mt-0.5 spire-body-muted">
             {selectedNeed
-              ? `Strippable ${selectedNeed.equipment_type.replace(/_/g, " ")} hulls · same fault-class donors filtered out (their copy of the part is also failing).`
+              ? `Hulls whose Bill of Materials carries ${selectedNeed.needed_part.nsn} as a serviceable installed component (sub-variant aware; donors whose own copy of this slot is failing are filtered out).`
               : "Select a need to see compatible donors."}
           </div>
         </div>
@@ -834,10 +834,11 @@ export function CannibalizationTab() {
           <div className="rounded-sm border border-dashed border-[var(--color-border)] p-6 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             <div className="text-center uppercase tracking-wider">No strippable hulls in scope</div>
             <div className="mt-2 normal-case text-[var(--color-text-secondary)]">
-              No same-platform asset in the scoped units has the recipient&apos;s
-              part installed and serviceable. Recommend Risk Board to expedite
-              the requisition or initiate a cross-level transfer of a
-              like-platform donor from outside this scope.
+              No hull in the scoped units carries the recipient&apos;s NSN
+              as a serviceable installed component (per the equipment-type
+              Bill of Materials, sub-variant aware). Recommend Risk Board
+              to expedite the requisition or initiate a cross-level
+              transfer of a donor from outside this scope.
             </div>
           </div>
         )}
@@ -873,6 +874,16 @@ export function CannibalizationTab() {
                 <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
                   {d.strip_reason}
                 </div>
+                {/* Task #161 -- which sub-component slot the donated NSN
+                   physically lives in on the donor hull, sourced from the
+                   per-asset BOM. Replaces the prior equipment_type proxy
+                   so the operator sees the actual mounting location. */}
+                {d.slot && (
+                  <div className="mt-1 font-mono text-xs text-[var(--color-text)] tracking-wide">
+                    <span className="text-[var(--color-text-muted)]">Slot · </span>
+                    {d.slot}
+                  </div>
+                )}
                 {d.donor_fault_classes.length > 0 && (
                   <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
                     other open faults: {d.donor_fault_classes.join(", ")}
