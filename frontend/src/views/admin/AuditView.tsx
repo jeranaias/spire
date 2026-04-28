@@ -60,6 +60,60 @@ const RESOURCE_PREFIXES: { value: string; label: string }[] = [
 
 const PAGE_SIZE = 100;
 
+/**
+ * Task #112 — curated set of audit kinds that represent a blocked-access
+ * attempt. The router-level scope gate emits `view_scope_denied`, the
+ * per-route role gate (admin/audit/secure-wipe/...) emits `role_denied`,
+ * and the classification gate emits `spillage_prevented`. The Blocked
+ * Access Attempts panel below — and the small last-24h badge on the
+ * ADMIN tab — both hit `/system/admin/audit?kinds=` with this list, so
+ * an investigator looking for "who is poking at endpoints they're not
+ * authorized for" has one place to scan instead of having to remember
+ * which `kinds` chip combination expresses that intent.
+ */
+export const BLOCKED_ACCESS_KINDS = [
+  "view_scope_denied",
+  "role_denied",
+  "spillage_prevented",
+] as const;
+
+const BLOCKED_PANEL_LIMIT = 12;
+
+function blockedKindLabel(kind: string): string {
+  switch (kind) {
+    case "view_scope_denied":   return "VIEW SCOPE";
+    case "role_denied":         return "ROLE";
+    case "spillage_prevented":  return "SPILLAGE";
+    default:                    return kind.toUpperCase();
+  }
+}
+
+function blockedKindHint(kind: string): string {
+  switch (kind) {
+    case "view_scope_denied":   return "Router-level view-scope deny (PULSE / BASTION)";
+    case "role_denied":         return "Per-route role-gate deny (admin / audit / secure-wipe / …)";
+    case "spillage_prevented":  return "Classification-gate deny (export above clearance)";
+    default:                    return kind;
+  }
+}
+
+/** Reads the target view/path the operator was trying to reach when
+ * the gate fired. `view_scope_denied` carries `{view, path}` in payload;
+ * `role_denied` carries `{action}`; `spillage_prevented` carries
+ * `{action, required_classification}`. We fall back through the row's
+ * `subject_id` so the cell never renders blank.
+ */
+function blockedTargetText(row: AuditEntry): string {
+  const p = row.payload as Record<string, unknown>;
+  const path   = typeof p.path   === "string" ? p.path   : "";
+  const view   = typeof p.view   === "string" ? p.view   : "";
+  const action = typeof p.action === "string" ? p.action : "";
+  if (path)   return path;
+  if (view)   return view;
+  if (action) return action;
+  return row.subject_id || "—";
+}
+
 function isoMinutesAgo(mins: number): string {
   return new Date(Date.now() - mins * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
@@ -210,6 +264,50 @@ export function AuditView() {
 
   const pushToast = useSpireStore((s) => s.pushToast);
   const { clearance, can } = useClearance();
+
+  // Task #112 — curated "Blocked access attempts" feed. Independent of
+  // the operator's filter selection so the panel never disappears just
+  // because the SOC analyst narrowed the chain to (say) PULSE-only.
+  // Polled on the same cadence as the main fetch (degraded-comms aware).
+  const [blocked, setBlocked]               = useState<AuditEntry[] | null>(null);
+  const [blocked24hCount, setBlocked24hCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const fetchBlocked = () => {
+      // Visibility gate matches the audit poll above so a backgrounded
+      // tab doesn't keep DoSing the operator's own backend.
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      const after = isoMinutesAgo(60 * 24);
+      api.system
+        .auditQuery(
+          { kinds: [...BLOCKED_ACCESS_KINDS], after, limit: BLOCKED_PANEL_LIMIT, offset: 0 },
+          { signal: controller.signal },
+        )
+        .then((r) => {
+          if (cancelled || controller.signal.aborted) return;
+          setBlocked(r.rows);
+          setBlocked24hCount(r.total);
+        })
+        .catch(() => { /* silent — panel keeps prior content; next tick retries */ });
+    };
+    fetchBlocked();
+    const id = setInterval(fetchBlocked, 12_000 * cadenceMult);
+    const onVis = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") fetchBlocked();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVis);
+    }
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(id);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVis);
+      }
+    };
+  }, [cadenceMult]);
 
   // Reset to page 0 whenever a filter changes — otherwise a narrowed result
   // set leaves the operator on an empty trailing page. Use the *debounced*
@@ -611,6 +709,23 @@ export function AuditView() {
         <DdilFreshnessBanner loadedAt={loadedAt} className="mt-3 mb-0" />
       </div>
 
+      {/* Task #112 — Blocked access attempts panel. Curated to the three
+       * deny kinds emitted by the backend gate stack
+       * (`view_scope_denied` / `role_denied` / `spillage_prevented`)
+       * so a security manager — or a judge / investigator — has one
+       * place to scan for "who is poking at endpoints they're not
+       * authorized for". Independent of the operator's filter chips
+       * below: even a narrow PULSE-only filter must not hide a
+       * cross-module deny pattern. Click a row → opens the same
+       * RowDrawer used by the main table so the audit-detail UX is
+       * one consistent surface. */}
+      <BlockedAccessPanel
+        rows={blocked}
+        total24h={blocked24hCount}
+        onOpen={setOpenRow}
+        highlightedId={openRow?.id ?? null}
+      />
+
       {/* Filters */}
       <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-bg)] p-3">
         <div className="grid grid-cols-12 gap-3">
@@ -858,6 +973,127 @@ export function AuditView() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Task #112 — Blocked Access Attempts panel.
+ *
+ * Curated, always-visible feed of the three deny audit kinds
+ * (`view_scope_denied`, `role_denied`, `spillage_prevented`). Renders
+ * compact rows: time · actor (role + identity if a person is bound) ·
+ * gate-kind chip · target view/path. Clicking a row hands control to
+ * the parent's `setOpenRow` so the existing RowDrawer renders the full
+ * payload + hash-chain detail — no second drawer to maintain.
+ *
+ * The header shows a 24h count badge so the SOC analyst can see at a
+ * glance whether the deny rate is "0 — quiet day" or "47 — somebody is
+ * poking around".
+ */
+function BlockedAccessPanel({
+  rows,
+  total24h,
+  onOpen,
+  highlightedId,
+}: {
+  rows: AuditEntry[] | null;
+  total24h: number | null;
+  onOpen: (r: AuditEntry) => void;
+  highlightedId: number | null;
+}) {
+  return (
+    <section
+      className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2"
+      aria-label="Blocked access attempts"
+    >
+      <div className="mb-1.5 flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-2">
+          <h2 className="font-mono text-[11px] uppercase text-[var(--color-warning)] tracking-widest">
+            Blocked access attempts
+          </h2>
+          <span className="font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-wider">
+            view-scope · role · spillage · last 24h
+          </span>
+        </div>
+        <span
+          className="rounded-sm border px-2 py-[1px] font-mono text-[10px] tabular-nums uppercase tracking-wider"
+          style={{
+            color: total24h && total24h > 0 ? "var(--color-warning)" : "var(--color-text-muted)",
+            borderColor: total24h && total24h > 0 ? "var(--color-warning-muted)" : "var(--color-border)",
+            background: total24h && total24h > 0
+              ? "color-mix(in oklab, var(--color-warning-muted) 18%, transparent)"
+              : "transparent",
+          }}
+          title="Total deny rows across view_scope_denied + role_denied + spillage_prevented in the last 24 hours."
+        >
+          {total24h == null ? "…" : total24h.toLocaleString("en-US")} in 24h
+        </span>
+      </div>
+      {rows == null ? (
+        <div className="rounded-sm border border-dashed border-[var(--color-border)] p-2 font-mono text-[11px] text-[var(--color-text-muted)] tracking-wider">
+          LOADING BLOCKED-ACCESS FEED …
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="rounded-sm border border-dashed border-[var(--color-border)] p-2 font-mono text-[11px] text-[var(--color-text-muted)] tracking-wider">
+          NO BLOCKED ATTEMPTS IN THE LAST 24 HOURS — every privileged call landed for an authorized role.
+        </div>
+      ) : (
+        <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)]">
+          {rows.map((r) => {
+            const target = blockedTargetText(r);
+            const personName = r.identity.dodid && r.identity.name
+              ? (r.identity.rank ? `${r.identity.rank} ${r.identity.name}` : r.identity.name)
+              : null;
+            const roleLabel = r.identity.role || r.actor || "unknown";
+            return (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpen(r)}
+                  className="flex w-full items-center gap-3 px-2 py-1.5 text-left font-mono text-[11px] tracking-wide hover:bg-[color-mix(in_oklab,var(--color-warning)_8%,transparent)]"
+                  style={{
+                    background: highlightedId === r.id
+                      ? "color-mix(in oklab, var(--color-warning) 14%, transparent)"
+                      : undefined,
+                  }}
+                  title="Open audit detail"
+                >
+                  <span className="w-[7.5rem] shrink-0 tabular-nums text-[var(--color-text-secondary)]" title={r.ts}>
+                    {fmtUtc(r.ts)}
+                  </span>
+                  <span
+                    className="w-[7.5rem] shrink-0 rounded-sm border px-1 py-[1px] text-center text-[10px] uppercase tracking-wider"
+                    style={{
+                      color: "var(--color-warning)",
+                      borderColor: "color-mix(in oklab, var(--color-warning) 50%, transparent)",
+                      background: "color-mix(in oklab, var(--color-warning) 12%, transparent)",
+                    }}
+                    title={blockedKindHint(r.kind)}
+                  >
+                    {blockedKindLabel(r.kind)}
+                  </span>
+                  <span className="w-[14rem] shrink-0 truncate text-[var(--color-text)]" title={`${roleLabel}${personName ? ` · ${personName}` : ""}`}>
+                    {roleLabel}
+                    {personName && (
+                      <span className="ml-1 text-[var(--color-text-muted)]">· {personName}</span>
+                    )}
+                  </span>
+                  <span
+                    className="min-w-0 flex-1 truncate text-[var(--color-text-secondary)]"
+                    title={target}
+                  >
+                    {target}
+                  </span>
+                  <span className="hidden shrink-0 text-[10px] uppercase text-[var(--color-text-muted)] tracking-wider md:inline">
+                    open →
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 

@@ -17,6 +17,7 @@ import { useScenarioPlayer } from "../state/scenarioPlayer";
 import { useFailsafe } from "../state/failsafe";
 import { MissionClock } from "./MissionClock";
 import { CommsControl } from "./CommsControl";
+import { commsCadenceMultiplier } from "./LinkStatusStrip";
 import { SystemStatusChip } from "./SystemStatusChip";
 import { StageCluster } from "./StageCluster";
 import { NotificationsChip } from "./NotificationsChip";
@@ -202,6 +203,13 @@ export function TopBar() {
                       <>
                         {/* Tab numerals dropped — see disabled-tab branch. */}
                         {tab.label}
+                        {/* Task #112 — small badge on the ADMIN tab counting
+                         * blocked-access attempts (view-scope/role/spillage
+                         * deny rows) in the last 24h. Only the ADMIN tab is
+                         * security_manager-gated, so the badge can never
+                         * leak count to a non-privileged role: this filter
+                         * already excluded other roles upstream. */}
+                        {tab.to === "/admin" && <AdminBlockedBadge />}
                         {isActive && (
                           <>
                             <span
@@ -903,6 +911,92 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Task #112 — small last-24h count badge that lives on the ADMIN tab.
+ *
+ * Polls `/system/admin/audit?kinds=view_scope_denied,role_denied,
+ * spillage_prevented&after=24h&limit=1` once a minute, reads `total`
+ * (the backend's filtered total before pagination, so `limit=1` is
+ * fine — we never need the rows themselves here), and renders a small
+ * warning-tone pill next to the ADMIN label so a security manager can
+ * see "47 blocked attempts in 24h" without having to navigate into
+ * the SOC view first. Hidden when:
+ *   - role is not security_manager (the ADMIN tab is gone anyway —
+ *     defensive skip so we never even issue the request)
+ *   - stage mode is on (the ADMIN tab is replaced by DHA RESCUE)
+ *   - count is 0 (no badge = quiet day; matches AlertBadge contract).
+ *
+ * Quiet-fail on errors: a transient backend hiccup must not splash a
+ * red banner across the chrome — the SOC view's panel will surface the
+ * underlying state if anything is actually wrong.
+ */
+function AdminBlockedBadge() {
+  const role = useSpireStore((s) => s.role);
+  const stageMode = useSpireStore((s) => s.stageMode);
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const enabled = role === "security_manager" && !stageMode;
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setCount(null);
+      return;
+    }
+    let cancelled = false;
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      const after = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+      api.system
+        .auditQuery({
+          kinds: ["view_scope_denied", "role_denied", "spillage_prevented"],
+          after,
+          limit: 1,
+          offset: 0,
+        })
+        .then((r) => { if (!cancelled) setCount(r.total); })
+        .catch(() => { /* quiet — keep prior value, retry next tick */ });
+    };
+    tick();
+    // 60s polling — much slower than the SOC panel's 12s, since this
+    // is just a chrome ornament not a triage surface. Degraded comms
+    // (Task #128) stretches it further so we don't keep a queued lane
+    // busy. Visibility-change re-fires immediately on refocus so the
+    // badge feels live when the analyst comes back to the tab.
+    const id = setInterval(tick, 60_000 * commsCadenceMultiplier(ddilMode));
+    const onVis = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") tick();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVis);
+    }
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVis);
+      }
+    };
+  }, [enabled, ddilMode]);
+
+  if (!enabled || count == null || count === 0) return null;
+
+  return (
+    <span
+      className="ml-1.5 rounded-sm border px-1 py-[1px] align-middle font-mono text-[10px] tabular-nums tracking-wider"
+      style={{
+        color: "var(--color-warning)",
+        borderColor: "color-mix(in oklab, var(--color-warning) 50%, transparent)",
+        background: "color-mix(in oklab, var(--color-warning) 14%, transparent)",
+        textShadow: "none",
+      }}
+      title={`${count.toLocaleString("en-US")} blocked-access attempt${count === 1 ? "" : "s"} in the last 24h (view-scope, role, or spillage deny). Open Audit · SOC View for the full list.`}
+      aria-label={`${count} blocked access attempts in the last 24 hours`}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
   );
 }
 

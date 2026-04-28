@@ -1602,6 +1602,106 @@ def _seed_audit_demo() -> None:
 _seed_audit_demo()
 
 
+def _seed_blocked_access_demo() -> None:
+    """Task #112 — backfill the new deny-kind rows on existing dev DBs.
+
+    `_seed_audit_demo()` above is idempotent on row count, so a DB that
+    was first booted before Task #112 will have plenty of audit rows but
+    none of the `view_scope_denied` / `role_denied` kinds the curated
+    Blocked Access Attempts panel highlights. This helper checks
+    whether either kind is already present and, if not, appends one
+    representative row per kind so the panel and the ADMIN-tab badge
+    have visible content out of the box on dev/demo machines.
+
+    Audit-integrity guard: synthetic deny rows must never land in a
+    real production audit chain. Operators can hard-disable this seed
+    by setting `SPIRE_DISABLE_DEMO_SEED=1` in the environment (any
+    truthy value other than "0" / "" / "false"). When disabled the
+    panel and badge still work — they simply show empty / 0 until
+    real deny activity arrives.
+    """
+    _disable = os.environ.get("SPIRE_DISABLE_DEMO_SEED", "0").strip().lower()
+    if _disable not in ("", "0", "false", "no"):
+        return
+    try:
+        from ..persistence import query_audit
+        for kind in ("view_scope_denied", "role_denied"):
+            existing = query_audit(kinds=[kind], limit=1, offset=0)
+            if existing.get("rows"):
+                continue
+            if kind == "view_scope_denied":
+                audit_log(
+                    "view_scope_denied",
+                    actor="maintenance_chief",
+                    subject_id="/api/bastion/cop",
+                    payload={
+                        "view": "/bastion",
+                        "path": "/api/bastion/cop",
+                        "method": "GET",
+                        "user_dodid": "2345678901",
+                        "user_role": "maintenance_chief",
+                        "roles_allowed": ["mef_commander", "security_manager"],
+                        "decision": "blocked",
+                        "surface": "backend",
+                        "source_ip": "10.42.7.22",
+                    },
+                )
+                audit_log(
+                    "view_scope_denied",
+                    actor="g4",
+                    subject_id="/api/pulse/risk-board",
+                    payload={
+                        "view": "/pulse",
+                        "path": "/api/pulse/risk-board",
+                        "method": "GET",
+                        "user_dodid": "1234567890",
+                        "user_role": "g4",
+                        "roles_allowed": ["maintenance_chief", "mef_commander", "security_manager"],
+                        "decision": "blocked",
+                        "surface": "backend",
+                        "source_ip": "10.42.7.18",
+                    },
+                )
+            else:  # role_denied
+                audit_log(
+                    "role_denied",
+                    actor="g4",
+                    subject_id="admin.audit.read",
+                    payload={
+                        "action": "admin.audit.read",
+                        "user_dodid": "1234567890",
+                        "user_role": "g4",
+                        "user_clearance": "SECRET",
+                        "roles_allowed": ["security_manager"],
+                        "decision": "blocked",
+                        "surface": "backend",
+                        "source_ip": "10.42.7.18",
+                    },
+                )
+                audit_log(
+                    "role_denied",
+                    actor="maintenance_chief",
+                    subject_id="admin.telemetry",
+                    payload={
+                        "action": "admin.telemetry",
+                        "user_dodid": "2345678901",
+                        "user_role": "maintenance_chief",
+                        "user_clearance": "CUI",
+                        "roles_allowed": ["security_manager"],
+                        "decision": "blocked",
+                        "surface": "backend",
+                        "source_ip": "10.42.7.22",
+                    },
+                )
+    except Exception:
+        # Never let a seed-write failure crash boot — the panel just
+        # shows an empty state until live deny activity arrives.
+        pass
+
+
+_seed_blocked_access_demo()
+
+
 def record_outcome(*, decision_kind: str, decision_id: str, decided_by: str,
                    was_correct: bool, observed_at: str = "",
                    notes: str = "", scoring_engine: str = "rule_based_v1") -> dict:
