@@ -3,13 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { api, type RiskBoard, type RiskBoardAsset, type AssetDeepDive } from "../../api";
-import { formatApiError } from "../../api-retry";
+import { formatApiError, withRetry } from "../../api-retry";
 import { RiskBar } from "../../components/RiskBar";
-import { LoadingOverlay } from "./FleetOverviewTab";
+import { LoadingOverlay, formatAsOf } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
 import { PredictedFailurePanel } from "../../components/PredictedFailurePanel";
 import { CollapsiblePanel } from "../../components/CollapsiblePanel";
-import { Button, IconButton, Pressable, fireIdempotent } from "../../components/ui";
+import { Button, IconButton, Pressable, ErrorState, fireIdempotent } from "../../components/ui";
 
 // Track-G1 — role-shaped default scope. A Maintenance Chief landing on the
 // Risk Board cold should see CLB-6 only (their unit), not the whole MEF.
@@ -25,6 +25,14 @@ const ALL_UNITS_SENTINEL = "__ALL__";
 export function RiskBoardTab() {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
+  // F6 — read DDIL cache hit so the freshness banner can fire when a
+  // disconnected read served the Risk Board from last-known-good. The
+  // store records the cachedAt + servedAt times whenever the api client
+  // falls back to cache. We also gate on the live ddilMode so the
+  // banner clears the moment comms recover (rather than persisting on
+  // a previous cache-hit record from before the reconnect).
+  const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
+  const ddilMode = useSpireStore((s) => s.ddilMode);
   const [params, setParams] = useSearchParams();
   const explicitUnit = params.get("unit");
   const equipFilter = params.get("equipment");
@@ -36,6 +44,12 @@ export function RiskBoardTab() {
   const unitFilter = rawUnitFilter === ALL_UNITS_SENTINEL ? null : rawUnitFilter;
   const [board, setBoard] = useState<RiskBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  // Reload counter — bumping it re-runs the load effect so the
+  // ErrorState retry button can re-enter the cold-load path without a
+  // full page reload (which would also lose unsaved selections in
+  // sibling tabs).
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<AssetDeepDive | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -43,11 +57,49 @@ export function RiskBoardTab() {
   const [draftActionFor, setDraftActionFor] = useState<RiskBoardAsset | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setBoard(null);
+    setError(null);
     setSelected(null);
     setDetail(null);
-    api.pulse.riskBoard(30).then(setBoard).catch((e) => setError(formatApiError(e)));
-  }, [role]);
+    setRetrying(true);
+    // F6 — wrap the cold load in withRetry so a single transient 5xx /
+    // SATCOM yellow doesn't dead-end the lead UC13 surface. Schedule
+    // matches FleetOverviewTab / BastionView (1s/3s/5s).
+    withRetry(() => api.pulse.riskBoard(30))
+      .then((b) => { if (!cancelled) setBoard(b); })
+      .catch((e) => { if (!cancelled) setError(formatApiError(e)); })
+      .finally(() => { if (!cancelled) setRetrying(false); });
+    return () => { cancelled = true; };
+  }, [role, loadAttempt]);
+
+  // F5/F6 — cached-payload-age warning. When the Risk Board GET was
+  // served from the DDIL cache and the cached snapshot is older than
+  // 5 minutes, surface a polite inline notice so an operator drafting
+  // a TMR off this view doesn't commit airframes against assumptions
+  // that have already moved. Threshold lifted to 5 min per Done line.
+  // Three guards keep this honest:
+  //   1. Only fires while DDIL is actively DISCONNECTED — a successful
+  //      live fetch flips the mode out of DISCONNECTED and the banner
+  //      clears immediately.
+  //   2. The cache-hit key must match this view, so a stale chip from
+  //      an unrelated endpoint never bleeds onto the Risk Board.
+  //   3. A 30s tick re-evaluates the threshold so a payload that is
+  //      4m59s old at first render auto-surfaces the warning at the 5m
+  //      mark without the operator having to re-navigate.
+  const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const cacheStaleMs = useMemo(() => {
+    if (ddilMode !== "DISCONNECTED") return null;
+    if (!ddilLastCacheHit) return null;
+    if (!ddilLastCacheHit.key.includes("/pulse/risk-board")) return null;
+    const ageMs = now - ddilLastCacheHit.cachedAt;
+    return ageMs > STALE_THRESHOLD_MS ? ageMs : null;
+  }, [ddilLastCacheHit, ddilMode, now]);
 
   const filteredAssets = useMemo(() => {
     if (!board) return [];
@@ -80,7 +132,21 @@ export function RiskBoardTab() {
       .finally(() => setDetailLoading(false));
   }, [selected]);
 
-  if (error) return <ErrorPanel msg={error} />;
+  if (error) {
+    // F6 — chassis-consistent <ErrorState> with a real Retry button.
+    // Bumping loadAttempt re-runs the cold-load path through withRetry
+    // so the operator never has to refresh the whole page.
+    return (
+      <ErrorState
+        variant="panel"
+        title="Risk board unavailable"
+        description="The PULSE risk-board API did not return. Network or backend may be cycling."
+        detail={error}
+        onRetry={() => setLoadAttempt((n) => n + 1)}
+        retrying={retrying}
+      />
+    );
+  }
   if (!board) return <RiskBoardSkeleton />;
 
   return (
@@ -139,7 +205,29 @@ export function RiskBoardTab() {
               {filteredAssets.length !== board.assets.length && (
                 <span className="ml-2 text-[var(--color-text-muted)]"> / {board.assets.length}</span>
               )}
+              {/* F5 — dataset freshness stamp. Same formatAsOf helper
+               * FleetOverviewTab uses, so both PULSE tabs read identical
+               * "as of <date>" copy from the canonical last_snapshot
+               * date instead of the operator inferring freshness from
+               * wall-clock time. */}
+              {board.as_of && (
+                <span className="ml-3 font-mono text-[var(--color-text-muted)] tracking-wider">
+                  · as of {formatAsOf(board.as_of)}
+                </span>
+              )}
             </h2>
+            {cacheStaleMs != null && (
+              <div
+                role="status"
+                className="mt-1 inline-flex items-center gap-2 rounded-sm border border-[var(--color-warning-muted)] bg-[color-mix(in_oklab,var(--color-warning-muted)_18%,var(--color-surface))] px-2 py-1 font-mono text-xs text-[var(--color-warning)] tracking-wider"
+              >
+                <span aria-hidden>▲</span>
+                <span>
+                  Cached {Math.floor(cacheStaleMs / 60000)} min ago — DDIL disconnected.
+                  Verify before committing TMRs.
+                </span>
+              </div>
+            )}
             <div className="spire-body-muted mt-0.5">
               Weighted: fault frequency 30% · days NMC 25% · hours 20% · severity trend 15% · age 7% · cost 3%.
               {/* W1 #30 — no cross-link to /admin/models/pulse-risk-scorer
@@ -805,12 +893,3 @@ function Fact({ label, value }: { label: string; value: any }) {
   );
 }
 
-function ErrorPanel({ msg }: { msg: string }) {
-  return (
-    <div className="flex h-full items-center justify-center p-12">
-      <div className="rounded border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-danger)]">
-        {msg}
-      </div>
-    </div>
-  );
-}

@@ -736,6 +736,7 @@ export interface RiskBoardAsset {
 
 export interface RiskBoard {
   assets: RiskBoardAsset[];
+  as_of: string;
 }
 
 export interface AssetDeepDive {

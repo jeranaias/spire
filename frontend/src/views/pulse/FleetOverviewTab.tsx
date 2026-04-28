@@ -271,7 +271,7 @@ function extractUnit(title: string): string | null {
 // Note for PULSE agent: cross-cutting agent edited this file solely to
 // route data.as_of through formatAsOf — none of the data flow / poll /
 // hero metric logic was touched.
-function formatAsOf(iso: string): string {
+export function formatAsOf(iso: string): string {
   if (!iso) return "—";
   // Parse as date-only to avoid TZ-shifted display ("2026-04-26" must read
   // Walkthrough audit: same as StatusStrip — '26 APR 26' was readable

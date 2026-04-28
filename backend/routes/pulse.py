@@ -297,7 +297,14 @@ async def risk_board(top: int = Query(20, ge=1, le=100), role: Optional[str] = N
             "fault_count_30d": fault_count_30d,
             "fault_buckets_30d": buckets,
         })
-    return {"assets": out}
+    # Stamp the dataset snapshot date so the Risk Board can render the
+    # same "as of <date>" line FleetOverviewTab already shows. Keeps both
+    # tabs reading the canonical last_snapshot date instead of inferring
+    # freshness from wall-clock time.
+    return {
+        "assets": out,
+        "as_of": last_day.isoformat() if last_day is not None else "",
+    }
 
 
 # ---------------------------------------------------------------------------
