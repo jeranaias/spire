@@ -24,7 +24,7 @@
  *     in this component.
  *
  * Architecture notes
- *   - This view sits inside the App shell, so the ClassificationBand
+ *   - This view sits inside the App shell, so the ClassificationBannerStrip
  *     stays visible (per the W2 brief: "Deck is part of the app").
  *   - We use the `?slide=N` query param so the presenter can deep-link
  *     into a specific slide (rehearsal jump, /demo's "back to pitch

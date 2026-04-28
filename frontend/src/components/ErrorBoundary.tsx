@@ -17,7 +17,7 @@ interface Props {
  * Error boundary. Two scopes:
  *
  *   scope="view" — wraps only the Outlet so a view crash doesn't take
- *                  out the chrome (TopBar / ClassificationBand /
+ *                  out the chrome (TopBar / ClassificationBannerStrip /
  *                  StatusFooter / role switcher). The reviewer caught
  *                  the prior single-boundary version blanking the whole
  *                  app on a stale-chunk failure — provably worse than

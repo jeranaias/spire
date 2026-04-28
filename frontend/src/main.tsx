@@ -24,8 +24,8 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ScopeGuard } from "./components/ScopeGuard";
 import { AuthView } from "./views/AuthView";
-// ClassificationBand is rendered once in App.tsx (the app shell) — see
-// Walkthrough #JOB-F. Importing it here would invite a second instance
+// ClassificationBannerStrip is rendered once in App.tsx (the app shell) —
+// see Walkthrough #JOB-F. Importing it here would invite a second instance
 // in the Suspense fallback, the exact duplication this fix eliminates.
 import { registerRoleSource, registerUnauthenticatedHandler, registerDdilHandlers } from "./api";
 import { useSpireStore, ROLE_DEFAULT_VIEW } from "./state/store";
@@ -100,7 +100,7 @@ const DecisionBridgeView = lazyWithRecovery(() => import("./views/DecisionBridge
 // W2 #38 — In-app pitch deck. Lives at `/pitch`. No role gate — any
 // authenticated identity can present (a g4 reviewing rehearsal, a
 // security_manager validating the security slide). The deck stays
-// inside the App shell so the ClassificationBand remains visible.
+// inside the App shell so the ClassificationBannerStrip remains visible.
 const PitchView = lazyWithRecovery(() => import("./views/pitch/PitchView").then((m) => ({ default: m.PitchView })));
 // W2 Task #37 — `/demo` scripted scenario cockpit. Lazy because the
 // surface is presenter-only; no operator ever has to download the chunk
@@ -182,9 +182,9 @@ function UnauthenticatedBridge() {
 }
 
 // Lightweight Suspense fallback. The app shell (App.tsx) already renders
-// ClassificationBand once at the top of the page; the Outlet sits inside
-// <main>, so the U-banner stays visible across transitions. We DO NOT
-// render a second ClassificationBand here — Walkthrough #JOB-F (review
+// ClassificationBannerStrip once at the top of the page; the Outlet sits
+// inside <main>, so the U-banner stays visible across transitions. We DO
+// NOT render a second strip here — Walkthrough #JOB-F (review
 // SENTRY #26) caught a duplicate banner briefly appearing at y=212 during
 // role swaps because the fallback rendered its own band inside the
 // Outlet while the shell's band was still mounted above. Single source
