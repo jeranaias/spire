@@ -297,7 +297,14 @@ export function MarkTab() {
                 Audit trail
               </h4>
               <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm text-[var(--color-text-secondary)]">
-                <div>Engine: {result.audit.engine}</div>
+                <div>
+                  Engine: {result.audit.engine}
+                  {result.audit.engine_version && (
+                    <span className="ml-1 text-[var(--color-text-muted)]">
+                      ({result.audit.engine_version})
+                    </span>
+                  )}
+                </div>
                 <div title={result.audit.timestamp}>
                   Timestamp:{" "}
                   <span className="font-mono">
@@ -315,8 +322,41 @@ export function MarkTab() {
                     })()}
                   </span>
                 </div>
+                {/* Chain index returned by the backend audit table. Same
+                 * row id an investigator pulls in the audit-log viewer —
+                 * proves the marking actually wrote to the chain instead
+                 * of just being claimed in the UI. */}
+                {typeof result.audit.chain_index === "number" && (
+                  <div>
+                    Chain entry:{" "}
+                    <span className="font-mono text-[var(--color-text)]">
+                      #{result.audit.chain_index}
+                    </span>
+                    {result.audit.input_hash && (
+                      <span
+                        className="ml-2 font-mono text-xs text-[var(--color-text-muted)]"
+                        title={`SHA-256 ${result.audit.input_hash}`}
+                      >
+                        sha256 {result.audit.input_hash.slice(0, 8)}…
+                      </span>
+                    )}
+                  </div>
+                )}
+                {result.audit.actor_name && (
+                  <div>
+                    Actor:{" "}
+                    <span className="text-[var(--color-text)]">
+                      {result.audit.actor_name}
+                    </span>
+                    {result.audit.actor_role && (
+                      <span className="ml-1 text-[var(--color-text-muted)]">
+                        ({result.audit.actor_role})
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="mt-1 italic">
-                  Every marking is logged to the hash-chained audit trail per LICENSE §Security Architecture.
+                  Marking written to the hash-chained audit trail per LICENSE §Security Architecture.
                 </div>
               </div>
             </section>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import re
@@ -31,6 +32,7 @@ from ..scoping import (
     classification_rank,
     require_clearance,
     require_no_downgrade,
+    require_role,
 )
 from ..state import get_dataset
 
@@ -425,13 +427,32 @@ def _parse_upload(raw: bytes, filename: str) -> tuple[list[dict], dict]:
     return records, schema_detected
 
 
+SENTRY_MARK_ROLES = frozenset({"data_custodian", "security_manager"})
+SENTRY_MARK_ENGINE = "SENTRY Pattern Engine (rule-based)"
+SENTRY_MARK_ENGINE_VERSION = "v1"
+
+
 @router.post("/mark")
-async def mark_text(payload: dict):
+async def mark_text(payload: dict, request: Request):
     """Upstream marking recommender. Accepts a free-text paragraph, returns
     the recommended classification + explanation without any LLM.
 
     Payload: {"text": "...", "release_authority": "US_ONLY"}.
+
+    Server-side gate: only data_custodian or security_manager may invoke.
+    The Mark Draft surface is disabled in the frontend for other roles, but
+    the backend re-checks because the FE primitive is UX, not authorization
+    — a curl from a g4 session must 403 before the engine runs.
+
+    Every successful call appends a hash-chained `sentry_mark` entry with
+    the actor identity, SHA-256 of the input, recommended classification,
+    caveats, engine + version, and timestamp. The chain index returned in
+    `audit.chain_index` is the same id you'll see in the audit-log viewer.
     """
+    role = session_role(request)
+    require_role(role, SENTRY_MARK_ROLES, "sentry.mark")
+    user = getattr(request.state, "user", None) or {}
+
     text = payload.get("text", "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
@@ -472,6 +493,35 @@ async def mark_text(payload: dict):
             "rule": h["rule"],
         })
 
+    # Hash the input rather than store it. The Mark Draft surface routinely
+    # carries raw PII / MGRS / classified TM refs — round-tripping that
+    # plaintext through the audit table would itself be a spillage. The
+    # SHA-256 lets an investigator prove which input produced this marking
+    # decision (operator can re-hash the original to compare) without the
+    # chain ever holding the cleartext.
+    input_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    subject_id = f"mark_{input_hash[:12]}"
+    audit_entry = audit_log(
+        "sentry_mark",
+        actor=role or "unknown",
+        subject_id=subject_id,
+        payload={
+            "actor_dodid": user.get("dodid"),
+            "actor_name": user.get("name"),
+            "actor_role": role,
+            "input_hash": input_hash,
+            "input_length": len(text),
+            "recommended_classification": tier1["classification"],
+            "caveats": caveats,
+            "flags": tier1["flags"],
+            "confidence": tier1["confidence"],
+            "release_authority": release,
+            "release_compatibility_status": status,
+            "engine": SENTRY_MARK_ENGINE,
+            "engine_version": SENTRY_MARK_ENGINE_VERSION,
+        },
+    )
+
     return {
         "recommended_classification": tier1["classification"],
         "confidence": tier1["confidence"],
@@ -491,8 +541,18 @@ async def mark_text(payload: dict):
             # honest about which engine produced the recommendation —
             # an operator who copies this into a chain-of-custody report
             # shouldn't see a fictional reviewer claim.
-            "engine": "SENTRY Pattern Engine (rule-based)",
-            "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "engine": SENTRY_MARK_ENGINE,
+            "engine_version": SENTRY_MARK_ENGINE_VERSION,
+            "timestamp": audit_entry["ts"],
+            # Chain index is the row id in the append-only audit table.
+            # The frontend renders "Chain entry #N" so the operator can
+            # cross-reference the same row in the audit-log viewer.
+            "chain_index": audit_entry["id"],
+            "chain_subject": subject_id,
+            "input_hash": input_hash,
+            "actor_dodid": user.get("dodid"),
+            "actor_name": user.get("name"),
+            "actor_role": role,
         },
     }
 
