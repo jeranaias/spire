@@ -1972,6 +1972,10 @@ export interface BloodScenarioBeatMeta {
   expected_duration_seconds_at_1x: number;
   inject_kinds: string[];
   sources: string[];
+  /** Per-beat classification (Task #50) — stamped on the cockpit
+   * timeline row + narration overlay so a single screenshot of the
+   * presenter surface self-marks. Defaults to "CUI" when absent. */
+  classification?: string;
 }
 
 export interface BloodScenarioMeta {

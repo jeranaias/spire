@@ -94,6 +94,7 @@
       "phase": "Pre-conflict",
       "title": "H+0 — Forward posture set",
       "view": "bastion.map",
+      "classification": "CUI",
       "overlay": {
         "highlight": "3d MLR objective marker · CLB-Det rear · Kadena/Yokota depots",
         "callouts": [
@@ -139,6 +140,7 @@
       "phase": "Pre-conflict",
       "title": "H+12 — Mass casualty event drives Class VIII demand spike",
       "view": "pulse.alerts",
+      "classification": "CUI",
       "overlay": {
         "highlight": "PULSE alert feed · Class VIII demand row",
         "callouts": [
@@ -208,6 +210,7 @@
       "phase": "Initial action",
       "title": "H+24 — PULSE forecasts H+48 stockout; recommends Kadena air bridge",
       "view": "pulse.forecast",
+      "classification": "CUI",
       "overlay": {
         "highlight": "PULSE Class-VIII stockout forecast · depot ranking · air-vs-surface mode decision",
         "callouts": [
@@ -274,6 +277,7 @@
       "phase": "Initial action",
       "title": "H+36 — SENTRY scrubs releasable demand summary; coalition confirms divert",
       "view": "sentry.coalition",
+      "classification": "CUI",
       "overlay": {
         "highlight": "SENTRY release packet preview · JPN_COALITION + AUS_COALITION",
         "callouts": [
@@ -342,6 +346,7 @@
       "phase": "Sustainment crisis",
       "title": "H+48 — BASTION shows secured corridor; mission accepted",
       "view": "bastion.mission",
+      "classification": "SECRET",
       "overlay": {
         "highlight": "Kadena → 3d MLR objective transit corridor · KC-130J 7Z42 mission accepted",
         "callouts": [
@@ -403,6 +408,7 @@
       "phase": "Recovery",
       "title": "H+72 — Resupply complete; PULSE updates; audit lineage closed",
       "view": "system.audit",
+      "classification": "CUI",
       "overlay": {
         "highlight": "Audit chain · 6 scenario events · 3 release events · 1 mission · 0 broken links",
         "callouts": [
