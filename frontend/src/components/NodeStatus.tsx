@@ -286,7 +286,7 @@ export function NodeStatus() {
   );
 }
 
-function ClockCard({ title, clock }: { title: string; clock: Record<string, number> }) {
+export function ClockCard({ title, clock }: { title: string; clock: Record<string, number> }) {
   return (
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono">
       <div
@@ -309,7 +309,7 @@ function ClockCard({ title, clock }: { title: string; clock: Record<string, numb
   );
 }
 
-function ConflictRow({
+export function ConflictRow({
   conflict,
   onResolve,
 }: {
