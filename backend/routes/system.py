@@ -35,6 +35,9 @@ from ..scoping import (
     AUDIT_READ_ROLES,
     SCENARIO_CONTROL_ROLES,
     MODEL_REGISTRY_ROLES,
+    CLEARANCE_RANK,
+    _normalize_classification,
+    clearance_rank,
 )
 from .. import scenario as scenario_state
 
@@ -742,6 +745,7 @@ async def admin_audit(
     q: str | None = None,
     only_anomalies: bool = False,
     only_role_only: bool = False,
+    intent: str | None = None,
 ):
     """SOC-shaped audit query. Gated to security_manager.
 
@@ -757,9 +761,20 @@ async def admin_audit(
         bound DODID (matches the FE 'ROLE-ONLY · NO DODID' badge). System
         processes (scheduler/cron/system/…) are excluded by definition.
       - limit/offset: pagination.
+      - intent: 'export' opts the caller into the strict server-side
+        bundle-clearance gate (see Task #88). When set, the endpoint
+        computes the bundle classification from the returned rows and
+        refuses with 403 + a `spillage_prevented` audit row if the
+        caller's clearance falls short. Paginated SOC browsing
+        (`limit<=100`, no `intent`) keeps the previous behaviour so
+        cleared analysts can still scroll the chain.
 
     Returns enriched rows with parsed payload, identity lookup, anomaly
-    tagging, and chain-walk metadata.
+    tagging, and chain-walk metadata. The response also carries
+    `bundle_classification` (the max classification across the returned
+    rows) and `bundle_classification_provenance` so the frontend can
+    show the same stamp the bytes were marked with — and so a curl
+    caller doesn't get a stripped, unmarked dump.
 
     MDM 2026 stage-pivot — same stage-demo bypass as `/audit` so the
     AUDIT-pill closing beat works for any signed-in presenter when
@@ -797,6 +812,86 @@ async def admin_audit(
     for row in result["rows"]:
         row["identity"] = _enrich_actor_identity(row["actor"])
 
+    # ------------------------------------------------------------------
+    # Server-side bundle classification (Task #88).
+    #
+    # The frontend AuditView already computes this for the export-window
+    # download, but the gate is purely client-side: a Security Manager
+    # session can call `GET /system/admin/audit?limit=500` directly from
+    # a shell and receive the raw row payload without any stamp. We
+    # mirror the FE computation here so the marking is enforced where
+    # the bytes actually leave the box.
+    # ------------------------------------------------------------------
+    bundle_level = "UNCLASSIFIED"
+    bundle_rank = 0
+    counts: dict[str, int] = {}
+    for row in result["rows"]:
+        cls_raw = row.get("classification") or ""
+        lvl = _normalize_classification(cls_raw)
+        counts[lvl] = counts.get(lvl, 0) + 1
+        rk = CLEARANCE_RANK[lvl]
+        if rk > bundle_rank:
+            bundle_rank = rk
+            bundle_level = lvl
+    total_returned = len(result["rows"])
+    at_level = counts.get(bundle_level, 0)
+    label = bundle_level.replace("_", " ")
+    if total_returned == 0:
+        provenance = (
+            f"stamped {label} (empty result set — defaulted to UNCLASSIFIED)"
+        )
+    else:
+        provenance = (
+            f"stamped {label} because {at_level} of {total_returned} "
+            f"row{'' if total_returned == 1 else 's'} "
+            f"{'is' if at_level == 1 else 'are'} {label}"
+        )
+
+    # Strict server-side deny when the caller asked for an export bundle.
+    # The frontend uses `intent=export` for the 500-row download fetch;
+    # paginated SOC browsing leaves it unset so an analyst can still
+    # navigate to a page that *happens* to contain rows above their
+    # clearance without being blocked from the chain entirely.
+    if (intent or "").lower() == "export":
+        user = getattr(request.state, "user", None) or {}
+        user_clearance = _normalize_classification(user.get("clearance"))
+        if clearance_rank(user_clearance) < bundle_rank:
+            try:
+                audit_log(
+                    "spillage_prevented",
+                    actor=user.get("role") or session_role(request) or "unknown",
+                    subject_id="audit.export.json",
+                    payload={
+                        "action": "audit.export.json",
+                        "user_dodid": user.get("dodid"),
+                        "user_role": user.get("role"),
+                        "user_clearance": user_clearance,
+                        "required_classification": bundle_level,
+                        "bundle_classification": bundle_level,
+                        "bundle_classification_provenance": provenance,
+                        "bundle_classification_counts": counts,
+                        "decision": "blocked",
+                        "surface": "backend",
+                        "source_ip": _client_ip(request),
+                    },
+                )
+            except Exception:
+                # Never let an audit-write failure mask the 403 — block
+                # first, log second; the chain just temporarily lost a row.
+                pass
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "InsufficientClearance",
+                    "action": "audit.export.json",
+                    "required_classification": bundle_level,
+                    "user_clearance": user_clearance,
+                    "user_role": user.get("role"),
+                    "bundle_classification_provenance": provenance,
+                    "bundle_classification_counts": counts,
+                },
+            )
+
     # Distinct facets for the chip palette — kept on a separate field so
     # the FE can render the chip set without waiting on a second round-trip.
     facets = distinct_audit_facets()
@@ -812,7 +907,14 @@ async def admin_audit(
         ),
     }
 
-    return {**result, "facets": facets, "storage": storage}
+    return {
+        **result,
+        "facets": facets,
+        "storage": storage,
+        "bundle_classification": bundle_level,
+        "bundle_classification_provenance": provenance,
+        "bundle_classification_counts": counts,
+    }
 
 
 @router.get("/comms/state")
