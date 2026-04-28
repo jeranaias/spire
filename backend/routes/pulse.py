@@ -21,11 +21,13 @@ from ..persistence import (
     feedback_summary,
     get_pulse_draft,
     list_pulse_drafts,
+    log as audit_log,
     record_pulse_draft,
     record_pulse_feedback,
     reject_pulse_draft,
 )
 from ..scoping import (
+    PULSE_FEEDBACK_ROLES,
     allowed_units,
     filter_assets,
     filter_units,
@@ -2454,10 +2456,74 @@ async def model_card(refresh: bool = Query(False)):
 # ---------------------------------------------------------------------------
 
 @router.post("/feedback/{asset_id}")
-async def feedback(asset_id: str, payload: dict):
+async def feedback(asset_id: str, request: Request, payload: dict):
+    """Accept a 👍 / 👎 on a PULSE risk-scorer prediction.
+
+    Task #97 — sibling tightening to SENTRY review (#25). Two gates:
+
+      1. Role allowlist. Only operator/maintenance class roles
+         (`g4`, `maintenance_chief`) can write into the PULSE
+         training-loop chain. `mef_commander` can read every PULSE
+         surface but doesn't sit at the rating console; the
+         `security_manager` is read-only on PULSE (they audit the
+         chain, they don't accept/reject the model in real time and
+         are denied even earlier by the `/api/pulse` view-scope
+         guard). URL-hacking past the FE returns 403 + an
+         `unauthorized_pulse_feedback` audit row carrying the
+         operator's identity so the SOC sees the attempt.
+
+      2. Identity stamping. The chain entry now carries DODID +
+         name + unit + CAC cert serial — not just the role string —
+         so a judge inspecting the chain can answer "who" not just
+         "which role".
+    """
+    user = getattr(request.state, "user", None) or {}
+    role = session_role(request) or user.get("role") or "unknown"
+
+    if role not in PULSE_FEEDBACK_ROLES:
+        audit_log(
+            "unauthorized_pulse_feedback",
+            actor=role,
+            subject_id=asset_id,
+            payload={
+                "action": "pulse.feedback",
+                "actor_role": role,
+                "actor_dodid": str(user.get("dodid", "")),
+                "actor_name": str(user.get("name", "")),
+                "actor_unit": str(user.get("unit", "")),
+                "actor_cert_serial": str(user.get("cert_serial", "")),
+                "decision": "blocked",
+                "reason": "role_not_in_pulse_feedback_authority",
+                "roles_allowed": sorted(PULSE_FEEDBACK_ROLES),
+            },
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "InsufficientPrivilege",
+                "action": "pulse.feedback",
+                "role_seen": role,
+                "roles_allowed": sorted(PULSE_FEEDBACK_ROLES),
+                "remediation": (
+                    "PULSE training-loop feedback is operator/maintenance "
+                    "authority. Hand the rating to your G-4 or "
+                    "Maintenance Chief."
+                ),
+            },
+        )
+
     correct = bool(payload.get("correct", False))
     note = payload.get("note", "")
-    record_pulse_feedback(asset_id, correct, note=note)
+    record_pulse_feedback(
+        asset_id,
+        correct,
+        note=note,
+        actor_role=role,
+        actor_dodid=str(user.get("dodid", "")),
+        actor_name=str(user.get("name", "")),
+        actor_unit=str(user.get("unit", "")),
+        actor_cert_serial=str(user.get("cert_serial", "")),
+    )
     summary = feedback_summary()
     return {"ok": True, "asset_id": asset_id, "correct": correct, "summary": summary}
 

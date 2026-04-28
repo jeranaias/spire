@@ -45,6 +45,16 @@ AUDIT_READ_ROLES         = frozenset({"security_manager"})
 # custodian / security manager / MEF commander pay grade. G-4 stays in the
 # allowlist because the operator-class persona owns the daily review pace.
 SENTRY_REVIEW_ROLES      = frozenset({"g4", "data_custodian", "security_manager", "mef_commander"})
+# PULSE risk-scorer feedback (👍 / 👎 on a prediction). Task #97 — operator
+# and maintenance roles own the loop because they're the ones living with
+# the prediction in the field. Deliberately tighter than `PULSE_VIEW_ROLES`:
+# the MEF Commander can read every PULSE surface but doesn't sit at the
+# rating console accepting/rejecting individual predictions, and the
+# security_manager is read-only on PULSE (they audit the chain, they don't
+# train the model in real time). A role outside this set hitting
+# `POST /api/pulse/feedback` returns 403 + an `unauthorized_pulse_feedback`
+# audit row so the SOC can chase the URL-hack attempt back to a CAC.
+PULSE_FEEDBACK_ROLES     = frozenset({"g4", "maintenance_chief"})
 # SENTRY sanitized export + download. The Export tab is custodian-class only;
 # operator/commander roles see the FE InsufficientPrivilege panel and the
 # backend mirrors that with `require_user_role` so a curl past the FE gate

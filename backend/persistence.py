@@ -138,20 +138,29 @@ CREATE TABLE IF NOT EXISTS sentry_decisions (
 );
 
 CREATE TABLE IF NOT EXISTS pulse_feedback (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_id    TEXT NOT NULL,
-    correct     INTEGER NOT NULL,
-    note        TEXT,
-    ts          TEXT NOT NULL
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id           TEXT NOT NULL,
+    correct            INTEGER NOT NULL,
+    note               TEXT,
+    actor_role         TEXT NOT NULL DEFAULT '',
+    actor_dodid        TEXT NOT NULL DEFAULT '',
+    actor_name         TEXT NOT NULL DEFAULT '',
+    actor_unit         TEXT NOT NULL DEFAULT '',
+    actor_cert_serial  TEXT NOT NULL DEFAULT '',
+    ts                 TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS incident_responses (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    incident_id TEXT NOT NULL,
-    item_key    TEXT NOT NULL,           -- imm-0, fol-2, notify-1 etc
-    checked     INTEGER NOT NULL,
-    actor_role  TEXT NOT NULL,
-    ts          TEXT NOT NULL
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    incident_id        TEXT NOT NULL,
+    item_key           TEXT NOT NULL,           -- imm-0, fol-2, notify-1 etc
+    checked            INTEGER NOT NULL,
+    actor_role         TEXT NOT NULL,
+    actor_dodid        TEXT NOT NULL DEFAULT '',
+    actor_name         TEXT NOT NULL DEFAULT '',
+    actor_unit         TEXT NOT NULL DEFAULT '',
+    actor_cert_serial  TEXT NOT NULL DEFAULT '',
+    ts                 TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS uploaded_batches (
@@ -224,18 +233,41 @@ def init_db() -> None:
         # sentry_decisions tables that predate task #25. SQLite's ALTER
         # TABLE ADD COLUMN is cheap and idempotent-by-try; we swallow
         # the duplicate-column error on subsequent boots.
-        for col in (
+        #
+        # Task #97 — extend the same identity-stamping treatment to the
+        # two sibling write surfaces (`pulse_feedback`, `incident_responses`)
+        # so the hash-chained audit log carries DODID / name / unit / CAC
+        # cert serial for every PULSE feedback and incident-checklist write,
+        # not just the role string the session cookie happened to carry.
+        # `pulse_feedback` predates per-actor scoping and never had even
+        # `actor_role`, so it picks that up here too.
+        identity_cols = (
             "actor_dodid",
             "actor_name",
             "actor_unit",
             "actor_cert_serial",
-        ):
+        )
+        for col in identity_cols:
             try:
                 c.execute(
                     f"ALTER TABLE sentry_decisions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
                 )
             except sqlite3.OperationalError:
                 # Column already exists — first install or already migrated.
+                pass
+        for col in ("actor_role",) + identity_cols:
+            try:
+                c.execute(
+                    f"ALTER TABLE pulse_feedback ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
+            except sqlite3.OperationalError:
+                pass
+        for col in identity_cols:
+            try:
+                c.execute(
+                    f"ALTER TABLE incident_responses ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
+            except sqlite3.OperationalError:
                 pass
 
 
@@ -690,24 +722,109 @@ def record_sentry_bulk_decision(
     return {"count": len(sr_numbers), "entry": entry}
 
 
-def record_pulse_feedback(asset_id: str, correct: bool, note: str = "") -> None:
+def record_pulse_feedback(
+    asset_id: str,
+    correct: bool,
+    note: str = "",
+    *,
+    actor_role: str = "",
+    actor_dodid: str = "",
+    actor_name: str = "",
+    actor_unit: str = "",
+    actor_cert_serial: str = "",
+) -> None:
+    """Persist a PULSE risk-scorer feedback row + emit a hash-chained
+    `pulse_feedback` audit entry.
+
+    Task #97 — sibling tightening to SENTRY review (#25). The actor_*
+    fields anchor the feedback to a specific Marine (DODID + name + unit
+    + CAC cert serial) rather than just the session cookie's role string,
+    so a judge inspecting the chain can answer "who" — not just "which
+    role" — for every accept/reject the model gets in the loop.
+    """
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
-            "INSERT INTO pulse_feedback(asset_id, correct, note, ts) VALUES (?,?,?,?)",
-            (asset_id, 1 if correct else 0, note, ts),
+            "INSERT INTO pulse_feedback(asset_id, correct, note, actor_role, "
+            "actor_dodid, actor_name, actor_unit, actor_cert_serial, ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                asset_id,
+                1 if correct else 0,
+                note,
+                actor_role,
+                actor_dodid,
+                actor_name,
+                actor_unit,
+                actor_cert_serial,
+                ts,
+            ),
         )
-    log("pulse_feedback", subject_id=asset_id, payload={"correct": correct, "note": note})
+    log(
+        "pulse_feedback",
+        actor=actor_role or "system",
+        subject_id=asset_id,
+        payload={
+            "correct": correct,
+            "note": note,
+            "actor_role": actor_role,
+            "actor_dodid": actor_dodid,
+            "actor_name": actor_name,
+            "actor_unit": actor_unit,
+            "actor_cert_serial": actor_cert_serial,
+        },
+    )
 
 
-def record_incident_response(incident_id: str, item_key: str, checked: bool, *, actor_role: str) -> None:
+def record_incident_response(
+    incident_id: str,
+    item_key: str,
+    checked: bool,
+    *,
+    actor_role: str,
+    actor_dodid: str = "",
+    actor_name: str = "",
+    actor_unit: str = "",
+    actor_cert_serial: str = "",
+) -> None:
+    """Persist an incident-checklist tick + emit the matching audit row.
+
+    Task #97 — sibling tightening to SENTRY review (#25). Identity fields
+    anchor the checklist tick to a specific Marine so the chain can name
+    *who* responded to INC-... not just that "a g4" did.
+    """
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
-            "INSERT INTO incident_responses(incident_id, item_key, checked, actor_role, ts) VALUES (?,?,?,?,?)",
-            (incident_id, item_key, 1 if checked else 0, actor_role, ts),
+            "INSERT INTO incident_responses(incident_id, item_key, checked, "
+            "actor_role, actor_dodid, actor_name, actor_unit, "
+            "actor_cert_serial, ts) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                incident_id,
+                item_key,
+                1 if checked else 0,
+                actor_role,
+                actor_dodid,
+                actor_name,
+                actor_unit,
+                actor_cert_serial,
+                ts,
+            ),
         )
-    log("incident_response", actor=actor_role, subject_id=incident_id, payload={"item": item_key, "checked": checked})
+    log(
+        "incident_response",
+        actor=actor_role,
+        subject_id=incident_id,
+        payload={
+            "item": item_key,
+            "checked": checked,
+            "actor_role": actor_role,
+            "actor_dodid": actor_dodid,
+            "actor_name": actor_name,
+            "actor_unit": actor_unit,
+            "actor_cert_serial": actor_cert_serial,
+        },
+    )
 
 
 def decisions_for_batch(sr_numbers: list[str]) -> dict[str, dict]:
