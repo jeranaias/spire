@@ -22,6 +22,13 @@
  *     setups it appears off-center on the secondary monitor; see
  *     Task #157). The banner is an alertdialog: Escape cancels,
  *     focus is parked on the safe "Try popup again" action.
+ *   - The presenter window is a true cockpit: Prev / Next / Jump-to
+ *     controls are rendered in the popup, and arrow / space / PageUp /
+ *     PageDown keys pressed *while the popup is focused* drive the
+ *     audience deck via the same `goToIndex` callbacks. Key events
+ *     stay in the window where focus lives, so the parent's window-
+ *     level listener never double-fires; the popup listener tears
+ *     down on close (Task #156).
  *   - Slide 4 (live demo handoff) has the "Start demo" button that
  *     opens `/demo` in the same tab. After the demo, "Return to pitch
  *     — slide 5" jumps to slide 5.
@@ -87,13 +94,25 @@ function formatMmSs(totalSec: number): string {
 // Inline detection for typing surfaces — mirrors App.tsx's chord guard so
 // we don't hijack arrow keys while a presenter is editing the URL bar or
 // a future text input on the deck.
+//
+// Realm-safe: the popup window keydown handler runs against elements
+// from the popup's document, whose constructors (HTMLSelectElement etc.)
+// are *different* objects from the parent realm's. `instanceof` checks
+// would silently return false there and let Space/PageDown hijack the
+// jump <select>. We branch on `nodeName` and a property probe instead,
+// which works in either window.
 function inField(t: EventTarget | null): boolean {
-  return (
-    t instanceof HTMLInputElement ||
-    t instanceof HTMLTextAreaElement ||
-    t instanceof HTMLSelectElement ||
-    (t instanceof HTMLElement && t.isContentEditable)
-  );
+  if (!t) return false;
+  const el = t as unknown as { nodeName?: unknown; isContentEditable?: unknown };
+  if (typeof el.nodeName !== "string") return false;
+  switch (el.nodeName) {
+    case "INPUT":
+    case "TEXTAREA":
+    case "SELECT":
+      return true;
+    default:
+      return el.isContentEditable === true;
+  }
 }
 
 export function PitchView() {
@@ -400,9 +419,14 @@ export function PitchView() {
         <PresenterNotesWindow
           slide={slide}
           elapsedSec={elapsedSec}
+          slideNumber={slideNumber}
+          slideCount={SLIDES.length}
           win={presenterPortal.win}
           containerEl={presenterPortal.root}
           onClosed={closePresenter}
+          onPrev={prev}
+          onNext={next}
+          onJump={goToIndex}
         />
       )}
 
@@ -852,6 +876,14 @@ function preparePresenterDocument(win: Window): HTMLElement {
       ul{padding:0;margin:0;list-style:none;}
       li{display:flex;gap:10px;padding:6px 0;font-size:15px;color:#cbd5e1;align-items:flex-start;}
       li::before{content:"\u2022";color:#64748b;flex:none;}
+      .controls{display:flex;align-items:center;gap:8px;margin:12px 0 4px;flex-wrap:wrap;}
+      .ctrl-btn{font:inherit;font-size:13px;padding:6px 12px;border-radius:4px;border:1px solid #334155;background:#1e293b;color:#e6edf6;cursor:pointer;font-variant-numeric:tabular-nums;}
+      .ctrl-btn:hover:not(:disabled){background:#334155;border-color:#475569;}
+      .ctrl-btn:disabled{opacity:0.4;cursor:not-allowed;}
+      .ctrl-btn-primary{background:#1d4ed8;border-color:#2563eb;}
+      .ctrl-btn-primary:hover:not(:disabled){background:#2563eb;border-color:#3b82f6;}
+      .jump-select{font:inherit;font-size:13px;padding:6px 8px;border-radius:4px;border:1px solid #334155;background:#0f172a;color:#e6edf6;max-width:240px;}
+      .ctrl-hint{font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#64748b;margin-left:auto;}
       .footer{position:fixed;left:0;right:0;bottom:0;background:#0f172a;border-top:1px solid #1e293b;padding:8px 16px;font-size:11px;color:#64748b;display:flex;justify-content:space-between;gap:8px;}
     </style>
   `;
@@ -865,12 +897,18 @@ function preparePresenterDocument(win: Window): HTMLElement {
 interface NotesWindowProps {
   slide: typeof SLIDES[number];
   elapsedSec: number;
+  slideNumber: number;
+  slideCount: number;
   win: Window;
   containerEl: HTMLElement;
   onClosed: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onJump: (i: number) => void;
 }
 function PresenterNotesWindow({
-  slide, elapsedSec, win, containerEl, onClosed,
+  slide, elapsedSec, slideNumber, slideCount, win, containerEl, onClosed,
+  onPrev, onNext, onJump,
 }: NotesWindowProps) {
   // Latest-onClosed ref so the polling loop never invokes a stale
   // callback (parent re-renders pass new closures every tick).
@@ -912,10 +950,56 @@ function PresenterNotesWindow({
     };
   }, [win]);
 
+  // Keyboard nav from inside the popup. Bound to the popup window so it
+  // only fires while the presenter has the popup focused — keydown
+  // events stay in their owning window, so the parent's existing
+  // window-level listener still handles keys when focus is on the
+  // audience screen. No double-fire across windows.
+  //
+  // The cleanup teardown also runs the moment the popup closes (the
+  // parent unmounts this component) so we never leave a dangling
+  // listener pinned to a closed window.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (inField(e.target)) return; // don't hijack the jump <select>.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case "ArrowRight":
+        case "PageDown":
+        case " ":
+          e.preventDefault();
+          onNext();
+          break;
+        case "ArrowLeft":
+        case "PageUp":
+          e.preventDefault();
+          onPrev();
+          break;
+        case "Home":
+          if (e.shiftKey) {
+            e.preventDefault();
+            onJump(0);
+          }
+          break;
+        case "End":
+          if (e.shiftKey) {
+            e.preventDefault();
+            onJump(SLIDES.length - 1);
+          }
+          break;
+      }
+    }
+    win.addEventListener("keydown", onKey);
+    return () => win.removeEventListener("keydown", onKey);
+  }, [win, onNext, onPrev, onJump]);
+
   const target = slide.targetSeconds;
   const ratio = elapsedSec / Math.max(1, target);
   const badgeClass = ratio < 1 ? "badge-on" : ratio < 1.25 ? "badge-warn" : "badge-over";
   const badgeLabel = ratio < 1 ? "on pace" : ratio < 1.25 ? "slightly long" : "over budget";
+
+  const atFirst = slideNumber <= 1;
+  const atLast = slideNumber >= slideCount;
 
   return createPortal(
     <>
@@ -925,6 +1009,40 @@ function PresenterNotesWindow({
         <span className="timer">{formatMmSs(elapsedSec)}</span>
         <span className={`badge ${badgeClass}`}>{badgeLabel}</span>
         <span className="target">target {formatMmSs(target)}</span>
+        <span className="target">slide {slideNumber} / {slideCount}</span>
+      </div>
+      <div className="controls" role="group" aria-label="Deck controls">
+        <button
+          type="button"
+          className="ctrl-btn"
+          onClick={onPrev}
+          disabled={atFirst}
+          aria-label="Previous slide"
+        >
+          ← Prev
+        </button>
+        <button
+          type="button"
+          className="ctrl-btn ctrl-btn-primary"
+          onClick={onNext}
+          disabled={atLast}
+          aria-label="Next slide"
+        >
+          Next →
+        </button>
+        <select
+          className="jump-select"
+          aria-label="Jump to slide"
+          value={slideNumber - 1}
+          onChange={(e) => onJump(Number(e.currentTarget.value))}
+        >
+          {SLIDES.map((s, i) => (
+            <option key={s.id} value={i}>
+              {i + 1}. {s.title}
+            </option>
+          ))}
+        </select>
+        <span className="ctrl-hint">← / → · space</span>
       </div>
       <h2>Speaker notes</h2>
       <ul>
