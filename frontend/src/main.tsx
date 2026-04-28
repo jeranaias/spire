@@ -110,6 +110,11 @@ const DemoView = lazyWithRecovery(() => import("./views/DemoView").then((m) => (
 // (Class VIII / blood resupply) hero use case. Lazy: the view is only
 // reached from the stage-mode Decision Bridge.
 const DhaRescueView = lazyWithRecovery(() => import("./views/DhaRescueView").then((m) => ({ default: m.DhaRescueView })));
+// MDM 2026 stage-pivot (Task #31) — printable presenter card. The view
+// itself short-circuits to "/" when the store is not in stageMode, so
+// the route is effectively hidden in normal operator use; the canonical
+// entry path is `/?stage=1#/presenter`.
+const PresenterCardView = lazyWithRecovery(() => import("./views/PresenterCardView").then((m) => ({ default: m.PresenterCardView })));
 
 // Expose the active role to the API layer. Every GET/POST now splices it as
 // `?role=...` so the backend's scoping filter applies per-call.
@@ -400,6 +405,12 @@ createRoot(document.getElementById("root")!).render(
              * presenter-facing summary + drill-into BASTION for the
              * Class VIII / blood resupply vignette. */}
             <Route path="dha-rescue" element={<ViewSuspense><DhaRescueView /></ViewSuspense>} />
+            {/* MDM 2026 stage-pivot (Task #31) — presenter cheat sheet.
+             * The view short-circuits to "/" when stageMode is off so the
+             * route is effectively hidden in operator chrome (no nav
+             * link, no help-overlay row); reachable via the documented
+             * `/?stage=1#/presenter` deep link. */}
+            <Route path="presenter" element={<ViewSuspense><PresenterCardView /></ViewSuspense>} />
           </Route>
         </Routes>
       </HashRouter>
