@@ -317,6 +317,11 @@ async def parse_tmr_text_llm(text: str) -> dict:
             response_format={"type": "json_object"},
             temperature=0.0,
             max_tokens=600,
+            # Structured JSON extraction needs Gemma-mid; the tier1 SLM
+            # gets the schema wrong often enough that we burn the
+            # difference on rule-based retries.
+            tier="tier2_mid",
+            call_site="tmr_parser",
         )
         raw = (result.get("content") or "").strip()
         # Some upstreams wrap JSON in code fences despite response_format=json_object.

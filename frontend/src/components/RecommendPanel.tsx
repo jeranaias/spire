@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { api, type RecommendActionsAsset, type RecommendedAction } from "../api";
 import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
+import { Button, ErrorState, LoadingState, EmptyState } from "./ui";
 
 const KIND_COLOR: Record<string, string> = {
   cannibalize: "var(--color-warning)",
@@ -97,24 +98,23 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
 
   if (error) {
     return (
-      <div className="rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-4 text-sm text-[var(--color-danger)]">
-        Recommendation engine: {error}
-      </div>
+      <ErrorState
+        variant="inline"
+        title="Recommendation engine unavailable"
+        detail={error}
+      />
     );
   }
   if (!data) {
-    return (
-      <div className="flex items-center gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4 font-mono text-sm text-[var(--color-text-muted)] tracking-wider">
-        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
-        Computing recommended actions …
-      </div>
-    );
+    return <LoadingState size="panel" label="Computing recommended actions …" />;
   }
   if (data.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center font-mono text-sm text-[var(--color-text-muted)] tracking-wider">
-        NO HIGH-RISK ASSETS — no recommended actions
-      </div>
+      <EmptyState
+        glyph="✓"
+        title="No high-risk assets"
+        description="Recommendation engine has nothing to do right now."
+      />
     );
   }
 
@@ -235,10 +235,12 @@ function AssetActionGroup({
                 <Stat label="ETA" value={`${action.time_to_effect_hours}h`} />
                 <Stat label="Conf" value={`${(action.confidence * 100).toFixed(0)}%`} />
               </div>
-              <button
+              <Button
                 onClick={() => onApprove(asset, action)}
                 disabled={done || pending}
-                className="rounded-sm border px-3 py-1 font-mono text-xs font-semibold uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50 tracking-widest"
+                pending={pending}
+                variant="secondary"
+                size="sm"
                 style={{
                   borderColor: done ? "var(--color-success)" : "var(--color-primary)",
                   color: done ? "var(--color-success)" : "var(--color-primary)",
@@ -247,8 +249,8 @@ function AssetActionGroup({
                     : "transparent",
                 }}
               >
-                {done ? "✓ Approved" : pending ? "…" : "Approve"}
-              </button>
+                {done ? "✓ Approved" : "Approve"}
+              </Button>
             </div>
           );
         })}

@@ -1,0 +1,484 @@
+{
+  "_comment": "Lane W2 / Task #36 — Blood-resupply scenario for the 8-minute SPIRE demo. Six beats from H+0 (forward MLR posture, SATCOM degraded) through H+72 (resupply complete, audit lineage closed). This file is data, not code: edit narration, view focus, overlay text, or expected_duration_seconds_at_1x without an engineer. The scenario engine (lane A1) reads `beats[*].view`/`overlay` to drive the FE; the backend hook module (`backend/scenario_blood.py`) reads `beats[*].inject` to fire alerts/forecasts/audit entries at the right H+offset. Numbers cite sources inline so J3 can fact-check.",
+
+  "scenario_id": "blood-h72",
+  "version": "1.0.0",
+  "title": "Class VIII (blood) resupply under SATCOM-degraded conditions",
+  "summary": "3d MLR forward at a contested first-island-chain objective takes a casualty event at H+12 that drives a Type O whole-blood and platelet demand spike. PULSE forecasts stockout at H+48 and recommends an air bridge from Kadena AB. SENTRY scrubs a releasable demand summary so the JSDF/ADF coalition cell can confirm the divert. BASTION shows the secured transit corridor at H+48; resupply lands at H+72.",
+  "duration_minutes": 4320,
+  "phases": [
+    { "offset_min": 0,    "label": "Pre-conflict" },
+    { "offset_min": 1440, "label": "Initial action" },
+    { "offset_min": 2880, "label": "Sustainment crisis" },
+    { "offset_min": 4320, "label": "Recovery" }
+  ],
+
+  "setting": {
+    "supported_unit": "3d MLR (forward, contested first-island-chain objective)",
+    "supporting_unit": "CLB-Det / 3d MLG (rear at Camp Foster, Okinawa)",
+    "fpcon": "BRAVO",
+    "ddil_posture": "SATCOM degraded — beyond-line-of-sight links intermittent; coalition coordination over Link 16 + HF backup",
+    "depots": [
+      {
+        "depot_id": "USAF-KADENA",
+        "name": "ASBP Blood Support Detachment, Kadena AB (Okinawa)",
+        "lat": 26.3556,
+        "lon": 127.7686,
+        "modes": ["air"],
+        "distance_nm_to_objective": 720,
+        "transit_estimate_min": {
+          "KC-130J": 165,
+          "C-17":    115
+        },
+        "blood_products_on_hand": {
+          "LTOWB_units":     820,
+          "RBC_O_neg_units": 540,
+          "FFP_units":       760,
+          "platelets_units": 110
+        }
+      },
+      {
+        "depot_id": "USAF-YOKOTA",
+        "name": "ASBP Blood Support Detachment, Yokota AB (Honshu)",
+        "lat": 35.7486,
+        "lon": 139.3486,
+        "modes": ["air"],
+        "distance_nm_to_objective": 1620,
+        "transit_estimate_min": {
+          "KC-130J": 360,
+          "C-17":    250
+        },
+        "blood_products_on_hand": {
+          "LTOWB_units":     1900,
+          "RBC_O_neg_units": 1240,
+          "FFP_units":       1850,
+          "platelets_units": 270
+        }
+      }
+    ],
+    "coalition_partners_in_play": ["JPN", "AUS"]
+  },
+
+  "blood_demand_model": {
+    "_comment": "Per-casualty assumptions used by the H+12 demand spike and H+24 PULSE stockout forecast.",
+    "casualty_event_count": 14,
+    "expected_massive_transfusion_pct": 0.35,
+    "mtp_units_per_patient": {
+      "RBC_O_neg":      6,
+      "FFP":            6,
+      "platelets":      1,
+      "_ratio_comment": "1:1:1 RBC:plasma:platelets — Joint Trauma System Damage Control Resuscitation CPG (2019)"
+    },
+    "non_mtp_units_per_patient": {
+      "RBC_O_neg": 2,
+      "FFP":       1,
+      "platelets": 0
+    },
+    "forward_holding_at_h0_units": {
+      "LTOWB":     24,
+      "RBC_O_neg": 16,
+      "FFP":       18,
+      "platelets":  4
+    },
+    "platelet_shelf_life_days":          5,
+    "ltowb_shelf_life_days":             35,
+    "rbc_shelf_life_days_refrigerated":  42,
+    "ffp_shelf_life_days_frozen":        365
+  },
+
+  "beats": [
+    {
+      "beat_id": "beat.h0.setup",
+      "event_id": "evt.h0.scenario_start",
+      "offset_min": 0,
+      "phase": "Pre-conflict",
+      "title": "H+0 — Forward posture set",
+      "view": "bastion.map",
+      "overlay": {
+        "highlight": "3d MLR objective marker · CLB-Det rear · Kadena/Yokota depots",
+        "callouts": [
+          "FPCON BRAVO",
+          "SATCOM DEGRADED",
+          "Class VIII forward holding: 24 LTOWB · 16 O- RBC · 18 FFP · 4 PLT"
+        ]
+      },
+      "narration": "We're forward. 3d Marine Littoral Regiment is on a first-island-chain objective with a CLB detachment supporting from Kadena. SATCOM is degraded — coordination is Link 16 and HF only. Forward Class Eight holding is enough for a 24-hour fight, no longer. Watch the Mission Clock.",
+      "expected_duration_seconds_at_1x": 35,
+      "inject": [
+        {
+          "kind": "audit",
+          "audit_kind": "scenario_beat_fired",
+          "subject_id": "blood-h72:beat.h0.setup",
+          "payload": {
+            "beat": "setup",
+            "view": "bastion.map",
+            "fpcon": "BRAVO",
+            "ddil": "satcom_degraded"
+          }
+        },
+        {
+          "kind": "alert",
+          "module": "bastion",
+          "severity": "INFO",
+          "title": "Scenario armed — blood-h72 vignette",
+          "body": "3d MLR forward; CLB-Det rear at Kadena. SATCOM degraded. Forward Class VIII = 24 LTOWB / 16 O- RBC / 18 FFP / 4 PLT.",
+          "scope": "scenario"
+        }
+      ],
+      "sources": [
+        "USMC Concept for Marine Littoral Regiment (2022) — forward posture & CLB-Det doctrine",
+        "JP 4-02 Joint Health Services — Roles of medical care",
+        "AABB Standards for Blood Banks and Transfusion Services, 32nd ed. — product descriptions"
+      ]
+    },
+
+    {
+      "beat_id": "beat.h12.casualty_event",
+      "event_id": "evt.h12.casualty_event",
+      "offset_min": 720,
+      "phase": "Pre-conflict",
+      "title": "H+12 — Mass casualty event drives Class VIII demand spike",
+      "view": "pulse.alerts",
+      "overlay": {
+        "highlight": "PULSE alert feed · Class VIII demand row",
+        "callouts": [
+          "14 casualties · est. 5 require massive-transfusion protocol",
+          "Demand surge: 40 O- RBC · 39 FFP · 5 PLT (above forward holding)",
+          "Forward LTOWB drawn first per JTS CPG"
+        ]
+      },
+      "narration": "Casualty event. Fourteen patients arrive at the Role-1; about a third will need massive-transfusion protocol per the Joint Trauma System CPG. That's a one-to-one-to-one RBC, plasma, platelets at six units each, plus baseline for the rest. Demand jumps to roughly 40 O-negative red cells, 39 plasma, 5 platelets. We have four platelets forward. We're already in trouble on platelets — and platelets only keep five days, so there's no stockpile waiting.",
+      "expected_duration_seconds_at_1x": 60,
+      "inject": [
+        {
+          "kind": "audit",
+          "audit_kind": "scenario_beat_fired",
+          "subject_id": "blood-h72:beat.h12.casualty_event",
+          "payload": {
+            "beat": "casualty_event",
+            "view": "pulse.alerts",
+            "casualty_count": 14,
+            "mtp_patients": 5,
+            "demand_units": {
+              "RBC_O_neg": 40,
+              "FFP":       39,
+              "platelets":  5
+            },
+            "forward_holding_units": {
+              "LTOWB":     24,
+              "RBC_O_neg": 16,
+              "FFP":       18,
+              "platelets":  4
+            }
+          }
+        },
+        {
+          "kind": "alert",
+          "module": "pulse",
+          "severity": "HIGH",
+          "title": "Class VIII demand spike — 14 casualties at 3d MLR Role-1",
+          "body": "MTP-eligible: ~5 patients · est. demand 40 O- RBC / 39 FFP / 5 PLT. Forward holding insufficient on platelets and red cells. Stockout projected within 36 h without resupply.",
+          "scope": "scenario",
+          "category": "supply"
+        },
+        {
+          "kind": "requisition",
+          "nsn_class": "VIII",
+          "items": [
+            { "product": "LTOWB",     "units_requested": 30, "priority": "01-IMMED" },
+            { "product": "RBC_O_neg", "units_requested": 40, "priority": "01-IMMED" },
+            { "product": "FFP",       "units_requested": 40, "priority": "01-IMMED" },
+            { "product": "platelets", "units_requested": 6,  "priority": "01-IMMED" }
+          ],
+          "requesting_unit": "3d MLR (forward)",
+          "supporting_unit": "CLB-Det / 3d MLG"
+        }
+      ],
+      "sources": [
+        "Joint Trauma System Clinical Practice Guideline — Damage Control Resuscitation (rev. 2019)",
+        "Cap & Spinella, 'Severity of bleeding and damage control resuscitation', J Trauma 2017",
+        "AABB Circular of Information for the Use of Human Blood and Blood Components — platelet 5-day shelf life"
+      ]
+    },
+
+    {
+      "beat_id": "beat.h24.pulse_forecast",
+      "event_id": "evt.h24.pulse_shortage_forecast",
+      "offset_min": 1440,
+      "phase": "Initial action",
+      "title": "H+24 — PULSE forecasts H+48 stockout; recommends Kadena air bridge",
+      "view": "pulse.forecast",
+      "overlay": {
+        "highlight": "PULSE Class-VIII stockout forecast · depot ranking · air-vs-surface mode decision",
+        "callouts": [
+          "Stockout at H+48 if no resupply (≈24h horizon)",
+          "AIR · Kadena AB (720 nm, KC-130J ≈ 2h45m) — RECOMMENDED",
+          "AIR · Yokota AB (1620 nm, C-17 ≈ 4h10m) — backup if Kadena depleted",
+          "SURFACE · USNS Mercy CONREP (~36h transit) — INFEASIBLE: misses H+48 stockout window",
+          "Mode: AIR — air transit clears the stockout horizon by ≈45h; surface arrives ≈12h late"
+        ]
+      },
+      "narration": "PULSE has the picture. At current burn the forward Class-Eight buffer goes to zero around H+48. Two air nodes are in range: Kadena Blood Support Det at 720 nautical miles — KC-130J makes that in two-and-three-quarter hours — and Yokota at 1,620, faster on a C-17 if we need the lift. We also looked at surface lift via USNS Mercy CONREP — that's roughly thirty-six hours before line-handlers, and we'd arrive about twelve hours after stockout, so PULSE rules surface out and recommends air. Of the two air options, Kadena: closer, smaller political footprint, and they hold 540 units of O-negative red cells plus 110 platelets.",
+      "expected_duration_seconds_at_1x": 80,
+      "inject": [
+        {
+          "kind": "audit",
+          "audit_kind": "scenario_beat_fired",
+          "subject_id": "blood-h72:beat.h24.pulse_forecast",
+          "payload": {
+            "beat": "pulse_forecast",
+            "view": "pulse.forecast",
+            "stockout_offset_min": 2880,
+            "recommended_depot": "USAF-KADENA",
+            "backup_depot": "USAF-YOKOTA"
+          }
+        },
+        {
+          "kind": "forecast",
+          "module": "pulse",
+          "kind_label": "class_viii_stockout",
+          "severity": "HIGH",
+          "title": "PULSE: Class VIII stockout projected at H+48",
+          "body": "Forward holding depletes at current MTP burn ~H+48. Mode decision: AIR (surface CONREP ~36h misses the window). Recommend air bridge from Kadena AB (720 nm; KC-130J 2h45m). Alternate air: Yokota AB (1620 nm; C-17 4h10m). Surface alt USNS Mercy CONREP — INFEASIBLE.",
+          "fields": {
+            "stockout_offset_min":      2880,
+            "mode":                     "AIR",
+            "mode_decision_rationale":  "Surface CONREP transit ~36h exceeds stockout horizon (~24h); air clears it with margin.",
+            "recommended_depot":        "USAF-KADENA",
+            "recommended_lift":         "KC-130J",
+            "transit_min":              165,
+            "backup_depot":             "USAF-YOKOTA",
+            "backup_lift":              "C-17",
+            "backup_transit_min":       250,
+            "surface_alt_platform":     "USNS Mercy (T-AH-19)",
+            "surface_alt_method":       "CONREP",
+            "surface_alt_transit_min":  2160,
+            "surface_alt_status":       "INFEASIBLE"
+          }
+        }
+      ],
+      "sources": [
+        "Air Mobility Command planning factors — KC-130J cruise ~330 KTAS; C-17 ~450 KTAS",
+        "USTRANSCOM Channel Mission Schedules (Pacific routes)",
+        "ASBP Blood Support Detachment locations (Kadena, Yokota) — armymedicine.health.mil",
+        "Holcomb et al., 'Damage-control resuscitation in the deployed setting', Mil Med 2017",
+        "NWP 4-01.4 Underway Replenishment — CONREP planning factors (sea state, alongside time)",
+        "MSC USNS Mercy (T-AH-19) fact sheet — Pacific hospital ship hold/availability"
+      ]
+    },
+
+    {
+      "beat_id": "beat.h36.coalition_scrub",
+      "event_id": "evt.h36.coalition_scrub",
+      "offset_min": 2160,
+      "phase": "Initial action",
+      "title": "H+36 — SENTRY scrubs releasable demand summary; coalition confirms divert",
+      "view": "sentry.coalition",
+      "overlay": {
+        "highlight": "SENTRY release packet preview · JPN_COALITION + AUS_COALITION",
+        "callouts": [
+          "REL TO JPN, AUS · UNCLASSIFIED · DISTRIBUTION C",
+          "EDIPI / serials / fault components redacted",
+          "ADF 9th CSSB confirms KC-30A divert capacity"
+        ]
+      },
+      "narration": "Coordination with the coalition cell. SENTRY takes the demand summary, classifies it, scrubs personally identifying numbers, weapon serials, and unit fault detail, and produces a REL TO JPN / AUS packet at the unclassified release ceiling. Australia's 9th Combat Service Support Battalion confirms KC-30A divert capacity. Japan's logistics liaison confirms airspace coordination from Kadena. The release event is in the audit chain — every redaction is auditable.",
+      "expected_duration_seconds_at_1x": 65,
+      "inject": [
+        {
+          "kind": "audit",
+          "audit_kind": "scenario_beat_fired",
+          "subject_id": "blood-h72:beat.h36.coalition_scrub",
+          "payload": {
+            "beat": "coalition_scrub",
+            "view": "sentry.coalition",
+            "profiles": ["JPN_COALITION", "AUS_COALITION"]
+          }
+        },
+        {
+          "kind": "audit",
+          "audit_kind": "sentry_coalition_release_simulated",
+          "subject_id": "blood-h72:scrub.JPN_COALITION",
+          "payload": {
+            "profile": "JPN_COALITION",
+            "classification": "UNCLASSIFIED",
+            "caveats": ["REL TO JPN", "FOR COALITION EXERCISE"],
+            "redactions_applied": ["EDIPI", "POC_PHONE", "serial_number", "tm_reference", "fault_component"],
+            "scenario": "blood-h72"
+          }
+        },
+        {
+          "kind": "audit",
+          "audit_kind": "sentry_coalition_release_simulated",
+          "subject_id": "blood-h72:scrub.AUS_COALITION",
+          "payload": {
+            "profile": "AUS_COALITION",
+            "classification": "CUI",
+            "caveats": ["REL TO AUS"],
+            "redactions_applied": ["EDIPI", "POC_PHONE"],
+            "scenario": "blood-h72"
+          }
+        },
+        {
+          "kind": "alert",
+          "module": "sentry",
+          "severity": "MODERATE",
+          "title": "Coalition divert request scrubbed (JPN + AUS)",
+          "body": "Demand summary released to JPN_COALITION (UNCLASSIFIED) and AUS_COALITION (CUI) under DISTRIBUTION C. Audit chain captures every redaction.",
+          "scope": "scenario"
+        }
+      ],
+      "sources": [
+        "DoDI 5230.24 — Distribution Statements on Technical Documents",
+        "AUSMIN Logistics Interoperability Annex (2023) — REL TO AUS authorities",
+        "US-JPN Logistics Coordination MOU (2024) — REL TO JPN baseline release"
+      ]
+    },
+
+    {
+      "beat_id": "beat.h48.bastion_action",
+      "event_id": "evt.h48.bastion_action",
+      "offset_min": 2880,
+      "phase": "Sustainment crisis",
+      "title": "H+48 — BASTION shows secured corridor; mission accepted",
+      "view": "bastion.mission",
+      "overlay": {
+        "highlight": "Kadena → 3d MLR objective transit corridor · KC-130J 7Z42 mission accepted",
+        "callouts": [
+          "Mission MED-AIR-7Z42 accepted",
+          "Threat band crossing: 18 min · escort: VMFA-225 cell on station",
+          "ETA forward: H+50:45"
+        ]
+      },
+      "narration": "Mission accepted. BASTION renders the secured corridor — Kadena, transit south through the assigned air-control measures, escort cell on station for the 18-minute threat band crossing. Resupply lands at the forward MLR Role-1 around H+50:45. The clock keeps running, but the worst-case stockout is averted.",
+      "expected_duration_seconds_at_1x": 55,
+      "inject": [
+        {
+          "kind": "audit",
+          "audit_kind": "scenario_beat_fired",
+          "subject_id": "blood-h72:beat.h48.bastion_action",
+          "payload": {
+            "beat": "bastion_action",
+            "view": "bastion.mission",
+            "mission_id": "MED-AIR-7Z42",
+            "lift_platform": "KC-130J",
+            "depot": "USAF-KADENA"
+          }
+        },
+        {
+          "kind": "audit",
+          "audit_kind": "bastion_mission_accepted",
+          "subject_id": "MED-AIR-7Z42",
+          "payload": {
+            "mission_id":      "MED-AIR-7Z42",
+            "type":            "Class VIII air resupply",
+            "depot":           "USAF-KADENA",
+            "destination":     "3d MLR (forward)",
+            "lift_platform":   "KC-130J",
+            "escort":          "VMFA-225 cell",
+            "departure_offset_min": 2880,
+            "eta_offset_min":  3045,
+            "scenario":        "blood-h72"
+          }
+        },
+        {
+          "kind": "alert",
+          "module": "bastion",
+          "severity": "HIGH",
+          "title": "MED-AIR-7Z42 accepted — KC-130J Kadena → 3d MLR",
+          "body": "Class VIII air resupply mission accepted. ETA forward H+50:45. Threat-band crossing 18 min with VMFA-225 escort.",
+          "scope": "scenario"
+        }
+      ],
+      "sources": [
+        "MCWP 4-11 Tactical-Level Logistics — convoy / mission planning",
+        "JP 3-17 Air Mobility Operations — escort coordination"
+      ]
+    },
+
+    {
+      "beat_id": "beat.h72.resolution",
+      "event_id": "evt.h72.resupply_complete",
+      "offset_min": 4320,
+      "phase": "Recovery",
+      "title": "H+72 — Resupply complete; PULSE updates; audit lineage closed",
+      "view": "system.audit",
+      "overlay": {
+        "highlight": "Audit chain · 6 scenario events · 3 release events · 1 mission · 0 broken links",
+        "callouts": [
+          "Forward Class VIII restored: 30 LTOWB · 40 O- RBC · 40 FFP · 6 PLT",
+          "PULSE projected days-of-supply: 4.5 → next sustainment window",
+          "Audit chain intact — every decision auditable end-to-end"
+        ]
+      },
+      "narration": "Resupply complete. Forward Class Eight is replenished — 30 units of low-titer whole blood, 40 O-negative red cells, 40 plasma, 6 platelets. PULSE updates: forward stocks now hold four-and-a-half days at projected burn. The audit chain shows the whole story — the casualty event, the forecast, the scrubbed coalition release, the mission acceptance, the close-out — every step hash-chained, every release auditable. That's the loop. Clear, decide, share, act, prove.",
+      "expected_duration_seconds_at_1x": 65,
+      "inject": [
+        {
+          "kind": "audit",
+          "audit_kind": "scenario_beat_fired",
+          "subject_id": "blood-h72:beat.h72.resolution",
+          "payload": {
+            "beat": "resolution",
+            "view": "system.audit",
+            "forward_class_viii_restored_units": {
+              "LTOWB":     30,
+              "RBC_O_neg": 40,
+              "FFP":       40,
+              "platelets":  6
+            },
+            "forward_days_of_supply": 4.5
+          }
+        },
+        {
+          "kind": "audit",
+          "audit_kind": "bastion_mission_completed",
+          "subject_id": "MED-AIR-7Z42",
+          "payload": {
+            "mission_id":  "MED-AIR-7Z42",
+            "outcome":     "complete",
+            "scenario":    "blood-h72"
+          }
+        },
+        {
+          "kind": "alert",
+          "module": "pulse",
+          "severity": "INFO",
+          "title": "Forward Class VIII restored — 4.5 days of supply",
+          "body": "Resupply landed; LTOWB / RBC / FFP / PLT levels back above buffer. Next sustainment window in 4.5 days at current burn.",
+          "scope": "scenario"
+        }
+      ],
+      "sources": [
+        "Joint Trauma System CPG — Damage Control Resuscitation",
+        "AABB Standards for Blood Banks and Transfusion Services, 32nd ed."
+      ]
+    }
+  ],
+
+  "speed_validation": {
+    "_comment": "Demo cadence has two modes. ACTUAL RUN: 1× clock with the scenario engine pausing between beats while narration plays — the 6 beats sum to 360s (6.0 min) of presenter time. REHEARSAL: the engine seeks beat-to-beat (clock jumps to each beat's offset, holds for `rehearsal_dwell_seconds_per_beat`, then jumps to the next), so a 6-beat dry run at 10s/beat = 60s. Continuous 16× playback (clock just runs) would take 4320/16 = 270 wall-seconds, which is too long for the <90s rehearsal target — that's why the engine implements seek-to-beat rather than rate-only fast-forward.",
+    "presenter_narration_total_seconds": 360,
+    "presenter_narration_total_minutes": 6.0,
+    "continuous_at_16x_wall_seconds": 270,
+    "rehearsal_at_16x_seconds_target": 90,
+    "rehearsal_dwell_seconds_per_beat": 10,
+    "rehearsal_total_seconds_at_target_dwell": 60
+  },
+
+  "global_sources": [
+    "AABB Standards for Blood Banks and Transfusion Services, 32nd ed. (2020)",
+    "AABB Circular of Information for the Use of Human Blood and Blood Components (2021)",
+    "Armed Services Blood Program (ASBP) — public materials, militaryblood.dhmsa.osd.mil",
+    "Joint Trauma System Clinical Practice Guideline — Damage Control Resuscitation (rev. 2019)",
+    "Joint Pub 4-02 Joint Health Services (2018)",
+    "USMC Concept for Marine Littoral Regiment (2022)",
+    "MCWP 4-11 Tactical-Level Logistics",
+    "JP 3-17 Air Mobility Operations (2019)",
+    "USTRANSCOM Channel Mission Schedules — Pacific (public)",
+    "DoDI 5230.24 — Distribution Statements on Technical Documents",
+    "Air Mobility Command planning factors — public KC-130J / C-17 cruise speeds",
+    "Cap & Spinella, 'Severity of bleeding and damage control resuscitation', J Trauma 2017",
+    "Holcomb et al., 'Damage-control resuscitation in the deployed setting', Mil Med 2017"
+  ]
+}

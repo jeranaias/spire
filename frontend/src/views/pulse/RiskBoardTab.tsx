@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
@@ -9,6 +9,7 @@ import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
 import { PredictedFailurePanel } from "../../components/PredictedFailurePanel";
 import { CollapsiblePanel } from "../../components/CollapsiblePanel";
+import { Button, IconButton, Pressable, fireIdempotent } from "../../components/ui";
 
 // Track-G1 — role-shaped default scope. A Maintenance Chief landing on the
 // Risk Board cold should see CLB-6 only (their unit), not the whole MEF.
@@ -40,31 +41,12 @@ export function RiskBoardTab() {
   const [detailLoading, setDetailLoading] = useState(false);
   // Walkthrough #20 — Draft Action surfaces a modal of recommend_actions.
   const [draftActionFor, setDraftActionFor] = useState<RiskBoardAsset | null>(null);
-  // Race-guard parity: monotonic generation tokens guard against late-
-  // arriving stale responses overwriting fresh ones — e.g. an operator
-  // toggling roles faster than the network resolves, or the deep-dive
-  // detail fetch outliving a switch to a different asset.
-  const boardGenRef = useRef(0);
-  const detailGenRef = useRef(0);
 
   useEffect(() => {
     setBoard(null);
     setSelected(null);
     setDetail(null);
-    setError(null);
-    const myGen = ++boardGenRef.current;
-    const ctrl = new AbortController();
-    api.pulse.riskBoard(30, ctrl.signal)
-      .then((b) => {
-        if (myGen !== boardGenRef.current) return;
-        setBoard(b);
-      })
-      .catch((e) => {
-        if (myGen !== boardGenRef.current) return;
-        if (e?.name === "AbortError") return;
-        setError(formatApiError(e));
-      });
-    return () => ctrl.abort();
+    api.pulse.riskBoard(30).then(setBoard).catch((e) => setError(formatApiError(e)));
   }, [role]);
 
   const filteredAssets = useMemo(() => {
@@ -91,31 +73,18 @@ export function RiskBoardTab() {
     if (!selected) return;
     setDetailLoading(true);
     setDetail(null);
-    const myGen = ++detailGenRef.current;
-    const ctrl = new AbortController();
     api.pulse
-      .assetDeepDive(selected, ctrl.signal)
-      .then((d) => {
-        if (myGen !== detailGenRef.current) return;
-        setDetail(d);
-      })
-      .catch((e) => {
-        if (myGen !== detailGenRef.current) return;
-        if (e?.name === "AbortError") return;
-        setError(formatApiError(e));
-      })
-      .finally(() => {
-        if (myGen !== detailGenRef.current) return;
-        setDetailLoading(false);
-      });
-    return () => ctrl.abort();
+      .assetDeepDive(selected)
+      .then(setDetail)
+      .catch((e) => setError(formatApiError(e)))
+      .finally(() => setDetailLoading(false));
   }, [selected]);
 
   if (error) return <ErrorPanel msg={error} />;
   if (!board) return <RiskBoardSkeleton />;
 
   return (
-    <div className="flex h-full" data-tour-id="pulse-risk-content">
+    <div className="flex h-full">
       <div data-pulse-risk-scroll className="flex-1 overflow-y-auto p-4">
         {/* Track-G2 — G-4 sees too many panels at once on landing. Collapse
          * Predicted Failures by default for G-4 (they have BASTION as their
@@ -173,6 +142,15 @@ export function RiskBoardTab() {
             </h2>
             <div className="spire-body-muted mt-0.5">
               Weighted: fault frequency 30% · days NMC 25% · hours 20% · severity trend 15% · age 7% · cost 3%.
+              {/* W1 #30 — no cross-link to /admin/models/pulse-risk-scorer
+               * is rendered here. The model supply-chain page is restricted
+               * to security_manager (see VIEW_SCOPE in state/store.ts), and
+               * security_manager is NOT in PULSE's scope, so any operator
+               * who can see this surface cannot reach the model card. The
+               * security_manager reaches the same card via
+               * /admin → "Model supply chain →" instead. The reverse
+               * direction (model card → in-app surface list) IS rendered
+               * inside ModelDetailView. */}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -185,14 +163,15 @@ export function RiskBoardTab() {
               onClear={clearFilter}
             />
             {(unitFilter || equipFilter) && (
-              <button
+              <Button
                 onClick={clearFilter}
-                className="flex items-center gap-1.5 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] px-2.5 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] tracking-wider"
+                variant="primary"
+                size="sm"
                 title={usingRoleDefault ? "Default scope from your role. Click to expand to all units." : "Clear filter"}
               >
                 {usingRoleDefault ? "Role scope: " : "Filter: "}
                 {unitFilter ?? ""} {equipFilter ? `· ${equipFilter}` : ""} ✕
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -227,7 +206,13 @@ export function RiskBoardTab() {
               detail={detail}
               onClose={() => setSelected(null)}
               onFeedback={(correct) => {
-                api.pulse.feedback(detail.asset.asset_id, correct).catch(() => {});
+                // Idempotent per (asset, verdict) so a triple-tap on the
+                // thumbs row never double-records.
+                fireIdempotent(
+                  `pulse:feedback:${detail.asset.asset_id}:${correct ? "correct" : "incorrect"}`,
+                  () => api.pulse.feedback(detail.asset.asset_id, correct),
+                  500,
+                ).catch(() => {});
                 pushToast({
                   tone: correct ? "ok" : "warn",
                   text: `Feedback recorded · ${detail.asset.asset_id} marked ${correct ? "correct" : "incorrect"}`,
@@ -271,36 +256,37 @@ function UnitFilterDropdown({
 
   return (
     <div className="relative">
-      <button
+      <Button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] tracking-wider"
+        variant="secondary"
+        size="sm"
         aria-expanded={open}
         title="Filter by unit"
+        trailingIcon={<span className="text-[var(--color-text-muted)]">▾</span>}
       >
         Filter by unit
-        <span className="text-[var(--color-text-muted)]">▾</span>
-      </button>
+      </Button>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 max-h-72 w-64 overflow-y-auto rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] py-1 shadow-2xl">
-          <button
+          <Pressable
             onClick={() => { onClear(); setOpen(false); }}
-            className="block w-full px-3 py-1.5 text-left font-mono text-xs uppercase text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] tracking-wider"
+            className="px-3 py-1.5 font-mono text-xs uppercase text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] tracking-wider"
           >
             All units
-          </button>
+          </Pressable>
           <div className="my-1 border-t border-[var(--color-border)]" />
           {units.map(([u, n]) => (
-            <button
+            <Pressable
               key={u}
               onClick={() => { onSelect(u); setOpen(false); }}
               className={
-                "flex w-full items-center justify-between px-3 py-1.5 text-left font-mono text-xs hover:bg-[var(--color-surface-hover)] tracking-wider " +
+                "flex items-center justify-between px-3 py-1.5 font-mono text-xs hover:bg-[var(--color-surface-hover)] tracking-wider " +
                 (current === u ? "text-[var(--color-primary)]" : "text-[var(--color-text)]")
               }
             >
               <span>{u}</span>
               <span className="text-[var(--color-text-muted)]">{n}</span>
-            </button>
+            </Pressable>
           ))}
         </div>
       )}
@@ -404,13 +390,9 @@ function DraftActionModal({
           >
             Draft Action · {asset.asset_id}
           </div>
-          <button
-            onClick={onClose}
-            className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-            aria-label="Close"
-          >
-            ✕
-          </button>
+          <IconButton onClick={onClose} aria-label="Close" variant="ghost" size="sm">
+            <span aria-hidden>✕</span>
+          </IconButton>
         </div>
         <div className="mb-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
           {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · {asset.primary_factor}
@@ -447,7 +429,7 @@ function DraftActionModal({
                   {act.description}
                 </div>
                 <div className="mt-2 flex items-center justify-end">
-                  <button
+                  <Button
                     onClick={() => {
                       pushToast({
                         tone: "ok",
@@ -455,22 +437,20 @@ function DraftActionModal({
                       });
                       onClose();
                     }}
-                    className="rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
+                    variant="primary"
+                    size="sm"
                   >
                     Draft this
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
           </div>
         )}
         <div className="mt-3 flex items-center justify-end">
-          <button
-            onClick={onClose}
-            className="rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] tracking-widest"
-          >
+          <Button onClick={onClose} variant="secondary" size="sm">
             Close
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -532,7 +512,7 @@ function RiskRow({
           : "border-[var(--color-border)] hover:border-[var(--color-border-active)] hover:bg-[var(--color-surface-hover)]",
       )}
     >
-      <button onClick={onClick} className="flex-1 text-left">
+      <Pressable onClick={onClick} className="flex-1">
         <div className="flex items-baseline gap-3">
           <span className="font-mono text-base font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
           <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
@@ -551,7 +531,7 @@ function RiskRow({
           Primary: {asset.primary_factor}
           {asset.predicted_failure && <span className="ml-3 text-[var(--color-warning)]">· {asset.predicted_failure}</span>}
         </div>
-      </button>
+      </Pressable>
       <div className="flex flex-col items-center gap-0.5 self-stretch justify-center">
         <div
           className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
@@ -586,17 +566,14 @@ function RiskRow({
       {/* Walkthrough #20, #37 — Draft Action button. Top row gets filled
        * primary; others get severity-outlined. */}
       {onDraftAction && (
-        <button
+        <Button
           onClick={(e) => { e.stopPropagation(); onDraftAction(); }}
-          className="rounded-sm border px-3 py-1.5 font-mono text-xs font-semibold uppercase tracking-widest transition-colors"
-          style={{
-            borderColor: isTop ? "var(--color-primary)" : ctaBorder,
-            background: isTop ? "var(--color-primary)" : "transparent",
-            color: isTop ? "white" : ctaBorder,
-          }}
+          variant={isTop ? "primary" : "secondary"}
+          size="sm"
+          style={isTop ? undefined : { borderColor: ctaBorder, color: ctaBorder }}
         >
           Draft Action
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -651,12 +628,9 @@ function AssetDeepDivePanel({
               {a.nomenclature}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded px-2 py-1 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-          >
-            ✕
-          </button>
+          <IconButton onClick={onClose} aria-label="Close panel" variant="ghost" size="sm">
+            <span aria-hidden>✕</span>
+          </IconButton>
         </div>
         <div className="mt-3">
           <RiskBar score={r.risk_score} band={r.band} />
@@ -749,18 +723,22 @@ function AssetDeepDivePanel({
           >
             Feedback:
           </span>
-          <button
+          <Button
             onClick={() => onFeedback(true)}
-            className="rounded-sm border border-[var(--color-success-muted)] px-3 py-1 font-mono text-sm font-semibold uppercase text-[var(--color-success)] hover:bg-[var(--color-success-muted)] tracking-wider"
+            variant="secondary"
+            size="sm"
+            className="border-[var(--color-success-muted)] text-[var(--color-success)] hover:bg-[var(--color-success-muted)]"
           >
             ✓ Correct
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => onFeedback(false)}
-            className="rounded-sm border border-[var(--color-danger-muted)] px-3 py-1 font-mono text-sm font-semibold uppercase text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)] tracking-wider"
+            variant="secondary"
+            size="sm"
+            className="border-[var(--color-danger-muted)] text-[var(--color-danger)] hover:bg-[var(--color-danger-muted)]"
           >
             ✗ Incorrect
-          </button>
+          </Button>
         </section>
       </div>
     </div>

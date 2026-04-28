@@ -99,6 +99,31 @@
       </div>
     </div>
     <div id="root"></div>
+    <script>
+      // /pitch and /demo URL-bar safety net. The app is a HashRouter SPA, so
+      // the canonical URLs are /#/pitch and /#/demo. If a presenter (or a
+      // judge with a typed link) hits a bare /pitch or /demo path WITHOUT a
+      // hash, the SPA index loads and the router falls through to the
+      // Decision Bridge — looking like a routing bug under stage lights.
+      // Detect known presenter routes and rewrite to the hash form before
+      // React boots so the router resolves correctly on first paint.
+      (function () {
+        try {
+          var p = window.location.pathname;
+          var h = window.location.hash;
+          // Strip a trailing slash so /pitch/ and /demo/ also redirect.
+          var normalized = p.length > 1 && p.charAt(p.length - 1) === "/"
+            ? p.slice(0, -1)
+            : p;
+          var KNOWN = ["/pitch", "/demo"];
+          if (!h && KNOWN.indexOf(normalized) !== -1) {
+            window.location.replace("/#" + normalized + window.location.search);
+          }
+        } catch (_) {
+          /* never block app boot on a redirect failure */
+        }
+      })();
+    </script>
     <script type="module" crossorigin src="/src/main.tsx"></script>
   </body>
 </html>

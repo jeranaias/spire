@@ -1,4 +1,5 @@
 import { useSpireStore, ROLE_LABELS, type Role } from "../state/store";
+import { Button } from "./ui";
 
 interface Props {
   feature: string;
@@ -45,12 +46,9 @@ export function InsufficientPrivilege({ feature, requiredRoles, description }: P
             {description}
           </div>
         )}
-        <button
-          disabled
-          className="mt-4 rounded-sm border border-[var(--color-border-active)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-[var(--color-text-muted)] tracking-wider"
-        >
+        <Button disabled variant="secondary" size="sm" className="mt-4">
           Request Access (unavailable in demo)
-        </button>
+        </Button>
       </div>
     </div>
   );

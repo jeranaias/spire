@@ -17,6 +17,7 @@ import { api, type PredictedFailureAsset, type FailurePrediction } from "../api"
 import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { useNavigate } from "react-router-dom";
+import { Button, Pressable, ErrorState, LoadingState } from "./ui";
 
 export function PredictedFailurePanel({
   unit,
@@ -52,16 +53,19 @@ export function PredictedFailurePanel({
 
   if (error) {
     return (
-      <div className="mb-4 rounded-sm border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-3 text-xs text-[var(--color-danger)]">
-        Predictive engine unavailable: {error}
+      <div className="mb-4">
+        <ErrorState
+          variant="inline"
+          title="Predictive engine unavailable"
+          detail={error}
+        />
       </div>
     );
   }
   if (!data) {
     return (
-      <div className="mb-4 flex items-center gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-sm text-[var(--color-text-muted)] tracking-wider">
-        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
-        Computing predicted failures …
+      <div className="mb-4">
+        <LoadingState size="panel" label="Computing predicted failures …" />
       </div>
     );
   }
@@ -120,9 +124,11 @@ export function PredictedFailurePanel({
             Horizon
           </span>
           {[7, 14, 30].map((h) => (
-            <button
+            <Pressable
               key={h}
               onClick={() => setHorizon(h)}
+              aria-pressed={horizon === h}
+              block={false}
               className="rounded-sm border px-2 py-[2px] font-mono text-xs font-semibold uppercase transition-colors tracking-wider"
               style={{
                 borderColor: horizon === h ? "var(--color-primary)" : "var(--color-border)",
@@ -131,7 +137,7 @@ export function PredictedFailurePanel({
               }}
             >
               {h}d
-            </button>
+            </Pressable>
           ))}
         </div>
       </div>
@@ -229,12 +235,14 @@ function PredictedRow({
           {top.criticality}
         </span>
       </div>
-      <button
+      <Button
         onClick={onDraftRequisition}
-        className="rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_30%,transparent)] px-3 py-1 font-mono text-xs font-semibold uppercase text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_50%,transparent)] tracking-wider"
+        variant="warning"
+        size="sm"
+        className="bg-[color-mix(in_oklab,var(--color-warning-muted)_30%,transparent)] hover:bg-[color-mix(in_oklab,var(--color-warning-muted)_50%,transparent)]"
       >
         Draft Action
-      </button>
+      </Button>
     </div>
   );
 }

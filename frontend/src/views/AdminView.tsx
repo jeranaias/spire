@@ -24,10 +24,12 @@ import {
 import { withRetry, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { InsufficientPrivilege } from "../components/InsufficientPrivilege";
-import { AboutFaq } from "../components/AboutFaq";
+import { ErrorState, LoadingState } from "../components/ui";
+import { Link } from "react-router-dom";
 
 export function AdminView() {
   const role = useSpireStore((s) => s.role);
+
   if (role !== "security_manager") {
     return (
       <InsufficientPrivilege
@@ -38,14 +40,15 @@ export function AdminView() {
     );
   }
 
+  return <TrainingFlywheelTab />;
+}
+
+function TrainingFlywheelTab() {
   const [tel, setTel] = useState<AdminTelemetry | null>(null);
   const [outcomes, setOutcomes] = useState<DecisionOutcome[]>([]);
   const [feedback, setFeedback] = useState<FeedbackRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [waking, setWaking] = useState(false);
-  // About/FAQ surface (#18, #23, #24) — also reachable from Help overlay,
-  // but pilots tend to look here first when debugging "what is this thing".
-  const [aboutOpen, setAboutOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,36 +107,35 @@ export function AdminView() {
 
   if (error && !tel) {
     return (
-      <div className="flex h-full items-center justify-center p-12">
-        <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
-          <div
-            className="font-mono text-xs uppercase text-[var(--color-danger)] tracking-widest"
-          >
-            Admin Telemetry Offline
-          </div>
-          <div className="mt-2 spire-body text-sm">
-            Training-flywheel telemetry endpoint did not respond after 4 attempts. Backend may be cycling.
-          </div>
-          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            {error}
-          </div>
-        </div>
-      </div>
+      <ErrorState
+        title="Admin Telemetry Offline"
+        description="Training-flywheel telemetry endpoint did not respond after 4 attempts. Backend may be cycling."
+        detail={error}
+        onRetry={() => {
+          setError(null);
+          setWaking(true);
+          // Force a refetch by toggling waking; the existing effect re-runs
+          // on dependency change. Simplest path here is to remount — the
+          // role useEffect handles the actual fetch on first mount.
+          window.location.reload();
+        }}
+      />
     );
   }
   if (!tel) {
-    return (
-      <div className="flex h-full items-center justify-center font-mono text-sm text-[var(--color-text-secondary)] tracking-wider">
-        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)] mr-3" />
-        {waking ? "Waking up — one moment" : "Loading admin telemetry …"}
-      </div>
-    );
+    return <LoadingState size="page" label="Loading admin telemetry …" waking={waking} />;
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6" data-tour-id="admin-content">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
+    <div className="flex h-full flex-col overflow-y-auto p-6">
+      {/* AdminTabs (W1 #29 audit view) provides formal sub-nav across
+       * all /admin/* surfaces; the in-header "Model supply chain →"
+       * link below is a redundant CTA in the heading row, kept after
+       * the rebase so the Flywheel page still cross-links to the model
+       * registry without forcing the operator into the tab strip. */}
+      <AdminTabs active="flywheel" />
+      <div className="mb-4 flex items-baseline justify-between gap-4">
+        <div>
           {/* Promoted from h2 to h1 — this view is the document, not a
            * subsection. Single h1 per view anchors the screen-reader
            * outline. */}
@@ -147,16 +149,18 @@ export function AdminView() {
             the rolling accuracy trend; below 80% accuracy across ≥ 20 outcomes triggers a retraining recommendation.
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setAboutOpen(true)}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-primary)] px-3 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_15%,transparent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] tracking-widest"
-          title="What does SPIRE rely on, how is it secured, how does it talk?"
+        {/* W1 #30 — admin-side link to the canonical model supply-chain
+         * page. Lives next to the flywheel so a security manager can pivot
+         * from "are we still calibrated" to "what models are we running"
+         * in one click. */}
+        <a
+          href="#/admin/models"
+          className="shrink-0 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-primary)] hover:bg-[var(--color-bg)]"
+          title="Per-model provenance, hosting target, FedRAMP, vendor jurisdiction"
         >
-          About SPIRE · FAQ
-        </button>
+          Model supply chain →
+        </a>
       </div>
-      {aboutOpen && <AboutFaq onClose={() => setAboutOpen(false)} />}
 
       {/* Hero stats row */}
       <div className="mb-4 grid grid-cols-4 gap-3">
@@ -438,4 +442,41 @@ function fmtAxis(iso?: string): string {
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
   const day = String(d.getUTCDate()).padStart(2, "0");
   return `${day} ${months[d.getUTCMonth()]}`;
+}
+
+
+/**
+ * AdminTabs — shared sub-nav for the /admin/* surfaces. Walkthrough audit:
+ * the audit-log view added in W1 was reachable only by typing the URL or
+ * via TopBar deep-link; an inline tab strip on every /admin page makes
+ * the SOC view discoverable from Flywheel and vice versa.
+ */
+export type AdminTabKey = "flywheel" | "audit" | "economics";
+
+export function AdminTabs({ active }: { active: AdminTabKey }) {
+  const tab = (to: string, key: AdminTabKey, label: string, hint: string) => (
+    <Link
+      to={to}
+      aria-current={active === key ? "page" : undefined}
+      className="rounded-sm border px-3 py-1.5 font-mono text-xs uppercase tracking-wider transition-colors"
+      style={{
+        background: active === key
+          ? "color-mix(in oklab, var(--color-primary) 22%, var(--color-surface))"
+          : "var(--color-surface)",
+        borderColor: active === key ? "var(--color-primary)" : "var(--color-border)",
+        color: active === key ? "var(--color-text)" : "var(--color-text-secondary)",
+        textDecoration: "none",
+      }}
+      title={hint}
+    >
+      {label}
+    </Link>
+  );
+  return (
+    <nav className="mb-3 flex items-center gap-2" aria-label="Admin sub-navigation">
+      {tab("/admin",           "flywheel",  "Training Flywheel",   "Per-engine accuracy + decision outcomes")}
+      {tab("/admin/audit",     "audit",     "Audit · SOC View",    "Hash-chained audit log with filters + export")}
+      {tab("/admin/economics", "economics", "Inference Economics", "Per-call LLM cost telemetry + 180k-Marine extrapolation")}
+    </nav>
+  );
 }

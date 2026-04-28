@@ -1,15 +1,19 @@
 import { useEffect } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { TopBar } from "./components/TopBar";
 import { StatusFooter } from "./components/StatusFooter";
 import { StatusStrip } from "./components/StatusStrip";
 import { ClassificationBand } from "./components/ClassificationBand";
 import { ToastLane } from "./components/ToastLane";
+import { NarrationOverlay } from "./components/NarrationOverlay";
+import { ScenarioPlayerHost } from "./components/ScenarioPlayerHost";
 import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
 import { Onboarding } from "./components/Onboarding";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { FailsafePlayer } from "./components/FailsafePlayer";
+import { useFailsafe } from "./state/failsafe";
 import { ROLE_DEFAULT_VIEW, useSpireStore, VIEW_SCOPE } from "./state/store";
 
 // Vimium-style two-key chord routing. `g s` → SENTRY, `g p` → PULSE,
@@ -88,6 +92,52 @@ function useGoToShortcuts() {
   }, [nav, role]);
 }
 
+// W2 Task #39 — F9 hotkey to summon the live-demo failsafe recording.
+// Confined to /demo and /pitch so an operator on BASTION never trips it.
+// We always confirm before activating (the failsafe overrides the live
+// surface and judges should never see it unless the live demo died).
+function useFailsafeHotkey() {
+  const loc = useLocation();
+  const openFullscreen = useFailsafe((s) => s.openFullscreen);
+  const mode = useFailsafe((s) => s.mode);
+
+  useEffect(() => {
+    const presenterRoute =
+      loc.pathname === "/demo" ||
+      loc.pathname === "/pitch" ||
+      loc.pathname.startsWith("/demo/") ||
+      loc.pathname.startsWith("/pitch/");
+    if (!presenterRoute) return;
+
+    function inField(target: EventTarget | null): boolean {
+      return (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      );
+    }
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "F9") return;
+      if (inField(e.target)) return;
+      // If failsafe is already on screen, the hotkey is a no-op — the
+      // overlay's own Esc handler is the way out.
+      if (mode !== "off") return;
+      e.preventDefault();
+      // Synchronous confirm — same pattern DangerButton/modal uses for
+      // truly destructive actions. Keystroke confirms and the presenter
+      // doesn't have to chase a button mid-pitch.
+      const ok = window.confirm(
+        "Activate failsafe? The recorded backup will replace the live demo. Press OK only if the live demo has failed.",
+      );
+      if (ok) openFullscreen();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [loc.pathname, mode, openFullscreen]);
+}
+
 export default function App() {
   // Track-G3 — reflect density onto <html data-density="..."> so the CSS
   // variable rotation in index.css applies across every view + portal.
@@ -101,6 +151,7 @@ export default function App() {
   }, [density]);
 
   useGoToShortcuts();
+  useFailsafeHotkey();
 
   return (
     <div className="flex h-full flex-col overflow-x-hidden">
@@ -131,10 +182,20 @@ export default function App() {
       </main>
       <StatusFooter />
       <ToastLane />
+      {/* W2 Task #37 — scripted scenario player. Host is render-less
+       * (timer + nav + hotkeys); the overlay is the operator-facing
+       * narration strip pinned to the bottom of the viewport. Both
+       * mounted at the shell so they survive route changes. */}
+      <ScenarioPlayerHost />
+      <NarrationOverlay />
       <FeedbackDrawer />
       <HelpOverlay />
       <Spiro />
       <Onboarding />
+      {/* W2 Task #39 — recorded-backup overlay. Renders nothing until the
+       * presenter opens it (via the Failsafe button on /demo or /pitch,
+       * or the F9 hotkey). Mounted at the shell so it covers any view. */}
+      <FailsafePlayer />
     </div>
   );
 }

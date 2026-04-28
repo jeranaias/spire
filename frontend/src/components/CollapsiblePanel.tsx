@@ -19,6 +19,7 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { useSpireStore, type Role } from "../state/store";
+import { Pressable } from "./ui";
 
 export interface CollapsiblePanelProps {
   /** Stable view+panel key — e.g. "pulse.forecast" + "recommend". */
@@ -93,12 +94,10 @@ export function CollapsiblePanel({
 
   return (
     <div className={clsx("rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]", className)}>
-      <button
-        type="button"
+      <Pressable
         onClick={toggle}
         aria-expanded={!collapsed}
         className="flex w-full items-center gap-3 border-b border-[var(--color-border)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-        style={{ minHeight: "var(--tap-min, 0)" }}
       >
         <span className="flex-1 min-w-0">{header}</span>
         <span
@@ -112,7 +111,7 @@ export function CollapsiblePanel({
         >
           ▾
         </span>
-      </button>
+      </Pressable>
       {collapsed
         ? (collapsedSummary != null && (
             <div

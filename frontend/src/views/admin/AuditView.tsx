@@ -1,0 +1,803 @@
+/**
+ * Audit · SOC View — `/admin/audit`.
+ *
+ * Surfaces SPIRE's existing hash-chained audit trail (`backend/persistence.py`)
+ * as the kind of view a Tier-2 SOC analyst can actually use:
+ *
+ *   - filter chips for actor / action / resource type / classification
+ *   - time-window presets (15m / 1h / 24h / 7d) plus custom range
+ *   - free-text search across actor / kind / subject / payload
+ *   - paginated table (server-side limit/offset, default 100/page)
+ *   - click-row → drawer with full payload + chain links + jump-to-related
+ *   - "Export filtered set" wrapped in `<ClassifiedExport>` for clearance gating
+ *   - anomaly count badge ("3 anomalies in current view") + per-row markers
+ *     for broken-chain / spillage_prevented / downgrade_blocked
+ *
+ * Identity (DODID + name + rank) is hydrated server-side from MOCK_USERS
+ * by joining on the actor field; rows where the actor is a role only get
+ * a fallback identity so the column never renders blank.
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  api,
+  type AuditEntry,
+  type AuditQueryParams,
+  type AuditQueryResult,
+} from "../../api";
+import { withRetry, formatApiError } from "../../api-retry";
+import { useSpireStore } from "../../state/store";
+import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
+import { Button, ErrorState, LoadingState, EmptyState, IconButton } from "../../components/ui";
+import { ClassifiedExport } from "../../components/classification/ClassifiedExport";
+import { AdminTabs } from "../AdminView";
+import {
+  CLASS_ORDER,
+  classificationColors,
+  classificationLabel,
+} from "../../components/classification/levels";
+
+type TimeWindow = "any" | "15m" | "1h" | "24h" | "7d" | "custom";
+
+const RESOURCE_PREFIXES: { value: string; label: string }[] = [
+  { value: "sentry",   label: "SENTRY"  },
+  { value: "pulse",    label: "PULSE"   },
+  { value: "comms",    label: "COMMS"   },
+  { value: "incident", label: "INCIDENT"},
+  { value: "login",    label: "AUTH"    },
+  { value: "llm",      label: "LLM"     },
+  { value: "decision", label: "MODEL OUTCOME" },
+  { value: "spillage", label: "SPILLAGE" },
+  { value: "downgrade",label: "DOWNGRADE"},
+  { value: "batch",    label: "BATCH"   },
+  { value: "system",   label: "SYSTEM"  },
+];
+
+const PAGE_SIZE = 100;
+
+function isoMinutesAgo(mins: number): string {
+  return new Date(Date.now() - mins * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function windowToRange(w: TimeWindow): { after?: string; before?: string } {
+  switch (w) {
+    case "15m": return { after: isoMinutesAgo(15) };
+    case "1h":  return { after: isoMinutesAgo(60) };
+    case "24h": return { after: isoMinutesAgo(60 * 24) };
+    case "7d":  return { after: isoMinutesAgo(60 * 24 * 7) };
+    default:    return {};
+  }
+}
+
+function fmtUtc(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const z = (n: number) => String(n).padStart(2, "0");
+  const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
+}
+
+export function AuditView() {
+  const role = useSpireStore((s) => s.role);
+  if (role !== "security_manager") {
+    return (
+      <InsufficientPrivilege
+        feature="Audit · SOC View"
+        requiredRoles={["security_manager"]}
+        description="Operator decision histories and source-IP correlations are restricted to Security Manager review per the audit posture."
+      />
+    );
+  }
+
+  const [actors, setActors]       = useState<string[]>([]);
+  const [kinds, setKinds]         = useState<string[]>([]);
+  const [resource, setResource]   = useState<string[]>([]);
+  const [classification, setClassification] = useState<string>("");
+  const [tw, setTw]               = useState<TimeWindow>("any");
+  const [customAfter, setCustomAfter]   = useState<string>("");
+  const [customBefore, setCustomBefore] = useState<string>("");
+  const [q, setQ]                 = useState<string>("");
+  const [onlyAnoms, setOnlyAnoms] = useState<boolean>(false);
+  const [page, setPage]           = useState<number>(0);
+  const [data, setData]           = useState<AuditQueryResult | null>(null);
+  const [error, setError]         = useState<string | null>(null);
+  const [waking, setWaking]       = useState<boolean>(false);
+  const [openRow, setOpenRow]     = useState<AuditEntry | null>(null);
+
+  // Reset to page 0 whenever a filter changes — otherwise a narrowed result
+  // set leaves the operator on an empty trailing page.
+  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, q, onlyAnoms]);
+
+  const queryParams = useMemo<AuditQueryParams>(() => {
+    const range = tw === "custom"
+      ? { after: customAfter || undefined, before: customBefore || undefined }
+      : windowToRange(tw);
+    return {
+      actors:         actors.length ? actors : undefined,
+      kinds:          kinds.length  ? kinds  : undefined,
+      resource:       resource.length ? resource : undefined,
+      classification: classification || undefined,
+      after:          range.after,
+      before:         range.before,
+      q:              q.trim() || undefined,
+      only_anomalies: onlyAnoms || undefined,
+      limit:          PAGE_SIZE,
+      offset:         page * PAGE_SIZE,
+    };
+  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, q, onlyAnoms, page]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async (firstLoad: boolean) => {
+      try {
+        const fetcher = firstLoad
+          ? () => withRetry(() => api.system.auditQuery(queryParams), {
+              onAttempt: (attempt) => { if (!cancelled) setWaking(attempt > 1); },
+            })
+          : () => api.system.auditQuery(queryParams);
+        const r = await fetcher();
+        if (cancelled) return;
+        setData(r);
+        setError(null);
+        setWaking(false);
+      } catch (e) {
+        if (cancelled) return;
+        if (firstLoad) {
+          setError(formatApiError(e));
+          setWaking(false);
+        } else {
+          console.warn("Audit query poll failed:", e);
+        }
+      }
+    };
+    run(true);
+    return () => { cancelled = true; };
+  }, [queryParams]);
+
+  // Polled refresh (12s) — separate effect so filter re-fetches don't fight
+  // the timer.
+  useEffect(() => {
+    const id = setInterval(() => {
+      api.system.auditQuery(queryParams).then(setData).catch(() => {});
+    }, 12_000);
+    return () => clearInterval(id);
+  }, [queryParams]);
+
+  const onExport = useCallback(async () => {
+    if (!data) return;
+    // Pull *all* rows matching the current filter (cap 500) so the exported
+    // bundle reflects the operator's filter intent, not just the current page.
+    const wide = await api.system.auditQuery({ ...queryParams, limit: 500, offset: 0 });
+    const blob = new Blob(
+      [JSON.stringify({
+        exported_at: new Date().toISOString(),
+        filter: queryParams,
+        head_hash: wide.head_hash,
+        broken_at_id: wide.broken_at_id,
+        anomaly_count: wide.anomaly_count,
+        rows: wide.rows,
+      }, null, 2)],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `spire_audit_${classificationLabel(classification || "UNCLASSIFIED")}_${new Date().toISOString().replace(/[-:]/g, "").slice(0,15)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [data, queryParams, classification]);
+
+  if (error && !data) {
+    return (
+      <ErrorState
+        title="Audit Query Offline"
+        description="Audit chain query endpoint did not respond."
+        detail={error}
+        onRetry={() => { setError(null); setWaking(true); window.location.reload(); }}
+      />
+    );
+  }
+  if (!data) {
+    return <LoadingState size="page" label="Loading audit chain …" waking={waking} />;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-4 pt-4">
+        <AdminTabs active="audit" />
+      </div>
+      {/* Header */}
+      <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <div className="flex items-baseline justify-between gap-4">
+          <div>
+            <h1 className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest">
+              Audit · SOC View
+            </h1>
+            <div className="mt-1 spire-body-muted">
+              Hash-chained, append-only · Head{" "}
+              <span className="font-mono tabular-nums text-[var(--color-text-secondary)]" title={data.head_hash}>
+                {data.head_hash.slice(0, 16)}…
+              </span>{" "}
+              · {data.storage.encrypted_at_rest ? "AES-256 at rest" : "plaintext (dev)"}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span
+              className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider"
+              style={{
+                color: data.anomaly_count > 0 ? "var(--color-warning)" : "var(--color-text-muted)",
+                borderColor: data.anomaly_count > 0 ? "var(--color-warning-muted)" : "var(--color-border)",
+                background: data.anomaly_count > 0
+                  ? "color-mix(in oklab, var(--color-warning-muted) 18%, transparent)"
+                  : "transparent",
+              }}
+              title={
+                data.broken_at_id
+                  ? `Chain break detected at id ${data.broken_at_id}`
+                  : "Includes spillage_prevented, downgrade_blocked, and chain-break flags"
+              }
+            >
+              {data.anomaly_count} anomal{data.anomaly_count === 1 ? "y" : "ies"} in view
+            </span>
+            <ClassifiedExport
+              classification={classification || "UNCLASSIFIED"}
+              action="audit.export.json"
+              label="Export filtered set"
+              pendingLabel="Exporting…"
+              onExport={onExport}
+              hint={`Up to 500 rows · stamped ${classification || "UNCLASSIFIED"}`}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+        <div className="grid grid-cols-12 gap-3">
+          {/* Free-text search */}
+          <div className="col-span-12 lg:col-span-4">
+            <FilterLabel>Search</FilterLabel>
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="actor, kind, subject, payload …"
+              className="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 font-mono text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:outline-none"
+            />
+          </div>
+
+          {/* Time window */}
+          <div className="col-span-12 lg:col-span-4">
+            <FilterLabel>Time window</FilterLabel>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(["any","15m","1h","24h","7d","custom"] as TimeWindow[]).map((w) => (
+                <Chip key={w} active={tw === w} onClick={() => setTw(w)} label={w.toUpperCase()} />
+              ))}
+              {tw === "custom" && (
+                <span className="ml-2 inline-flex items-center gap-1.5 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-wider">
+                  <input
+                    type="datetime-local"
+                    value={customAfter}
+                    onChange={(e) => setCustomAfter(e.target.value ? new Date(e.target.value).toISOString() : "")}
+                    className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 font-mono text-[11px] text-[var(--color-text)]"
+                    title="After"
+                  />
+                  <span>→</span>
+                  <input
+                    type="datetime-local"
+                    value={customBefore}
+                    onChange={(e) => setCustomBefore(e.target.value ? new Date(e.target.value).toISOString() : "")}
+                    className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5 font-mono text-[11px] text-[var(--color-text)]"
+                    title="Before"
+                  />
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Anomalies toggle */}
+          <div className="col-span-12 lg:col-span-4 flex items-end gap-2">
+            <Chip
+              active={onlyAnoms}
+              onClick={() => setOnlyAnoms((v) => !v)}
+              label={onlyAnoms ? "ANOMALIES ONLY ✓" : "ANOMALIES ONLY"}
+              tone={onlyAnoms ? "warn" : "default"}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setActors([]); setKinds([]); setResource([]); setClassification("");
+                setTw("any"); setCustomAfter(""); setCustomBefore(""); setQ(""); setOnlyAnoms(false);
+              }}
+            >
+              Clear filters
+            </Button>
+          </div>
+
+          {/* Actors */}
+          <div className="col-span-12 lg:col-span-4">
+            <FilterLabel>Actor / role</FilterLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {data.facets.actors.map((a) => (
+                <Chip
+                  key={a.actor}
+                  active={actors.includes(a.actor)}
+                  onClick={() => setActors((prev) => prev.includes(a.actor) ? prev.filter((x) => x !== a.actor) : [...prev, a.actor])}
+                  label={`${a.actor} · ${a.count}`}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Resource type prefixes */}
+          <div className="col-span-12 lg:col-span-4">
+            <FilterLabel>Resource type</FilterLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {RESOURCE_PREFIXES.map((r) => (
+                <Chip
+                  key={r.value}
+                  active={resource.includes(r.value)}
+                  onClick={() => setResource((prev) => prev.includes(r.value) ? prev.filter((x) => x !== r.value) : [...prev, r.value])}
+                  label={r.label}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Classification */}
+          <div className="col-span-12 lg:col-span-4">
+            <FilterLabel>Classification on artifact</FilterLabel>
+            <div className="flex flex-wrap gap-1.5">
+              <Chip active={classification === ""} onClick={() => setClassification("")} label="ANY" />
+              {CLASS_ORDER.map((c) => (
+                <Chip
+                  key={c}
+                  active={classification === c}
+                  onClick={() => setClassification(c === classification ? "" : c)}
+                  label={classificationLabel(c)}
+                  tintColor={classificationColors(c).bg}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Action (kinds) — long list, render as collapsing chip cluster */}
+          <div className="col-span-12">
+            <FilterLabel>Action (kind)</FilterLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {data.facets.kinds.map((k) => (
+                <Chip
+                  key={k.kind}
+                  active={kinds.includes(k.kind)}
+                  onClick={() => setKinds((prev) => prev.includes(k.kind) ? prev.filter((x) => x !== k.kind) : [...prev, k.kind])}
+                  label={`${k.kind} · ${k.count}`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Pagination strip */}
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider">
+        <span>
+          {data.total.toLocaleString("en-US")} entries match · page {page + 1} / {totalPages} · showing rows {data.total === 0 ? 0 : (page * PAGE_SIZE + 1)}–{Math.min(data.total, (page + 1) * PAGE_SIZE)}
+        </span>
+        <span className="flex items-center gap-2">
+          <Button size="sm" variant="secondary" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+            ← Prev
+          </Button>
+          <Button size="sm" variant="secondary" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>
+            Next →
+          </Button>
+        </span>
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
+        {data.rows.length === 0 ? (
+          <div className="p-6">
+            <EmptyState
+              title="No audit entries match these filters"
+              description="Loosen the time window or clear a chip; the chain itself is intact."
+              action={<Button size="sm" variant="secondary" onClick={() => { setActors([]); setKinds([]); setResource([]); setClassification(""); setTw("any"); setQ(""); setOnlyAnoms(false); }}>Clear filters</Button>}
+            />
+          </div>
+        ) : (
+          <table className="w-full font-mono text-xs">
+            <thead className="sticky top-0 z-10 bg-[var(--color-surface)] text-[var(--color-text-muted)]">
+              <tr className="tracking-wider">
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-left uppercase">Time (UTC)</th>
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-left uppercase">Identity</th>
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-left uppercase">Action</th>
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-left uppercase">Resource</th>
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-left uppercase">Class</th>
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-left uppercase">Source IP</th>
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-left uppercase">Model</th>
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-center uppercase">Outcome</th>
+                <th className="border-b border-[var(--color-border)] px-2 py-2 text-left uppercase">Chain</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((r) => (
+                <AuditRow key={r.id} row={r} onOpen={setOpenRow} highlighted={openRow?.id === r.id} />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Drawer */}
+      {openRow && (
+        <RowDrawer
+          row={openRow}
+          allRows={data.rows}
+          onClose={() => setOpenRow(null)}
+          onJump={(target) => setOpenRow(target)}
+        />
+      )}
+    </div>
+  );
+}
+
+function FilterLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-1 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
+      {children}
+    </div>
+  );
+}
+
+function Chip({
+  active,
+  onClick,
+  label,
+  tone = "default",
+  tintColor,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  tone?: "default" | "warn";
+  tintColor?: string;
+}) {
+  const accent =
+    tintColor ??
+    (tone === "warn" ? "var(--color-warning)" : "var(--color-primary)");
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className="rounded-sm border px-2 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors"
+      style={{
+        background: active
+          ? `color-mix(in oklab, ${accent} 22%, var(--color-surface))`
+          : "var(--color-surface)",
+        borderColor: active ? accent : "var(--color-border)",
+        color: active ? "var(--color-text)" : "var(--color-text-secondary)",
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function AuditRow({
+  row,
+  onOpen,
+  highlighted,
+}: {
+  row: AuditEntry;
+  onOpen: (r: AuditEntry) => void;
+  highlighted: boolean;
+}) {
+  const anomalyMark = anomalyMeta(row.anomaly_tag);
+  const outcomeColor =
+    row.outcome === "blocked" ? "var(--color-danger)" :
+    row.outcome === "error"   ? "var(--color-warning)" :
+                                "var(--color-success)";
+  return (
+    <tr
+      onClick={() => onOpen(row)}
+      className="cursor-pointer border-b border-[var(--color-border)] hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,transparent)]"
+      style={{
+        background: highlighted
+          ? "color-mix(in oklab, var(--color-primary) 14%, transparent)"
+          : undefined,
+      }}
+    >
+      <td className="px-2 py-1.5 tabular-nums text-[var(--color-text-secondary)]" title={row.ts}>
+        {fmtUtc(row.ts)}
+      </td>
+      <td className="px-2 py-1.5">
+        <div className="text-[var(--color-text)]">
+          {row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name}
+        </div>
+        <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
+          {row.identity.dodid ? `DODID ${row.identity.dodid} · ` : ""}{row.identity.role || row.actor}
+        </div>
+      </td>
+      <td className="px-2 py-1.5 text-[var(--color-text)]">
+        <div className="flex items-center gap-1.5">
+          {anomalyMark && (
+            <span
+              title={anomalyMark.title}
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ background: anomalyMark.color }}
+            />
+          )}
+          {row.kind}
+        </div>
+      </td>
+      <td className="px-2 py-1.5 text-[var(--color-text-secondary)]" title={row.subject_id || "—"}>
+        {row.subject_id || "—"}
+      </td>
+      <td className="px-2 py-1.5">
+        {row.classification ? (
+          <span
+            className="rounded-sm border px-1 py-[1px] text-[10px] uppercase tracking-wider"
+            style={{
+              color: classificationColors(row.classification).bg,
+              borderColor: "color-mix(in oklab, currentColor 50%, transparent)",
+              background: "color-mix(in oklab, currentColor 12%, transparent)",
+            }}
+          >
+            {row.classification.replace(/_/g, " ")}
+          </span>
+        ) : (
+          <span className="text-[var(--color-text-muted)]">—</span>
+        )}
+      </td>
+      <td className="px-2 py-1.5 tabular-nums text-[var(--color-text-secondary)]">
+        {row.source_ip || "—"}
+      </td>
+      <td className="px-2 py-1.5 text-[var(--color-text-secondary)]">
+        {row.model_invoked || "—"}
+      </td>
+      <td className="px-2 py-1.5 text-center">
+        <span
+          className="rounded-sm border px-1 py-[1px] text-[10px] uppercase tracking-wider"
+          style={{
+            color: outcomeColor,
+            borderColor: "color-mix(in oklab, currentColor 50%, transparent)",
+            background: "color-mix(in oklab, currentColor 12%, transparent)",
+          }}
+        >
+          {row.outcome}
+        </span>
+      </td>
+      <td className="px-2 py-1.5">
+        <span
+          className="font-mono tabular-nums text-[10px] tracking-wider"
+          style={{
+            color: row.chain_ok ? "var(--color-text-muted)" : "var(--color-danger)",
+          }}
+          title={`prev ${row.prev_hash}\nself ${row.self_hash}`}
+        >
+          {row.self_hash.slice(0, 8)}…{row.chain_ok ? "" : " ⚠"}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+function anomalyMeta(tag: AuditEntry["anomaly_tag"]): { color: string; title: string } | null {
+  switch (tag) {
+    case "broken_chain":
+      return { color: "var(--color-danger)",  title: "Hash chain break — row tampered or out of sequence" };
+    case "spillage_prevented":
+      return { color: "var(--color-warning)", title: "Spillage prevented — a user attempted an export above their clearance" };
+    case "downgrade_blocked":
+      return { color: "var(--color-warning)", title: "Downgrade blocked — operator attempted to lower an existing classification" };
+    case "blocked_or_error":
+      return { color: "var(--color-warning)", title: "Blocked or error event" };
+    default:
+      return null;
+  }
+}
+
+function RowDrawer({
+  row,
+  allRows,
+  onClose,
+  onJump,
+}: {
+  row: AuditEntry;
+  allRows: AuditEntry[];
+  onClose: () => void;
+  onJump: (target: AuditEntry) => void;
+}) {
+  // ESC closes the drawer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // "Related" rows = anything in the current page sharing the subject_id.
+  // For chain-link navigation the API already returns prev/self hashes; we
+  // resolve adjacent rows by hash where they happen to be on this page.
+  const related = useMemo(
+    () => row.subject_id
+      ? allRows.filter((r) => r.id !== row.id && r.subject_id === row.subject_id)
+      : [],
+    [row, allRows],
+  );
+  const prevInPage = useMemo(
+    () => allRows.find((r) => r.self_hash === row.prev_hash) || null,
+    [row, allRows],
+  );
+  const nextInPage = useMemo(
+    () => allRows.find((r) => r.prev_hash === row.self_hash) || null,
+    [row, allRows],
+  );
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]"
+        aria-hidden="true"
+      />
+      <aside
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[560px] flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl"
+        role="dialog"
+        aria-label={`Audit entry ${row.id}`}
+      >
+        <div className="flex items-start justify-between border-b border-[var(--color-border)] p-4">
+          <div>
+            <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
+              Audit entry · id {row.id}
+            </div>
+            <div className="mt-1 font-mono text-base font-semibold text-[var(--color-text)] tracking-wide">
+              {row.kind}
+            </div>
+            <div className="mt-0.5 font-mono text-[11px] tabular-nums text-[var(--color-text-secondary)]">
+              {row.ts}
+            </div>
+          </div>
+          <IconButton aria-label="Close drawer" onClick={onClose} variant="ghost">✕</IconButton>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* Identity + outcome card */}
+          <Section label="Identity">
+            <KV k="Name"  v={row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name} />
+            <KV k="DODID" v={row.identity.dodid || "(not captured)"} />
+            <KV k="Role"  v={row.identity.role || row.actor} />
+            <KV k="Unit"  v={row.identity.unit || "—"} />
+          </Section>
+
+          <Section label="Action">
+            <KV k="Kind"     v={row.kind} />
+            <KV k="Resource" v={row.subject_id || "—"} />
+            <KV k="Outcome"  v={row.outcome.toUpperCase()} />
+            <KV k="Class"    v={row.classification ? row.classification.replace(/_/g, " ") : "—"} />
+            <KV k="Model"    v={row.model_invoked || "—"} />
+            <KV k="Source IP" v={row.source_ip || "—"} />
+            {row.anomaly_tag && (
+              <div
+                className="mt-2 rounded-sm border px-2 py-1.5 font-mono text-[11px] tracking-wide"
+                style={{
+                  color: row.anomaly_tag === "broken_chain" ? "var(--color-danger)" : "var(--color-warning)",
+                  borderColor: "currentColor",
+                  background: "color-mix(in oklab, currentColor 12%, transparent)",
+                }}
+              >
+                {anomalyMeta(row.anomaly_tag)?.title}
+              </div>
+            )}
+          </Section>
+
+          <Section label="Hash chain">
+            <KV
+              k="prev"
+              v={
+                <HashLink hash={row.prev_hash} target={prevInPage} onJump={onJump} />
+              }
+            />
+            <KV
+              k="self"
+              v={
+                <span className="font-mono tabular-nums text-[var(--color-text-secondary)]" title={row.self_hash}>
+                  {row.self_hash}
+                </span>
+              }
+            />
+            <KV
+              k="next"
+              v={
+                <HashLink hash={nextInPage ? nextInPage.self_hash : ""} target={nextInPage} onJump={onJump} fallback="(not on this page)" />
+              }
+            />
+          </Section>
+
+          <Section label="Payload">
+            <pre className="overflow-x-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-[11px] leading-relaxed text-[var(--color-text)]">
+              {JSON.stringify(row.payload, null, 2)}
+            </pre>
+          </Section>
+
+          {related.length > 0 && (
+            <Section label={`Related events (same resource · ${related.length})`}>
+              <div className="flex flex-col gap-1">
+                {related.slice(0, 12).map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => onJump(r)}
+                    className="flex items-center justify-between gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-left font-mono text-[11px] tracking-wide text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+                  >
+                    <span>{fmtUtc(r.ts)} · {r.kind}</span>
+                    <span className="text-[var(--color-text-muted)]">id {r.id}</span>
+                  </button>
+                ))}
+              </div>
+            </Section>
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section className="mb-4">
+      <div className="mb-1.5 font-mono text-[10px] uppercase text-[var(--color-primary)] tracking-widest">
+        {label}
+      </div>
+      <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function KV({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-3 py-0.5 font-mono text-[12px] tracking-wide">
+      <span className="w-20 shrink-0 text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">{k}</span>
+      <span className="text-[var(--color-text)]">{v}</span>
+    </div>
+  );
+}
+
+function HashLink({
+  hash,
+  target,
+  onJump,
+  fallback = "(genesis or not on page)",
+}: {
+  hash: string;
+  target: AuditEntry | null;
+  onJump: (r: AuditEntry) => void;
+  fallback?: string;
+}) {
+  if (!hash) {
+    return <span className="text-[var(--color-text-muted)]">{fallback}</span>;
+  }
+  if (target) {
+    return (
+      <button
+        type="button"
+        onClick={() => onJump(target)}
+        className="font-mono tabular-nums text-[var(--color-primary)] underline-offset-2 hover:underline"
+        title={`Jump to id ${target.id}`}
+      >
+        {hash.slice(0, 16)}… → id {target.id}
+      </button>
+    );
+  }
+  return (
+    <span className="font-mono tabular-nums text-[var(--color-text-secondary)]" title={hash}>
+      {hash.slice(0, 16)}… <span className="text-[var(--color-text-muted)]">({fallback})</span>
+    </span>
+  );
+}

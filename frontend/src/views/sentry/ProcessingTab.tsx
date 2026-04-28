@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { api, type SentryJob, type SentryReviewQueue } from "../../api";
 import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
+import { Button, ErrorState, EmptyState, LoadingState } from "../../components/ui";
 
 const FLAG_COLORS: Record<string, string> = {
   pii: "var(--color-info)",
@@ -79,44 +80,36 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   if (!ctx.jobId) {
     return (
       <div className="flex h-full items-center justify-center p-12">
-        <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-text-secondary)]">
-          No active job. Return to Upload to load a batch and process it.
-        </div>
+        <EmptyState
+          glyph="∅"
+          title="No active job"
+          description="Return to Upload to load a batch and process it."
+          action={
+            <Button onClick={() => nav("/sentry/upload")} variant="primary" size="sm">
+              ← Back to Upload
+            </Button>
+          }
+        />
       </div>
     );
   }
   if (error) {
     return (
       <div className="flex h-full items-center justify-center p-12">
-        <div className="max-w-md rounded-md border border-[var(--color-danger-muted)] bg-[var(--color-surface)] p-6 text-center">
-          <div
-            className="font-mono text-xs uppercase text-[var(--color-danger)] tracking-widest"
-          >
-            Processing Unavailable
-          </div>
-          <div className="mt-2 spire-body text-sm">
-            SENTRY processing pipeline did not respond. Re-load the batch from Upload to retry.
-          </div>
-          <div className="mt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            {error}
-          </div>
-          <button
-            onClick={() => nav("/sentry/upload")}
-            className="mt-4 inline-flex h-11 min-w-[44px] items-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-4 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
-          >
-            ← Back to Upload
-          </button>
-        </div>
+        <ErrorState
+          title="Processing Unavailable"
+          description="SENTRY processing pipeline did not respond. Re-load the batch from Upload to retry."
+          detail={error}
+          onRetry={() => nav("/sentry/upload")}
+          retryLabel="← Back to Upload"
+        />
       </div>
     );
   }
   if (!queue || !job) {
     return (
-      <div className="flex h-full items-center justify-center p-12 text-sm text-[var(--color-text-secondary)]">
-        <div className="flex items-center gap-3 font-mono text-sm tracking-wider">
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
-          Initializing processing …
-        </div>
+      <div className="flex h-full items-center justify-center p-12">
+        <LoadingState size="page" label="Initializing processing …" />
       </div>
     );
   }
@@ -192,12 +185,9 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
             </span>
           </div>
           {done && (
-            <button
-              onClick={() => nav("/sentry/review")}
-              className="ml-3 rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-sm font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-wider"
-            >
+            <Button onClick={() => nav("/sentry/review")} size="sm" className="ml-3">
               Review queue →
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -264,7 +254,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           </span>
         </div>
         <div className="mt-2 flex items-center gap-6 text-sm">
-          <Counter label="Tier 1 (HawkStack)" value={counts.tier1} total={processed} tone="primary" />
+          <Counter label="Tier 1 (Local)" value={counts.tier1} total={processed} tone="primary" />
           <Counter label="Tier 2 (LLM)" value={counts.tier2} total={processed} tone="info" />
           <div className="ml-auto flex gap-3">
             <FlagCounter label="PII" value={counts.pii} color={FLAG_COLORS.pii} />
