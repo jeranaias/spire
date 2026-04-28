@@ -142,7 +142,13 @@ function computeBundleClassification(rows: AuditEntry[]): {
 
 export function AuditView() {
   const role = useSpireStore((s) => s.role);
-  if (role !== "security_manager") {
+  // MDM 2026 stage-pivot — bypass the security_manager scope check
+  // when the session is in stage mode. The on-stage flow lets the
+  // host close the BASTION beat by jumping into the audit chain to
+  // show the hash-chained record, regardless of which mock identity
+  // is currently signed in. Outside stage mode the wall is unchanged.
+  const stageMode = useSpireStore((s) => s.stageMode);
+  if (role !== "security_manager" && !stageMode) {
     return (
       <InsufficientPrivilege
         feature="Audit · SOC View"
@@ -156,7 +162,13 @@ export function AuditView() {
   const [kinds, setKinds]         = useState<string[]>([]);
   const [resource, setResource]   = useState<string[]>([]);
   const [classification, setClassification] = useState<string>("");
-  const [tw, setTw]               = useState<TimeWindow>("any");
+  // MDM 2026 stage-pivot — when the host opens AUDIT from the stage
+  // pill it should land on the closing-beat reveal: every operator
+  // decision across the four use cases in the last 15 minutes,
+  // chronological, hash-chained. Outside stage mode the SOC analyst
+  // gets the previous default ("any") so a deep-link to a 6-hour-old
+  // event still works.
+  const [tw, setTw]               = useState<TimeWindow>(stageMode ? "15m" : "any");
   const [customAfter, setCustomAfter]   = useState<string>("");
   const [customBefore, setCustomBefore] = useState<string>("");
   const [q, setQ]                 = useState<string>("");

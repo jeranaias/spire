@@ -11,11 +11,17 @@ interface Props {
 
 export function ScopeGuard({ view, children }: Props) {
   const role = useSpireStore((s) => s.role);
+  const stageMode = useSpireStore((s) => s.stageMode);
   const allowed = VIEW_SCOPE[view] ?? [];
   const nav = useNavigate();
   const inScope = allowed.includes(role);
 
-  if (inScope) return <>{children}</>;
+  // Round-4 — stage mode collapses the FE chrome into a four-tile
+  // walkthrough where every presenter (regardless of role) needs to
+  // see all four surfaces read-only. The backend continues to enforce
+  // role-gated WRITES (e.g. SENTRY coalition release, BASTION simulate)
+  // independently of this FE bypass, so the security model is intact.
+  if (inScope || stageMode) return <>{children}</>;
 
   const home = ROLE_DEFAULT_VIEW[role] ?? "/bastion";
 

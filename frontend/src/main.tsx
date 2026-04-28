@@ -106,10 +106,44 @@ const PitchView = lazyWithRecovery(() => import("./views/pitch/PitchView").then(
 // surface is presenter-only; no operator ever has to download the chunk
 // during normal use.
 const DemoView = lazyWithRecovery(() => import("./views/DemoView").then((m) => ({ default: m.DemoView })));
+// MDM 2026 stage-pivot — first-class landing for the DHA RESCUE
+// (Class VIII / blood resupply) hero use case. Lazy: the view is only
+// reached from the stage-mode Decision Bridge.
+const DhaRescueView = lazyWithRecovery(() => import("./views/DhaRescueView").then((m) => ({ default: m.DhaRescueView })));
 
 // Expose the active role to the API layer. Every GET/POST now splices it as
 // `?role=...` so the backend's scoping filter applies per-call.
 registerRoleSource(() => useSpireStore.getState().role);
+
+// MDM 2026 stage-pivot — hydrate `stageMode` from the URL hash query
+// string before the store renders. HashRouter parks the query inside the
+// hash (`#/path?stage=1`), so we parse the hash first and fall back to a
+// bare `?stage=1` on the document URL. `?stage=1` enables; `?stage=0`
+// (or any other value) disables. The state is also persisted to
+// localStorage so a hard reload, a fresh tab, or a popout window all
+// inherit the stage layout without re-passing the URL parameter.
+(function hydrateStageModeFromUrl() {
+  if (typeof window === "undefined") return;
+  try {
+    const hash = window.location.hash || "";
+    const hashQ = hash.indexOf("?");
+    const queries: string[] = [];
+    if (hashQ >= 0) queries.push(hash.slice(hashQ + 1));
+    if (window.location.search) queries.push(window.location.search.replace(/^\?/, ""));
+    let stageParam: string | null = null;
+    for (const q of queries) {
+      const sp = new URLSearchParams(q);
+      if (sp.has("stage")) {
+        stageParam = sp.get("stage");
+        break;
+      }
+    }
+    if (stageParam == null) return;
+    useSpireStore.getState().setStageMode(stageParam === "1");
+  } catch {
+    /* tolerant — don't crash boot on a malformed URL */
+  }
+})();
 
 // W1 — Wire the DDIL interceptor's view of the store. The api layer stays
 // Zustand-agnostic; this adapter is the single binding point. Cache TTL
@@ -162,22 +196,45 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 // Bridges the api layer's 401 callback to React-Router so any /api/* that
 // returns 401 mid-session signs the user out and bounces them to /auth.
 // Mounted once at the root.
+//
+// MDM 2026 stage-pivot — when the store is in `stageMode` we DO NOT
+// bounce the presenter to `/auth` on a transient 401 (the 4-step cert-
+// pick → PIN → sign-in dance is fatal under stage lights). Instead we
+// surface a non-blocking toast inviting the presenter to tap any
+// identity chip in the TopBar to resume; the IdentityChips strip will
+// re-issue a session via quick-switch (or PIN-fallback) on the next
+// click. Outside stage mode the original behaviour is preserved
+// byte-for-byte so operators still get the secure redirect.
 function UnauthenticatedBridge() {
   const signOut = useSpireStore((s) => s.signOut);
+  const pushToast = useSpireStore((s) => s.pushToast);
   const nav = useNavigate();
   const loc = useLocation();
   useEffect(() => {
     registerUnauthenticatedHandler(() => {
       // Only act if the store still thinks we're signed in — avoids
       // re-running on the 401 from /api/auth/me right after sign-out.
-      if (useSpireStore.getState().currentUser) {
-        signOut();
-        const intended = loc.pathname + loc.search + loc.hash;
-        nav("/auth", { state: { from: intended }, replace: true });
+      if (!useSpireStore.getState().currentUser) return;
+      if (useSpireStore.getState().stageMode) {
+        // Stage path: keep the presenter in place, surface a toast.
+        // We deliberately do NOT signOut() here because the IdentityChips
+        // strip in the TopBar can re-mint a session on the next click
+        // and the BASTION/DHA surface remains visually intact in the
+        // meantime. The toast is the only audience-visible signal.
+        pushToast({
+          tone: "warn",
+          text: "Session expired — tap any identity chip to resume.",
+          ttlMs: 6000,
+        });
+        return;
       }
+      // Operator path: clear local state and bounce to /auth.
+      signOut();
+      const intended = loc.pathname + loc.search + loc.hash;
+      nav("/auth", { state: { from: intended }, replace: true });
     });
     return () => registerUnauthenticatedHandler(() => {});
-  }, [nav, signOut, loc]);
+  }, [nav, signOut, loc, pushToast]);
   return null;
 }
 
@@ -307,6 +364,12 @@ createRoot(document.getElementById("root")!).render(
              * itself is read-only, and the scenarioControl seek calls
              * are role-checked server-side. */}
             <Route path="demo" element={<ViewSuspense><DemoView /></ViewSuspense>} />
+            {/* MDM 2026 stage-pivot — DHA RESCUE first-class surface.
+             * Reachable from the stage-mode Decision Bridge as the
+             * fourth hero use-case tile. No role gate: it's a
+             * presenter-facing summary + drill-into BASTION for the
+             * Class VIII / blood resupply vignette. */}
+            <Route path="dha-rescue" element={<ViewSuspense><DhaRescueView /></ViewSuspense>} />
           </Route>
         </Routes>
       </HashRouter>

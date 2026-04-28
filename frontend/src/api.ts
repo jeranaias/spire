@@ -258,6 +258,22 @@ export const api = {
       ),
     logout: () => jsonFetch<{ ok: boolean }>("/auth/logout", { method: "POST" }, false),
     me: () => jsonFetch<{ user: AuthUser }>("/auth/me", undefined, false),
+    /**
+     * MDM 2026 stage-pivot — re-issue a session cookie for a different
+     * MOCK identity without requiring a PIN re-entry. Backend route is
+     * additive (`POST /api/auth/quick-switch`) and gated by the
+     * `SPIRE_DEMO_QUICK_SWITCH=1` env var. Returns 404 if disabled or
+     * 404 on unknown DODID.
+     *
+     * The IdentityPill prefers this when the store is in `stageMode` so
+     * the presenter can swap CAC identity on stage with one click.
+     */
+    quickSwitch: (dodid: string) =>
+      jsonFetch<{ ok: boolean; user: AuthUser; expires_at: number }>(
+        "/auth/quick-switch",
+        { method: "POST", body: JSON.stringify({ dodid }) },
+        false,
+      ),
   },
   system: {
     status: () => jsonFetch<SystemStatus>("/system/status"),
@@ -277,6 +293,22 @@ export const api = {
         method: "POST",
         body: JSON.stringify(detail),
       }),
+    /**
+     * MDM 2026 stage-pivot — append an audit chain entry for a DHA
+     * RESCUE operator action (Advance to H+72, approve market
+     * sourcing, etc.). Backend at `POST /api/system/dha-rescue/audit`
+     * stamps the entry with the session DODID + role.
+     */
+    dhaRescueAudit: (detail: {
+      action: string;
+      advance_to_hour?: number;
+      recommendation_id?: string;
+      subject_id?: string;
+    }) =>
+      jsonFetch<{ ok: boolean; logged: boolean; action: string }>(
+        "/system/dha-rescue/audit",
+        { method: "POST", body: JSON.stringify(detail) },
+      ),
     datasetInfo: () => jsonFetch<DatasetInfo>("/system/dataset-info"),
     commsState: () => jsonFetch<CommsStateResponse>("/system/comms/state"),
     setAirGap: (enable: boolean, reason?: string) =>
@@ -314,6 +346,24 @@ export const api = {
     // dispatch — the player just steers the FE through the beats.
     scenarioBloodVignette: () =>
       jsonFetch<BloodScenarioMeta>("/system/scenario/blood-h72", undefined, false),
+    // Round-4 — pull the injected events buffer for the DHA RESCUE
+    // surface so the operator can see scripted alerts/forecasts/
+    // requisitions/toasts that fired this run. Backed by
+    // /api/system/scenario/blood-h72/feed.
+    scenarioBloodFeed: (sinceOffsetMin?: number, kinds?: string[], limit = 100) => {
+      const sp = new URLSearchParams();
+      if (typeof sinceOffsetMin === "number" && Number.isFinite(sinceOffsetMin)) {
+        sp.set("since_offset_min", String(sinceOffsetMin));
+      }
+      if (kinds && kinds.length > 0) sp.set("kind", kinds.join(","));
+      sp.set("limit", String(limit));
+      const qs = sp.toString();
+      return jsonFetch<BloodScenarioFeed>(
+        `/system/scenario/blood-h72/feed${qs ? `?${qs}` : ""}`,
+        undefined,
+        false,
+      );
+    },
     adminTelemetry: () => jsonFetch<AdminTelemetry>("/system/admin/telemetry"),
     adminOutcomes: (limit = 50, kind?: string) => {
       const sp = new URLSearchParams();
@@ -2050,4 +2100,24 @@ export interface BloodScenarioMeta {
     rehearsal_dwell_seconds_per_beat?: number;
   };
   global_sources?: string[];
+}
+
+// Round-4 — events buffer served by /api/system/scenario/blood-h72/feed.
+// One row per scripted injection (alert / forecast / requisition / toast).
+// The consumer only treats `kind`, `offset_min`, `beat_id`, `payload` as
+// authoritative; unknown keys are tolerated.
+export interface BloodScenarioFeedEvent {
+  kind: string;
+  offset_min: number;
+  beat_id?: string;
+  event_id?: string;
+  phase?: string;
+  payload?: Record<string, unknown>;
+  [k: string]: unknown;
+}
+
+export interface BloodScenarioFeed {
+  scenario_id: string;
+  events: BloodScenarioFeedEvent[];
+  as_of: string;
 }

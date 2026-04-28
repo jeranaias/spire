@@ -8,6 +8,7 @@ import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
 import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
 import { RefreshAge } from "../components/RefreshAge";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
+import { UseCaseStrip } from "../components/UseCaseStrip";
 import {
   Button,
   IconButton,
@@ -550,7 +551,13 @@ export function BastionView() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
+    // MDM 2026 stage-pivot — wrap the original sidebar+map+panel row
+    // in a flex-column so the UseCaseStrip can sit above it without
+    // disturbing the existing 3-pane layout. Strip is render-noop in
+    // operator mode so this wrapper has no visual impact off-stage.
+    <div className="flex h-full flex-col overflow-hidden">
+      <UseCaseStrip number="15" title="BASTION" subtitle="INSTALLATION COP AGGREGATOR · gates · utilities · emergency · weather · sensors" accent="var(--color-danger)" />
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left sidebar: alert stream */}
       <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
         <AlertStreamHeader
@@ -732,7 +739,7 @@ export function BastionView() {
          * (left-3) and Mission Clock (right-3) overlapping. The button
          * is also disabled during an active sim, so hiding the whole
          * pill removes the overlap and the dead control simultaneously. */}
-        {(role === "mef_commander" || role === "security_manager" || role === "g4") && !sim && (
+        {(role === "mef_commander" || role === "security_manager" || role === "g4" || useSpireStore.getState().stageMode) && !sim && (
           <div
             className="pointer-events-auto absolute left-3 top-3 z-[7] flex items-center gap-1.5"
             role="region"
@@ -833,6 +840,7 @@ export function BastionView() {
           }}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -1406,17 +1414,29 @@ function ResponsePanel({
               )}
             </div>
             <div className="font-mono text-[var(--color-text)]">{alert.model_info.model}</div>
-            <div className="text-[var(--color-text-secondary)]">
-              {alert.model_info.parameters.toLocaleString("en-US")} parameters · {alert.model_info.architecture}
-              {alert.model_info.validation_map_50_95 != null && (
-                <span className="ml-1 text-[var(--color-text-muted)]">
-                  · val mAP {(alert.model_info.validation_map_50_95 * 100).toFixed(1)}%
-                </span>
-              )}
-            </div>
-            <div className="mt-1 break-words text-xs text-[var(--color-text-muted)]">
-              {alert.model_info.training} · target: {alert.model_info.deployment_target}
-            </div>
+            {(alert.model_info.parameters != null || alert.model_info.architecture || alert.model_info.validation_map_50_95 != null) && (
+              <div className="text-[var(--color-text-secondary)]">
+                {alert.model_info.parameters != null && (
+                  <>{alert.model_info.parameters.toLocaleString("en-US")} parameters</>
+                )}
+                {alert.model_info.parameters != null && alert.model_info.architecture && " · "}
+                {alert.model_info.architecture}
+                {alert.model_info.validation_map_50_95 != null && (
+                  <span className="ml-1 text-[var(--color-text-muted)]">
+                    · val mAP {(alert.model_info.validation_map_50_95 * 100).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+            )}
+            {(alert.model_info.training || alert.model_info.deployment_target || alert.model_info.capability) && (
+              <div className="mt-1 break-words text-xs text-[var(--color-text-muted)]">
+                {alert.model_info.capability && <>{alert.model_info.capability}</>}
+                {alert.model_info.capability && (alert.model_info.training || alert.model_info.deployment_target) && " · "}
+                {alert.model_info.training}
+                {alert.model_info.training && alert.model_info.deployment_target && " · "}
+                {alert.model_info.deployment_target && <>target: {alert.model_info.deployment_target}</>}
+              </div>
+            )}
             {alert.model_info.weights_size_mb != null && (
               <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)]">
                 Weights on disk: {alert.model_info.weights_size_mb} MB

@@ -78,6 +78,9 @@ function useGoToShortcuts() {
           case "p": go("/pulse"); break;
           case "b": go("/bastion"); break;
           case "a": go("/admin"); break;
+          // MDM 2026 stage-pivot — `g d` jumps to the DHA RESCUE
+          // hero surface. Always allowed (the route has no scope guard).
+          case "d": nav("/dha-rescue"); break;
           // 'g f' opens the feedback drawer. Dispatched as a window event
           // so FeedbackDrawer can listen without duplicating the chord
           // window state. Walkthrough audit: prior shortcut was Shift+F
@@ -120,9 +123,26 @@ function useFailsafeHotkey() {
   const scenarioLoaded = useScenarioPlayer((s) => s.scenarioId !== null);
   const openFullscreen = useFailsafe((s) => s.openFullscreen);
   const mode = useFailsafe((s) => s.mode);
+  // MDM 2026 stage-pivot — when the operator session is in stage mode
+  // (the on-stage demo cockpit) the F9 failsafe must be reachable from
+  // any route, not just /demo and /pitch. The surrounding stage flow
+  // navigates SENTRY/PULSE/BASTION/DHA RESCUE, and the presenter still
+  // needs the recorded backup as a single keystroke escape hatch.
+  const stageMode = useSpireStore((s) => s.stageMode);
 
   useEffect(() => {
-    if (!scenarioLoaded) return;
+    // Failsafe hotkey is armed whenever a presenter context is active:
+    // a scenario is loaded, the operator session is in MDM 2026 stage
+    // mode, or the route is one of the dedicated presenter surfaces
+    // (/demo, /pitch). Any of these means F9 should reach the recorded
+    // backup with one keystroke.
+    const path = window.location.pathname;
+    const presenterRoute =
+      path === "/demo" ||
+      path === "/pitch" ||
+      path.startsWith("/demo/") ||
+      path.startsWith("/pitch/");
+    if (!scenarioLoaded && !stageMode && !presenterRoute) return;
 
     function inField(target: EventTarget | null): boolean {
       return (
@@ -150,7 +170,7 @@ function useFailsafeHotkey() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [scenarioLoaded, mode, openFullscreen]);
+  }, [scenarioLoaded, stageMode, mode, openFullscreen]);
 }
 
 export default function App() {

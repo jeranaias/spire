@@ -7,6 +7,7 @@ import { ExportTab } from "./sentry/ExportTab";
 import { MarkTab } from "./sentry/MarkTab";
 import { CoalitionTab } from "./sentry/CoalitionTab";
 import { useSpireStore } from "../state/store";
+import { UseCaseStrip } from "../components/UseCaseStrip";
 
 export interface SentryContext {
   batchId: string | null;
@@ -42,6 +43,7 @@ export function SentryView() {
     <div className="flex h-full flex-col">
       {/* Single h1 per view for screen-reader document outline. */}
       <h1 className="sr-only">SENTRY · Classification &amp; Release</h1>
+      <UseCaseStrip number="14" title="SENTRY" subtitle="CUI AUTO-TAGGING — DoDM 5200.01" accent="var(--color-info)" />
       <SentrySubnav />
       <div className="flex-1 overflow-hidden">
         <Routes>
