@@ -20,6 +20,41 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
   // total + filename for the bar's accessible label.
   const [progress, setProgress] = useState<number>(0);
   const [progressLabel, setProgressLabel] = useState<string>("");
+  // Task #131 — Process-batch caption must reflect what the pipeline
+  // ACTUALLY does on this build. Task #65 fixed the same dishonest
+  // framing on the Processing tab (no LLM is loaded; the engine is
+  // regex-only) but the Upload pre-flight still claimed a Tier-2
+  // language-model gate. We read the load flags from
+  // /api/system/status so the caption flips automatically the moment
+  // weights are present without any further code change.
+  const [modelsLoaded, setModelsLoaded] = useState<{
+    sentry: boolean;
+    pulse: boolean;
+    known: boolean;
+  }>({ sentry: false, pulse: false, known: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    api.system
+      .status()
+      .then((s) => {
+        if (cancelled) return;
+        setModelsLoaded({
+          sentry: !!s.models?.sentry_loaded,
+          pulse: !!s.models?.pulse_loaded,
+          known: true,
+        });
+      })
+      .catch(() => {
+        // If status is unreachable, leave `known=false` so the caption
+        // falls back to the generic "rule-based pattern engine"
+        // wording — never claim a model gate we can't confirm.
+        if (!cancelled) setModelsLoaded({ sentry: false, pulse: false, known: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function loadCanonical() {
     setLoading(true);
@@ -387,7 +422,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
               Process batch
             </Button>
             <span className="text-xs text-[var(--color-text-muted)]">
-              Tier-1 pattern engine runs first; ambiguous records escalate to the language-model gate.
+              {processCaption(modelsLoaded)}
             </span>
           </div>
         </div>
@@ -458,6 +493,30 @@ function uploadWithProgress(
     form.append("file", file);
     xhr.send(form);
   });
+}
+
+/**
+ * Task #131 — return an honest one-liner that describes what the
+ * Process-batch action will actually do, driven by the live model load
+ * flags from /api/system/status.
+ *
+ * Three cases:
+ *   • Status not yet known (or unreachable): generic rule-based wording
+ *     with no claim about a Tier-2 gate.
+ *   • At least one model loaded: the original Tier-1 → Tier-2 escalation
+ *     wording is honest again.
+ *   • Both models offline (the prevailing case on this build): say so
+ *     explicitly — Tier-2 gate is OFFLINE and ambiguous records are
+ *     would-route only.
+ */
+function processCaption(models: { sentry: boolean; pulse: boolean; known: boolean }): string {
+  if (!models.known) {
+    return "Rule-based pattern engine. Tier-2 model gate status not yet confirmed for this build.";
+  }
+  if (models.sentry || models.pulse) {
+    return "Tier-1 pattern engine runs first; ambiguous records escalate to the language-model gate.";
+  }
+  return "Rule-based pattern engine only. Tier-2 model gate is offline on this build — ambiguous records are flagged would-route, not sent to an LLM.";
 }
 
 function fmtBatchTimestamp(iso: string | undefined | null): string {
