@@ -518,3 +518,205 @@ def keep(role: Optional[str], allowed: Optional[set[str]], unit_name: str) -> bo
     if allowed is None:
         return True
     return unit_name in allowed
+
+
+# ---------------------------------------------------------------------------
+# Installation footprint scoping (buildings, ECPs, rally points).
+#
+# Background: the BASTION COP used to return the full installation map
+# (every building, every ECP, every rally point — including ammo, ARMS,
+# fuel, hazmat) to every role, including a battalion-level Maintenance
+# Chief whose unit scope is a single CLB. That payload is a complete
+# OSINT installation product handed to the role most likely to be phished.
+#
+# Truth source for which roles see the full map. Everyone else gets a
+# scoped, sensitive-infra-stripped view derived from `allowed_units(...)`
+# and the per-record `sector` / `occupant_unit` tags in
+# `dataset/data/installation_data.json`.
+# ---------------------------------------------------------------------------
+
+INSTALLATION_FULL_VIEW_ROLES = frozenset({"security_manager", "mef_commander"})
+
+# Roles for which the installation map is not part of their workflow at
+# all. Returning an empty footprint to them is safer than leaking the
+# full perimeter just because their unit-scope happens to be unrestricted.
+INSTALLATION_NO_VIEW_ROLES = frozenset({"data_custodian"})
+
+# Building types that are sensitive OSINT regardless of who occupies the
+# building. Stripped from any non-INSTALLATION_FULL_VIEW_ROLES payload —
+# even an occupant has no operational need for the rest of the base's
+# ammo / ARMS / fuel / hazmat / comms-node / TOC inventory in their COP.
+SENSITIVE_BUILDING_TYPES = frozenset({
+    "ammunition",
+    "arms_storage",
+    "fuel",
+    "hazmat",
+    "communications",
+    "tactical",
+})
+
+
+def allowed_sectors(
+    ds: CanonicalDataset,
+    role: Optional[str],
+    buildings: Iterable[dict],
+) -> Optional[set[str]]:
+    """Sectors of the installation visible to this role.
+
+    Returns:
+        - `None` when the role gets the full installation view (no filter).
+        - `set()` when the role explicitly gets no installation footprint.
+        - A populated set otherwise — derived from the `sector` field on
+          each allowed unit's `home_building`.
+    """
+    if role in INSTALLATION_FULL_VIEW_ROLES:
+        return None
+    # Unknown / absent role: preserve the legacy "no filter" behaviour for
+    # internal call sites (CLI tools, tests). Production traffic always
+    # passes a role through the session middleware.
+    if not role:
+        return None
+    if role in INSTALLATION_NO_VIEW_ROLES:
+        return set()
+    allowed = allowed_units(ds, role)
+    if allowed is None:
+        # A role with no configured unit filter but also not in the
+        # full-view set — collapse to empty footprint rather than leak.
+        return set()
+    bldgs_by_id = {b["id"]: b for b in buildings}
+    sectors: set[str] = set()
+    for u in ds.units:
+        if u.name not in allowed:
+            continue
+        home_id = getattr(u, "home_building", None)
+        if not home_id:
+            continue
+        b = bldgs_by_id.get(home_id)
+        if b and b.get("sector"):
+            sectors.add(b["sector"])
+    return sectors
+
+
+def _coarsen_grid(grid: Optional[str]) -> Optional[str]:
+    """Reduce a 5-digit MGRS grid to its 1km cell centroid.
+
+    "18S UJ 28580 71040" -> "18S UJ 28500 71000". Returns the input
+    unchanged if it doesn't parse as 5-digit easting/northing — coarsening
+    is a defence-in-depth measure, not the truth source for OSINT
+    protection (the strip / drop rules in `filter_buildings` are)."""
+    if not grid:
+        return grid
+    parts = grid.split()
+    if len(parts) != 4:
+        return grid
+    zone, square, e, n = parts
+    if not (e.isdigit() and n.isdigit() and len(e) == len(n) >= 3):
+        return grid
+    drop = min(2, len(e) - 1)
+    e_coarse = e[: len(e) - drop] + ("0" * drop)
+    n_coarse = n[: len(n) - drop] + ("0" * drop)
+    return f"{zone} {square} {e_coarse} {n_coarse}"
+
+
+def _coarsen_critical_building(b: dict) -> dict:
+    """Return a 1km-MGRS-centroid view of a critical / hazmat building.
+
+    Stripped: precise lat/lon, occupancy figures, utility wiring detail,
+    floor counts, free-text notes, the `nearest_rally_point` tag (an
+    operator inside the building doesn't need to be told their own RP,
+    and that tag is OSINT for adversary planning).
+    Kept: id, name, type, sector, occupant_unit, coarsened grid +
+    coarsened lat/lon (~1km precision), and a `coarsened: True` flag so
+    the operator knows the COP is a reduced-resolution view of their own
+    footprint.
+    """
+    out: dict = {
+        "id": b.get("id"),
+        "name": b.get("name"),
+        "type": b.get("type"),
+        "sector": b.get("sector"),
+        "occupant_unit": b.get("occupant_unit"),
+        "grid": _coarsen_grid(b.get("grid")),
+        "coarsened": True,
+    }
+    # 2-decimal lat/lon ≈ 1.1km precision at this latitude — matches the
+    # 1km-MGRS coarsening above so map and grid agree.
+    if b.get("lat") is not None:
+        out["lat"] = round(float(b["lat"]), 2)
+    if b.get("lon") is not None:
+        out["lon"] = round(float(b["lon"]), 2)
+    return out
+
+
+def filter_buildings(
+    buildings: Iterable[dict],
+    ds: CanonicalDataset,
+    role: Optional[str],
+) -> list[dict]:
+    """Return the buildings visible to this role.
+
+    Rules (in order of precedence):
+      1. `INSTALLATION_FULL_VIEW_ROLES` — full list, no strip, no coarsen.
+      2. `INSTALLATION_NO_VIEW_ROLES` — empty list.
+      3. No role passed (CLI / test) — preserve legacy unrestricted view.
+      4. Otherwise, per building:
+         a. Drop if `type in SENSITIVE_BUILDING_TYPES` (ammo / ARMS / fuel
+            / hazmat / comms-node / TOC are OSINT regardless of who
+            occupies them).
+         b. If `hazmat_present` or `critical_infrastructure`:
+              - if `occupant_unit ∈ allowed_units`, COARSEN the record
+                to a 1km-MGRS centroid + minimal attributes (no precise
+                lat/lon, no occupancy, no utility wiring, no notes) so
+                the operator knows their CI footprint exists without
+                handing a full OSINT product to a phished CAC.
+              - otherwise, drop.
+         c. Else if `occupant_unit ∈ allowed_units`, keep at full
+            fidelity (the operator's own non-CI building).
+         d. Else if the building has no occupant tag and its `sector` is
+            in `allowed_sectors(role)`, keep at full fidelity (shared
+            base infra in the operator's neighbourhood — barracks,
+            DFAC, MWR).
+         e. Drop everything else.
+    """
+    bldgs = list(buildings)
+    if role in INSTALLATION_FULL_VIEW_ROLES:
+        return bldgs
+    if not role:
+        return bldgs
+    if role in INSTALLATION_NO_VIEW_ROLES:
+        return []
+    allowed_u = allowed_units(ds, role) or set()
+    sectors = allowed_sectors(ds, role, bldgs) or set()
+    out: list[dict] = []
+    for b in bldgs:
+        if b.get("type") in SENSITIVE_BUILDING_TYPES:
+            continue
+        occupant = b.get("occupant_unit")
+        is_critical = bool(b.get("hazmat_present") or b.get("critical_infrastructure"))
+        if is_critical:
+            if occupant and occupant in allowed_u:
+                out.append(_coarsen_critical_building(b))
+            # Otherwise drop — non-occupant CI is never visible to a
+            # lower-scoped role, even within their sector.
+            continue
+        if occupant and occupant in allowed_u:
+            out.append(b)
+            continue
+        if not occupant and b.get("sector") in sectors:
+            out.append(b)
+    return out
+
+
+def filter_perimeter(
+    items: Iterable[dict],
+    sectors: Optional[set[str]],
+) -> list[dict]:
+    """Filter ECPs / rally-points / similar perimeter records by sector.
+
+    `sectors=None` (full-view role) returns the input unchanged. An empty
+    set returns an empty list — the caller asked for a scoped view and we
+    found no association, which is the safe default."""
+    items = list(items)
+    if sectors is None:
+        return items
+    return [i for i in items if i.get("sector") in sectors]
