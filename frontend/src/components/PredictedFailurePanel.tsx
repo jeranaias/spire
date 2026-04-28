@@ -159,9 +159,12 @@ export function PredictedFailurePanel({
                 text: `Opening recommended actions for ${a.unit_name} · ${a.equipment_type}`,
                 ttlMs: 4000,
               });
-              nav(
-                `/pulse/forecast?unit=${encodeURIComponent(a.unit_name)}&asset=${encodeURIComponent(a.asset_id)}`,
-              );
+              // Pass unit/asset via router state, not URL params —
+              // unit names in copy-pasted URLs are themselves an OPSEC
+              // leak (forecast-leak finding F-15).
+              nav("/pulse/forecast", {
+                state: { unit: a.unit_name, asset: a.asset_id },
+              });
             }}
           />
         ))}
