@@ -327,7 +327,7 @@ export const api = {
      * comma-joined where the backend accepts a list (actors / kinds /
      * resource); empty strings are skipped so the URL stays compact.
      */
-    auditQuery: (params: AuditQueryParams = {}) => {
+    auditQuery: (params: AuditQueryParams = {}, opts?: { signal?: AbortSignal }) => {
       const sp = new URLSearchParams();
       if (params.actors?.length)  sp.set("actors",  params.actors.join(","));
       if (params.kinds?.length)   sp.set("kinds",   params.kinds.join(","));
@@ -339,7 +339,10 @@ export const api = {
       if (params.only_anomalies)  sp.set("only_anomalies", "true");
       sp.set("limit",  String(params.limit  ?? 100));
       sp.set("offset", String(params.offset ?? 0));
-      return jsonFetch<AuditQueryResult>(`/system/admin/audit?${sp.toString()}`);
+      return jsonFetch<AuditQueryResult>(
+        `/system/admin/audit?${sp.toString()}`,
+        opts?.signal ? { signal: opts.signal } : undefined,
+      );
     },
     // W1 #30 — model registry / supply-chain page. Restricted server-side
     // to security_manager via MODEL_REGISTRY_ROLES.

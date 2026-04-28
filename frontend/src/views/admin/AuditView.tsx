@@ -96,6 +96,19 @@ export function AuditView() {
   const [customAfter, setCustomAfter]   = useState<string>("");
   const [customBefore, setCustomBefore] = useState<string>("");
   const [q, setQ]                 = useState<string>("");
+  // Task #39 (F4) — debounced free-text search. Wiring `onChange` straight
+  // into `queryParams` fired one /system/admin/audit round-trip per
+  // keystroke; on a SATCOM-Yellow link a 17-character SR number raced 17
+  // in-flight queries home and the *last* response (not the one matching
+  // the final string) won. We coalesce keystrokes into a single trailing
+  // query 220ms after typing settles, and abort any in-flight audit query
+  // when a newer one supersedes it (see fetch effect below). Mirrors the
+  // pattern in InferenceEconomicsTab.tsx (Defend-the-cost slider).
+  const [debouncedQ, setDebouncedQ] = useState<string>("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 220);
+    return () => clearTimeout(t);
+  }, [q]);
   const [onlyAnoms, setOnlyAnoms] = useState<boolean>(false);
   const [page, setPage]           = useState<number>(0);
   const [data, setData]           = useState<AuditQueryResult | null>(null);
@@ -104,8 +117,9 @@ export function AuditView() {
   const [openRow, setOpenRow]     = useState<AuditEntry | null>(null);
 
   // Reset to page 0 whenever a filter changes — otherwise a narrowed result
-  // set leaves the operator on an empty trailing page.
-  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, q, onlyAnoms]);
+  // set leaves the operator on an empty trailing page. Use the *debounced*
+  // search value so the page doesn't reset on every keystroke.
+  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms]);
 
   const queryParams = useMemo<AuditQueryParams>(() => {
     const range = tw === "custom"
@@ -118,48 +132,81 @@ export function AuditView() {
       classification: classification || undefined,
       after:          range.after,
       before:         range.before,
-      q:              q.trim() || undefined,
+      q:              debouncedQ.trim() || undefined,
       only_anomalies: onlyAnoms || undefined,
       limit:          PAGE_SIZE,
       offset:         page * PAGE_SIZE,
     };
-  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, q, onlyAnoms, page]);
+  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms, page]);
 
   useEffect(() => {
     let cancelled = false;
-    const run = async (firstLoad: boolean) => {
+    const controller = new AbortController();
+    const run = async () => {
       try {
-        const fetcher = firstLoad
-          ? () => withRetry(() => api.system.auditQuery(queryParams), {
-              onAttempt: (attempt) => { if (!cancelled) setWaking(attempt > 1); },
-            })
-          : () => api.system.auditQuery(queryParams);
-        const r = await fetcher();
+        // Each filter-change cycle goes through withRetry — `withRetry` only
+        // re-issues on transient 5xx / network errors, so on a healthy link
+        // it costs nothing extra; on a Fly cold-start it gives the operator
+        // the "Waking…" affordance instead of a hard error. The same
+        // AbortSignal is threaded into every attempt so a newer queryParams
+        // (debounced search, filter chip, page nav) cancels in-flight work
+        // including any pending backoff retry.
+        const r = await withRetry(
+          () => api.system.auditQuery(queryParams, { signal: controller.signal }),
+          { onAttempt: (attempt) => { if (!cancelled) setWaking(attempt > 1); } },
+        );
         if (cancelled) return;
         setData(r);
         setError(null);
         setWaking(false);
       } catch (e) {
         if (cancelled) return;
-        if (firstLoad) {
-          setError(formatApiError(e));
-          setWaking(false);
-        } else {
-          console.warn("Audit query poll failed:", e);
-        }
+        // AbortError is the expected outcome of a faster keystroke landing
+        // a newer query — don't surface it as a UI error or a console warn.
+        const name = (e as { name?: string } | null)?.name;
+        if (controller.signal.aborted || name === "AbortError") return;
+        setError(formatApiError(e));
+        setWaking(false);
       }
     };
-    run(true);
-    return () => { cancelled = true; };
+    run();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [queryParams]);
 
   // Polled refresh (12s) — separate effect so filter re-fetches don't fight
-  // the timer.
+  // the timer. Gated on `document.visibilityState === "visible"` so a
+  // backgrounded tab does not keep DoSing the operator's own backend on a
+  // degraded link (Task #39 / F4). Re-runs immediately on visibility-change
+  // back to "visible" so the analyst sees fresh data when they refocus.
+  // The poll's in-flight request is abortable too, so a queryParams change
+  // (or unmount) doesn't leak a stale poll response on top of the fresh
+  // filter-driven response.
   useEffect(() => {
-    const id = setInterval(() => {
-      api.system.auditQuery(queryParams).then(setData).catch(() => {});
-    }, 12_000);
-    return () => clearInterval(id);
+    const controller = new AbortController();
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      api.system
+        .auditQuery(queryParams, { signal: controller.signal })
+        .then((r) => { if (!controller.signal.aborted) setData(r); })
+        .catch(() => { /* AbortError + transient errors: poll silently retries on next tick */ });
+    };
+    const id = setInterval(tick, 12_000);
+    const onVis = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") tick();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVis);
+    }
+    return () => {
+      clearInterval(id);
+      controller.abort();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVis);
+      }
+    };
   }, [queryParams]);
 
   const onExport = useCallback(async () => {
