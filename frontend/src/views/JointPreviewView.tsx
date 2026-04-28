@@ -33,6 +33,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, type JointOmsUciExport } from "../api";
+import { ClassificationBannerStrip } from "../components/ClassificationBannerStrip";
 import { useSpireStore, type DdilMode } from "../state/store";
 
 interface State {
@@ -170,42 +171,61 @@ export function JointPreviewView() {
       })()
     : null;
 
+  // Layout: outer column flex pins the canonical CAPCO classification
+  // strips to the very top and bottom of the viewport (DoDM 5200.01-V2
+  // page-level marking, task #151). The Navy partner chrome — its own
+  // SECRET/REL header, JLTC topbar, hotline strip, body and operator
+  // footer — lives inside the flex-1 middle pane that scrolls. The
+  // strip is the canonical green CAPCO block (UNCLASSIFIED // DEMO DATA
+  // // NOT FOR OPERATIONAL USE) regardless of the Navy palette below;
+  // classification marking is service-agnostic and must be visible in
+  // the first frame on a 30-ft projector. No FPCON badge: the partner
+  // shell has no SPIRE session state to surface.
   return (
     <div
+      className="flex h-screen w-full flex-col"
       style={{
-        position: "fixed",
-        inset: 0,
         background: "#0d1620",
         color: "#cfdbe4",
         fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        overflow: "auto",
       }}
     >
-      <JointBanner
-        classification={s.data?.envelope.classification.marking ?? "SECRET"}
-        releasability={s.data?.envelope.classification.releasability ?? "REL TO USA, FVEY"}
-      />
-      {isDisconnected && (
-        <StaleStripe lastGoodAgeSec={lastGoodAgeSec} cachedAt={ddilLastCacheHit?.cachedAt ?? s.lastGoodPullAt ?? null} />
-      )}
-      <JointTopBar
-        publishedAgoSec={publishedAgoSec}
-        pulledAgoSec={pulledAgoSec}
-        loading={s.loading}
-        onPull={() => void pull()}
-        ddilMode={ddilMode}
-      />
-      <HotlineStrip hot={hot} ddilMode={ddilMode} />
-      <main style={{ padding: "16px 24px 64px", maxWidth: 1600, margin: "0 auto" }}>
-        {s.error ? (
-          <ErrorPanel message={s.error} status={s.errorStatus} />
-        ) : s.loading && !s.data ? (
-          <LoadingPanel />
-        ) : s.data ? (
-          <Console data={s.data} />
-        ) : null}
-      </main>
-      <JointFooter operator={s.data?.envelope.operator ?? null} subscription={s.data?.envelope.subscriptionModel ?? null} />
+      <ClassificationBannerStrip position="top" />
+      <div
+        className="flex flex-1 flex-col overflow-y-auto"
+        style={{
+          background: "#0d1620",
+          color: "#cfdbe4",
+          fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+        }}
+      >
+        <JointBanner
+          classification={s.data?.envelope.classification.marking ?? "SECRET"}
+          releasability={s.data?.envelope.classification.releasability ?? "REL TO USA, FVEY"}
+        />
+        {isDisconnected && (
+          <StaleStripe lastGoodAgeSec={lastGoodAgeSec} cachedAt={ddilLastCacheHit?.cachedAt ?? s.lastGoodPullAt ?? null} />
+        )}
+        <JointTopBar
+          publishedAgoSec={publishedAgoSec}
+          pulledAgoSec={pulledAgoSec}
+          loading={s.loading}
+          onPull={() => void pull()}
+          ddilMode={ddilMode}
+        />
+        <HotlineStrip hot={hot} ddilMode={ddilMode} />
+        <main style={{ padding: "16px 24px 24px", maxWidth: 1600, margin: "0 auto", width: "100%" }}>
+          {s.error ? (
+            <ErrorPanel message={s.error} status={s.errorStatus} />
+          ) : s.loading && !s.data ? (
+            <LoadingPanel />
+          ) : s.data ? (
+            <Console data={s.data} />
+          ) : null}
+        </main>
+        <JointFooter operator={s.data?.envelope.operator ?? null} subscription={s.data?.envelope.subscriptionModel ?? null} />
+      </div>
+      <ClassificationBannerStrip position="bottom" />
     </div>
   );
 }
@@ -1034,13 +1054,14 @@ function JointFooter({
       ` · ${operator.unit || "—"}`
     : "Released by unknown operator";
   const sub = subscription || "TOPIC_FULL_MAGTF";
+  // Flow-positioned footer: the page-level classification strip now pins
+  // to the viewport bottom (task #151), so the operator footer sits in
+  // normal flex flow at the end of the scroll pane instead of fixed-
+  // overlaying the bottom edge.
   return (
     <footer
       style={{
-        position: "fixed",
-        bottom: 0,
-        left: 0,
-        right: 0,
+        marginTop: "auto",
         borderTop: "1px solid #1f2c39",
         background: "#0a131c",
         padding: "6px 24px",

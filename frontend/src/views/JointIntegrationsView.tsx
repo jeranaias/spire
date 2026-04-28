@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, type JointConformance } from "../api";
+import { ClassificationBannerStrip } from "../components/ClassificationBannerStrip";
 
 interface State {
   loading: boolean;
@@ -33,24 +34,40 @@ export function JointIntegrationsView() {
     return () => { alive = false; };
   }, []);
 
-  if (s.loading) {
-    return (
-      <div className="flex h-full items-center justify-center font-mono text-sm uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
-        Loading joint conformance posture…
-      </div>
-    );
-  }
-  if (s.error || !s.data) {
-    return (
-      <div className="p-8 font-mono text-sm text-[var(--color-danger)]">
-        Failed to load joint conformance: {s.error ?? "unknown"}
-      </div>
-    );
-  }
-  const d = s.data;
+  // Layout: outer column flex pins the canonical CAPCO classification
+  // strips to the very top and bottom of the viewport (DoDM 5200.01-V2
+  // page-level marking, task #151). This page is rendered outside the
+  // SPIRE App shell, so the strip is mounted here directly. The
+  // documentation surface itself scrolls in the flex-1 middle pane.
+  // The strip is the canonical green CAPCO block (UNCLASSIFIED // DEMO
+  // DATA // NOT FOR OPERATIONAL USE) regardless of what the
+  // conformance posture says about export classification — page-level
+  // marking is service-agnostic and must be visible in the first
+  // frame on a 30-ft projector.
   return (
-    <div className="h-full overflow-y-auto bg-[var(--color-bg)]">
-      <div className="mx-auto max-w-5xl px-6 py-8">
+    <div className="flex h-screen w-full flex-col bg-[var(--color-bg)]">
+      <ClassificationBannerStrip position="top" />
+      <div className="flex-1 overflow-y-auto bg-[var(--color-bg)]">
+        {s.loading ? (
+          <div className="flex h-full items-center justify-center font-mono text-sm uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+            Loading joint conformance posture…
+          </div>
+        ) : s.error || !s.data ? (
+          <div className="p-8 font-mono text-sm text-[var(--color-danger)]">
+            Failed to load joint conformance: {s.error ?? "unknown"}
+          </div>
+        ) : (
+          <ConformanceBody d={s.data} />
+        )}
+      </div>
+      <ClassificationBannerStrip position="bottom" />
+    </div>
+  );
+}
+
+function ConformanceBody({ d }: { d: JointConformance }) {
+  return (
+    <div className="mx-auto max-w-5xl px-6 py-8">
         <Header />
         <Intro />
 
@@ -154,7 +171,6 @@ export function JointIntegrationsView() {
         <footer className="mt-10 border-t border-[var(--color-border)] pt-4 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
           Conformance posture published {d.publishedAtUtc} · machine-readable: <code className="text-[var(--color-text-secondary)]">/api/joint/conformance</code>
         </footer>
-      </div>
     </div>
   );
 }
