@@ -239,7 +239,16 @@ export async function replayQueuedWrite(write: {
 export const api = {
   auth: {
     // List the four mocked CAC identities for the cert-selection screen.
-    users: () => jsonFetch<{ users: AuthUser[] }>("/auth/users", undefined, false),
+    // Unauthenticated callers see the trimmed `PublicAuthUser` shape
+    // (no clearance / role / billet / unit / parent_command) — see
+    // `backend/auth.list_users`. The in-app identity switcher uses the
+    // authenticated `directory()` variant below to recover the full
+    // payload it needs to render role labels.
+    users: () => jsonFetch<{ users: PublicAuthUser[] }>("/auth/users", undefined, false),
+    // Same `/auth/users` endpoint, but typed for the post-login
+    // identity switcher: when the session cookie is present the backend
+    // returns the full `AuthUser` records (role / billet / etc).
+    directory: () => jsonFetch<{ users: AuthUser[] }>("/auth/users", undefined, false),
     // PIN: any 6-digit numeric (UI illusion only).
     login: (dodid: string, pin: string) =>
       jsonFetch<{ ok: boolean; user: AuthUser; expires_at: number }>(
@@ -514,7 +523,10 @@ export const api = {
 // ---- Types (trimmed to what views consume) --------------------------------
 
 // CAC/PIV identity payload — mirrors `backend/auth.MOCK_USERS`. Kept in
-// sync with `frontend/src/state/store.ts` `User`.
+// sync with `frontend/src/state/store.ts` `User`. This is the *full*
+// post-login payload returned by `/api/auth/login`, `/api/auth/me`, and
+// the authenticated re-fetch of `/api/auth/users` from the in-app
+// identity switcher.
 export interface AuthUser {
   dodid: string;
   name: string;
@@ -528,6 +540,27 @@ export interface AuthUser {
   branch: string;
   clearance: string;
   role: "maintenance_chief" | "g4" | "mef_commander" | "data_custodian" | "security_manager";
+  initials: string;
+  cert_issuer?: string;
+  cert_serial?: string;
+  cert_expires?: string;
+}
+
+/**
+ * Trimmed cert-directory shape returned by `/api/auth/users` to
+ * unauthenticated callers (i.e. the cert-selection splash). A real CAC
+ * reader surfaces name/rank/branch/cert metadata + masked DODID; it does
+ * NOT broadcast clearance, role, billet, unit, or parent_command before
+ * sign-in. Stripping those fields server-side means a judge or passer-by
+ * looking at the splash — or scraping the open endpoint — cannot
+ * enumerate who holds TS//SCI vs SECRET, who's the security manager,
+ * etc. Task #27 / auth-cac-splash F1.
+ */
+export interface PublicAuthUser {
+  dodid: string;
+  name: string;
+  rank: string;
+  branch: string;
   initials: string;
   cert_issuer?: string;
   cert_serial?: string;
