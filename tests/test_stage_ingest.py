@@ -343,6 +343,38 @@ class TestStageIngestRobustness:
         assert resp.status_code in (400, 422), resp.text
         assert resp.status_code < 500
 
+    def test_malformed_sr_parts_returns_422(self, park_client):
+        """Whitespace-only sr_parts.csv must NOT silently fall through
+        to a 200 with a partial dataset (round-5 review). The route
+        should return 422 with an operator-facing parser message."""
+        files = _csv_files()
+        files["sr_parts"] = (
+            "sr_parts.csv",
+            b"\n   \n\t\n",
+            "text/csv",
+        )
+        resp = park_client.post("/api/system/stage-ingest", files=files)
+        assert resp.status_code == 422, resp.text
+        assert "sr_parts" in resp.text.lower()
+
+    def test_malformed_due_in_returns_422(self, park_client):
+        """due_in.csv with no usable header row must fail with 422,
+        not silently degrade to an empty-reqs ingest."""
+        files = _csv_files()
+        files["due_in"] = (
+            "due_in.csv",
+            # A single-byte file decodes to a non-empty body but has
+            # no comma-delimited header → DictReader.fieldnames=[','].
+            # We send a comma-only first line so the header parses to
+            # ['',''] (no usable column names) and the parser must reject.
+            b",\n,\n",
+            "text/csv",
+        )
+        resp = park_client.post("/api/system/stage-ingest", files=files)
+        # Either a 422 ("no usable header") or a downstream lift failure
+        # in _due_in_to_reqs that re-surfaces as 422 from the outer wrap.
+        assert resp.status_code == 422, resp.text
+
     def test_post_ingest_hydrates_bastion_cop(self, park_client):
         """After a successful stage-ingest the synthesized snapshot
         block flips /api/bastion/cop off the empty envelope — the

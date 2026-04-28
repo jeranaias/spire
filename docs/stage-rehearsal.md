@@ -15,13 +15,20 @@ the *real* sanitized export onto DECISION BRIDGE, the dashboards light
 up with *real* document numbers, *real* defect codes, and *real*
 serial-hash strings — then the pitch continues.
 
-> The trade-off: stage live-ingest hydrates the SR / requisition surfaces
-> (DECISION BRIDGE, SENTRY) only. PULSE / BASTION continue to render the
-> "Awaiting GCSS-MC ingest" placeholder because the export does not
-> carry the snapshot timeseries those views derive from. This is by
-> design and matches the framing — "the synthetic veil drops and *real
-> records* appear", not "the entire dataset including unmodelled
-> snapshot timeseries materializes from three CSVs".
+> Hydration scope: stage live-ingest hydrates **every top-level surface**
+> — DECISION BRIDGE, BASTION, PULSE, and SENTRY — by attaching a
+> today-only synthesized `DailySnapshot` block to the parsed SR /
+> requisition / asset records. The `_build_dataset_from_report` helper
+> in `backend/routes/stage_ingest.py` constructs `ds.snapshots` and
+> populates `ds.assets` with full attribute-access records so the
+> downstream PULSE risk surfaces and the BASTION COP have something to
+> read against. The "Awaiting GCSS-MC ingest" placeholder disappears
+> from every view within one `useDatasetStatus` poll (≤5 s) of a
+> successful ingest. **The historical multi-month snapshot timeseries
+> is *not* materialized** — those rows remain seed-42 in the populated
+> baseline; what stage live-ingest replaces is the *current-day* SR /
+> requisition / asset slice, which is what the demo narrative ("real
+> records appear") actually requires.
 
 ## Pre-flight (T-30 min before demo)
 
@@ -57,7 +64,7 @@ serial-hash strings — then the pitch continues.
 | 3 | T+20s | Drag `hashed_header.csv` onto slot 1 | Slot turns green; filename + size shown |
 | 4 | T+25s | Drag `hashed_sr_parts.csv` onto slot 2 | Slot 2 green; submit button enables |
 | 5 | T+30s | Drag `hashed_due_in.csv` onto slot 3 | Slot 3 green |
-| 6 | T+35s | Click "Hydrate SPIRE" | Phase chip cycles parsing → validating → hydrating |
+| 6 | T+35s | Click "Hydrate SPIRE" | Progress bar fills 33% → 66% → 90% (parsing → validating → hydrating) with per-file row counts displayed when complete |
 | 7 | T+45s | Wait for "Ingest Complete" badge | SR count + ingest-hash + elapsed shown |
 | 8 | T+50s | Tile grid lights up with real records | DECISION BRIDGE shows live SR rows |
 | 9 | T+60s | Navigate to SENTRY → Review Queue | Real document numbers / defect codes appear |

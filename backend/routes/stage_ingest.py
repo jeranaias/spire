@@ -120,17 +120,50 @@ def _count_csv_rows(text: str) -> int:
     return max(0, len(lines) - 1)
 
 
-def _parse_csv_dicts(text: str) -> list[dict]:
+def _parse_csv_dicts(text: str, *, label: str) -> list[dict]:
     """Parse a CSV body into a list of dicts keyed by header column.
-    Returns ``[]`` on any parse error so the caller can fall back to
-    counts-only synthesis without 500ing the request."""
+
+    Strict mode (Task #183 round-5): malformed input must surface as a
+    422 — the previous silent-fallback to ``[]`` masked corruption and
+    let the route return 200 with a partial dataset, breaking the
+    "same files → same dashboards" determinism guarantee. We re-raise
+    a typed HTTPException so the route's outer handler relays the
+    operator-facing error message verbatim instead of converting it
+    into a generic 500.
+    """
     if not text or not text.strip():
-        return []
+        # Empty sibling files are rejected at the upload size gate before
+        # we get here; if a decoded body is whitespace-only at this point
+        # it's a malformed file (e.g. only a stray newline), not an empty
+        # upload, so fail loudly.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{label} CSV is whitespace-only after decode — "
+                "expected a header row plus at least one data row."
+            ),
+        )
     try:
         reader = _csv.DictReader(io.StringIO(text))
-        return [dict(r) for r in reader if any((v or "").strip() for v in r.values())]
-    except Exception:  # noqa: BLE001 — defensive against malformed CSVs
-        return []
+        if reader.fieldnames is None or not any(
+            (f or "").strip() for f in reader.fieldnames
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{label} CSV has no usable header row. "
+                    "Stage-ingest requires a real CSV header."
+                ),
+            )
+        rows = [dict(r) for r in reader if any((v or "").strip() for v in r.values())]
+    except HTTPException:
+        raise
+    except (_csv.Error, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label} CSV failed to parse: {exc}",
+        )
+    return rows
 
 
 def _index_sr_parts(sr_parts_rows: list[dict]) -> dict[str, list[dict]]:
@@ -246,8 +279,8 @@ def _build_dataset_from_report(
     # Real per-row parses — used to attach actual document_numbers to
     # the requisition list and a per-SR parts-on-order count to the
     # synthesized snapshots.
-    sr_parts_rows = _parse_csv_dicts(sr_parts_csv)
-    due_in_rows = _parse_csv_dicts(due_in_csv)
+    sr_parts_rows = _parse_csv_dicts(sr_parts_csv, label="sr_parts")
+    due_in_rows = _parse_csv_dicts(due_in_csv, label="due_in")
     parts_by_sr = _index_sr_parts(sr_parts_rows)
 
     srs = []

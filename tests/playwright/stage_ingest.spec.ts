@@ -131,13 +131,78 @@ test.describe("Stage live-ingest mode (Task #183)", () => {
 
     await page.getByTestId("stage-ingest-submit").click();
 
-    // The phase chip cycles parsing → validating → hydrating → ready.
+    // The progress bar fills parsing → validating → hydrating → ready.
     // We assert the terminal "Ingest Complete" badge so the spec is
     // immune to fast/slow-machine ordering.
     await expect(hero).toContainText(/Ingest Complete/i, { timeout: 10_000 });
+    // Per-file row count chips appear inside each slot's success line
+    // once the response carries source_files.{slot}.rows_parsed.
+    await expect(page.getByTestId("stage-ingest-rows-header")).toContainText(
+      /rows parsed/i,
+    );
+    await expect(page.getByTestId("stage-ingest-rows-sr_parts")).toContainText(
+      /rows parsed/i,
+    );
+    await expect(page.getByTestId("stage-ingest-rows-due_in")).toContainText(
+      /rows parsed/i,
+    );
     // The dataset-status poll fires every 5s — wait for the hero to
     // unmount, which only happens when datasetStatus.empty flips false.
     await expect(hero).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test("full lifecycle: empty → ingest → BASTION + PULSE populated", async ({
+    page,
+  }) => {
+    // Round-5 review fix — assert the populated-state transition end
+    // to end. The previous specs only proved (a) empty placeholders
+    // render and (b) hero unmounts after ingest. This spec also proves
+    // BASTION + PULSE flip out of the awaiting-ingest placeholder
+    // post-ingest, which is the actual demo-flow guarantee.
+    await forceEmptyOrFail(page);
+
+    // 1. BASTION starts in awaiting-ingest mode.
+    await gotoHash(page, "#/bastion");
+    await expect(page.getByTestId("awaiting-ingest-bastion")).toBeVisible();
+
+    // 2. PULSE container-level gate fires for every PULSE tab.
+    await gotoHash(page, "#/pulse/risk");
+    await expect(page.getByTestId("awaiting-ingest-pulse")).toBeVisible();
+
+    // 3. DECISION BRIDGE → drop CSVs → submit → wait for ready.
+    await gotoHash(page, "#/decision");
+    await page
+      .getByTestId("stage-ingest-input-header")
+      .setInputFiles(FIXTURE_HEADER);
+    await page
+      .getByTestId("stage-ingest-input-sr_parts")
+      .setInputFiles(FIXTURE_PARTS);
+    await page
+      .getByTestId("stage-ingest-input-due_in")
+      .setInputFiles(FIXTURE_DUE_IN);
+    await page.getByTestId("stage-ingest-submit").click();
+    await expect(page.getByTestId("stage-ingest-hero")).toContainText(
+      /Ingest Complete/i,
+      { timeout: 10_000 },
+    );
+
+    // 4. BASTION must hydrate — the awaiting placeholder disappears
+    //    within one dataset-status poll (≤5s) plus a 5s buffer.
+    await gotoHash(page, "#/bastion");
+    await expect(page.getByTestId("awaiting-ingest-bastion")).toHaveCount(0, {
+      timeout: 15_000,
+    });
+
+    // 5. PULSE container gate must clear too — the placeholder
+    //    disappears regardless of which tab the operator lands on.
+    await gotoHash(page, "#/pulse/overview");
+    await expect(page.getByTestId("awaiting-ingest-pulse")).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    await gotoHash(page, "#/pulse/risk");
+    await expect(page.getByTestId("awaiting-ingest-pulse")).toHaveCount(0, {
+      timeout: 5_000,
+    });
   });
 
   test("BASTION renders the awaiting-ingest placeholder when empty", async ({
