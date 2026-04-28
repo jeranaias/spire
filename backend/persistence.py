@@ -163,6 +163,21 @@ CREATE TABLE IF NOT EXISTS uploaded_batches (
     raw_bytes   BLOB
 );
 
+-- Task #67: persist the in-memory `_BATCHES` dict so a uvicorn restart
+-- mid-demo doesn't strand the operator on a 404 between Upload and
+-- Processing. Stores the full batch payload (records + jobs + results)
+-- as a JSON blob keyed by batch_id. Hydrated on demand by the SENTRY
+-- routes; small enough (<1MB per 500-record batch) that JSON-in-SQLite
+-- beats threading another schema migration through.
+CREATE TABLE IF NOT EXISTS sentry_batches (
+    batch_id    TEXT PRIMARY KEY,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    payload     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentry_batches_updated ON sentry_batches(updated_at);
+
 CREATE TABLE IF NOT EXISTS user_prefs (
     dodid       TEXT NOT NULL,
     pref_key    TEXT NOT NULL,
@@ -686,6 +701,68 @@ def feedback_summary() -> dict:
         total = c.execute("SELECT COUNT(*) AS n FROM pulse_feedback").fetchone()["n"]
         correct = c.execute("SELECT COUNT(*) AS n FROM pulse_feedback WHERE correct = 1").fetchone()["n"]
     return {"total": total, "correct": correct, "correct_rate": (correct / total) if total else 0.0}
+
+
+def store_sentry_batch(batch_id: str, batch: dict) -> None:
+    """Task #67 — persist (or upsert) a SENTRY batch's full state.
+
+    The blob includes the records list, schema, jobs map, and any per-job
+    results. Re-stored on every state-mutating endpoint (start_processing
+    completion, etc.) so a uvicorn restart recovers the same batch the
+    operator was in the middle of.
+    """
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    try:
+        payload = json.dumps(batch, default=str)
+    except Exception:
+        # Defence in depth — if anything in the batch is non-serializable
+        # we should still surface a useful failure rather than crash the
+        # processing endpoint. Caller logs the noise.
+        raise
+    with conn() as c:
+        c.execute(
+            "INSERT INTO sentry_batches(batch_id, created_at, updated_at, payload) "
+            "VALUES (?,?,?,?) "
+            "ON CONFLICT(batch_id) DO UPDATE SET "
+            "updated_at = excluded.updated_at, payload = excluded.payload",
+            (batch_id, ts, ts, payload),
+        )
+
+
+def load_sentry_batch(batch_id: str) -> Optional[dict]:
+    """Task #67 — hydrate a previously-persisted batch by id, or None."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT payload FROM sentry_batches WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["payload"])
+    except Exception:
+        return None
+
+
+def find_sentry_batch_id_for_job(job_id: str) -> Optional[str]:
+    """Task #67 — locate the batch that owns a given job_id by scanning the
+    50 most-recently-updated persisted batches. Used after a uvicorn
+    restart when /sentry/jobs/{job_id} comes in cold and the in-memory
+    `_BATCHES` dict has been wiped.
+    """
+    with conn() as c:
+        rows = c.execute(
+            "SELECT batch_id, payload FROM sentry_batches "
+            "ORDER BY updated_at DESC LIMIT 50"
+        ).fetchall()
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"])
+        except Exception:
+            continue
+        if isinstance(payload, dict) and job_id in (payload.get("jobs") or {}):
+            return r["batch_id"]
+    return None
 
 
 def record_pulse_draft(

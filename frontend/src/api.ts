@@ -546,8 +546,14 @@ export const api = {
     demoBatch: (limit = 500) => jsonFetch<SentryBatch>(`/sentry/demo-batch?limit=${limit}`),
     process: (batchId: string) =>
       jsonFetch<{ job_id: string; batch_id: string }>(`/sentry/process/${batchId}`, { method: "POST" }),
-    jobStatus: (jobId: string) => jsonFetch<SentryJob>(`/sentry/jobs/${jobId}`),
-    reviewQueue: (batchId: string) => jsonFetch<SentryReviewQueue>(`/sentry/review-queue/${batchId}`),
+    jobStatus: (jobId: string, role?: string) =>
+      jsonFetch<SentryJob>(
+        `/sentry/jobs/${jobId}${role ? `?role=${encodeURIComponent(role)}` : ""}`,
+      ),
+    reviewQueue: (batchId: string, role?: string) =>
+      jsonFetch<SentryReviewQueue>(
+        `/sentry/review-queue/${batchId}${role ? `?role=${encodeURIComponent(role)}` : ""}`,
+      ),
     review: (sr: string, action: "approve" | "reject" | "modify", note = "") =>
       jsonFetch<{ ok: boolean }>(`/sentry/review/${sr}/${action}`, {
         method: "POST",
@@ -1604,6 +1610,18 @@ export interface SentryBatch {
   jobs: string[];
 }
 
+// Task #67 — `scope` is the role-scoping descriptor SENTRY routes return
+// so the FE can render an honest "Showing N of M (CLB-6 only)" footer.
+// `unrestricted=true` means the caller's role sees the entire batch.
+export interface SentryScope {
+  role: string;
+  unrestricted: boolean;
+  allowed_units: string[];
+  total_records: number;
+  scoped_records: number;
+  label: string;
+}
+
 export interface SentryJob {
   job_id: string;
   batch_id: string;
@@ -1623,6 +1641,7 @@ export interface SentryJob {
   sentry_model_loaded?: boolean;
   pulse_model_loaded?: boolean;
   done: boolean;
+  scope?: SentryScope;
 }
 
 export interface SentryReviewQueue {
@@ -1632,6 +1651,7 @@ export interface SentryReviewQueue {
   held: any[];
   counts: { auto_cleared: number; flagged: number; held: number };
   aggregation_risks: any[];
+  scope?: SentryScope;
 }
 
 export interface MarkResult {

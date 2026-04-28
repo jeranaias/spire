@@ -11,6 +11,7 @@ import {
   normalizeClassification,
   type Classification,
 } from "../../components/classification";
+import { useSpireStore } from "../../state/store";
 
 const FLAG_COLORS: Record<string, string> = {
   pii: "var(--color-info)",
@@ -57,7 +58,17 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const [counts, setCounts] = useState({ tier1: 0, tier2: 0, pii: 0, geo: 0, comms: 0, classified: 0, controlled: 0 });
   const [error, setError] = useState<string | null>(null);
   const [release, setRelease] = useState<ReleasePreview>("US_ONLY");
+  const [retryNonce, setRetryNonce] = useState(0);
   const tickRef = useRef<number | null>(null);
+
+  // Task #67 — DDIL is what actually drives interceptor failures (LIMITED
+  // adds latency, INTERMITTENT drops a fraction of requests, DISCONNECTED
+  // queues every write). Reading both lets the error block tell the
+  // operator the truth ("comms degraded — held until restored") instead
+  // of the misleading "pipeline did not respond" we used to render.
+  const role = useSpireStore((s) => s.role);
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const ddilQueueLen = useSpireStore((s) => s.ddilQueue.length);
 
   useEffect(() => {
     if (!ctx.jobId || !ctx.batchId) return;
@@ -65,10 +76,10 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
     setError(null);
     (async () => {
       try {
-        const j = await api.sentry.jobStatus(ctx.jobId!);
+        const j = await api.sentry.jobStatus(ctx.jobId!, role);
         if (!alive) return;
         setJob(j);
-        const q = await api.sentry.reviewQueue(ctx.batchId!);
+        const q = await api.sentry.reviewQueue(ctx.batchId!, role);
         if (!alive) return;
         setQueue(q);
       } catch (e) {
@@ -81,7 +92,18 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
     return () => {
       alive = false;
     };
-  }, [ctx.jobId, ctx.batchId]);
+  }, [ctx.jobId, ctx.batchId, role, retryNonce]);
+
+  // Task #67 — when DDIL flips back to CONNECTED, retry automatically so
+  // the operator doesn't have to click anything. The interceptor's
+  // CONNECTED-restore handler already drains queued writes; this just
+  // clears the stale error state and re-fetches.
+  useEffect(() => {
+    if (ddilMode === "CONNECTED" && error) {
+      setError(null);
+      setRetryNonce((n) => n + 1);
+    }
+  }, [ddilMode, error]);
 
   // Drive the scan-line animation forward deterministically. We're NOT
   // chasing real processing time — the backend already finished — we just
@@ -161,6 +183,41 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
     );
   }
   if (error) {
+    // Task #67 — degrade gracefully when DDIL is the actual cause. Telling
+    // the operator "the pipeline did not respond" while their own switch
+    // is on DISCONNECTED is a lie that erodes trust; tell them comms are
+    // down, hold the work, and don't bounce them back to /sentry/upload
+    // (which will also fail, and worse, lose their batch context).
+    const commsDown = ddilMode !== "CONNECTED";
+    if (commsDown) {
+      const modeLabel =
+        ddilMode === "LIMITED"
+          ? "Limited"
+          : ddilMode === "INTERMITTENT"
+            ? "Intermittent"
+            : "Disconnected";
+      const description =
+        ddilMode === "DISCONNECTED"
+          ? "Comms link is down. Processing is held — work will resume automatically when comms restore."
+          : ddilMode === "INTERMITTENT"
+            ? "Comms link is intermittent. The processing fetch dropped — it will retry on the next packet through."
+            : "Comms link is degraded. Latency is high; processing fetch timed out. It will retry shortly.";
+      const queueLine =
+        ddilQueueLen > 0
+          ? `${ddilQueueLen} write${ddilQueueLen === 1 ? "" : "s"} queued for replay when comms restore.`
+          : undefined;
+      return (
+        <div className="flex h-full items-center justify-center p-12">
+          <ErrorState
+            title={`Comms ${modeLabel} — processing held`}
+            description={description}
+            detail={queueLine}
+            onRetry={() => setRetryNonce((n) => n + 1)}
+            retryLabel="Retry now"
+          />
+        </div>
+      );
+    }
     return (
       <div className="flex h-full items-center justify-center p-12">
         <ErrorState
@@ -191,6 +248,26 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const ceiling = RELEASE_CEILING[release];
   const ceilingRank = classificationRank(ceiling);
 
+  // Task #67 — surface DDIL state without blocking the operator. LIMITED
+  // and INTERMITTENT still let traffic through (just degraded), and
+  // DISCONNECTED is being served from the DDIL cache here (otherwise we'd
+  // be in the error branch above). In all three cases the operator
+  // should see the comms posture so they don't misread cached data as
+  // live or DDIL latency as engine slowness.
+  const showCommsStrip = ddilMode !== "CONNECTED";
+  const stripLabel =
+    ddilMode === "LIMITED"
+      ? "Limited"
+      : ddilMode === "INTERMITTENT"
+        ? "Intermittent"
+        : "Disconnected";
+  const stripCopy =
+    ddilMode === "LIMITED"
+      ? "High latency on this link. Counters may lag the live stream."
+      : ddilMode === "INTERMITTENT"
+        ? "Packets dropping. Some polls may fail and retry on the next pass."
+        : "Comms link is down. Showing last-known-good — work resumes when comms restore.";
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* Subtle CRT scanline overlay across the whole processing view */}
@@ -219,6 +296,31 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           finished synchronously inside POST /sentry/process before this
           tab mounted. The animation below is a deterministic replay of
           that completed pass, not live work. */}
+
+      {showCommsStrip && (
+        <div
+          className={clsx(
+            "shrink-0 border-b px-4 py-2 font-mono text-xs",
+            ddilMode === "DISCONNECTED"
+              ? "border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger)_15%,var(--color-surface))] text-[var(--color-danger)]"
+              : "border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_15%,var(--color-surface))] text-[var(--color-warning)]",
+          )}
+          role="status"
+        >
+          <span className="font-semibold uppercase tracking-wider">
+            Comms · {stripLabel}
+          </span>
+          <span className="mx-2 opacity-50">·</span>
+          <span>{stripCopy}</span>
+          {ddilQueueLen > 0 && (
+            <>
+              <span className="mx-2 opacity-50">·</span>
+              <span>{ddilQueueLen} write{ddilQueueLen === 1 ? "" : "s"} queued</span>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
           <div className="flex items-center gap-2">
@@ -414,6 +516,23 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           <span>Classification discrepancies: <span className="font-mono tabular-nums text-[var(--color-warning)]">{job.mismatches}</span></span>
           <span>Aggregation risks: <span className="font-mono tabular-nums text-[var(--color-warning)]">{job.aggregation_risks.length}</span></span>
         </div>
+        {/* Task #67 — scope footer. Only render when the role is actually
+            scoped to fewer units than the batch contains, so unrestricted
+            roles (mef_commander / data_custodian) don't see a noisy
+            "Showing 500 of 500" line. */}
+        {queue.scope && !queue.scope.unrestricted && queue.scope.label && (
+          <div className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
+            Showing{" "}
+            <span className="tabular-nums text-[var(--color-text-secondary)]">
+              {queue.scope.scoped_records.toLocaleString("en-US")}
+            </span>{" "}
+            of{" "}
+            <span className="tabular-nums text-[var(--color-text-secondary)]">
+              {queue.scope.total_records.toLocaleString("en-US")}
+            </span>{" "}
+            records · {queue.scope.label}
+          </div>
+        )}
       </div>
 
       {/* CAPCO classification banner — bottom. Pairs with the top band so a
