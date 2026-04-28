@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Cannibalization } from "../../api";
+import { api, type Cannibalization, type StrippableDonor } from "../../api";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
 import { Button, Pressable, fireIdempotent } from "../../components/ui";
@@ -38,6 +38,11 @@ type MatchRow = {
   };
 };
 
+// Task #40 -- DonorRow is a strippable asset record (not another open need).
+// A donor is a hull where the part is installed and serviceable, sourced
+// from the backend's strippable_donors surface.
+type DonorRow = StrippableDonor;
+
 type SortMode = "days_open" | "impact" | "unit";
 
 export function CannibalizationTab() {
@@ -46,7 +51,7 @@ export function CannibalizationTab() {
   const [data, setData] = useState<Cannibalization | null>(null);
   const [selectedNeed, setSelectedNeed] = useState<NeedRow | null>(null);
   const [proposedLocal, setProposedLocal] = useState<MatchRow[]>([]);
-  const [confirmDonor, setConfirmDonor] = useState<{ need: NeedRow; donor: NeedRow } | null>(null);
+  const [confirmDonor, setConfirmDonor] = useState<{ need: NeedRow; donor: DonorRow } | null>(null);
   const [committing, setCommitting] = useState(false);
   // Walkthrough #43 — filter chips
   const [unitFilter, setUnitFilter] = useState<string | null>(null);
@@ -68,25 +73,22 @@ export function CannibalizationTab() {
       .catch(() => { /* tolerate; empty-state copy explains 'no needs' */ });
   }, [role]);
 
-  // Walkthrough #9 — Donor candidates with cause-of-fault overlap exclusion.
-  // If recipient's fault class matches donor's fault class, the donor's
-  // own X is the failing part — pulling it is nonsensical. Drop it.
-  const donors = useMemo(() => {
+  // Task #40 -- Strippable donor pool from the backend. The previous
+  // derivation built donors from OTHER OPEN NMCS NEEDS sharing the same
+  // backordered NSN -- every "donor" was itself a deadlined asset waiting
+  // for that exact part. The backend now surfaces real strippable hulls
+  // (long-term-NMC for an unrelated cause, PMC, or MC at a high-readiness
+  // unit) where the part is installed and serviceable, with a strip_reason
+  // string for the operator. The "different fault class" predicate is
+  // already enforced server-side; the cross-unit-only chip below applies
+  // here as a UI filter.
+  const donors = useMemo<DonorRow[]>(() => {
     if (!data || !selectedNeed) return [];
-    return (data.open_needs as NeedRow[]).filter((n) => {
-      if (n.sr_number === selectedNeed.sr_number) return false;
-      if (n.needed_part.nsn !== selectedNeed.needed_part.nsn) return false;
-      // Walkthrough #9 — exclude donors whose own fault class matches the
-      // recipient's. The donor would be the worst possible source of that
-      // exact part since their copy of it is also failing.
-      if (
-        selectedNeed.fault_class &&
-        n.fault_class &&
-        selectedNeed.fault_class === n.fault_class
-      ) return false;
-      return true;
-    });
-  }, [data, selectedNeed]);
+    const pool = data.strippable_donors?.[selectedNeed.sr_number] ?? [];
+    return crossUnitOnly
+      ? pool.filter((d) => d.unit !== selectedNeed.unit)
+      : pool;
+  }, [data, selectedNeed, crossUnitOnly]);
 
   if (!data) return <LoadingOverlay message="Matching needs with donors …" />;
 
@@ -112,7 +114,7 @@ export function CannibalizationTab() {
 
   function commit() {
     if (!confirmDonor) return;
-    const key = `cannib-commit:${confirmDonor.need.sr_number}:${confirmDonor.donor.sr_number}`;
+    const key = `cannib-commit:${confirmDonor.need.sr_number}:${confirmDonor.donor.asset_id}`;
     fireIdempotent(key, () => commitInner());
   }
 
@@ -146,7 +148,9 @@ export function CannibalizationTab() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             recipient_sr: confirmDonor.need.sr_number,
-            donor_sr: confirmDonor.donor.sr_number,
+            // Task #40 -- strippable donors are asset-keyed; donor may be MC
+            // and have no SR. Backend accepts donor_asset_id as canonical.
+            donor_asset_id: confirmDonor.donor.asset_id,
             nsn: confirmDonor.need.needed_part.nsn,
           }),
           signal: ctrl.signal,
@@ -169,27 +173,22 @@ export function CannibalizationTab() {
     }
   }
 
-  // Walkthrough #45 — bulk auto-propose top match per need.
+  // Walkthrough #45 / Task #40 -- bulk auto-propose top strippable donor
+  // for each filtered need. Sources from the backend's strippable_donors
+  // pool so we never auto-propose another deadlined hull as a "donor".
   function autoProposeTopMatches() {
     if (!data) return;
     let count = 0;
     const proposals: MatchRow[] = [];
     for (const need of filteredNeeds) {
-      const candidates = (data.open_needs as NeedRow[]).filter((n) =>
-        n.sr_number !== need.sr_number &&
-        n.needed_part.nsn === need.needed_part.nsn &&
-        // Walkthrough audit: the checkbox 'Cross-unit, different fault
-        // class' adds the cross-unit predicate when toggled on. The
-        // different-fault-class predicate below applies in BOTH modes
-        // (cause-of-fault overlap is always invalid — see #9).
-        (!crossUnitOnly || n.unit !== need.unit) &&
-        (n.fault_class !== need.fault_class)
-      );
+      const pool = data.strippable_donors?.[need.sr_number] ?? [];
+      const candidates = pool.filter((d) => !crossUnitOnly || d.unit !== need.unit);
       if (candidates.length === 0) continue;
-      // Prefer cross-unit donors; among those, the lowest unit_mc_rate
-      // donor is the worst choice (their unit is hurting too) so prefer
-      // donor with HIGHER mc_rate i.e. unit can spare it.
+      // Pool is already priority-sorted by the backend (long-term-NMC,
+      // then PMC, then MC at high-MC unit). Prefer cross-unit ties so
+      // intra-unit moves don't shadow easier cross-level transfers.
       candidates.sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority - b.priority;
         const aCross = a.unit !== need.unit ? 1 : 0;
         const bCross = b.unit !== need.unit ? 1 : 0;
         if (aCross !== bCross) return bCross - aCross;
@@ -281,7 +280,7 @@ export function CannibalizationTab() {
                 onChange={(e) => setSameClassOnly(e.target.checked)}
                 className="accent-[var(--color-primary)]"
               />
-              Cross-unit, different fault class
+              Cross-unit only
             </label>
             <Button
               onClick={autoProposeTopMatches}
@@ -349,7 +348,7 @@ export function CannibalizationTab() {
           </h3>
           <div className="mt-0.5 spire-body-muted">
             {selectedNeed
-              ? `Compatible NSN ${selectedNeed.needed_part.nsn} · same fault-class donors filtered out (their copy of the part is also failing).`
+              ? `Strippable ${selectedNeed.equipment_type.replace(/_/g, " ")} hulls · same fault-class donors filtered out (their copy of the part is also failing).`
               : "Select a need to see compatible donors."}
           </div>
         </div>
@@ -359,42 +358,65 @@ export function CannibalizationTab() {
           </div>
         )}
         {selectedNeed && donors.length === 0 && (
-          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            NO COMPATIBLE DONORS
+          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-6 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+            <div className="text-center uppercase tracking-wider">No strippable hulls in scope</div>
+            <div className="mt-2 normal-case text-[var(--color-text-secondary)]">
+              No same-platform asset in the scoped units has the recipient&apos;s
+              part installed and serviceable. Recommend Risk Board to expedite
+              the requisition or initiate a cross-level transfer of a
+              like-platform donor from outside this scope.
+            </div>
           </div>
         )}
         <div className="flex flex-col gap-2">
-          {donors.map((d) => (
-            <div
-              key={d.sr_number}
-              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
-            >
-              <div className="flex items-baseline justify-between">
-                <div className="font-mono text-base font-semibold text-[var(--color-text)]">{d.asset_id}</div>
-                <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+          {donors.map((d) => {
+            const statusTone = d.current_status === "MC"
+              ? "var(--color-success-muted)"
+              : d.current_status === "PMC"
+                ? "var(--color-warning)"
+                : "var(--color-danger)";
+            return (
+              <div
+                key={d.asset_id}
+                className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="font-mono text-base font-semibold text-[var(--color-text)]">{d.asset_id}</div>
+                  <span
+                    className="rounded-sm border px-1.5 py-[1px] font-mono text-xs font-semibold uppercase tracking-wider"
+                    style={{ borderColor: statusTone, color: statusTone }}
+                  >
+                    {d.current_status}
+                  </span>
+                </div>
+                <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+                  {d.equipment_type.replace(/_/g, " ")} · {d.unit}
                   {d.unit_mc_rate != null && (
-                    <span className="mr-2 tabular-nums">unit MC {(d.unit_mc_rate * 100).toFixed(1)}%</span>
+                    <span className="ml-2 tabular-nums">unit MC {(d.unit_mc_rate * 100).toFixed(1)}%</span>
                   )}
-                </span>
+                </div>
+                {/* Task #40 -- strip_reason explains why this hull qualifies
+                   as a donor (long-term-NMC / PMC / MC at high-MC unit). */}
+                <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
+                  {d.strip_reason}
+                </div>
+                {d.donor_fault_classes.length > 0 && (
+                  <div className="mt-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                    other open faults: {d.donor_fault_classes.join(", ")}
+                  </div>
+                )}
+                <div className="mt-2 flex items-center justify-end">
+                  <Button
+                    onClick={() => setConfirmDonor({ need: selectedNeed!, donor: d })}
+                    variant="primary"
+                    size="sm"
+                  >
+                    Propose
+                  </Button>
+                </div>
               </div>
-              <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
-                {d.equipment_type.replace(/_/g, " ")} · {d.unit} · open {d.days_open}d
-              </div>
-              <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
-                Fault: {d.fault_component} {d.fault_class && d.fault_class !== d.fault_component && <span className="text-[var(--color-text-muted)]">({d.fault_class})</span>}
-              </div>
-              {/* Walkthrough #23 — primary CTA-styled Propose button. */}
-              <div className="mt-2 flex items-center justify-end">
-                <Button
-                  onClick={() => setConfirmDonor({ need: selectedNeed!, donor: d })}
-                  variant="primary"
-                  size="sm"
-                >
-                  Propose
-                </Button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
@@ -518,24 +540,35 @@ function ConfirmProposeModal({
   onConfirm,
 }: {
   need: NeedRow;
-  donor: NeedRow;
+  donor: DonorRow;
   committing: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const crossUnit = need.unit !== donor.unit;
   const dialogRef = useRef<HTMLDivElement>(null);
-  // Walkthrough #10 — pre-commit donor MC impact estimate. We approximate
-  // by removing one MC asset from the donor unit's last-day count.
+  // Task #40 -- pre-commit donor MC impact estimate.
+  //
+  // Pre-fix bug: the prior math always subtracted 1 from MC count because
+  // every "donor" was an NMCS need (so removing the part inflated the
+  // displayed impact -- the donor was already not in the MC tally).
+  // With strippable donors, removing the part only decrements the MC
+  // count when the donor was MC to begin with. PMC/NMCM/NMCS donors do
+  // not change the MC count (they were never counted as MC).
   const donorMc = donor.unit_mc_rate ?? 0;
   const donorTotal = donor.unit_total ?? 0;
   const donorMcCount = donor.unit_mc_count ?? 0;
+  const willDropMc = donor.current_status === "MC" ? 1 : 0;
   const projectedMc = donorTotal > 0
-    ? Math.max(0, (donorMcCount - 1) / donorTotal)
+    ? Math.max(0, (donorMcCount - willDropMc) / donorTotal)
     : donorMc;
-  const donorIsNmcs = donor.fault_component != null;  // donor itself was a need = NMCS
-  // Walkthrough #10 — operator must acknowledge the impact when donor is NMCS.
-  const [acknowledged, setAcknowledged] = useState(!donorIsNmcs);
+  // A donor is "high-impact" only when stripping it actually drops a MC
+  // hull. A long-term-NMC strippable hull is a free cannibalization from
+  // the unit's MC perspective.
+  const donorIsHighImpact = willDropMc === 1;
+  // Walkthrough #10 -- operator must acknowledge the impact when stripping
+  // an MC hull. NMC/PMC strippables don't gate.
+  const [acknowledged, setAcknowledged] = useState(!donorIsHighImpact);
 
   // Walkthrough #24 — Esc dismiss + click-outside + focus-trap.
   useEffect(() => {
@@ -617,25 +650,39 @@ function ConfirmProposeModal({
           </div>
         </div>
 
-        {/* Walkthrough #10 — pre-commit MC impact estimate */}
+        {/* Task #40 -- pre-commit MC impact estimate; only "warn" tone when
+            the donor was itself MC (stripping it drops a hull from the MC
+            tally). Long-term-NMC and PMC strippables show the math but
+            don't gate the commit. */}
         {donorTotal > 0 && (
           <div
             className="mb-3 rounded-sm border bg-[var(--color-bg)] px-3 py-2 font-mono text-xs tracking-wide"
             style={{
-              borderColor: donorIsNmcs
-                ? "color-mix(in oklab, var(--color-danger) 40%, var(--color-border))"
-                : "color-mix(in oklab, var(--color-warning) 30%, var(--color-border))",
+              borderColor: donorIsHighImpact
+                ? "color-mix(in oklab, var(--color-warning) 40%, var(--color-border))"
+                : "color-mix(in oklab, var(--color-success-muted) 60%, var(--color-border))",
             }}
           >
-            <div className="text-[var(--color-text-muted)]">Donor unit MC impact estimate</div>
+            <div className="text-[var(--color-text-muted)]">
+              Donor unit MC impact estimate · donor status {donor.current_status}
+            </div>
             <div className="mt-0.5 text-sm text-[var(--color-text)] tabular-nums">
               {donor.unit}: {(donorMc * 100).toFixed(1)}% → {(projectedMc * 100).toFixed(1)}% (≈{((donorMc - projectedMc) * 100).toFixed(1)} pp)
             </div>
-            {donorIsNmcs && (
-              <div className="mt-1 text-[var(--color-danger)]">
-                ⚠ Donor is itself NMCS. Confirm operator acknowledgement before committing.
+            {!donorIsHighImpact && (
+              <div className="mt-1 text-[var(--color-text-secondary)]">
+                Donor was not in the MC tally; strip does not change unit MC rate.
               </div>
             )}
+            {donorIsHighImpact && (
+              <div className="mt-1 text-[var(--color-warning)]">
+                ⚠ Donor was MC. Strip will deadline this hull until the
+                donated part is replaced. Confirm acknowledgement before committing.
+              </div>
+            )}
+            <div className="mt-1 text-[var(--color-text-muted)]">
+              Why this hull is strippable: {donor.strip_reason}
+            </div>
           </div>
         )}
 
@@ -646,8 +693,9 @@ function ConfirmProposeModal({
           &nbsp;Donor's SR annotated with removal event; recipient's requisition closes as CANN.
         </div>
 
-        {/* Walkthrough #10 — block commit until acknowledgement */}
-        {donorIsNmcs && (
+        {/* Task #40 -- gate commit only when stripping the donor would
+            drop a MC hull from the unit tally. */}
+        {donorIsHighImpact && (
           <label className="mb-3 flex items-start gap-2 font-mono text-xs text-[var(--color-warning)] tracking-wide">
             <input
               type="checkbox"
@@ -655,7 +703,7 @@ function ConfirmProposeModal({
               onChange={(e) => setAcknowledged(e.target.checked)}
               className="mt-0.5 accent-[var(--color-warning)]"
             />
-            I acknowledge the donor is NMCS and the unit MC drop is acceptable.
+            I acknowledge stripping this MC hull will drop the donor unit MC rate.
           </label>
         )}
 
