@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
 import { withRetry, pollWithBackoff, formatApiError } from "../api-retry";
@@ -858,7 +858,7 @@ function AlertRow({
   // `<button>`) because the row contains nested action buttons (Ack,
   // Snooze, Resolve) and a button-inside-button is invalid HTML;
   // role + tabIndex + Enter/Space handler give the same semantics.
-  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       onClick();
