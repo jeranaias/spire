@@ -2044,6 +2044,41 @@ async def forecast(
     # can report the same numbers a judge sees on the Forecast tab.
     calibration = _compute_forecast_calibration(full_history)
 
+    # Task #113 -- KPI color bands for the "P(cross threshold) /
+    # P(recovery)" card. Published by the backend so the cutoffs are
+    # documented next to the rest of the doctrine (`threshold`,
+    # `coverage_target`) instead of buried as magic numbers in the
+    # front end.
+    #
+    # Bands are evaluated on the `goodness` score the front end derives
+    # from `cross_probability` and `starts_below_threshold` (1 = best
+    # case for the operator, 0 = worst). They line up with the published
+    # numbers in this same payload:
+    #   * green_min == coverage_target -- the same calibration bar the
+    #     forecast band is fit to (`coverage_p10_p90` target). Derived
+    #     from the calibration helper (Task #130) so they cannot drift.
+    #     If we wouldn't bet the band on it, we shouldn't paint the card
+    #     green either.
+    #   * amber_min = 0.50 -- the standard "more likely than not"
+    #     decision line (cf. NWS deterministic forecast issuance
+    #     criteria, FAA flight-decision risk matrices). Below this the
+    #     forecast says recovery / staying-above is *less likely than
+    #     not* -- escalation territory.
+    # `label` is the operator-facing copy the UI surfaces in the
+    # tooltip so the color → number mapping is explainable without
+    # opening the source.
+    amber_min = 0.50
+    green_min = calibration["coverage_target"]
+    kpi_bands = {
+        "green_min": green_min,
+        "amber_min": amber_min,
+        "label": (
+            f"≥{int(round(green_min * 100))}% likely to meet threshold: green; "
+            f"{int(round(amber_min * 100))}–{int(round(green_min * 100))}%: amber; "
+            f"<{int(round(amber_min * 100))}%: red"
+        ),
+    }
+
     return {
         "unit": unit or "FLEET",
         "history": history,
@@ -2068,6 +2103,7 @@ async def forecast(
         "coverage_p10_p90": calibration["coverage_p10_p90"],
         "coverage_n": calibration["coverage_n"],
         "coverage_target": calibration["coverage_target"],
+        "kpi_bands": kpi_bands,
         "model_card_url": "/#/admin/models/pulse-risk",
     }
 

@@ -104,6 +104,42 @@ def test_forecast_links_to_model_card(client):
     assert data.get("model_card_url", "").endswith("/admin/models/pulse-risk")
 
 
+def test_forecast_publishes_kpi_color_bands(client):
+    """Task #113 — the KPI color cutoffs used by the front-end card
+    (`< amber_min` = red, `< green_min` = amber, else green) must be
+    published by the backend so the doctrine lives next to the rest of
+    the forecast thresholds and is documented in one place. Asserts
+    the bands are present, sane, and carry an operator-facing label
+    the UI can drop into a tooltip."""
+    _login(client)
+    r = client.get("/api/pulse/forecast", params={"window": 14})
+    assert r.status_code == 200, r.text
+    data = r.json()
+
+    bands = data.get("kpi_bands")
+    assert isinstance(bands, dict), "kpi_bands must be on the forecast payload"
+
+    green_min = bands.get("green_min")
+    amber_min = bands.get("amber_min")
+    label = bands.get("label")
+
+    assert isinstance(green_min, (int, float)), "kpi_bands.green_min must be numeric"
+    assert isinstance(amber_min, (int, float)), "kpi_bands.amber_min must be numeric"
+    assert 0.0 < amber_min < green_min < 1.0, (
+        f"kpi_bands ordering invalid (amber_min={amber_min}, green_min={green_min})"
+    )
+    # Green band is tied to the calibration target — operators should
+    # not see "green" at a confidence below what the band is calibrated
+    # for. The backend derives one from the other so they cannot drift.
+    assert green_min == data.get("coverage_target"), (
+        "kpi_bands.green_min must equal coverage_target so 'green' "
+        "lines up with the calibration bar (drift guard)"
+    )
+    assert isinstance(label, str) and label.strip(), (
+        "kpi_bands.label is what the UI tooltip shows; must be a non-empty string"
+    )
+
+
 def test_forecast_band_is_not_artificially_compressed(client):
     """Sigma cap raised to 0.10 and 0.6× damping dropped — at a
     14-day horizon the p10/p90 spread on the synthetic dataset should

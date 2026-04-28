@@ -1923,6 +1923,14 @@ export interface Forecast {
   coverage_p10_p90?: number | null;
   coverage_n?: number;
   coverage_target?: number;
+  // Task #113 — KPI color cutoffs published by the backend so the
+  // doctrine lives next to the other forecast thresholds. See
+  // backend/routes/pulse.py for the justification.
+  kpi_bands?: {
+    green_min: number;
+    amber_min: number;
+    label: string;
+  };
   model_card_url?: string;
 }
 

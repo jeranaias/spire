@@ -260,8 +260,20 @@ export function ForecastTab() {
   // `goodness` ∈ [0,1]: 1 = great, 0 = dire — independent of which
   // direction the underlying probability points.
   const goodness = startsBelow ? endCross : 1 - endCross;
+  // Task #113 — color cutoffs come from the backend (`kpi_bands`) so the
+  // doctrine is documented next to `threshold` / `coverage_target`
+  // instead of buried as magic numbers here. Fallback values match the
+  // published bands (green ≥ 0.80 = coverage_target; amber ≥ 0.50 =
+  // "more likely than not"); see backend/routes/pulse.py for the
+  // justification a judge can be pointed at.
+  const kpiBands = data?.kpi_bands;
+  const greenMin = typeof kpiBands?.green_min === "number" ? kpiBands.green_min : 0.80;
+  const amberMin = typeof kpiBands?.amber_min === "number" ? kpiBands.amber_min : 0.50;
+  const kpiBandsLabel =
+    kpiBands?.label ||
+    `≥${Math.round(greenMin * 100)}% likely to meet threshold: green; ${Math.round(amberMin * 100)}–${Math.round(greenMin * 100)}%: amber; <${Math.round(amberMin * 100)}%: red`;
   const kpiTone: "danger" | "warning" | "success" =
-    goodness < 0.5 ? "danger" : goodness < 0.8 ? "warning" : "success";
+    goodness < amberMin ? "danger" : goodness < greenMin ? "warning" : "success";
   const kpiColorVar =
     kpiTone === "danger"
       ? "var(--color-danger)"
@@ -544,6 +556,15 @@ export function ForecastTab() {
             borderColor: dataLoaded ? kpiBorderMix : "var(--color-border)",
             background: dataLoaded ? kpiBackgroundMix : "var(--color-surface)",
           }}
+          /* Task #113 — tooltip surfaces the color → number mapping in
+           * plain English so a judge asking "why is the card amber?"
+           * can be answered without opening the source. The bands
+           * themselves are published by the backend (`kpi_bands`). */
+          title={
+            dataLoaded
+              ? `Color bands (recovery / hold confidence): ${kpiBandsLabel}.`
+              : undefined
+          }
         >
           {/* Walkthrough #4 — semantic label honors cross direction
            * (recovery vs decline). starts_below_threshold flips the
