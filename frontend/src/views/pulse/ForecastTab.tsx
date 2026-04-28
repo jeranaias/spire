@@ -43,6 +43,7 @@ function useElementWidth<T extends HTMLElement>(): [(el: T | null) => void, numb
   return [setRef, w];
 }
 import { api, type Forecast } from "../../api";
+import { formatApiError } from "../../api-retry";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { RecommendPanel } from "../../components/RecommendPanel";
@@ -50,16 +51,66 @@ import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 
 type Horizon = "7" | "14" | "30";
 
+// Task #3 follow-on (PR polish): persist the operator's last-used unit and
+// horizon so a fresh tab re-entry restores the prior selection. Watch-floor
+// sessions tend to stay on a single unit and re-open the tab repeatedly;
+// resetting to FLEET on every load is friction.
+const FORECAST_PREFS_KEY = "spire.pulse.forecast.v1";
+function readForecastPrefs(): { unit?: string; horizon?: Horizon } {
+  try {
+    const raw = localStorage.getItem(FORECAST_PREFS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    const horizon = ["7", "14", "30"].includes(parsed?.horizon) ? (parsed.horizon as Horizon) : undefined;
+    const unit = typeof parsed?.unit === "string" && parsed.unit.length > 0 ? parsed.unit : undefined;
+    return { unit, horizon };
+  } catch {
+    return {};
+  }
+}
+function writeForecastPrefs(unit: string, horizon: Horizon): void {
+  try {
+    localStorage.setItem(FORECAST_PREFS_KEY, JSON.stringify({ unit, horizon }));
+  } catch {
+    /* localStorage may be unavailable (private browsing); fail silent. */
+  }
+}
+
 export function ForecastTab() {
   const role = useSpireStore((s) => s.role);
   const [params] = useSearchParams();
   // Honor an inbound ?unit=… deep link (e.g. from PredictedFailurePanel's
-  // Draft Action button). Defaults to FLEET if no param.
-  const initialUnit = params.get("unit") ?? "FLEET";
+  // Draft Action button). URL param wins over persisted prefs (deep links
+  // are explicit operator intent), then persisted, then FLEET default.
+  const persistedRef = useRef(readForecastPrefs());
+  const initialUnit = params.get("unit") ?? persistedRef.current.unit ?? "FLEET";
+  const initialHorizon = persistedRef.current.horizon ?? "14";
   const [unit, setUnit] = useState<string>(initialUnit);
-  const [horizon, setHorizon] = useState<Horizon>("14");
+  const [horizon, setHorizon] = useState<Horizon>(initialHorizon);
   const [data, setData] = useState<Forecast | null>(null);
   const [units, setUnits] = useState<string[]>([]);
+  // Issues #19, #20, #21, #22 — explicit error + loading state. The prior
+  // implementation swallowed errors with a no-op `.catch(() => {})` and
+  // left the skeleton on screen forever, which the operator interpreted
+  // as "the chart loads once and then nothing happens" when nav-ing away
+  // and back during a transient backend hiccup. We now track:
+  //   - loading: a request is in flight
+  //   - error:   the last request failed (with a retry CTA)
+  // Plus an AbortController + request-generation guard to discard stale
+  // responses when unit/horizon change rapidly.
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  // Bumped on every manual retry so the fetch effect re-runs even when
+  // unit/horizon haven't changed.
+  const [reloadKey, setReloadKey] = useState(0);
+  // Task #3 follow-on: timestamp of the last successful response so the
+  // operator can see how stale the displayed projection is. Wall-clock
+  // time avoids the complexity of an interval-driven "X seconds ago".
+  const [lastRefreshed, setLastRefreshed] = useState<number | null>(null);
+  // Generation token guards against late-arriving stale responses
+  // overwriting fresh ones (race when the user toggles unit/horizon
+  // faster than the network resolves).
+  const reqGenRef = useRef(0);
   const [chartRef, chartWidth] = useElementWidth<HTMLDivElement>();
   const CHART_HEIGHT = 360;
 
@@ -80,15 +131,55 @@ export function ForecastTab() {
       .catch(() => { /* tolerate; dropdown stays at FLEET */ });
   }, [role]);
 
+  // Task #3 follow-on: if a persisted unit isn't in the role-scoped unit
+  // list (e.g. the operator switched from MEF Commander to Maintenance
+  // Chief, whose persisted MWSS-271 isn't visible), fall back to FLEET so
+  // the dropdown isn't showing a value that isn't an option.
   useEffect(() => {
-    setData(null);
-    const targetUnit = unit === "FLEET" ? undefined : unit;
-    // Same pattern: catch transient errors so the chart shows its
-    // 'forecast unavailable' state rather than logging an uncaught.
-    api.pulse.forecast(targetUnit, Number(horizon))
-      .then(setData)
-      .catch(() => { /* keep prior data, chart shows skeleton/empty */ });
+    if (unit !== "FLEET" && units.length > 0 && !units.includes(unit)) {
+      setUnit("FLEET");
+    }
+  }, [units, unit]);
+
+  // Task #3 follow-on: write current selection to localStorage whenever
+  // it changes. Persist-on-change rather than persist-on-unmount so an
+  // unexpected reload still preserves the operator's choice.
+  useEffect(() => {
+    writeForecastPrefs(unit, horizon);
   }, [unit, horizon]);
+
+  useEffect(() => {
+    const targetUnit = unit === "FLEET" ? undefined : unit;
+    const myGen = ++reqGenRef.current;
+    const ctrl = new AbortController();
+    setLoading(true);
+    setError(null);
+    // Issues #19–#22 — pass the abort signal so we can cancel in-flight
+    // requests when the user changes unit/horizon mid-fetch (or
+    // unmounts), and gate state updates on the generation token so a
+    // late response from a previous selection cannot overwrite the
+    // current one.
+    api.pulse.forecast(targetUnit, Number(horizon), ctrl.signal)
+      .then((d) => {
+        if (myGen !== reqGenRef.current) return;
+        setData(d);
+        setError(null);
+        setLastRefreshed(Date.now());
+      })
+      .catch((e) => {
+        if (myGen !== reqGenRef.current) return;
+        // AbortError is expected on dependency changes; don't surface it.
+        if (e?.name === "AbortError") return;
+        setError(formatApiError(e));
+      })
+      .finally(() => {
+        if (myGen !== reqGenRef.current) return;
+        setLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [unit, horizon, role, reloadKey]);
+
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
   // Build the combined series. Null-guarded so hooks order stays stable.
   // Walkthrough audit: per-path data was passed via `<Line data={...}>`,
@@ -140,7 +231,12 @@ export function ForecastTab() {
 
   // Walkthrough #21 — keep controls mounted during fetch by NOT returning
   // an early loading state. Skeleton only fills the chart pane.
+  // Issues #19–#22 — distinguish data-present from in-flight: the chart
+  // re-renders cached data while a refresh is loading, so the operator
+  // never sees a blank screen on re-entry to the tab.
   const dataLoaded = !!data;
+  const showSkeleton = !dataLoaded && loading && !error;
+  const showError = !!error && !loading;
   const todayLabel = data?.history?.length
     ? data.history[data.history.length - 1].date.slice(5)
     : null;
@@ -208,6 +304,30 @@ export function ForecastTab() {
               ))}
             </select>
           </label>
+          {/* Issues #19–#22 — manual reload control. The chart is cached
+           * across nav-aways, but the operator can force a fresh fit on
+           * the latest snapshot without changing unit/horizon. */}
+          <div className="flex flex-col items-end gap-0.5">
+            <button
+              onClick={reload}
+              disabled={loading}
+              className="rounded-sm border border-[var(--color-border-active)] px-2 py-1 font-mono text-xs uppercase text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:opacity-50 tracking-widest"
+              title="Re-fit Monte Carlo on latest data"
+              aria-label="Reload forecast"
+            >
+              {loading && dataLoaded ? "Refreshing…" : "Reload"}
+            </button>
+            {/* Task #3 follow-on: timestamp of last successful response so
+             * the operator can tell at a glance how stale the chart is. */}
+            {lastRefreshed != null && (
+              <span
+                className="font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest tabular-nums"
+                title={new Date(lastRefreshed).toString()}
+              >
+                refreshed {new Date(lastRefreshed).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -224,10 +344,52 @@ export function ForecastTab() {
         className="relative shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
         style={{ height: CHART_HEIGHT, minHeight: CHART_HEIGHT }}
       >
-        {!dataLoaded ? (
+        {/* Issues #19–#22 (review polish): when refreshing over already-
+         * rendered data, a tiny in-chart pill makes it obvious the chart
+         * is being re-fit, so the operator doesn't read stale-looking
+         * lines as fresh. */}
+        {loading && dataLoaded && !showError && (
+          <div
+            className="pointer-events-none absolute right-2 top-2 z-10 flex items-center gap-1.5 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)]/90 px-2 py-1 font-mono text-[10px] uppercase text-[var(--color-text-secondary)] tracking-widest shadow"
+            aria-live="polite"
+          >
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-primary)]" />
+            Refreshing
+          </div>
+        )}
+        {showError ? (
+          // Issues #19–#22 — explicit error pane with retry. Replaces the
+          // prior silent skeleton-forever behavior on transient failures.
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            <div className="font-semibold uppercase text-[var(--color-danger)] tracking-widest">
+              Forecast Unavailable
+            </div>
+            <div className="max-w-md text-[var(--color-text-secondary)] leading-relaxed">
+              {error}
+            </div>
+            <button
+              onClick={reload}
+              className="mt-1 rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-xs font-semibold uppercase text-white hover:bg-[var(--color-primary-hover)] tracking-widest"
+            >
+              Retry
+            </button>
+          </div>
+        ) : showSkeleton ? (
           <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)] mr-2" />
             Running Monte Carlo forecast …
+          </div>
+        ) : !dataLoaded ? (
+          // No data, no error, not loading — should not happen normally,
+          // but provide a manual recovery path just in case.
+          <div className="flex h-full flex-col items-center justify-center gap-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+            Forecast not loaded.
+            <button
+              onClick={reload}
+              className="rounded-sm border border-[var(--color-border-active)] px-2 py-1 uppercase tracking-widest hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+            >
+              Load now
+            </button>
           </div>
         ) : !chartUsable ? (
           <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
