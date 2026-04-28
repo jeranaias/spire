@@ -192,14 +192,18 @@ export function TopBar() {
          * + Reset + Audit) and keeps the AlertBadge backstop so a stage
          * presenter sees the alert count even with the dropdown closed. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
-          {/* CompactMissionClock for everything below xl. The full centred
-           * MissionClock only renders at xl+; below xl the chip rides the
-           * right group at every breakpoint (sm and md/lg) so operators
-           * always have a visible, click-to-open clock. */}
-          <span className="inline-flex xl:hidden">
+          {/* CompactMissionClock for the cramped 1024–1279 (md/lg) range.
+           * The full centred MissionClock renders at xl+. At sm the
+           * compact chip is hidden — the System chip dropdown's
+           * "Mission timeline" row is the fallback access path. */}
+          <span className="hidden md:inline-flex xl:hidden">
             <MissionClock compact />
           </span>
-          {!stageMode && <SystemStatusChip />}
+          {/* SystemStatusChip is part of the stable spine — present in
+           * both operator and stage modes so the sync/gcss/mode/timeline
+           * dropdown is always one click away (and at sm it's the only
+           * way to reach the mission timeline). */}
+          <SystemStatusChip />
           <CommsControl />
           {!stageMode && <PushToJointButton role={role} />}
           {!stageMode && <NotificationsChip />}

@@ -24,6 +24,31 @@ async function enableStageMode(page: Page): Promise<void> {
   });
 }
 
+// Seed a scenario in sessionStorage so `useScenarioPlayer.scenarioId` is
+// non-null at boot. Failsafe in StageCluster is gated on a loaded
+// scenario; pre-seeding the persisted demoPlayer state is the cleanest
+// way to get the third stage-cluster button visible without driving the
+// scenario picker through the UI.
+async function preloadScenario(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      window.sessionStorage.setItem(
+        "spire.demoPlayer.v1",
+        JSON.stringify({
+          scenarioId: "TXN-PROBE-01",
+          currentBeatIndex: 0,
+          status: "loaded",
+          speed: 1,
+          autoAdvance: false,
+          narrationVisible: true,
+        }),
+      );
+    } catch {
+      /* private mode tolerant */
+    }
+  });
+}
+
 test.describe("TopBar declutter (Task #184)", () => {
   test("xl+ shows the full spine: System + Notif + Comms + IdPill", async ({ page }) => {
     await page.setViewportSize(BREAKPOINTS.xl);
@@ -45,6 +70,22 @@ test.describe("TopBar declutter (Task #184)", () => {
     }
   });
 
+  test("stage mode at lg with a loaded scenario renders all 3 stage-cluster controls", async ({ page }) => {
+    // Required scenario from done-criteria: stage mode + 1440 + Failsafe
+    // visible = the cluster groups Failsafe + Reset + Audit. Pre-seed the
+    // scenarioPlayer sessionStorage so the Failsafe gate is open.
+    await page.setViewportSize(BREAKPOINTS.lg);
+    await enableStageMode(page);
+    await preloadScenario(page);
+    await signIn(page, SECURITY_MANAGER_DODID);
+    const cluster = page.getByTestId("stage-cluster");
+    await expect(cluster).toBeVisible();
+    await expect(cluster).toHaveAttribute("data-stage-mode", "1");
+    await expect(cluster.getByTestId("stage-cluster-failsafe")).toBeVisible();
+    await expect(cluster.getByTestId("stage-cluster-reset")).toBeVisible();
+    await expect(cluster.getByTestId("stage-cluster-audit")).toBeVisible();
+  });
+
   test("xl+ shows full MissionClock and hides CompactMissionClock", async ({ page }) => {
     await page.setViewportSize(BREAKPOINTS.xl);
     await signIn(page);
@@ -55,13 +96,23 @@ test.describe("TopBar declutter (Task #184)", () => {
     }
   });
 
-  test("sm shows CompactMissionClock so the clock is always one click away", async ({ page }) => {
-    // The original declutter hid the clock entirely below md; the sm
-    // fallback now keeps the compact chip visible at every width below
-    // xl so an operator on a narrow surface still has a reachable clock.
+  test("sm hides the MissionClock — System chip mission-timeline row is the fallback", async ({ page }) => {
+    // Per the spec the compact clock renders only at md+. At sm the
+    // chrome is too cramped for the chip; the System chip dropdown's
+    // Mission timeline row owns the access path (clicking it fires the
+    // `spire:open-mission-clock` event which expands the clock from the
+    // System chip's stacking context).
     await page.setViewportSize(BREAKPOINTS.sm);
     await signIn(page);
-    await expect(page.getByTestId("mission-clock-compact")).toBeVisible();
+    const compact = page.getByTestId("mission-clock-compact");
+    if (await compact.count()) {
+      await expect(compact).toBeHidden();
+    }
+    // System chip is part of the spine — present at every breakpoint.
+    await expect(page.getByTestId("system-status-chip")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByTestId("system-status-chip").click();
+    await expect(page.getByTestId("system-status-panel")).toContainText(/Mission timeline/i);
   });
 
   test("MissionClock dropdown opens and is not clipped by neighbouring chrome", async ({ page }) => {
@@ -167,6 +218,9 @@ test.describe("TopBar declutter (Task #184)", () => {
     await page.setViewportSize(BREAKPOINTS.lg);
     await signIn(page, SECURITY_MANAGER_DODID);
     await expect(page.getByTestId("stage-cluster")).toHaveCount(0);
+    // SystemStatusChip is part of the spine and stays visible — only
+    // the stage-only cluster is gone.
+    await expect(page.getByTestId("system-status-chip")).toBeVisible();
   });
 
   test("IdentityPill menu hosts Operator settings (Air-gap, Density, Comms)", async ({ page }) => {

@@ -77,16 +77,15 @@ right group. JointCOP button is `hidden xl:inline-flex` — the menu's
 ┌──────────────────────────────────┐
 │ SPIRE · UNCLASS                       │
 │ SENTRY PULSE BASTION ADMIN            │
-│ [Clock chip][System][Notif][Comms]    │
-│ [Stage cluster?][IdPill ▾]            │
+│ [System][Notif][Comms][IdPill ▾]      │
 └──────────────────────────────────┘
 ```
 
-CompactMissionClock rides the right group at every breakpoint below
-xl, so the operator always has a visible click-to-open clock — the
-`spire:open-mission-clock` event and the System chip menu's mission
-timeline row are belt-and-suspenders fallbacks. Tabs wrap. Tagline
-truncates.
+CompactMissionClock disappears at sm — the chrome is too cramped for
+the chip. The System chip's "Mission timeline" dropdown row is the
+only access path at this width and fires the
+`spire:open-mission-clock` event to expand the clock from the System
+chip's stacking context. Tabs wrap. Tagline truncates.
 
 ## Rationale
 
@@ -104,7 +103,7 @@ truncates.
 | AirGapToggle              | IdentityPill → Operator settings → Air-gap row    |
 | DensityToggle             | IdentityPill → Operator settings → Density radio  |
 | CommsControl              | Stays in right group (single posture chip)        |
-| MissionClock              | `compact` chip below xl (sm/md/lg), full clock at xl+ |
+| MissionClock              | `compact` chip at md/lg, full clock at xl+, hidden at sm (System chip's Mission timeline row is the access path) |
 | PushToJointButton         | Right group, `xl+` only                           |
 | Tab numerals (`01/02/...`)| Removed — labels carry the meaning                |
 
