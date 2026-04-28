@@ -54,6 +54,9 @@ Thumbs.db
 
 # Local scratch — screenshots, Playwright outputs, debug artefacts
 tmp/
+test-results/
+playwright-report/
+.last-run.json
 
 # One-shot debug scripts — kept unversioned so the repo stays tidy
 scripts/forecast_debug*.py
