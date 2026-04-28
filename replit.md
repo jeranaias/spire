@@ -28,12 +28,18 @@ Key capabilities include:
 The SPIRE application features a clear separation between its backend and frontend components, designed for scalability and maintainability.
 
 ### UI/UX Decisions
-- **Frontend Technologies**: React 19, Vite 8, TypeScript, Tailwind 4, MapLibre, Recharts, Zustand, React Router.
-- **Authentication UI**: CAC cert-selection splash with mocked Marine roles, identity pill, and role badges in the TopBar, including specific UI elements for classification, operational indicators, and role-based access.
-- **Classification Display**: Visual representation of data classification levels.
-- **Joint COP Preview**: A simulated Navy/Joint "JLTC" shell with distinct styling and communication control for disaster preparedness drills.
-- **Decision Bridge**: A 6x2 grid layout optimized for 1920x1080 resolution.
-- **Stage Mode**: An 8-minute demo UI (`?stage=1`) collapsing SPIRE to four hero use-case tiles (SENTRY, PULSE, BASTION, DHA RESCUE), with presenter role-hopping capabilities and rehearsal aids.
+- **Frontend Framework**: React 19 with Vite 8 and TypeScript.
+- **Styling**: Tailwind 4 for utility-first CSS.
+- **Mapping**: MapLibre for geographical data visualization.
+- **Charting**: Recharts for data representation.
+- **State Management**: Zustand for reactive state management.
+- **Routing**: React Router for navigation.
+- **Authentication UI**: CAC cert-selection splash at `/#/auth` with mocked Marine roles.
+- **TopBar**: Features identity pill, role badge, sign-out, and specific operational indicators like `GcssMcSyncPill` and `MissionClock`. The `JOINT COP` push action (Task #103) is always rendered for operator chrome at xl+ but is disabled (with a tooltip naming Park / Hayes) for roles outside `JOINT_RELEASE_ROLES` so a maintenance chief who clicks it gets a real explanation instead of a silent 403 in a fresh tab. For release-authority roles, the click surfaces an inline pre-flight panel — current operator (rank + last name), role, allowed status, classification marking that will be stamped (`SECRET // REL TO USA, FVEY`), and subscription model (`TOPIC_FULL_MAGTF`) — with a primary `Open partner viewer` confirm before the JLTC tab opens.
+- **Classification Display**: `ClassificationBadge.tsx` for visual representation of data classification levels.
+- **Joint COP Preview**: Faux Navy/Joint "JLTC" shell (`JointPreviewView`) with a distinct steel-blue palette and fouled-anchor mark. Hardened for the contested fight (Task #79): JLTC topbar surfaces a 4-state SPIRE comms control (CONN/LIM/INT/DISC) wired to `useSpireStore.ddilMode` so the shared API interceptor's latency / packet-loss / cache effects apply to this tab too. Auto-refreshes the OMS/UCI export on a comms-aware cadence (30s default, 60s on LIMITED, polling suspended on DISCONNECTED with the cached payload still rendered behind a red "STALE — DISCONNECTED · last good pull T-Ns" stripe). A fixed "what's hot now" 4-cell strip (worst alert, worst MC unit, C3/C4 unit count, active alert count) sits between topbar and tables for ≤5-second glance reads. Pulled/Published pills now show relative `T-Ns` ages that tick at 1Hz. Projection legibility pass: classification banner 18px bold; field values and table cells 14px. ErrorPanel hint corrected — any SECRET-cleared operator can pull (no longer claims only Security Manager / MEF Commander), and a 401 surfaces an actionable "Sign in to SPIRE" link instead of the generic clearance hint.
+- **Decision Bridge**: 6x2 grid layout designed to fit without vertical scroll at 1920x1080 resolution.
+- **Stage Mode (MDM 2026 pivot)**: `?stage=1` query param activates an 8-minute demo UI that collapses SPIRE to four hero use-case tiles (SENTRY, PULSE, BASTION, DHA RESCUE). Persists in `sessionStorage`, hydrated in `main.tsx` before first paint, gated throughout TopBar/DecisionBridge/AuditView. Adds `/dha-rescue` route, AUDIT pill, and an additive `POST /api/auth/quick-switch` endpoint (env-gated by `SPIRE_DEMO_QUICK_SWITCH=1`) for presenter role-hopping without PIN re-entry. Presenter rehearsal aid at `scripts/demo_rehearsal.ts`.
 
 ### Technical Implementations
 - **Backend Framework**: FastAPI (Python 3.12) for high-performance API services.

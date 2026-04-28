@@ -265,7 +265,7 @@ export function TopBar() {
            * pref to keep the canonical spine. */}
           {(stageMode || visibleChips.system) && <SystemStatusChip />}
           <CommsControl />
-          {!stageMode && visibleChips.jointCop && <PushToJointButton role={role} />}
+          {!stageMode && visibleChips.jointCop && <PushToJointButton role={role} user={currentUser} />}
           {!stageMode && visibleChips.notifications && <NotificationsChip />}
           {/* StageCluster is stage-only — the operator chrome stays
            * decluttered (System + Notif + Comms + Identity). Operator
@@ -931,34 +931,205 @@ function AlertBadge({ count }: { count: number }) {
 }
 
 // PushToJointButton — opens the OMS/UCI sister-service viewer in a new
-// tab. Visible to roles that can release a SECRET//REL bundle. Other
-// roles don't see it so we don't tease an InsufficientClearance gate.
-function PushToJointButton({ role }: { role: Role }) {
-  const allowed = role === "security_manager" || role === "mef_commander" || role === "data_custodian";
-  if (!allowed) return null;
+// tab. Visible to every operator so the affordance teaches what exists,
+// but only release-authority roles can actually push: matches the
+// server-side gate in `backend/scoping.py::JOINT_RELEASE_ROLES`. Click
+// surfaces a pre-flight panel (operator name, role, allowed/denied,
+// classification marking that will be stamped, subscription model)
+// before the new tab is opened — so a maintenance chief who clicks the
+// button gets a clear "you can't release, sign in as Park or Hayes"
+// instead of a silent 403 in a fresh tab.
+//
+// Mirrors `JOINT_RELEASE_ROLES` in backend/scoping.py. `joint_release_authority`
+// is reserved on the backend for a future dedicated billet and isn't part
+// of the FE Role union, so we only enumerate the two roles a demo
+// identity can actually hold (Park / Hayes).
+const JOINT_RELEASE_FE_ROLES: ReadonlySet<Role> = new Set<Role>([
+  "security_manager",
+  "mef_commander",
+]);
+
+// Static descriptors mirrored from the OMS/UCI envelope authored by
+// `backend/routes/joint.py::oms_uci_export`. The marking + subscription
+// model never vary per-operator at SPIRE 0.1, so it's safe to surface
+// them from the FE without an extra round-trip — the partner viewer
+// itself is the source of truth and the audit chain is what enforces it.
+const JOINT_RELEASE_MARKING = "SECRET // REL TO USA, FVEY";
+const JOINT_RELEASE_SUBSCRIPTION = "TOPIC_FULL_MAGTF";
+
+function PushToJointButton({ role, user }: { role: Role; user: User | null }) {
+  const allowed = JOINT_RELEASE_FE_ROLES.has(role);
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement | null>(null);
+
+  // Click-outside + Escape close, mirroring IdentityPill / NotificationsChip.
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (!wrap.current) return;
+      if (!wrap.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   function openPartner() {
     // HashRouter: deep links use the #/ prefix.
     const url = new URL(window.location.href);
     url.hash = "#/joint/preview";
     window.open(url.toString(), "_blank", "noopener,noreferrer");
+    setOpen(false);
   }
+
+  // Friendly tooltip / disabled-state message — names the two demo
+  // identities that DO hold release authority so a denied operator
+  // knows exactly who to swap to (matches the backend roles_allowed
+  // surfaced in the JOINT_RELEASE_ROLES audit error envelope).
+  const deniedTitle =
+    "Joint release requires a Security Manager or MEF Commander; sign in as Park or Hayes.";
+  const allowedTitle =
+    "Push to Joint COP — opens the sister-service OMS/UCI viewer in a new tab";
+
+  const operatorLabel = user
+    ? `${user.rank} ${user.last_name}`
+    : "—";
+  const roleLabel = ROLE_LABELS[role];
+
   return (
-    <Button
-      variant="secondary"
-      size="md"
-      onClick={openPartner}
-      aria-label="Push current SPIRE state to the Joint COP partner viewer (opens in a new tab)"
-      title="Push to Joint COP — opens the sister-service OMS/UCI viewer in a new tab"
-      className="hidden xl:inline-flex px-2.5 text-xs tracking-wider border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))]"
-      leadingIcon={
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M5 12h14" />
-          <path d="M13 5l7 7-7 7" />
-        </svg>
-      }
+    <div
+      ref={wrap}
+      className="relative hidden shrink-0 xl:inline-flex"
+      data-testid="push-to-joint-wrap"
     >
-      JOINT COP
-    </Button>
+      <Button
+        variant="secondary"
+        size="md"
+        onClick={() => allowed && setOpen((v) => !v)}
+        disabled={!allowed}
+        aria-haspopup={allowed ? "dialog" : undefined}
+        aria-expanded={allowed ? open : undefined}
+        aria-disabled={!allowed || undefined}
+        aria-label={
+          allowed
+            ? "Open Joint COP release pre-flight"
+            : `Joint COP release disabled — ${deniedTitle}`
+        }
+        title={allowed ? allowedTitle : deniedTitle}
+        data-testid="push-to-joint-button"
+        data-allowed={allowed ? "true" : "false"}
+        className="px-2.5 text-xs tracking-wider border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))]"
+        leadingIcon={
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M5 12h14" />
+            <path d="M13 5l7 7-7 7" />
+          </svg>
+        }
+      >
+        JOINT COP
+      </Button>
+
+      {open && allowed && (
+        <div
+          role="dialog"
+          aria-label="Joint COP release pre-flight"
+          data-testid="push-to-joint-panel"
+          className="absolute right-0 top-[calc(100%+6px)] z-[8500] w-[22rem] max-w-[92vw] rounded-md border border-[var(--color-border-active)] bg-[var(--color-surface)] shadow-2xl"
+        >
+          <div className="border-b border-[var(--color-border)] px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            Joint COP release · pre-flight
+          </div>
+
+          <dl className="px-4 py-3 space-y-2 font-mono text-[11px] tracking-wide">
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="uppercase text-[10px] tracking-widest text-[var(--color-text-muted)]">
+                Operator
+              </dt>
+              <dd
+                className="truncate text-right text-[var(--color-text)]"
+                data-testid="push-to-joint-operator"
+              >
+                {operatorLabel}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="uppercase text-[10px] tracking-widest text-[var(--color-text-muted)]">
+                Role
+              </dt>
+              <dd
+                className="truncate text-right text-[var(--color-text)]"
+                data-testid="push-to-joint-role"
+              >
+                {roleLabel}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="uppercase text-[10px] tracking-widest text-[var(--color-text-muted)]">
+                Release authority
+              </dt>
+              <dd
+                className="text-right font-semibold uppercase tracking-widest text-[var(--color-success)]"
+                data-testid="push-to-joint-status"
+              >
+                Allowed
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="uppercase text-[10px] tracking-widest text-[var(--color-text-muted)]">
+                Classification
+              </dt>
+              <dd
+                className="text-right font-semibold text-[var(--color-warning)]"
+                data-testid="push-to-joint-classification"
+              >
+                {JOINT_RELEASE_MARKING}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="uppercase text-[10px] tracking-widest text-[var(--color-text-muted)]">
+                Subscription
+              </dt>
+              <dd
+                className="text-right text-[var(--color-text-secondary)]"
+                data-testid="push-to-joint-subscription"
+              >
+                {JOINT_RELEASE_SUBSCRIPTION}
+              </dd>
+            </div>
+          </dl>
+
+          <p className="border-t border-[var(--color-border)] px-4 py-2 font-mono text-[10px] leading-relaxed tracking-wide text-[var(--color-text-muted)]">
+            Opens the JLTC partner viewer in a new tab. Every pull is gated
+            server-side and recorded on the audit chain with your name.
+          </p>
+
+          <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-3 py-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setOpen(false)}
+              data-testid="push-to-joint-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={openPartner}
+              data-testid="push-to-joint-confirm"
+            >
+              Open partner viewer
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
