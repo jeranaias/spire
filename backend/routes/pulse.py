@@ -764,11 +764,16 @@ async def recommend_actions(
 
 
 @router.get("/assets/{asset_id}")
-async def asset_deep_dive(asset_id: str):
+async def asset_deep_dive(asset_id: str, request: Request):
     ds = get_dataset()
     asset = ds.asset(asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail="asset not found")
+
+    role = session_role(request)
+    allowed = allowed_units(ds, role)
+    if allowed is not None and asset.unit_name not in allowed:
+        raise HTTPException(status_code=403, detail="asset out of scope")
 
     score = risk_score(ds, asset_id)
 
