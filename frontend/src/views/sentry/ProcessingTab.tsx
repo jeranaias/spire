@@ -1,10 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { api, type SentryJob, type SentryReviewQueue } from "../../api";
 import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
 import { Button, ErrorState, EmptyState, LoadingState } from "../../components/ui";
+import {
+  ClassificationBadge,
+  classificationRank,
+  normalizeClassification,
+  type Classification,
+} from "../../components/classification";
 
 const FLAG_COLORS: Record<string, string> = {
   pii: "var(--color-info)",
@@ -14,6 +20,35 @@ const FLAG_COLORS: Record<string, string> = {
   controlled: "#fb923c",
 };
 
+type ReleasePreview = "US_ONLY" | "FVEY" | "NATO";
+
+// Release-authority ceiling. Mirrors the bundle gate in
+// backend/routes/sentry.py — records whose detected (or source) classification
+// outranks the ceiling are not releasable to that partner posture and the
+// preview surfaces them as BLOCKED rather than redacted-but-shipped.
+const RELEASE_CEILING: Record<ReleasePreview, Classification> = {
+  US_ONLY: "TS_SCI",
+  FVEY: "SECRET",
+  NATO: "CUI",
+};
+
+const RELEASE_LABEL: Record<ReleasePreview, string> = {
+  US_ONLY: "US ONLY",
+  FVEY: "FVEY",
+  NATO: "NATO",
+};
+
+// FVEY/NATO previews generalize unit designators (CLB-6 → "[CLB-6 AOR]") to
+// match the bundle export's release overlay (`generalize` branch). Keeps the
+// preview honest: what the operator sees on the right is what would actually
+// land in a partner's inbox after redaction.
+function generalizeUnit(unit: string | undefined, release: ReleasePreview): string {
+  if (!unit) return "";
+  if (release === "US_ONLY") return unit;
+  const head = unit.split(/\s+/)[0] || unit;
+  return `[${head} AOR]`;
+}
+
 export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const nav = useNavigate();
   const [job, setJob] = useState<SentryJob | null>(null);
@@ -21,6 +56,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const [displayIdx, setDisplayIdx] = useState(0);
   const [counts, setCounts] = useState({ tier1: 0, tier2: 0, pii: 0, geo: 0, comms: 0, classified: 0, controlled: 0 });
   const [error, setError] = useState<string | null>(null);
+  const [release, setRelease] = useState<ReleasePreview>("US_ONLY");
   const tickRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -77,6 +113,37 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
     };
   }, [queue, displayIdx]);
 
+  // Banner classification — mirrors the backend `bundle_class` rank logic.
+  // We walk every record visible in the queue (auto_cleared + flagged + held)
+  // and pick the highest of source / detected per record. Per DoDM 5200.01
+  // the banner reflects the highest classification on screen, not just the
+  // most recent card. Falls back to UNCLASSIFIED before the queue lands so
+  // the band paints green during the initial spinner instead of flashing.
+  const bannerClass: Classification = useMemo(() => {
+    if (!queue) return "UNCLASSIFIED";
+    const all = [...queue.auto_cleared, ...queue.flagged, ...queue.held];
+    let bestRank = 0;
+    let best: Classification = "UNCLASSIFIED";
+    for (const r of all) {
+      const cands = [r.source_classification, r.detected_classification];
+      for (const c of cands) {
+        const rk = classificationRank(c);
+        if (rk > bestRank) {
+          bestRank = rk;
+          best = normalizeClassification(c);
+        }
+      }
+    }
+    return best;
+  }, [queue]);
+
+  // CUI is rendered as the dual-line "UNCLASSIFIED // CUI" per CAPCO so a
+  // judge reading the banner from the projector sees the controlled-marking
+  // suffix the same way DoDM 5200.01 prints it on a cover sheet.
+  const bannerProps = bannerClass === "CUI"
+    ? { classification: "UNCLASSIFIED" as Classification, caveats: ["CUI"] }
+    : { classification: bannerClass };
+
   if (!ctx.jobId) {
     return (
       <div className="flex h-full items-center justify-center p-12">
@@ -121,6 +188,9 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const pct = all.length > 0 ? processed / all.length : 0;
   const recent = all.slice(Math.max(0, displayIdx - 10), displayIdx).reverse();
 
+  const ceiling = RELEASE_CEILING[release];
+  const ceilingRank = classificationRank(ceiling);
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* Subtle CRT scanline overlay across the whole processing view */}
@@ -138,6 +208,12 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           }}
         />
       </div>
+
+      {/* CAPCO classification banner — top. Required on every screen
+          rendering classified content per DoDM 5200.01. Computed from the
+          highest source/detected classification across the records currently
+          in view, not a hard-coded constant. */}
+      <ProcessingBanner edge="top" {...bannerProps} />
 
       {/* Task #65 — header tells the truth: the engine pass already
           finished synchronously inside POST /sentry/process before this
@@ -243,13 +319,24 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
 
         {/* Sanitized column */}
         <div className="flex w-[45%] flex-col overflow-hidden">
-          <div className="bg-[var(--color-bg)] px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            Sanitized output
+          <div className="flex items-center justify-between gap-3 bg-[var(--color-bg)] px-3 py-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Sanitized output
+            </span>
+            <ReleasePreviewSelector value={release} onChange={setRelease} />
           </div>
           <div className="flex-1 overflow-y-auto p-3">
             {recent.map((r) => (
-              <SanitizedRecord key={r.sr_number} record={r} />
+              <SanitizedRecord
+                key={r.sr_number}
+                record={r}
+                release={release}
+                ceilingRank={ceilingRank}
+              />
             ))}
+            {recent.length === 0 && (
+              <div className="text-xs text-[var(--color-text-muted)]">Awaiting sanitized output …</div>
+            )}
           </div>
         </div>
       </div>
@@ -328,6 +415,95 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           <span>Aggregation risks: <span className="font-mono tabular-nums text-[var(--color-warning)]">{job.aggregation_risks.length}</span></span>
         </div>
       </div>
+
+      {/* CAPCO classification banner — bottom. Pairs with the top band so a
+          presenter switching slides mid-processing always has the marking
+          on screen, even if the top band scrolls under a presenter overlay. */}
+      <ProcessingBanner edge="bottom" {...bannerProps} />
+    </div>
+  );
+}
+
+function ProcessingBanner({
+  edge,
+  classification,
+  caveats,
+}: {
+  edge: "top" | "bottom";
+  classification: Classification;
+  caveats?: string[];
+}) {
+  // Full-width band tinted to match the active classification, with the
+  // standard ClassificationBadge centered. Reusing the badge primitive keeps
+  // the color/labelling logic in one place — adding a new caveat upstream
+  // automatically reflows here.
+  const bg = `color-mix(in oklab, ${
+    classification === "UNCLASSIFIED" ? "#007A33" :
+    classification === "CUI" ? "#502B85" :
+    classification === "CONFIDENTIAL" ? "#0033A0" :
+    classification === "SECRET" ? "#C8102E" :
+    classification === "TOP_SECRET" ? "#FF8C00" :
+    "#FFD100"
+  } 18%, var(--color-surface))`;
+  return (
+    <div
+      role="region"
+      aria-label={`Classification banner (${edge})`}
+      className={clsx(
+        "z-20 flex shrink-0 items-center justify-center gap-3 px-4 py-1.5",
+        edge === "top"
+          ? "border-b border-[var(--color-border)]"
+          : "border-t border-[var(--color-border)]",
+      )}
+      style={{ background: bg }}
+    >
+      <ClassificationBadge
+        classification={classification}
+        caveats={caveats}
+        size="md"
+      />
+    </div>
+  );
+}
+
+function ReleasePreviewSelector({
+  value,
+  onChange,
+}: {
+  value: ReleasePreview;
+  onChange: (next: ReleasePreview) => void;
+}) {
+  // Compact pill picker mirroring the CoalitionTab partner-tab pattern.
+  // Each option re-runs the right column's redaction + ceiling block, so
+  // the operator can flip between US_ONLY and a partner posture without
+  // leaving the Processing surface.
+  const options: ReleasePreview[] = ["US_ONLY", "FVEY", "NATO"];
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+        Coalition release preview
+      </span>
+      <div role="group" className="inline-flex items-center gap-0.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+        {options.map((o) => {
+          const active = o === value;
+          return (
+            <button
+              key={o}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onChange(o)}
+              className={clsx(
+                "rounded-sm px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest transition-colors",
+                active
+                  ? "bg-[var(--color-primary)] text-white"
+                  : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
+              )}
+            >
+              {RELEASE_LABEL[o]}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -397,13 +573,86 @@ function RawRecord({ record, isMostRecent }: { record: any; isMostRecent: boolea
   );
 }
 
-function SanitizedRecord({ record }: { record: any }) {
+function SanitizedRecord({
+  record,
+  release,
+  ceilingRank,
+}: {
+  record: any;
+  release: ReleasePreview;
+  ceilingRank: number;
+}) {
   const flags: string[] = record.flags || [];
+  const highlights = record.highlights || [];
+  const remark: string = record.remark || "";
+
+  // Walk the highlight spans and stamp the actual `[REDACTED:CAT]` tokens
+  // over the offending substrings. This is the same span-based machinery
+  // dataset/coalition.apply_redactions_with_spans + the export bundle use —
+  // we run it client-side off the highlights the backend already attached so
+  // the visible page never paints un-redacted CUI text.
+  const sortedHighlights = [...highlights].sort(
+    (a: any, b: any) => a.start - b.start,
+  );
+  const redactedSegments: { text: string; redactedAs?: string; category?: string }[] = [];
+  if (remark) {
+    let cursor = 0;
+    for (const h of sortedHighlights) {
+      const start = Math.max(h.start ?? 0, cursor);
+      const end = h.end ?? start;
+      if (end <= start) continue;
+      if (start > cursor) {
+        redactedSegments.push({ text: remark.slice(cursor, start) });
+      }
+      const cat = (h.category || "pii") as string;
+      redactedSegments.push({
+        text: "",
+        redactedAs: `[REDACTED:${cat.toUpperCase()}]`,
+        category: cat,
+      });
+      cursor = end;
+    }
+    if (cursor < remark.length) {
+      redactedSegments.push({ text: remark.slice(cursor) });
+    }
+  }
+
+  // Coalition release ceiling: detected/source classification > ceiling →
+  // the partner doesn't get this record at all. Show the BLOCKED pane
+  // instead of the redacted preview so the operator sees the difference
+  // between "redacted-and-shipped" and "withheld entirely".
+  const recordRank = Math.max(
+    classificationRank(record.detected_classification),
+    classificationRank(record.source_classification),
+  );
+  const blockedByRelease = release !== "US_ONLY" && recordRank > ceilingRank;
+
+  const displayUnit = generalizeUnit(record.unit_name, release);
+
   return (
-    <div className="mb-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs">
+    <div
+      className={clsx(
+        "mb-2 rounded-sm border px-3 py-2 text-xs",
+        blockedByRelease
+          ? "border-[var(--color-danger-muted)] bg-[color-mix(in_oklab,var(--color-danger)_8%,var(--color-surface))]"
+          : "border-[var(--color-border)] bg-[var(--color-surface)]",
+      )}
+    >
       <div className="mb-1 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
         <span className="font-mono">{record.sr_number}</span>
-        <span className="ml-auto font-mono" style={{ color: record.detected_classification === "UNCLASSIFIED" ? "var(--color-success)" : record.detected_classification === "CUI" ? "var(--color-warning)" : "var(--color-danger)" }}>
+        <span>·</span>
+        <span className="font-mono">{displayUnit}</span>
+        <span
+          className="ml-auto font-mono"
+          style={{
+            color:
+              record.detected_classification === "UNCLASSIFIED"
+                ? "var(--color-success)"
+                : record.detected_classification === "CUI"
+                ? "var(--color-warning)"
+                : "var(--color-danger)",
+          }}
+        >
           {record.detected_classification}
         </span>
         {record.classification_discrepancy && (
@@ -412,32 +661,97 @@ function SanitizedRecord({ record }: { record: any }) {
           </span>
         )}
       </div>
-      <div className="flex flex-wrap gap-1">
-        {flags.length === 0 && (
-          <span className="text-[var(--color-success)]">✓ Clean</span>
-        )}
-        {/* Task #65 -- detection != sanitization. The wording used to read
-            "[PII FLAGGED]" which implied the field had been redacted on
-            this surface. Sanitization (redact / suppress / minimize) only
-            happens at coalition export. Here we are only showing what the
-            classifier *detected* in the source record. */}
-        {flags.map((f) => (
-          <span
-            key={f}
-            className="rounded-sm px-1.5 py-0.5 text-xs font-mono"
-            style={{
-              background: `color-mix(in oklab, ${FLAG_COLORS[f] || "#fff"} 20%, var(--color-bg))`,
-              color: FLAG_COLORS[f] || "inherit",
-              border: `1px solid color-mix(in oklab, ${FLAG_COLORS[f] || "#fff"} 40%, transparent)`,
-            }}
-            title="Detection only -- this surface does not redact. Sanitization happens at coalition export."
-          >
-            [{f.toUpperCase()} DETECTED]
-          </span>
-        ))}
-      </div>
+
+      {/* Task #66 supersedes the prior Task #65 "detection only, no
+          redaction on this surface" position: the right column now
+          performs true span-based redaction so a 30-foot projection
+          never shows raw EDIPIs / MGRS / comms freqs. The left "Raw
+          input" column remains the operator's source-of-truth and is
+          still detection-only with colored highlight overlays. */}
+      {blockedByRelease ? (
+        // Striped "withheld" surface so the operator can't miss that the
+        // entire record is held back at this release ceiling — distinct from
+        // a redacted-but-shipped record which still renders text below.
+        <div
+          className="mt-1 rounded-sm border border-dashed border-[var(--color-danger-muted)] px-2 py-1.5 font-mono text-xs uppercase text-[var(--color-danger)] tracking-wider"
+          style={{
+            background:
+              "repeating-linear-gradient(45deg, transparent 0 6px, color-mix(in oklab, var(--color-danger) 8%, transparent) 6px 12px)",
+          }}
+        >
+          ⛔ WITHHELD · classification {record.detected_classification} exceeds {RELEASE_LABEL[release]} release ceiling
+        </div>
+      ) : (
+        <>
+          {/* Live-redacted remark — same span ranges the left column highlights */}
+          {redactedSegments.length > 0 && (
+            <div className="mt-1 leading-relaxed text-[var(--color-text)]">
+              {redactedSegments.map((s, i) =>
+                s.redactedAs ? (
+                  <span
+                    key={i}
+                    className="mx-[1px] rounded-sm px-1 font-mono text-[10px] font-semibold uppercase tracking-wider"
+                    style={{
+                      background: `color-mix(in oklab, ${
+                        FLAG_COLORS[s.category || "pii"] || "var(--color-warning)"
+                      } 18%, var(--color-bg))`,
+                      color:
+                        FLAG_COLORS[s.category || "pii"] ||
+                        "var(--color-warning)",
+                      border: `1px solid color-mix(in oklab, ${
+                        FLAG_COLORS[s.category || "pii"] || "var(--color-warning)"
+                      } 50%, transparent)`,
+                    }}
+                  >
+                    {s.redactedAs}
+                  </span>
+                ) : (
+                  <span key={i}>{s.text}</span>
+                ),
+              )}
+            </div>
+          )}
+          {redactedSegments.length === 0 && flags.length === 0 && (
+            <div className="mt-1 text-[var(--color-success)]">✓ Clean</div>
+          )}
+          {/* Fallback: a record can carry `flags` without precomputed
+              highlight spans (e.g. backend stripped them or a Tier 2
+              path produced flags-only). Rather than render an empty
+              card and pretend nothing happened, surface a per-flag
+              [REDACTED:CAT] chip row so the operator still sees what
+              category got flagged. Code-review walkthrough audit. */}
+          {redactedSegments.length === 0 && flags.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {flags.map((f) => (
+                <span
+                  key={f}
+                  className="rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider"
+                  style={{
+                    background: `color-mix(in oklab, ${
+                      FLAG_COLORS[f] || "var(--color-warning)"
+                    } 18%, var(--color-bg))`,
+                    color: FLAG_COLORS[f] || "var(--color-warning)",
+                    border: `1px solid color-mix(in oklab, ${
+                      FLAG_COLORS[f] || "var(--color-warning)"
+                    } 50%, transparent)`,
+                  }}
+                  title="Redaction metadata present without span preview — see Review Queue for the full record."
+                >
+                  [REDACTED:{f.toUpperCase()}]
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
       <div className="mt-1 text-sm text-[var(--color-text-muted)]">
         Routed to {record.routed_to === "tier2_llm" ? "Tier 2 LLM" : "Tier 1 classifier"} · confidence {record.confidence?.toFixed(2)}
+        {release !== "US_ONLY" && !blockedByRelease && (
+          <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-primary)]">
+            · {RELEASE_LABEL[release]} preview
+          </span>
+        )}
       </div>
     </div>
   );
