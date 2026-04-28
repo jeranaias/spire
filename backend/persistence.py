@@ -189,9 +189,10 @@ CREATE TABLE IF NOT EXISTS user_prefs (
 -- Risk Board "Draft Action" submissions. Persisting these turned the
 -- Draft button from a toast-only no-op into a real artifact a judge
 -- can drill into ("where did that go?" → here, plus an audit_log row).
--- status is held|dismissed; the demo doesn't ship a full approval
--- workflow, so the badge surfaces every held draft until an operator
--- dismisses it.
+-- status transitions: held → approved | rejected | dismissed. The
+-- approval queue ships an approver action (g4 / maintenance_chief /
+-- mef_commander, never the originator); originators may still dismiss
+-- their own drafts to clear the queue.
 CREATE TABLE IF NOT EXISTS pulse_drafts (
     draft_id    TEXT PRIMARY KEY,
     asset_id    TEXT NOT NULL,
@@ -878,19 +879,32 @@ def list_pulse_drafts(*, status: str = "held", limit: int = 50) -> list[dict]:
     return out
 
 
-def dismiss_pulse_draft(draft_id: str, *, actor: str) -> Optional[dict]:
+def dismiss_pulse_draft(
+    draft_id: str,
+    *,
+    actor: str,
+    originator: Optional[str] = None,
+) -> Optional[dict]:
     """Mark a draft as dismissed and audit-log the dismissal. Returns the
-    updated row or None if the draft wasn't found / already dismissed."""
+    updated row or None if the draft wasn't found / already dismissed.
+    Defense-in-depth: if `originator` is provided and doesn't match the
+    persisted draft's actor, the call raises PermissionError so a
+    misbehaving caller can never dismiss someone else's queued draft
+    even if the route layer's check is bypassed."""
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         row = c.execute(
-            "SELECT draft_id, asset_id, kind, status FROM pulse_drafts WHERE draft_id = ?",
+            "SELECT draft_id, asset_id, kind, status, actor FROM pulse_drafts WHERE draft_id = ?",
             (draft_id,),
         ).fetchone()
         if row is None:
             return None
         if row["status"] != "held":
             return dict(row)
+        if originator is not None and (row["actor"] or "") != originator:
+            raise PermissionError(
+                f"dismiss_pulse_draft: actor {actor!r} is not originator of {draft_id}"
+            )
         c.execute(
             "UPDATE pulse_drafts SET status = 'dismissed' WHERE draft_id = ?",
             (draft_id,),
@@ -902,6 +916,112 @@ def dismiss_pulse_draft(draft_id: str, *, actor: str) -> Optional[dict]:
         payload={"asset_id": row["asset_id"], "kind": row["kind"], "ts": ts},
     )
     return {**dict(row), "status": "dismissed"}
+
+
+def get_pulse_draft(draft_id: str) -> Optional[dict]:
+    """Return a single draft row by id, or None if not found. Includes the
+    decoded artifact so callers can drive downstream execution paths
+    (e.g. approving a CANNIBALIZE draft → cannibalization propose) off the
+    same payload the originator queued."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT draft_id, asset_id, unit_name, kind, title, description, "
+            "cost_usd, mc_delta_pct, time_to_effect_hours, artifact_json, "
+            "actor, status, created_at FROM pulse_drafts WHERE draft_id = ?",
+            (draft_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    try:
+        d["artifact"] = json.loads(d.pop("artifact_json") or "{}")
+    except Exception:  # noqa: BLE001
+        d["artifact"] = {}
+    return d
+
+
+def approve_pulse_draft(
+    draft_id: str,
+    *,
+    actor: str,
+    extra_payload: Optional[dict] = None,
+) -> Optional[dict]:
+    """Mark a draft as approved and audit-log the approval. The actor is
+    the approver (must differ from the draft's originator — caller is
+    expected to have already enforced that gate). Returns the updated row
+    or None if the draft wasn't found. If the draft was not in the
+    held state, returns the existing row unchanged so callers can
+    distinguish "already terminal" from "not found"."""
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    with conn() as c:
+        row = c.execute(
+            "SELECT draft_id, asset_id, kind, status, actor "
+            "FROM pulse_drafts WHERE draft_id = ?",
+            (draft_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["status"] != "held":
+            return dict(row)
+        c.execute(
+            "UPDATE pulse_drafts SET status = 'approved' WHERE draft_id = ?",
+            (draft_id,),
+        )
+    payload = {
+        "asset_id": row["asset_id"],
+        "kind": row["kind"],
+        "originator": row["actor"],
+        "ts": ts,
+    }
+    if extra_payload:
+        payload.update(extra_payload)
+    log(
+        "pulse_draft_approve",
+        actor=actor,
+        subject_id=draft_id,
+        payload=payload,
+    )
+    return {**dict(row), "status": "approved"}
+
+
+def reject_pulse_draft(
+    draft_id: str,
+    *,
+    actor: str,
+    reason: Optional[str] = None,
+) -> Optional[dict]:
+    """Mark a draft as rejected and audit-log the rejection. The actor is
+    the approver (must differ from the originator — caller-enforced).
+    `reason` is optional free text the approver may attach to the audit
+    payload so investigators can see why a queued draft was killed."""
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    with conn() as c:
+        row = c.execute(
+            "SELECT draft_id, asset_id, kind, status, actor "
+            "FROM pulse_drafts WHERE draft_id = ?",
+            (draft_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["status"] != "held":
+            return dict(row)
+        c.execute(
+            "UPDATE pulse_drafts SET status = 'rejected' WHERE draft_id = ?",
+            (draft_id,),
+        )
+    log(
+        "pulse_draft_reject",
+        actor=actor,
+        subject_id=draft_id,
+        payload={
+            "asset_id": row["asset_id"],
+            "kind": row["kind"],
+            "originator": row["actor"],
+            "reason": (reason or "").strip(),
+            "ts": ts,
+        },
+    )
+    return {**dict(row), "status": "rejected"}
 
 
 def store_uploaded_batch(batch_id: str, source: str, record_count: int, schema: dict, raw: bytes) -> None:

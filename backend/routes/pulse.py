@@ -10,11 +10,14 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..auth import session_role
 from ..persistence import (
+    approve_pulse_draft,
     dismiss_pulse_draft,
     feedback_summary,
+    get_pulse_draft,
     list_pulse_drafts,
     record_pulse_draft,
     record_pulse_feedback,
+    reject_pulse_draft,
 )
 from ..scoping import (
     allowed_units,
@@ -1366,13 +1369,285 @@ async def get_drafts(
 @router.post("/drafts/{draft_id}/dismiss")
 async def dismiss_draft(request: Request, draft_id: str):
     """Mark a draft as dismissed. Used by the TopBar drafts popover so
-    operators can clear the queue once they've routed an action through
-    the real workflow off-platform."""
+    the originator can withdraw a held draft they no longer want
+    surfaced to approvers. Originator-only: a non-originator who wants
+    the draft off the queue must reject it (which audit-logs *who*
+    killed it and *why*) instead of dismissing through the back door."""
+    draft = get_pulse_draft(draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    if draft.get("status") != "held":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "DraftNotHeld",
+                "current_status": draft.get("status"),
+                "remediation": "Only held drafts can be dismissed.",
+            },
+        )
     role = session_role(request) or "unknown"
-    result = dismiss_pulse_draft(draft_id, actor=role)
+    originator = draft.get("actor") or ""
+    if role != originator:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "DismissNotOriginator",
+                "remediation": (
+                    "Only the originator can dismiss a held draft. "
+                    "Approvers must use reject (with a reason) so the "
+                    "audit trail captures who killed the queue entry."
+                ),
+            },
+        )
+    result = dismiss_pulse_draft(draft_id, actor=role, originator=originator)
     if result is None:
         raise HTTPException(status_code=404, detail="draft not found")
     return {"ok": True, "draft_id": draft_id, "status": result.get("status", "dismissed")}
+
+
+# Approver roles that can clear a held draft. The originator is excluded
+# from approving their own draft (see `_assert_approver` below) so a
+# self-approval can never short-circuit the second-pair-of-eyes gate. Set
+# matches `_PROPOSE_ROLES` since the same roles that can propose
+# cross-levels are the ones authorized to release queued PULSE drafts.
+_APPROVER_ROLES = frozenset({"g4", "maintenance_chief", "mef_commander"})
+
+
+def _execute_cannibalization_from_draft(
+    *,
+    draft: dict,
+    approver_role: str,
+) -> Optional[dict]:
+    """When an approver releases a CANNIBALIZE draft, hand off into the
+    same audit-logged path the cross-level propose endpoint uses so the
+    proposal lands in the audit chain with a real PROP-... id and the
+    SOC view can correlate draft → proposal → execution.
+
+    Returns the proposal dict (mirrors the `/cannibalization/propose`
+    response shape) or None if the artifact didn't carry the fields
+    required to drive a propose. We don't 4xx on a malformed artifact —
+    the approve action is still valid, the downstream execution just
+    gets queued instead of auto-routed.
+    """
+    artifact = draft.get("artifact") or {}
+    if (artifact.get("kind") or "").lower() != "cannibalization_proposal":
+        return None
+    recipient_sr = artifact.get("recipient_sr")
+    donor_sr = artifact.get("donor_sr")
+    donor_asset_id = artifact.get("donor_asset_id")
+    nsn = artifact.get("nsn")
+    if not (recipient_sr and (donor_sr or donor_asset_id) and nsn):
+        return None
+
+    ds = get_dataset()
+    sr_index = {sr.sr_number: sr for sr in ds.srs}
+    recipient = sr_index.get(recipient_sr)
+    if recipient is None:
+        return None
+
+    donor = None
+    donor_unit_name = None
+    if donor_asset_id:
+        asset = ds.asset(donor_asset_id)
+        if asset is None:
+            return None
+        donor_unit_name = asset.unit_name
+        if donor_sr:
+            donor = sr_index.get(donor_sr)
+    elif donor_sr:
+        donor = sr_index.get(donor_sr)
+        if donor is None:
+            return None
+        donor_unit_name = donor.unit_name
+        donor_asset_id = donor.asset_id
+
+    is_self = False
+    if donor_sr and recipient_sr == donor_sr:
+        is_self = True
+    elif donor_asset_id and recipient.asset_id == donor_asset_id:
+        is_self = True
+
+    # Approver scope check — the approver must be able to see both units.
+    allowed = allowed_units(ds, approver_role)
+    if allowed is not None:
+        if recipient.unit_name not in allowed:
+            return None
+        if donor_unit_name and donor_unit_name not in allowed:
+            return None
+
+    # NSN must still match a pending requisition on the recipient SR. If
+    # the requisition has been fulfilled since the draft was queued, skip
+    # the propose step rather than write a stale audit row.
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
+    pending_nsns = {
+        r.nsn for r in recipient.requisitions
+        if r.received_date is None or (last_day and r.received_date > last_day)
+    }
+    if nsn not in pending_nsns:
+        return None
+
+    proposal = {
+        "proposal_id": f"PROP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
+        "recipient_sr": recipient_sr,
+        "donor_asset_id": donor_asset_id,
+        "donor_sr": donor_sr,
+        "nsn": nsn,
+        "self_cannib": is_self,
+        "recipient_unit": recipient.unit_name,
+        "donor_unit": donor_unit_name,
+        "status": "PROPOSED",
+        "proposed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "from_draft_id": draft.get("draft_id"),
+    }
+    try:
+        from ..persistence import log as audit_log
+        audit_log(
+            "cannibalization_propose",
+            actor=approver_role,
+            subject_id=proposal["proposal_id"],
+            payload=proposal,
+        )
+    except Exception:
+        # An audit-write failure here doesn't undo the approval — the
+        # draft still moved to "approved" and that transition is on
+        # chain. Surface no proposal id rather than half-claiming one.
+        return None
+
+    _PROPOSED_MATCHES.append(proposal)
+    return proposal
+
+
+def _assert_approver(role: Optional[str], originator: str, action: str) -> str:
+    """Common gate for approve/reject. Raises 403 if role isn't an
+    approver, or if the actor matches the originator (no self-approval).
+    Returns the resolved role string for use in audit calls."""
+    require_role(role, _APPROVER_ROLES, action)
+    # require_role already raised on a missing/wrong role; re-narrow.
+    actor = role or "unknown"
+    if actor == originator:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "SelfApprovalForbidden",
+                "action": action,
+                "remediation": (
+                    "The originator of a draft cannot also approve or "
+                    "reject it. A different approver-role operator must "
+                    "release this queue entry."
+                ),
+            },
+        )
+    return actor
+
+
+@router.post("/drafts/{draft_id}/approve")
+async def approve_draft(request: Request, draft_id: str):
+    """Release a held draft. Caller must be an approver role and must
+    not be the draft's originator. For CANNIBALIZE drafts whose artifact
+    carries the recipient/donor/NSN tuple, the approval also drives the
+    cross-level propose path so the approval doesn't dead-end at a
+    status flip — the SOC view will see a `pulse_draft_approve` row
+    immediately followed by a `cannibalization_propose` row sharing the
+    same approver actor."""
+    draft = get_pulse_draft(draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    if draft.get("status") != "held":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "DraftNotHeld",
+                "current_status": draft.get("status"),
+                "remediation": "Only held drafts can be approved.",
+            },
+        )
+
+    role = session_role(request)
+    actor = _assert_approver(role, draft.get("actor") or "", "pulse_draft_approve")
+
+    # Approver scope check — block out-of-scope releases the same way
+    # /draft-action blocks out-of-scope creations.
+    ds = get_dataset()
+    allowed = allowed_units(ds, actor)
+    asset = ds.asset(draft.get("asset_id") or "")
+    if asset is not None and allowed is not None and asset.unit_name not in allowed:
+        raise HTTPException(status_code=403, detail="asset out of scope")
+
+    proposal = _execute_cannibalization_from_draft(draft=draft, approver_role=actor)
+    extra: dict = {}
+    if proposal is not None:
+        extra["execution"] = {
+            "kind": "cannibalization_propose",
+            "proposal_id": proposal["proposal_id"],
+            "status": "queued",
+        }
+    elif (draft.get("kind") or "").lower() == "cannibalize":
+        # CANNIBALIZE without a clean handoff path: still approved, but
+        # we tell the caller the downstream execution didn't auto-route
+        # (e.g. the requisition was already fulfilled).
+        extra["execution"] = {
+            "kind": "cannibalization_propose",
+            "status": "queued_for_execution",
+            "note": "Recipient artifact no longer matches a pending requisition; route manually.",
+        }
+    else:
+        extra["execution"] = {
+            "kind": draft.get("kind"),
+            "status": "queued_for_execution",
+        }
+
+    result = approve_pulse_draft(draft_id, actor=actor, extra_payload=extra)
+    if result is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    return {
+        "ok": True,
+        "draft_id": draft_id,
+        "status": result.get("status", "approved"),
+        "execution": extra["execution"],
+    }
+
+
+@router.post("/drafts/{draft_id}/reject")
+async def reject_draft(request: Request, draft_id: str, payload: Optional[dict] = None):
+    """Reject a held draft. Caller must be an approver role and must not
+    be the draft's originator. Accepts an optional `reason` in the body
+    that gets written to the audit payload so investigators can see why
+    a queued draft was killed."""
+    draft = get_pulse_draft(draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    if draft.get("status") != "held":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "DraftNotHeld",
+                "current_status": draft.get("status"),
+                "remediation": "Only held drafts can be rejected.",
+            },
+        )
+
+    role = session_role(request)
+    actor = _assert_approver(role, draft.get("actor") or "", "pulse_draft_reject")
+
+    ds = get_dataset()
+    allowed = allowed_units(ds, actor)
+    asset = ds.asset(draft.get("asset_id") or "")
+    if asset is not None and allowed is not None and asset.unit_name not in allowed:
+        raise HTTPException(status_code=403, detail="asset out of scope")
+
+    reason = ""
+    if isinstance(payload, dict):
+        reason = (payload.get("reason") or "").strip()
+
+    result = reject_pulse_draft(draft_id, actor=actor, reason=reason)
+    if result is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    return {
+        "ok": True,
+        "draft_id": draft_id,
+        "status": result.get("status", "rejected"),
+        "reason": reason,
+    }
 
 
 # ---------------------------------------------------------------------------

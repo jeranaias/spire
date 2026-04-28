@@ -580,6 +580,26 @@ export const api = {
         `/pulse/drafts/${encodeURIComponent(draftId)}/dismiss`,
         { method: "POST" },
       ),
+    approveDraft: (draftId: string) =>
+      jsonFetch<{
+        ok: boolean;
+        draft_id: string;
+        status: string;
+        execution: {
+          kind: string | null;
+          status: string;
+          proposal_id?: string;
+          note?: string;
+        };
+      }>(
+        `/pulse/drafts/${encodeURIComponent(draftId)}/approve`,
+        { method: "POST" },
+      ),
+    rejectDraft: (draftId: string, reason = "") =>
+      jsonFetch<{ ok: boolean; draft_id: string; status: string; reason: string }>(
+        `/pulse/drafts/${encodeURIComponent(draftId)}/reject`,
+        { method: "POST", body: JSON.stringify({ reason }) },
+      ),
   },
   sentry: {
     demoBatch: (limit = 500) => jsonFetch<SentryBatch>(`/sentry/demo-batch?limit=${limit}`),

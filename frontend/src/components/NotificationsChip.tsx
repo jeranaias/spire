@@ -63,7 +63,10 @@ export function NotificationsChip() {
   const [tab, setTab] = useState<"drafts" | "alerts">(
     draftsAllowed ? "drafts" : "alerts",
   );
-  const [dismissing, setDismissing] = useState<string | null>(null);
+  // One-action-per-draft pending-state; covers approve / reject / dismiss
+  // so the buttons rate-limit themselves and don't double-fire on a
+  // jittery click.
+  const [pending, setPending] = useState<{ id: string; kind: "approve" | "reject" | "dismiss" } | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -130,8 +133,8 @@ export function NotificationsChip() {
             : "var(--color-text-muted)";
 
   async function dismiss(draftId: string) {
-    if (dismissing) return;
-    setDismissing(draftId);
+    if (pending) return;
+    setPending({ id: draftId, kind: "dismiss" });
     try {
       await api.pulse.dismissDraft(draftId);
       setDrafts((prev) => prev.filter((d) => d.draft_id !== draftId));
@@ -140,7 +143,60 @@ export function NotificationsChip() {
     } catch (e) {
       pushToast({ tone: "error", text: `Dismiss failed: ${formatApiError(e)}` });
     } finally {
-      setDismissing(null);
+      setPending(null);
+    }
+  }
+
+  async function approve(draftId: string) {
+    if (pending) return;
+    setPending({ id: draftId, kind: "approve" });
+    try {
+      const r = await api.pulse.approveDraft(draftId);
+      setDrafts((prev) => prev.filter((d) => d.draft_id !== draftId));
+      bumpDrafts();
+      const exec = r.execution;
+      const tail = exec?.proposal_id
+        ? ` · cross-level proposal ${exec.proposal_id} queued`
+        : exec?.status === "queued_for_execution"
+          ? " · queued for execution"
+          : "";
+      pushToast({
+        tone: "ok",
+        text: `Draft ${draftId} approved${tail}`,
+        ttlMs: 5000,
+      });
+    } catch (e) {
+      pushToast({ tone: "error", text: `Approve failed: ${formatApiError(e)}` });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function reject(draftId: string) {
+    if (pending) return;
+    // Light-weight reason capture — `prompt` keeps the popover small;
+    // an empty/cancelled reason is fine (the audit row records "" so
+    // the rejection itself is still on-chain).
+    const raw = window.prompt(
+      `Reject draft ${draftId}? Optional reason (logged in the audit chain):`,
+      "",
+    );
+    if (raw === null) return;
+    const reason = raw.trim();
+    setPending({ id: draftId, kind: "reject" });
+    try {
+      await api.pulse.rejectDraft(draftId, reason);
+      setDrafts((prev) => prev.filter((d) => d.draft_id !== draftId));
+      bumpDrafts();
+      pushToast({
+        tone: "warn",
+        text: `Draft ${draftId} rejected${reason ? ` · ${reason}` : ""}`,
+        ttlMs: 5000,
+      });
+    } catch (e) {
+      pushToast({ tone: "error", text: `Reject failed: ${formatApiError(e)}` });
+    } finally {
+      setPending(null);
     }
   }
 
@@ -255,52 +311,98 @@ export function NotificationsChip() {
               )}
               {draftCount > 0 && (
                 <ul className="max-h-[60vh] divide-y divide-[var(--color-border)] overflow-y-auto">
-                  {drafts.map((d) => (
-                    <li key={d.draft_id} className="p-3">
-                      <div className="flex items-start gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-widest">
-                            <span className="font-semibold text-[var(--color-primary)]">
-                              {d.kind?.toUpperCase()}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => openOnAsset(d)}
-                              className="font-semibold text-[var(--color-text)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-primary)]"
-                              title="Open this asset on the Risk Board"
-                            >
-                              {d.asset_id}
-                            </button>
-                            {d.unit_name && (
-                              <span className="text-[var(--color-text-muted)]">· {d.unit_name}</span>
-                            )}
-                          </div>
-                          <div className="mt-1 font-mono text-xs text-[var(--color-text)] tracking-wide">
-                            {d.title}
-                          </div>
-                          <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                            {d.draft_id} · by {d.actor} · {formatAge(d.created_at)}
-                            {d.mc_delta_pct != null && (
-                              <> · MC +{(d.mc_delta_pct * 100).toFixed(0)}</>
-                            )}
-                            {d.cost_usd != null && (
-                              <> · ${d.cost_usd.toLocaleString("en-US")}</>
-                            )}
+                  {drafts.map((d) => {
+                    // Approver UI is gated on (1) the role being in the
+                    // approver set and (2) the actor differing from the
+                    // originator — the backend re-asserts both, but we
+                    // also hide the buttons so the popover doesn't lure
+                    // an originator into a guaranteed-403 click.
+                    const canApprove = draftsAllowed && d.actor !== role;
+                    const isOriginator = d.actor === role;
+                    const rowPending = pending?.id === d.draft_id;
+                    return (
+                      <li key={d.draft_id} className="p-3" data-testid={`drafts-row-${d.draft_id}`}>
+                        <div className="flex items-start gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-widest">
+                              <span className="font-semibold text-[var(--color-primary)]">
+                                {d.kind?.toUpperCase()}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => openOnAsset(d)}
+                                className="font-semibold text-[var(--color-text)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-primary)]"
+                                title="Open this asset on the Risk Board"
+                              >
+                                {d.asset_id}
+                              </button>
+                              {d.unit_name && (
+                                <span className="text-[var(--color-text-muted)]">· {d.unit_name}</span>
+                              )}
+                            </div>
+                            <div className="mt-1 font-mono text-xs text-[var(--color-text)] tracking-wide">
+                              {d.title}
+                            </div>
+                            <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                              {d.draft_id} · by {d.actor} · {formatAge(d.created_at)}
+                              {d.mc_delta_pct != null && (
+                                <> · MC +{(d.mc_delta_pct * 100).toFixed(0)}</>
+                              )}
+                              {d.cost_usd != null && (
+                                <> · ${d.cost_usd.toLocaleString("en-US")}</>
+                              )}
+                            </div>
                           </div>
                         </div>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => dismiss(d.draft_id)}
-                          pending={dismissing === d.draft_id}
-                          disabled={!!dismissing}
-                          title="Archive this draft (writes an audit row)"
-                        >
-                          Dismiss
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
+                        <div className="mt-2 flex items-center justify-end gap-2">
+                          {canApprove && (
+                            <>
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => approve(d.draft_id)}
+                                pending={rowPending && pending?.kind === "approve"}
+                                disabled={!!pending}
+                                data-testid={`drafts-approve-${d.draft_id}`}
+                                title="Approve this draft. CANNIBALIZE drafts auto-route to a cross-level proposal."
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => reject(d.draft_id)}
+                                pending={rowPending && pending?.kind === "reject"}
+                                disabled={!!pending}
+                                data-testid={`drafts-reject-${d.draft_id}`}
+                                title="Reject this draft. Optional reason is logged in the audit chain."
+                              >
+                                Reject
+                              </Button>
+                            </>
+                          )}
+                          {isOriginator && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => dismiss(d.draft_id)}
+                              pending={rowPending && pending?.kind === "dismiss"}
+                              disabled={!!pending}
+                              data-testid={`drafts-dismiss-${d.draft_id}`}
+                              title="Withdraw this draft (writes an audit row). Originator-only."
+                            >
+                              Dismiss
+                            </Button>
+                          )}
+                          {!canApprove && !isOriginator && (
+                            <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                              awaiting approver
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

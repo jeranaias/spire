@@ -477,12 +477,13 @@ function DraftActionModal({
       bumpDrafts();
       pushToast({
         tone: "ok",
-        // Walkthrough audit: the prior toast claimed "awaiting approval"
-        // when no approval queue existed. Honest copy now: the draft is
-        // persisted (audit row + DB) and surfaces in the topbar Drafts
-        // badge until an operator dismisses it. A full multi-step
-        // approval workflow ships post-MDM.
-        text: `${(act.kind || "").toUpperCase()} drafted for ${asset.asset_id} · held in Drafts (${r.draft.draft_id})`,
+        // Held drafts now route to a real approver gate: the originator
+        // queues, an approver-role operator (Maintenance Chief / G-4 /
+        // MEF Commander, but never the originator) approves or rejects
+        // from the Notifications popover. Approving a CANNIBALIZE draft
+        // also drives the cross-level propose path so the audit chain
+        // shows draft → approve → cannibalization_propose.
+        text: `${(act.kind || "").toUpperCase()} drafted for ${asset.asset_id} · awaiting approver review (${r.draft.draft_id})`,
         ttlMs: 5000,
       });
     } catch (e) {
@@ -580,11 +581,15 @@ function DraftActionModal({
             })}
           </div>
         )}
-        {/* Honest framing: drafts persist + audit but no approval workflow ships
-         * with MDM. The TopBar badge is where the operator finds them next. */}
+        {/* Drafts now flow through a real approver gate. The originator
+         * queues here; an approver-role operator (Maintenance Chief / G-4
+         * / MEF Commander, never the originator) clears it via the
+         * Notifications popover up top. CANNIBALIZE approvals also drive
+         * the cross-level propose endpoint, so a single approval click
+         * leaves draft → approve → cannibalization_propose on chain. */}
         <div className="mt-3 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
-          Drafts are held with an audit row · review via the Drafts badge in the top bar.
-          Full approval workflow ships post-MDM.
+          Drafts are held with an audit row · approver clears it via the Notifications popover (top bar).
+          Originator can also withdraw via Dismiss.
         </div>
         <div className="mt-3 flex items-center justify-end">
           <Button onClick={onClose} variant="secondary" size="sm">
