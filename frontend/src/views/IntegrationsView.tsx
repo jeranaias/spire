@@ -11,6 +11,22 @@
  * This is a REFERENCE IMPLEMENTATION — the connection is intentionally
  * mocked, labeled as such, and grounded in the synthetic dataset. No
  * pretend "live" production link.
+ *
+ * Task #74 — Honesty pass. The first read of this page made shipped
+ * claims out of unbuilt aspirations (15-min JWT, IL-5 enclave, 0400Z
+ * pull, circuit breaker, sync-conflict viewer). A 10pt corner chip
+ * does not scale to a CDAO conference-room projector. This pass:
+ *   - Hoists a persistent CAPCO-chrome banner ("UNBUILT · PRE-
+ *     COORDINATION PENDING WITH PM GCSS-MC AND THE IL-5 ENCLAVE AO")
+ *     that re-prints above every claim section.
+ *   - Stamps every ATO-touching card with a hard "PRE-ATO · NOT
+ *     ACCREDITED" badge that survives projection scale.
+ *   - Rewrites Authentication / ATO posture / Failure modes copy with
+ *     explicit "Target:" / "Planned:" framing wherever the behavior is
+ *     not in code today.
+ *   - Aligns the Authentication card with the actual session model
+ *     (12h HMAC-signed cookie; no JWT; no re-tap) — see
+ *     `backend/auth.py` `SESSION_TTL_SECONDS` and `sign_session`.
  */
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -80,6 +96,10 @@ function GcssMcContractPage() {
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--color-bg)]">
+      {/* Sticky CAPCO-chrome unbuilt banner. Sits above the scroll
+       * region so a judge sees it the instant the page paints, and
+       * stays pinned while they scroll through the ATO copy. */}
+      <UnbuiltBanner sticky />
       <div className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
         <ContractHeader />
         <FieldMappingSection sample={sample} />
@@ -90,6 +110,85 @@ function GcssMcContractPage() {
         <SampleEndpointSection sample={sample} error={error} />
         <FooterCitations />
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Persistent UNBUILT banner + PRE-ATO stamp
+//
+// CAPCO-style solid color block, full width, white text, no gradient. Same
+// chrome the operator sees on the classification band so it reads as
+// "official integrity-of-claims notice", not decorative chip. Re-printed
+// above every section that touches ATO / auth / failure-mode claims so a
+// projector audience cannot miss it.
+// ---------------------------------------------------------------------------
+
+const UNBUILT_BG = "#B8460E";  // CAPCO-adjacent burnt-orange. Distinct from
+                                // the SECRET red and the FPCON warning amber
+                                // so it reads as its own integrity stamp.
+
+function UnbuiltBanner({ sticky = false }: { sticky?: boolean }) {
+  return (
+    <div
+      className={
+        (sticky ? "sticky top-0 z-20 " : "") +
+        "flex h-9 shrink-0 items-center justify-between px-4 py-1 font-mono text-sm font-semibold uppercase tracking-widest"
+      }
+      style={{ background: UNBUILT_BG, color: "#FFFFFF" }}
+      role="region"
+      aria-label="Integrations contract integrity-of-claims banner"
+    >
+      <span className="whitespace-nowrap">
+        UNBUILT · REFERENCE CONTRACT ONLY · NO LIVE GCSS-MC LINK
+      </span>
+      <span
+        className="hidden shrink-0 rounded-sm border px-2.5 py-[2px] font-mono text-xs leading-none tracking-widest sm:inline-flex"
+        style={{
+          borderColor: "rgba(255,255,255,0.55)",
+          background: "rgba(0,0,0,0.25)",
+        }}
+      >
+        PRE-COORDINATION PENDING · PM GCSS-MC + IL-5 ENCLAVE AO
+      </span>
+    </div>
+  );
+}
+
+function SectionUnbuiltStrip() {
+  // Compact, in-section repeat of the top banner. Lives at the top of every
+  // ATO/auth/failure-mode card-grid so a screenshot of a single section is
+  // never load-bearing on its own.
+  return (
+    <div
+      className="mb-3 flex items-center justify-between gap-3 rounded-sm px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-widest"
+      style={{ background: UNBUILT_BG, color: "#FFFFFF" }}
+    >
+      <span>Unbuilt · Pre-coordination pending with PM GCSS-MC and the IL-5 enclave AO</span>
+      <span
+        className="hidden shrink-0 rounded-sm border px-2 py-[1px] text-[10px] tracking-wider sm:inline-flex"
+        style={{ borderColor: "rgba(255,255,255,0.55)", background: "rgba(0,0,0,0.25)" }}
+      >
+        PRE-ATO · NOT ACCREDITED
+      </span>
+    </div>
+  );
+}
+
+function PreAtoStamp() {
+  // Per-card hard stamp. Sized to remain legible at projection scale (a
+  // 10pt corner chip is invisible from row 8 of a CDAO conference room).
+  return (
+    <div
+      className="mb-2 inline-flex items-center gap-2 rounded-sm border-2 px-2 py-[2px] font-mono text-[11px] font-bold uppercase tracking-widest"
+      style={{
+        borderColor: UNBUILT_BG,
+        color: UNBUILT_BG,
+        background: "color-mix(in oklab, " + UNBUILT_BG + " 8%, var(--color-surface))",
+      }}
+      title="This card describes a target / planned posture. SPIRE has no ATO and no live GCSS-MC link."
+    >
+      PRE-ATO · NOT ACCREDITED
     </div>
   );
 }
@@ -114,38 +213,31 @@ function ContractHeader() {
             and maintenance system of record for the Operating Forces.
           </div>
         </div>
-        <ReferenceBadge />
+        <PreAtoStamp />
       </div>
       <p className="mt-4 spire-body">
-        SPIRE writes nothing into GCSS-MC; it pulls a documented slice on a
-        polling cadence (see below) and renders the operator-facing
-        analytics on top. This page is the contract: which SPIRE entities
-        come from which GCSS-MC tables, how often we poll, how we
-        authenticate, what hosting environment the adapter runs in, and
-        what happens when the upstream goes dark. The sample endpoint
-        below proves the shape end-to-end against the canonical SPIRE
-        dataset.
+        <span className="font-semibold text-[var(--color-text)]">
+          What is built today:
+        </span>{" "}
+        the field mapping, the polling-cadence design, and the sample
+        endpoint that emits GCSS-MC-shaped rows out of the canonical SPIRE
+        synthetic dataset. SPIRE never writes upstream and there is no
+        live GCSS-MC link.
+      </p>
+      <p className="mt-3 spire-body">
+        <span className="font-semibold text-[var(--color-text)]">
+          What is planned, not built:
+        </span>{" "}
+        the IL-5 enclave deployment, the service-account batch path, the
+        circuit-breaker / reconciliation behavior, and every ATO claim on
+        this page. Pre-coordination with PM GCSS-MC and the IL-5 enclave
+        AO is pending. Sections that describe planned posture are stamped
+        <span className="ml-1 font-semibold" style={{ color: UNBUILT_BG }}>
+          PRE-ATO · NOT ACCREDITED
+        </span>{" "}
+        so a single screenshot can never read as "shipped".
       </p>
     </header>
-  );
-}
-
-function ReferenceBadge() {
-  return (
-    <div
-      className="shrink-0 rounded-sm border px-3 py-2 font-mono text-[10px] uppercase tracking-widest"
-      style={{
-        borderColor: "color-mix(in oklab, var(--color-warning) 50%, var(--color-border))",
-        background: "color-mix(in oklab, var(--color-warning-muted) 18%, var(--color-surface))",
-        color: "var(--color-warning)",
-      }}
-      title="No live GCSS-MC instance is connected. The mapping and sample data are documentation, not a deployed link."
-    >
-      <div className="text-[11px] font-semibold">Reference Implementation</div>
-      <div className="mt-0.5 text-[9px] text-[var(--color-text-muted)] tracking-wider">
-        Mock adapter · SPIRE synthetic dataset
-      </div>
-    </div>
   );
 }
 
@@ -309,8 +401,9 @@ function FieldMappingSection({ sample }: { sample: SamplePayload | null }) {
   return (
     <Section
       title="Field mapping"
-      subtitle="SPIRE entities ↔ GCSS-MC tables. Defensible against an actual logistics SME — every field is sourced from public USMC documentation."
+      subtitle="SPIRE entities ↔ GCSS-MC tables. Defensible against an actual logistics SME — every field is sourced from public USMC documentation. The mapping itself is documentation, not a deployed link."
     >
+      <SectionUnbuiltStrip />
       <div className="overflow-x-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
         <table className="w-full min-w-[720px] font-mono text-xs">
           <thead className="bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] text-left uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -369,27 +462,27 @@ interface CadenceRow {
 const CADENCE_ROWS: CadenceRow[] = [
   {
     entity: "EQUIPMENT_MASTER",
-    cadence: "Daily, 0400Z full pull · delta poll every 6h",
+    cadence: "Target: daily full pull · delta poll every 6h",
     rationale:
-      "Asset roster changes slowly (re-fielding, transfers, decommissioning). Daily full pull catches reorganizations; 6h delta covers in-day changes.",
+      "Asset roster changes slowly (re-fielding, transfers, decommissioning). A daily full pull catches reorganizations; a 6h delta covers in-day changes. Exact wall-clock window (e.g. 0400Z) is to be negotiated with PM GCSS-MC against the read-replica's existing batch schedule — not yet set.",
   },
   {
     entity: "MIMMS_DAILY_READINESS",
-    cadence: "Every 30s during the operations window · 5 min off-hours",
+    cadence: "Target: ~30s in the operations window · ~5 min off-hours",
     rationale:
-      "Drives the 15-second readiness picture. 30s is the floor that GCSS-MC's read replica handles without us throttling the wider system.",
+      "Drives the 15-second readiness picture. 30s is the design floor we believe GCSS-MC's read replica can sustain without us throttling the wider system; the actual sustainable rate is pending a load-test under PM GCSS-MC oversight.",
   },
   {
     entity: "EQUIPMENT_REPAIR_ORDER",
-    cadence: "Every 60s · event-trigger on ERO open/close",
+    cadence: "Target: ~60s · planned event-trigger on ERO open/close",
     rationale:
-      "ERO state changes are bursty (mechanic shift change). 60s baseline keeps SR cards live; an event-trigger on ERO_OPEN / ERO_CLOSE accelerates the SLA-critical transitions.",
+      "ERO state changes are bursty (mechanic shift change). 60s baseline keeps SR cards live; the event-trigger on ERO_OPEN / ERO_CLOSE that would accelerate SLA-critical transitions is planned, not built — depends on a webhook surface PM GCSS-MC has not yet committed to.",
   },
   {
     entity: "SUPPLY_DOC",
-    cadence: "Every 5 min · event-trigger on D6 receipt",
+    cadence: "Target: ~5 min · planned event-trigger on D6 receipt",
     rationale:
-      "Milestone codes flip on a DLA tempo; 5 min is more than enough resolution for a parts-on-order display. The D6 (received) trigger accelerates the closeout that flips an NMCS asset back to MC.",
+      "Milestone codes flip on a DLA tempo; 5 min is more than enough resolution for a parts-on-order display. The D6 (received) trigger that would accelerate the NMCS-to-MC flip is planned, not built — same webhook dependency as ERO.",
   },
 ];
 
@@ -397,8 +490,9 @@ function PollingCadenceSection() {
   return (
     <Section
       title="Polling cadence"
-      subtitle="Pull rates per entity, with rationale. SPIRE is read-only against GCSS-MC — every cadence is sized to the upstream's read-replica budget, not the source-of-truth shard."
+      subtitle="Target pull rates per entity, with rationale. SPIRE would be read-only against GCSS-MC and every cadence is sized to the upstream's read-replica budget, not the source-of-truth shard. None of these cadences run against a live GCSS-MC today."
     >
+      <SectionUnbuiltStrip />
       <div className="overflow-x-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
         <table className="w-full min-w-[640px] font-mono text-xs">
           <thead className="bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] text-left uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -435,32 +529,58 @@ function AuthSection() {
   return (
     <Section
       title="Authentication"
-      subtitle="Identity propagates from the operator's CAC all the way to the GCSS-MC API call. Service accounts exist only for the unattended batch path, sealed behind a separate audit lane."
+      subtitle="What the SPIRE session model actually is today, and what would have to change to push identity all the way to a GCSS-MC API call."
     >
+      <SectionUnbuiltStrip />
       <div className="grid gap-3 md:grid-cols-2">
         <SubCard
-          label="Primary · CAC/PIV pass-through"
+          label="Built today · SPIRE session"
+          stamp
           body={
             <>
-              The operator authenticates SPIRE with their CAC (mocked in
-              this demo via the cert-selection screen). The GCSS-MC adapter
-              re-uses the operator's DODID and clearance to scope the
-              outbound query — read access enforced upstream, never trusted
-              from SPIRE alone. The session JWT is short-lived (15 min)
-              and re-minted on CAC re-tap.
+              <span className="font-semibold text-[var(--color-text)]">
+                Built:
+              </span>{" "}
+              the operator picks a "smartcard" on the cert-selection
+              screen and confirms a 6-digit PIN. SPIRE writes a server-
+              issued, HMAC-SHA256-signed cookie (<code className="font-mono text-[var(--color-primary)]">spire_session</code>),
+              <code className="ml-1 font-mono text-[var(--color-primary)]">HttpOnly</code>,
+              <code className="ml-1 font-mono text-[var(--color-primary)]">SameSite=Lax</code>,
+              with a fixed 12-hour TTL sized to a Marine's shift. This is
+              not a JWT, there is no client-side token, and the cookie
+              does not refresh on activity.
+              <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                Source of record: <code className="font-mono">backend/auth.py</code>
+                (<code className="font-mono">SESSION_TTL_SECONDS</code>,
+                <code className="ml-1 font-mono">sign_session</code>).
+                There is no real PKI, OCSP, or CAC reader in the loop —
+                see Authentication on the sign-in screen.
+              </span>
             </>
           }
         />
         <SubCard
-          label="Fallback · service account"
+          label="Target · CAC/PIV pass-through to GCSS-MC"
+          stamp
           body={
             <>
-              For the unattended batch poll (the 0400Z EQUIPMENT_MASTER
-              pull), the adapter uses a dedicated service account scoped
-              to read-only on the four documented tables. Credentials
-              live in the IL-5 enclave's secret manager; rotation is
-              every 90 days and audit-logged. No interactive operator
-              ever sees the service account.
+              <span className="font-semibold text-[var(--color-text)]">
+                Target:
+              </span>{" "}
+              with a real CAC reader and DoD PKI in front of SPIRE, the
+              adapter would re-use the operator's authenticated DODID and
+              clearance to scope every outbound GCSS-MC call — read
+              access enforced upstream, never trusted from SPIRE alone.
+              For the unattended batch path, the adapter would use a
+              dedicated service account scoped to read-only on the four
+              documented tables, with secrets in the enclave's secret
+              manager and rotation/audit policy set by PM GCSS-MC.
+              <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                Pre-coordination pending with PM GCSS-MC and the IL-5
+                enclave AO. Rotation cadence, secret-manager choice, and
+                whether session re-mint on CAC re-tap is supported are
+                all open items, not shipped behavior.
+              </span>
             </>
           }
         />
@@ -477,56 +597,93 @@ function AtoSection() {
   return (
     <Section
       title="ATO posture"
-      subtitle="Where SPIRE will live and which control families the adapter inherits vs. owns. Pre-ATO; we publish the target so a sponsor can pre-coordinate the package."
+      subtitle="Pre-ATO. The cards below describe the target accreditation package SPIRE intends to pre-coordinate with PM GCSS-MC and the IL-5 enclave AO — none of it is approved or in place today."
     >
+      <SectionUnbuiltStrip />
       <div className="grid gap-3 md:grid-cols-2">
         <SubCard
-          label="Hosting target"
+          label="Hosting · target"
+          stamp
           body={
             <>
+              <span className="font-semibold text-[var(--color-text)]">
+                Target:
+              </span>{" "}
               IL-5 enclave (DoD SRG IL-5, controlled unclassified +
-              mission-critical). Co-resident with GCSS-MC's read replica
-              so the adapter call never traverses the broader DODIN.
-              Air-gapped MEU/MAGTF deployment runs the same image with
-              the comms-state primitive engaged — see SPIRE's local-first
-              posture in BASTION's StatusFooter.
+              mission-critical), co-resident with GCSS-MC's read replica
+              so the adapter call would not traverse the broader DODIN.
+              Air-gapped MEU/MAGTF deployment is intended to run the same
+              image with the comms-state primitive engaged — see SPIRE's
+              local-first posture in BASTION's StatusFooter.
+              <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                Built today: SPIRE runs in this Replit workspace against
+                the synthetic dataset. No IL-5 enclave footprint exists.
+                Pre-coordination pending with PM GCSS-MC and the IL-5
+                enclave AO.
+              </span>
             </>
           }
         />
         <SubCard
-          label="Accreditation pathway"
+          label="Accreditation pathway · planned"
+          stamp
           body={
             <>
-              Inherited ATO via the GCSS-MC enclave's existing IL-5
-              boundary. SPIRE's own scope adds a tailored package for
-              read-only adapter logic only. Expected ATO type: ATO-with-
-              conditions (ATC) for the SBIR pilot, full ATO at the MTA-RP
-              transition.
+              <span className="font-semibold text-[var(--color-text)]">
+                Planned:
+              </span>{" "}
+              inherit the GCSS-MC enclave's IL-5 boundary and submit a
+              tailored package for SPIRE's read-only adapter logic. The
+              path SPIRE intends to ask for is ATO-with-conditions (ATC)
+              for an SBIR pilot, full ATO at the MTA-RP transition.
+              <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                No package has been submitted, no AO has reviewed SPIRE,
+                and no ATC / ATO exists. The ATC-then-ATO sequence is
+                what a typical RMF pathway would look like at this scope
+                — not a commitment from any AO.
+              </span>
             </>
           }
         />
         <SubCard
-          label="NIST 800-53 control families addressed"
+          label="NIST 800-53 control families · target scope"
+          stamp
           body={
-            <ul className="mt-1 list-inside list-disc font-mono text-xs leading-relaxed text-[var(--color-text-secondary)]">
-              <li>AC — Access Control (CAC pass-through, role-scoped reads)</li>
-              <li>AU — Audit & Accountability (hash-chained audit log; see Admin/SOC view)</li>
-              <li>IA — Identification & Authentication (CAC/PIV, mTLS)</li>
-              <li>SC — System & Communications Protection (TLS 1.3, FIPS-validated cryptography)</li>
-              <li>SI — System & Information Integrity (input validation on every adapter row)</li>
-            </ul>
+            <>
+              <span className="font-semibold text-[var(--color-text)]">
+                Target:
+              </span>{" "}
+              SPIRE's adapter package would address the families below.
+              These are scoping intent, not assessor-validated controls —
+              no SCA has tested SPIRE.
+              <ul className="mt-1 list-inside list-disc font-mono text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                <li>AC — Access Control (CAC pass-through, role-scoped reads)</li>
+                <li>AU — Audit & Accountability (hash-chained audit log; see Admin/SOC view)</li>
+                <li>IA — Identification & Authentication (CAC/PIV, mTLS)</li>
+                <li>SC — System & Communications Protection (TLS 1.3, FIPS-validated cryptography)</li>
+                <li>SI — System & Information Integrity (input validation on every adapter row)</li>
+              </ul>
+            </>
           }
         />
         <SubCard
-          label="Boundary diagram"
+          label="Boundary diagram · planned"
+          stamp
           body={
             <>
-              SPIRE adapter ↔ GCSS-MC read replica is a single point-to-
-              point mTLS pipe inside the IL-5 enclave. No SPIRE component
-              egresses the enclave; the network egress monitor (see
-              <code className="ml-1 font-mono text-[var(--color-primary)]">/api/system/status</code>)
-              is armed at boot and would flag any unapproved outbound
-              attempt.
+              <span className="font-semibold text-[var(--color-text)]">
+                Planned:
+              </span>{" "}
+              SPIRE adapter ↔ GCSS-MC read replica as a single point-to-
+              point mTLS pipe inside the IL-5 enclave, with no SPIRE
+              component egressing the enclave. A network egress monitor
+              (<code className="font-mono text-[var(--color-primary)]">/api/system/status</code>)
+              would flag any unapproved outbound attempt.
+              <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                Today the egress monitor endpoint reflects this
+                workspace, not an enclave boundary. Pre-coordination
+                pending with the IL-5 enclave AO.
+              </span>
             </>
           }
         />
@@ -543,43 +700,74 @@ function FailureModesSection() {
   return (
     <Section
       title="Failure modes"
-      subtitle="Logistics systems go dark — the adapter is designed assuming this is the normal case, not the exception."
+      subtitle="How the adapter is designed to behave when GCSS-MC goes dark. Logistics systems do go dark — but none of the behaviors below are wired up against a real upstream yet, because there is no real upstream wired up."
     >
+      <SectionUnbuiltStrip />
       <div className="grid gap-3 md:grid-cols-3">
         <SubCard
-          label="GCSS-MC unreachable"
+          label="GCSS-MC unreachable · planned"
+          stamp
           body={
             <>
-              SPIRE renders the last-known cache and stamps every screen
-              with a yellow "GCSS-MC stale · last sync N min ago" banner.
-              Predictions degrade gracefully: PULSE marks risk scores
-              with an "uncertainty inflated · stale upstream" tag rather
-              than showing a confident wrong number.
+              <span className="font-semibold text-[var(--color-text)]">
+                Planned:
+              </span>{" "}
+              SPIRE would render the last-known cache and stamp affected
+              screens with a "GCSS-MC stale · last sync N min ago"
+              indicator, and PULSE risk scores would carry a "stale
+              upstream — uncertainty inflated" caveat rather than show a
+              confident wrong number.
+              <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                Built today: SPIRE has a comms-state primitive that
+                marks the whole session DDIL — see the StatusFooter.
+                The per-entity stale/uncertainty tag described above is
+                not yet implemented in PULSE.
+              </span>
             </>
           }
         />
         <SubCard
-          label="Adapter degraded (partial table)"
+          label="Adapter degraded · planned"
+          stamp
           body={
             <>
-              If MIMMS_DAILY_READINESS lands but SUPPLY_DOC times out,
-              SPIRE serves readiness with a partial-cover indicator on
-              parts-on-order columns. A degraded poll counts toward a
-              circuit-breaker that backs the cadence off automatically
-              (30s → 2 min → 10 min) until the window recovers.
+              <span className="font-semibold text-[var(--color-text)]">
+                Planned:
+              </span>{" "}
+              if MIMMS_DAILY_READINESS lands but SUPPLY_DOC times out,
+              SPIRE would serve readiness with a partial-cover indicator
+              on parts-on-order columns and a circuit-breaker would back
+              the cadence off automatically (illustrative target:
+              30s → 2 min → 10 min) until the window recovers.
+              <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                Built today: nothing. There is no circuit-breaker, no
+                partial-cover indicator, and no per-table cadence
+                governor in code. The 30s/2m/10m back-off is a design
+                target, not measured behavior.
+              </span>
             </>
           }
         />
         <SubCard
-          label="Reconciliation on recovery"
+          label="Reconciliation on recovery · planned"
+          stamp
           body={
             <>
-              First clean poll after an outage triggers a delta
-              reconciliation: SPIRE compares its cache to the recovered
-              GCSS-MC state and replays deltas (status flips, new EROs)
-              into the audit chain so the operator can scrub the gap
-              window and see exactly what landed when. Conflicts are
-              surfaced via the existing sync-conflict viewer.
+              <span className="font-semibold text-[var(--color-text)]">
+                Planned:
+              </span>{" "}
+              the first clean poll after an outage would trigger a delta
+              reconciliation — SPIRE would compare its cache to the
+              recovered GCSS-MC state, replay deltas (status flips, new
+              EROs) into the audit chain so the operator can scrub the
+              gap window, and surface conflicts in a sync-conflict
+              viewer.
+              <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
+                Built today: nothing. The sync-conflict viewer does not
+                exist as a screen, and SPIRE has no recovery-replay path
+                because there is no live upstream to reconcile against.
+                Pre-coordination pending with PM GCSS-MC.
+              </span>
             </>
           }
         />
@@ -618,8 +806,9 @@ function SampleEndpointSection({
   return (
     <Section
       title="Sample endpoint"
-      subtitle="Live contract roundtrip. Hits the canonical synthetic dataset and emits GCSS-MC-shaped rows. Used by the topbar last-sync indicator and any judge who wants to curl it directly."
+      subtitle="Contract-shape roundtrip. Hits the canonical SPIRE synthetic dataset and emits GCSS-MC-shaped rows. Used by the topbar last-sync indicator and any judge who wants to curl it directly. The endpoint reads SPIRE's own dataset — it is not querying GCSS-MC."
     >
+      <SectionUnbuiltStrip />
       <div className="rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-primary)_4%,var(--color-bg))] p-3 font-mono text-xs">
         <div className="mb-2 flex items-center justify-between gap-2">
           <span className="uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -791,9 +980,29 @@ function Section({
   );
 }
 
-function SubCard({ label, body }: { label: string; body: React.ReactNode }) {
+function SubCard({
+  label,
+  body,
+  stamp = false,
+}: {
+  label: string;
+  body: React.ReactNode;
+  // When `stamp` is true, the card prints the projection-scale
+  // PRE-ATO · NOT ACCREDITED stamp above its label. Use on every card
+  // that describes auth, ATO, or failure-mode behavior so a screenshot
+  // of one card is never load-bearing on its own.
+  stamp?: boolean;
+}) {
   return (
-    <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+    <div
+      className="rounded-sm border bg-[var(--color-bg)] p-3"
+      style={{
+        borderColor: stamp
+          ? "color-mix(in oklab, " + UNBUILT_BG + " 35%, var(--color-border))"
+          : "var(--color-border)",
+      }}
+    >
+      {stamp && <PreAtoStamp />}
       <div className="mb-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
         {label}
       </div>
