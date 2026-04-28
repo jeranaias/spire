@@ -729,6 +729,58 @@ def filter_buildings(
     return out
 
 
+def allowed_buildings(
+    ds: CanonicalDataset,
+    role: Optional[str],
+    buildings: Iterable[dict],
+) -> Optional[set[str]]:
+    """Return the set of building NAMES this role can read incidents for.
+
+    Mirrors `filter_buildings` (occupant_unit + sector) but returns just
+    the names so callers filtering by `Incident.location_building` can do
+    a set membership check. Sensitive types (ammo / arms / fuel / hazmat
+    / comms / TOC) are always excluded for restricted roles — even if a
+    UAS_INCURSION lands on the ammo depot, a Maintenance Chief has no
+    operational need to read that incident, and the location alone is
+    OSINT.
+
+    Returns:
+      - `None`  → role gets the full installation view (no filter).
+      - `set()` → role gets no installation footprint (data_custodian).
+      - populated set otherwise.
+    """
+    bldgs = list(buildings)
+    if role in INSTALLATION_FULL_VIEW_ROLES:
+        return None
+    if not role:
+        return None
+    if role in INSTALLATION_NO_VIEW_ROLES:
+        return set()
+    allowed_u = allowed_units(ds, role) or set()
+    sectors = allowed_sectors(ds, role, bldgs) or set()
+    out: set[str] = set()
+    for b in bldgs:
+        if b.get("type") in SENSITIVE_BUILDING_TYPES:
+            continue
+        occupant = b.get("occupant_unit")
+        is_critical = bool(b.get("hazmat_present") or b.get("critical_infrastructure"))
+        if is_critical:
+            # Occupant CI carve-out: a unit's own critical building stays
+            # in scope (the chief needs to know an incident at her motor
+            # pool exists). Non-occupant CI is dropped — even within the
+            # same sector — for the same reason `filter_buildings` drops
+            # it from the COP map.
+            if occupant and occupant in allowed_u:
+                out.add(b["name"])
+            continue
+        if occupant and occupant in allowed_u:
+            out.add(b["name"])
+            continue
+        if not occupant and b.get("sector") in sectors:
+            out.add(b["name"])
+    return out
+
+
 def filter_perimeter(
     items: Iterable[dict],
     sectors: Optional[set[str]],

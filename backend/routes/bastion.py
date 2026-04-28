@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from ..auth import session_role
 from ..scoping import (
     BASTION_SIMULATE_ROLES,
+    allowed_buildings,
     allowed_sectors,
     allowed_units,
     filter_buildings,
@@ -743,12 +744,84 @@ def _response_checklist_for(incident_type: str, severity: str, *, location: Opti
     return base.get(incident_type, base["DEFAULT"])
 
 
+def _audit_blocked_incident_view(
+    *, actor_role: Optional[str], user: Optional[dict],
+    incident_id: str, incident_location: Optional[str], action: str,
+) -> None:
+    """Append a `bastion_incident_view_blocked` row when a restricted role
+    probes another unit's incident response. Best-effort — never let an
+    audit-write failure mask the 403 (same pattern as
+    `_audit_blocked_alert_action`)."""
+    try:
+        audit_log(
+            "bastion_incident_view_blocked",
+            actor=actor_role or "unknown",
+            subject_id=incident_id,
+            payload={
+                "action": action,
+                "incident_id": incident_id,
+                "incident_location": incident_location,
+                "user_dodid": (user or {}).get("dodid"),
+                "user_role": (user or {}).get("role") or actor_role,
+                "decision": "blocked",
+                "reason": "out_of_scope",
+                "surface": "backend",
+            },
+        )
+    except Exception:
+        pass
+
+
 @router.get("/incidents/{incident_id}/response")
-async def incident_response(incident_id: str):
+async def incident_response(
+    incident_id: str,
+    request: Request,
+    role: Optional[str] = None,
+):
+    """Per-incident response checklist.
+
+    Authorization (task #115 / sibling of the COP installation-map fix):
+      The incident response payload exposes `location_building`,
+      `location_grid`, response force, and the FPCON change on the day
+      of the event — i.e. exactly the OSINT product Task #55 closed for
+      `/api/bastion/cop`. Restricted roles (maintenance_chief, g4) only
+      see incidents tied to a building in their `allowed_buildings`
+      footprint; cross-tenant probes return 403 + emit an audit row so
+      the SOC can see who tried to read another unit's incident response.
+    """
     ds = get_dataset()
     incident = ds.incident(incident_id)
     if incident is None:
         raise HTTPException(status_code=404, detail="incident not found")
+
+    user = getattr(request.state, "user", None) or {}
+    # Session role is the authority — `session_middleware._override_query_role`
+    # already strips any client-supplied `?role=` and replaces it with the
+    # authenticated role, but we still call `session_role` first as the
+    # intent so a future middleware change can't silently let a query
+    # role spoof past this endpoint. The query-role fallback only fires
+    # for unauthenticated callers (CLI tools, the test pre-auth probes
+    # in `test_bastion_authz.py`).
+    actor_role = session_role(request) or user.get("role") or role
+    inst = _load_installation()
+    bldg_names = allowed_buildings(ds, actor_role, inst["buildings"])
+    if bldg_names is not None and incident.location_building not in bldg_names:
+        _audit_blocked_incident_view(
+            actor_role=actor_role, user=user,
+            incident_id=incident.incident_number,
+            incident_location=incident.location_building,
+            action="bastion.incident.response",
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "OutOfScope",
+                "action": "bastion.incident.response",
+                "incident_id": incident.incident_number,
+                "user_role": actor_role,
+            },
+        )
+
     checklist = _response_checklist_for(incident.type, incident.severity, location=incident.location_building)
     return {
         "incident_number": incident.incident_number,
@@ -766,10 +839,38 @@ async def incident_response(incident_id: str):
 
 
 @router.get("/incidents")
-async def list_incidents(limit: int = 50):
+async def list_incidents(
+    request: Request,
+    limit: int = 50,
+    role: Optional[str] = None,
+):
+    """Installation incident feed.
+
+    Authorization (task #115): mirrors the `/api/bastion/cop` building
+    scope — `location_building → sector` lookup against the operator's
+    `allowed_buildings` set. A maintenance_chief or g4 should not be
+    reading every UAS incursion / EOD response on base, including
+    `location_building`, `location_grid`, response force, and damage
+    figures, just because their CAC is signed in. Sensitive types
+    (ammo / arms / fuel / hazmat / comms / TOC) are dropped for
+    restricted roles regardless of unit affiliation; full-view roles
+    (security_manager, mef_commander) keep the unfiltered feed.
+
+    `total` reflects the post-scoping count so the BASTION incident
+    table reads "the 27 incidents in your footprint" rather than
+    "the latest 50 minus everything filtered out".
+    """
     ds = get_dataset()
+    inst = _load_installation()
+    user = getattr(request.state, "user", None) or {}
+    # Session role first — see the matching note on `incident_response`.
+    actor_role = session_role(request) or user.get("role") or role
+    bldg_names = allowed_buildings(ds, actor_role, inst["buildings"])
+
     out = []
-    for i in list(ds.incidents)[-limit:]:
+    for i in ds.incidents:
+        if bldg_names is not None and i.location_building not in bldg_names:
+            continue
         out.append({
             "incident_number": i.incident_number,
             "date_time": i.date_time.isoformat(),
@@ -781,7 +882,9 @@ async def list_incidents(limit: int = 50):
             "casualties": i.casualties,
             "damage_usd": i.property_damage_usd,
         })
-    return {"incidents": out}
+    # Apply limit AFTER scoping so a restricted role sees their N latest
+    # in-scope incidents, not "the latest 50 minus everything filtered".
+    return {"incidents": out[-limit:], "total": len(out)}
 
 
 # ---------------------------------------------------------------------------
