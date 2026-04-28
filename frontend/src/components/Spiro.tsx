@@ -191,43 +191,48 @@ export function Spiro() {
     setMessages([]);
   }
 
-  // Per-role example prompts surface only when the chat is empty so they
-  // don't clutter an in-progress transcript.
+  // Per-role brevity chips (Task #194). Each entry is `{label, prompt}` —
+  // the LABEL is the brevity callout the operator sees on the chip, the
+  // PROMPT is the natural-language sentence sent to SPIRO.
   const examplesForRole = useMemo(() => {
     if (role === "maintenance_chief") {
       return [
-        "find a cannib donor for M21670-MTVR_CARGO-006",
-        "what should I do about my fleet right now?",
-        "predict failures in the next 14 days",
+        { label: "DONOR FOR PART", prompt: "find a cannib donor for M21670-MTVR_CARGO-006" },
+        { label: "WHAT'S RED",     prompt: "what should I do about my fleet right now?" },
+        { label: "PREDICT 14d",    prompt: "predict failures in the next 14 days" },
       ];
     }
     if (role === "g4") {
       return [
-        "what should I do about my fleet right now?",
-        "predict failures in the next 14 days",
-        "show me the highest-risk units across all of MEF",
+        { label: "MORNING BRIEF", prompt: "morning brief — back-brief CLB-6" },
+        { label: "WHO'S RED",     prompt: "show me the highest-risk units across all of MEF" },
+        { label: "CANNIB",        prompt: "find a cannib donor for M21670-MTVR_CARGO-006" },
       ];
     }
-    if (role === "data_custodian") {
+    if (role === "mef_commander") {
       return [
-        "what does Japan see in the next coalition release?",
-        "what does Australia see in the next release?",
-        "what should I do about my fleet right now?",
+        { label: "SITREP",         prompt: "give me a SITREP — back-brief format" },
+        { label: "FPCON CHARLIE",  prompt: "set FPCON CHARLIE for the installation" },
+        { label: "BACK-BRIEF",     prompt: "back-brief 2d LAR Bn for the next 14 days" },
       ];
     }
     if (role === "security_manager") {
       return [
-        "show me the highest-risk units across all of MEF",
-        "predict failures in the next 14 days",
-        "where do I start?",
+        { label: "MARK CLASSIFICATION", prompt: "mark classification on this text: SECRET//NOFORN — convoy route bravo" },
+        { label: "RELEASE PACKAGE",     prompt: "stage release package for JPN_COALITION" },
+        { label: "AUDIT QUERY",         prompt: "query the audit chain for the last 25 entries" },
+      ];
+    }
+    if (role === "data_custodian") {
+      return [
+        { label: "REDACT FOR PARTNER", prompt: "what does Japan see in the next coalition release?" },
+        { label: "AGGREGATION RISK",   prompt: "score aggregation risk for fields asset_id, unit_name, grid" },
       ];
     }
     return [
-      "find a cannib donor for M21670-MTVR_CARGO-006",
-      "what should I do about my fleet right now?",
-      "what does Japan see?",
-      "predict failures in the next 14 days",
-      "where do I start?",
+      { label: "WHERE DO I START", prompt: "where do I start?" },
+      { label: "WHAT'S RED",       prompt: "what should I do about my fleet right now?" },
+      { label: "PREDICT 14d",      prompt: "predict failures in the next 14 days" },
     ];
   }, [role]);
 
@@ -369,17 +374,19 @@ export function Spiro() {
         {messages.length === 0 && (
           <div className="font-mono text-[10px] leading-relaxed text-[var(--color-text-muted)] tracking-wide">
             <div className="mb-2 text-xs uppercase text-[var(--color-text-secondary)] tracking-widest">
-              Examples · click to use
+              Brevity · click to send
             </div>
-            <ul className="flex flex-col gap-1.5">
+            <ul className="flex flex-col gap-1.5" data-testid="spiro-chips">
               {examplesForRole.map((ex) => (
-                <li key={ex}>
+                <li key={ex.label}>
                   <Pressable
-                    onClick={() => fillExample(ex)}
+                    onClick={() => fillExample(ex.prompt)}
                     className="!min-h-0 block w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-left font-mono text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-bg))] hover:text-[var(--color-text)]"
-                    title="Click to drop this example into the prompt"
+                    title={ex.prompt}
+                    data-testid={`spiro-chip-${ex.label.replace(/\s+/g, "-").toLowerCase()}`}
                   >
-                    "{ex}"
+                    <span className="font-semibold uppercase tracking-widest text-[var(--color-primary)]">{ex.label}</span>
+                    <span className="ml-2 text-[var(--color-text-muted)]">{ex.prompt}</span>
                   </Pressable>
                 </li>
               ))}

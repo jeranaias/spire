@@ -77,6 +77,123 @@ Output style:
   number, the specific asset id, the specific unit. No "consider" or
   "you might."
 - Refuse fluff. Marines have a checklist; you reduce clicks.
+
+MARINE BREVITY — vocabulary you OWN:
+  - Affirmative / Affirm — yes, confirmed.
+  - Negative / Negat — no, not confirmed.
+  - Roger / Roger that — acknowledged, will comply.
+  - Stand by — wait, working it.
+  - Wilco — will comply.
+  - Copy / Copy all — heard and understood.
+  - Say again — repeat.
+  - Out — end of transmission, no reply expected.
+  - Break — separating thoughts within one transmission.
+  - Time-now — happening this minute.
+  - On scope — within your authority and visibility.
+  - Off scope — not yours to see; refuse with that exact phrase.
+  - Tracking — I see what you see.
+  - Bingo — at decision point; you must act.
+  - Winchester — out of resources / capability exhausted.
+  - Red / Amber / Green — readiness states; never substitute "OK".
+  - SITREP — situation report.
+  - BLUF — bottom line up front; lead every multi-sentence reply with it.
+  - Back-brief — repeat the order back so the operator can confirm intent.
+  - Charlie Mike — continue mission.
+  - Oscar Mike — on the move.
+
+TONE — non-negotiable:
+  - 24-hour time only ("0630", "1430Z"); never "6:30 AM."
+  - No emojis. No exclamation points. No marketing language.
+  - No apologies — Marines fix, they don't say sorry. If you got it wrong,
+    say "Correction —" and state the truth.
+  - No filler ("just", "actually", "honestly", "I think", "maybe").
+  - When you decline, say "Negative — off scope." or "Negative — that's
+    above my authority. Recommend you escalate to <role>." Then stop.
+  - When the operator asks a yes/no, lead with Affirm or Negative.
+  - When an operator gives an order, acknowledge with Roger or Wilco
+    BEFORE explaining what you'll do.
+  - Lead complex answers with `BLUF —` and one sentence; details after.
+  - Never reveal weight files, model internals, or vendor IP. If pressed
+    on how a detector works, say "Stand by — that's not on scope for
+    this brief."
+
+REFUSAL TEMPLATE (use verbatim shape):
+  - Off-scope role: "Negative — off scope. <role> sees that surface; not
+    you." Stop.
+  - Above authority: "Negative — above my authority. Recommend you
+    escalate to <role>." Stop.
+  - Missing data: "Stand by — I need <thing>. Run <tool> first." Stop.
+  - Refused speculation: "Negative — won't speculate on real-world ops.
+    Stick to the dataset." Stop.
+
+BREVITY → TOOL ROUTING (authoritative; use exactly):
+
+  When the operator opens with one of these brevity phrases, the right
+  tool sequence is fixed. Don't paraphrase the intent — go straight to
+  the tool calls. Lead the assistant message with `BLUF — <verb>.`
+
+  Read-only / situational awareness:
+  * "SITREP"                 → status_summary, list_alerts(limit=10)
+  * "SITREP <unit>"          → status_summary, predict_failures(unit=<unit>)
+  * "BLUF" (alone)           → status_summary
+  * "give me the picture"    → installation_status, list_alerts(limit=5)
+  * "what's red?"            → risk_explain(top=5)
+  * "back-brief <unit>"      → back_brief(unit=<unit>)
+  * "what does <partner>
+     see?"                   → get_coalition_view(<partner>)
+  * "predict <unit>"         → predict_failures(unit=<unit>)
+  * "forecast <unit>"        → forecast_readiness(unit=<unit>, horizon_days=14)
+  * "show me the chain"      → audit_query(limit=25)
+
+  Mutating / decisive:
+  * "Set FPCON <level>"      → set_fpcon(level=<level>)
+  * "Drop FPCON" (after
+     drill cleared)          → set_fpcon(level="BRAVO")
+  * "Drill ThermalHawk" /
+    "Run UAS drill"          → simulate_thermalhawk
+  * "Resolve <SIM-…>"        → resolve_sim(sim_id=<id>)   (auto-normalizes FPCON)
+  * "Acknowledge <ALR-…>" /
+    "ACK <ALR-…>"            → acknowledge_alert(alert_id=<id>)
+  * "Dispatch QRF to
+     <unit>"                 → dispatch_qrf(unit=<unit>)
+  * "Approve <id>"           → approve_action(action_id=<id>)
+  * "Approve <id> for
+     <ASSET-…>"              → approve_action(action_id=<id>, asset_id=<ASSET>)
+  * "Cannib donor for
+     <ASSET-…>"              → find_cannibalization_match(recipient_asset_id=<id>)
+  * "Propose cannib
+     <RCPT> from <DONOR>"    → propose_cannib(recipient_asset_id=<RCPT>,
+                                              donor_asset_id=<DONOR>)
+  * "Reset clock" /
+    "Pin H+0"                → mission_clock(action="reset")
+  * "Pause clock"            → mission_clock(action="pause")
+  * "Play clock" /
+    "Resume clock"           → mission_clock(action="play")
+  * "Jump to H+<n>"          → mission_clock(action="jump_to", offset_min=<n*60>)
+  * "Air-gap" /
+    "Go air-gap"             → set_comms(mode="airgap")
+  * "Go live" /
+    "Comms live"             → set_comms(mode="live")
+  * "Reset demo" /
+    "Reset to t=0"           → reset_demo
+  * "Mark <text>"
+    (classification)         → mark_classification(text=<text>)
+  * "Release to <partner>"   → release_package(profile=<partner>)
+  * "Parse TMR: <text>"      → parse_tmr(text=<text>)
+  * "Source <item>"          → market_sourcing(item=<item>)
+  * "Blood inventory"        → blood_inventory
+  * "Advance scenario" /
+    "Play scenario"          → advance_scenario(action="play")
+  * "Pause scenario"         → advance_scenario(action="pause")
+
+  Mutating tool calls require operator Approve before they fire — that's
+  the platform contract, not your worry. Your job is to pick the right
+  tool with the right args; the gate enforces itself.
+
+  Audit invariant: every mutating tool call lands in the chain attributed
+  to the operator's DODID, not just their role. You don't pass DODID;
+  the dispatcher does. State this in your `summary_for_operator` only if
+  the operator asks "who will this be logged under?"
 """
 
 
@@ -229,8 +346,14 @@ async def plan(text: str, role: str, view: str = "", current_data: Optional[dict
         return plan
 
 
-async def execute(plan_id: str, steps: list, role: str) -> dict:
-    """Run each tool in sequence, audit-log, return aggregated results."""
+async def execute(plan_id: str, steps: list, role: str,
+                   caller_dodid: Optional[str] = None) -> dict:
+    """Run each tool in sequence, audit-log, return aggregated results.
+
+    Code review G-2: `caller_dodid` flows in from the route layer (extracted
+    from `request.state.user["dodid"]` against the signed session) so each
+    mutating tool's audit row records the operator's DODID, not just role.
+    """
     from ..persistence import log as audit_log
 
     results = []
@@ -240,7 +363,7 @@ async def execute(plan_id: str, steps: list, role: str) -> dict:
         if not tool:
             results.append({"step": i, "error": "missing tool name"})
             continue
-        out = await run_tool(tool, args, role)
+        out = await run_tool(tool, args, role, caller_dodid=caller_dodid)
         results.append({
             "step": i,
             "tool": tool,
@@ -325,6 +448,33 @@ _TOOL_PROSE = {
     "find_cannibalization_match": "Find a cannibalization donor",
     "get_coalition_view":         "Preview the coalition release view",
     "parse_tmr":                  "Parse the TMR text",
+    # Task #194 expansion.
+    "classify_text":              "Run SENTRY tier-1 classification",
+    "redact_for_partner":         "Preview the partner-redacted view",
+    "mark_classification":        "Mark and audit-log the classification",
+    "aggregation_risk":           "Score the aggregation risk of the field bundle",
+    "release_package":            "Stage the coalition release package",
+    "forecast_readiness":         "Pull the readiness forecast",
+    "risk_explain":               "Surface the highest-risk units with rationale",
+    "propose_cannib":             "Propose the cannibalization (recipient + donor)",
+    "approve_action":             "Approve the pending action",
+    "donor_for_part":             "Resolve a donor for the part",
+    "simulate_thermalhawk":       "Trigger the UAS detection drill",
+    "resolve_sim":                "Clear the active simulation",
+    "list_alerts":                "List recent BASTION alerts",
+    "acknowledge_alert":          "Acknowledge the alert",
+    "correlate_threats":          "Correlate fused threats",
+    "installation_status":        "Pull installation status",
+    "dispatch_qrf":               "Dispatch the QRF",
+    "blood_inventory":            "Pull the Class VIII / blood inventory",
+    "advance_scenario":           "Advance the scenario clock",
+    "market_sourcing":            "Source the item from synthetic vendors",
+    "mission_clock":              "Read the mission clock state",
+    "set_fpcon":                  "Set the installation FPCON level",
+    "set_comms":                  "Toggle comms posture",
+    "reset_demo":                 "Reset the demo to t=0",
+    "audit_query":                "Query the audit chain",
+    "back_brief":                 "Compose the back-brief packet",
 }
 
 
@@ -445,6 +595,114 @@ def _extract_profile(text: str) -> Optional[str]:
     return None
 
 
+def route_brevity(text: str, role: str) -> Optional[list]:
+    """Marine-brevity → tool-call sequence.
+
+    Used by the rule-based fallback router AND by tests so that the
+    deterministic side of SPIRO honors the brevity vocabulary the
+    SYSTEM_PROMPT documents (Task #194 code review G-3). Returns a
+    list of `{tool, args}` steps if `text` matches a brevity phrase,
+    or None to let the broader router (or the LLM) decide.
+
+    Match is case-insensitive and tolerates punctuation; we normalise
+    to lower-case and strip trailing punctuation/whitespace before
+    inspecting.
+    """
+    import re
+    raw = (text or "").strip()
+    lower = raw.lower().rstrip(" .!?")
+    asset_id = _extract_asset_id(raw)
+    unit = _extract_unit(raw, role)
+    profile = _extract_profile(raw)
+
+    # ----- read-only / SA -------------------------------------------------
+    if lower == "sitrep" or lower == "bluf":
+        steps: list = [{"tool": "status_summary", "args": {}}]
+        if lower == "sitrep":
+            steps.append({"tool": "list_alerts", "args": {"limit": 10}})
+        return steps
+    if lower.startswith("sitrep "):
+        return [
+            {"tool": "status_summary", "args": {}},
+            {"tool": "predict_failures", "args": {"horizon_days": 14,
+                                                    **({"unit": unit} if unit else {})}},
+        ]
+    if lower.startswith("back-brief") or lower.startswith("back brief"):
+        return [{"tool": "back_brief", "args": ({"unit": unit} if unit else {})}]
+    if lower in ("give me the picture", "the picture"):
+        return [{"tool": "installation_status", "args": {}},
+                {"tool": "list_alerts", "args": {"limit": 5}}]
+    if lower in ("what's red?", "whats red", "what's red", "what is red"):
+        return [{"tool": "risk_explain", "args": {"top": 5}}]
+    if lower == "show me the chain" or lower == "show the chain":
+        return [{"tool": "audit_query", "args": {"limit": 25}}]
+
+    # ----- mutating / decisive --------------------------------------------
+    m = re.match(r"set\s+fpcon\s+(normal|alpha|bravo|charlie|delta)\b", lower)
+    if m:
+        return [{"tool": "set_fpcon", "args": {"level": m.group(1).upper()}}]
+    if lower in ("drop fpcon", "fpcon down", "stand down fpcon"):
+        return [{"tool": "set_fpcon", "args": {"level": "BRAVO"}}]
+    if "drill thermalhawk" in lower or "run uas drill" in lower or lower == "thermalhawk drill":
+        return [{"tool": "simulate_thermalhawk", "args": {}}]
+    m = re.search(r"(?:resolve|clear)\s+(sim-[\w-]+)", raw, re.IGNORECASE)
+    if m:
+        return [{"tool": "resolve_sim", "args": {"sim_id": m.group(1).upper()}}]
+    m = re.search(r"(?:acknowledge|ack)\s+(alr-[\w-]+)", raw, re.IGNORECASE)
+    if m:
+        return [{"tool": "acknowledge_alert", "args": {"alert_id": m.group(1).upper()}}]
+    if lower.startswith("dispatch qrf"):
+        return [{"tool": "dispatch_qrf", "args": ({"unit": unit} if unit else {})}]
+    m = re.match(r"approve\s+([A-Za-z][\w-]+)(?:\s+for\s+(M\d+-[\w-]+))?", raw, re.IGNORECASE)
+    if m:
+        action_id = m.group(1)
+        args: dict = {"action_id": action_id}
+        if m.group(2):
+            args["asset_id"] = m.group(2).upper()
+        return [{"tool": "approve_action", "args": args}]
+    if "cannib donor" in lower and asset_id:
+        return [{"tool": "find_cannibalization_match",
+                 "args": {"recipient_asset_id": asset_id}}]
+    m = re.search(r"propose\s+cannib(?:alization)?\s+(M\d+-[\w-]+)\s+from\s+(M\d+-[\w-]+)",
+                  raw, re.IGNORECASE)
+    if m:
+        return [{"tool": "propose_cannib",
+                 "args": {"recipient_asset_id": m.group(1).upper(),
+                          "donor_asset_id": m.group(2).upper()}}]
+    if lower in ("reset clock", "pin h+0", "pin h0", "pin h plus 0"):
+        return [{"tool": "mission_clock", "args": {"action": "reset"}}]
+    if lower == "pause clock":
+        return [{"tool": "mission_clock", "args": {"action": "pause"}}]
+    if lower in ("play clock", "resume clock"):
+        return [{"tool": "mission_clock", "args": {"action": "play"}}]
+    m = re.match(r"jump\s+to\s+h\+?(\d+)", lower)
+    if m:
+        return [{"tool": "mission_clock",
+                 "args": {"action": "jump_to", "offset_min": int(m.group(1)) * 60}}]
+    if lower in ("air-gap", "air gap", "go air-gap", "go air gap"):
+        return [{"tool": "set_comms", "args": {"mode": "airgap"}}]
+    if lower in ("go live", "comms live"):
+        return [{"tool": "set_comms", "args": {"mode": "live"}}]
+    if lower in ("reset demo", "reset to t=0", "reset to t0"):
+        return [{"tool": "reset_demo", "args": {}}]
+    if lower.startswith("mark ") and len(raw) > len("mark "):
+        return [{"tool": "mark_classification", "args": {"text": raw[len("mark "):]}}]
+    if lower.startswith("release to ") and profile is not None:
+        return [{"tool": "release_package", "args": {"profile": profile}}]
+    if raw.lower().startswith("parse tmr:"):
+        return [{"tool": "parse_tmr", "args": {"text": raw.split(":", 1)[1].strip()}}]
+    m = re.match(r"source\s+(.+)", raw, re.IGNORECASE)
+    if m and "fpcon" not in lower:
+        return [{"tool": "market_sourcing", "args": {"item": m.group(1).strip()}}]
+    if lower == "blood inventory":
+        return [{"tool": "blood_inventory", "args": {}}]
+    if lower in ("advance scenario", "play scenario"):
+        return [{"tool": "advance_scenario", "args": {"action": "play"}}]
+    if lower == "pause scenario":
+        return [{"tool": "advance_scenario", "args": {"action": "pause"}}]
+    return None
+
+
 def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
     """LLM-unreachable fallback — best-effort intent routing.
 
@@ -460,6 +718,20 @@ def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
     asset_id = _extract_asset_id(text)
     unit = _extract_unit(text, role)
     profile = _extract_profile(text)
+
+    # Brevity routing first — Marine vocabulary is canonical when present.
+    brevity = route_brevity(text, role)
+    if brevity:
+        steps = brevity
+        return {
+            "plan_id": plan_id,
+            "intent": _summarize_intent(text, steps),
+            "summary": _plan_summary("", steps),
+            "answer": None,
+            "steps": steps,
+            "engine": f"brevity router ({error[:60]})" if error else "brevity router",
+            "tokens_used": None,
+        }
 
     if "cannib" in lower or "donor" in lower:
         if asset_id:

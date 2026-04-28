@@ -492,6 +492,16 @@ async def reset_demo(request: Request):
     except Exception as e:  # noqa: BLE001
         failed_steps.append({"step": "dataset_rehydrate", "error": str(e)[:160]})
 
+    # 8. Task #194 — SPIRO ephemeral tool state (FPCON ladder, QRF dispatches).
+    #    Independent of dataset rehydration; both reset legs are required
+    #    for a clean t=0 demo state and are reported separately in summary.
+    try:
+        from ..copilot.tools import reset_tools_state as _reset_spiro_tools
+        spiro_tools_state = _reset_spiro_tools()
+    except Exception as e:  # noqa: BLE001
+        spiro_tools_state = {"error": str(e)[:160]}
+        failed_steps.append({"step": "spiro_tools", "error": str(e)[:160]})
+
     finished = datetime.utcnow()
     duration_ms = int((finished - started).total_seconds() * 1000)
     overall_ok = not failed_steps
@@ -503,6 +513,7 @@ async def reset_demo(request: Request):
         "comms_timeline_regenerated": timeline_regenerated,
         "decision_outcomes_cleared": outcomes_cleared,
         "feedback_log_cleared": feedback_cleared,
+        "spiro_tools": spiro_tools_state,
         "mission_clock": clock_state,
         "dataset_rehydrated": dataset_rehydrated,
         "duration_ms": duration_ms,

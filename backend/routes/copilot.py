@@ -29,6 +29,16 @@ def _role(request: Request) -> str:
     return session_role(request) or "mef_commander"
 
 
+def _dodid(request: Request) -> str | None:
+    """Pull the caller's DODID from the signed session, used as the audit
+    actor for mutating tool calls (code review G-2). Falls back to None
+    when the session has no DODID claim — tools then degrade to role-as-actor.
+    """
+    user = getattr(request.state, "user", None) or {}
+    val = user.get("dodid")
+    return str(val) if val else None
+
+
 @router.post("/plan")
 async def make_plan(request: Request, payload: dict = Body(default={})):
     text = (payload.get("text") or "").strip()
@@ -45,9 +55,11 @@ async def execute_plan(request: Request, payload: dict = Body(default={})):
     plan_id = payload.get("plan_id") or "PL-AD-HOC"
     steps = payload.get("steps") or []
     role = _role(request)
+    dodid = _dodid(request)
     if not isinstance(steps, list) or not steps:
         raise HTTPException(status_code=400, detail="steps required")
-    return await copilot_execute(plan_id=plan_id, steps=steps, role=role)
+    return await copilot_execute(plan_id=plan_id, steps=steps, role=role,
+                                  caller_dodid=dodid)
 
 
 @router.post("/summarize")
