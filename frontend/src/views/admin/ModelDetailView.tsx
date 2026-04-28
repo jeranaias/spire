@@ -185,6 +185,30 @@ function ImplementationCard({ impl, headline }: { impl: ModelImplementation; hea
                 : "ok"
             }
           />
+          {/*
+            Task #82 — call out that "Target IL" is a hosting *target*,
+            not an active *authorization*. The Authorization section
+            below carries the AO / package / expiration so the auditor
+            can't confuse a target-IL with a held ATO.
+          */}
+          <div className="mt-1 font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">
+            Target is the hosting boundary SPIRE deploys against; the active
+            ATO lives in the Authorization block below.
+          </div>
+        </Section>
+
+        <Section title="Authorization (ATO)">
+          {/*
+            Task #82 — distinct from hosting target. SPIRE is in
+            pre-fielding posture so most rows surface "TBD — placeholder"
+            honestly rather than implying an ATO that doesn't exist.
+          */}
+          <Row label="Authorizing official" value={impl.authorization?.ao ?? "TBD — placeholder"} />
+          <Row label="Package ID" value={impl.authorization?.package_id ?? "TBD — placeholder"} />
+          <Row label="Expiration" value={impl.authorization?.expiration ?? "TBD — placeholder"} />
+          {impl.authorization?.note && (
+            <Row label="Note" value={impl.authorization.note} />
+          )}
         </Section>
 
         <Section title="FedRAMP status">
@@ -203,10 +227,20 @@ function ImplementationCard({ impl, headline }: { impl: ModelImplementation; hea
         </Section>
         <Section title="Vendor risk">
           <Row label="Vendor" value={vendor.name} />
+          {/*
+            Task #82 — when the canonical jurisdictions array is present,
+            render the joined list and only paint green if every entry
+            is US-aligned. This stops a multi-jurisdiction publisher
+            (Alphabet US + DeepMind UK) reading as pure US.
+          */}
           <Row
             label="Jurisdiction"
-            value={vendor.jurisdiction}
-            tone={isUS(vendor.jurisdiction) ? "ok" : "warn"}
+            value={
+              vendor.jurisdictions && vendor.jurisdictions.length > 0
+                ? vendor.jurisdictions.join(" + ")
+                : vendor.jurisdiction
+            }
+            tone={isAllUS(vendor.jurisdictions, vendor.jurisdiction) ? "ok" : "warn"}
           />
           <Row label="Ownership" value={vendor.ownership ?? "—"} />
           <Row
@@ -331,7 +365,25 @@ function Row({
 function isUS(j?: string | null): boolean {
   if (!j) return false;
   const v = j.trim().toLowerCase();
-  return v === "united states" || v === "us" || v === "u.s." || v === "usa";
+  return (
+    v === "united states" ||
+    v === "us" ||
+    v === "u.s." ||
+    v === "usa" ||
+    v === "u.s.a." ||
+    v === "united states of america"
+  );
+}
+
+/**
+ * Task #82 — green only if every canonical jurisdiction in the vendor's
+ * list is US-aligned. Falls back to the single string when the canonical
+ * list isn't published.
+ */
+function isAllUS(list?: string[] | null, fallback?: string | null): boolean {
+  const candidates = list && list.length > 0 ? list : (fallback ? [fallback] : []);
+  if (candidates.length === 0) return false;
+  return candidates.every((j) => isUS(j));
 }
 
 function formatDollars(v: number): string {
