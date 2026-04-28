@@ -32,7 +32,7 @@ import {
   type DecisionBridgeShortages,
 } from "../api";
 import { pollWithBackoff, formatApiError } from "../api-retry";
-import { ROLE_DEFAULT_VIEW, useSpireStore } from "../state/store";
+import { ROLE_DEFAULT_VIEW, useSpireStore, type DdilMode } from "../state/store";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import {
   EmptyState,
@@ -107,6 +107,90 @@ function mcTone(rate: number): string {
   if (rate < 0.60) return "var(--color-danger)";
   if (rate < 0.70) return "var(--color-warning)";
   return "var(--color-success)";
+}
+
+// ---------------------------------------------------------------------------
+// Freshness helpers — Task #47.
+//
+// Frozen-snapshot honesty: when a tile renders rows derived from `dataset_day`
+// (e.g. mission posture, MC% by unit) we owe the operator an explicit "AS OF"
+// pill instead of letting the live DTG ticker imply the readout is real-time.
+// Tone scales with how stale the dataset is relative to wall-clock now:
+//   < 24h        → muted    (fresh enough to read at face value)
+//   24h ≤ Δ < 72h → warning (stale; trust but verify)
+//   ≥ 72h        → danger  (do not act on this without a sync)
+// ---------------------------------------------------------------------------
+
+/** Parse `YYYY-MM-DD` to UTC midnight; null if unparseable. */
+function parseDatasetDay(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  // ISO yyyy-mm-dd; parse as UTC midnight so tone math doesn't drift across TZs.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Render `2026-04-26` as `26APR26` matching the BASTION DTG style. */
+function formatDatasetDay(s: string | null | undefined): string | null {
+  const d = parseDatasetDay(s);
+  if (!d) return null;
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" }).toUpperCase();
+  const yy = String(d.getUTCFullYear()).slice(2);
+  return `${dd}${month}${yy}`;
+}
+
+/** Tone for the AS-OF badge given the dataset day. */
+function datasetBadgeTone(s: string | null | undefined): { fg: string; border: string } {
+  const d = parseDatasetDay(s);
+  if (!d) return { fg: "var(--color-text-muted)", border: "var(--color-border)" };
+  const ageHours = (Date.now() - d.getTime()) / 3_600_000;
+  if (ageHours >= 72) {
+    return { fg: "var(--color-danger)", border: "var(--color-danger)" };
+  }
+  if (ageHours >= 24) {
+    return { fg: "var(--color-warning)", border: "var(--color-warning)" };
+  }
+  return { fg: "var(--color-text-muted)", border: "var(--color-border)" };
+}
+
+/**
+ * Inline pill for tile headers: "AS OF 26APR26", colored by staleness. Renders
+ * nothing if the source has no dataset_day (tolerant: better to omit than to
+ * lie about how fresh the data is).
+ */
+function DatasetBadge({ day }: { day: string | null | undefined }) {
+  const label = formatDatasetDay(day);
+  if (!label) return null;
+  const tone = datasetBadgeTone(day);
+  return (
+    <span
+      className="rounded-sm border px-1.5 py-[1px] font-mono text-[9px] font-semibold tracking-widest"
+      style={{ color: tone.fg, borderColor: tone.border }}
+      title={`Snapshot date: ${day} — tile rows are computed from this dataset, not live telemetry`}
+    >
+      AS OF {label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DDIL-aware polling cadence.
+//
+// Task #47 wants the bridge to honor the operator-driven comms posture: when
+// the link is degraded the tile pollers should slow down (4–8x) instead of
+// hammering against a lossy/queued lane. Returns the multiplier applied to
+// both `baseMs` and `maxMs`.
+// ---------------------------------------------------------------------------
+function commsCadenceMultiplier(mode: DdilMode): number {
+  switch (mode) {
+    case "LIMITED":      return 4;
+    case "INTERMITTENT": return 6;
+    case "DISCONNECTED": return 8;
+    case "CONNECTED":
+    default:             return 1;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +354,7 @@ function MissionTile({ mission, error }: { mission: DecisionBridgeMission | null
       label="FPCON · Mission Clock"
       drillLabel="BASTION"
       onDrill={drill}
+      rightSlot={<DatasetBadge day={mission?.dataset_day} />}
     >
       {error && !mission ? (
         <ErrorState title="Mission strap unavailable" description={error} />
@@ -527,6 +612,7 @@ function McTile({
       label="MC% by Unit (60s)"
       drillLabel="PULSE"
       onDrill={() => drill()}
+      rightSlot={<DatasetBadge day={data?.dataset_day} />}
     >
       {error && !data ? (
         <ErrorState title="MC% unavailable" description={error} />
@@ -701,10 +787,144 @@ function AuditTile({
 }
 
 // ---------------------------------------------------------------------------
+// Link-status strip — Task #47.
+//
+// Sits between the bridge header and the tile grid. Tells the operator at a
+// glance whether what they're looking at is fresh or cached:
+//
+//   CONNECTED    → "LINK · CONNECTED · LAST SYNC 12s AGO"
+//   LIMITED      → "LINK · LIMITED · LAST SYNC 18s AGO — slow lane"
+//   INTERMITTENT → "LINK · INTERMITTENT · LAST FRESH 1m48s AGO — showing cached"
+//   DISCONNECTED → "LINK · DISCONNECTED · LAST FRESH 4m12s AGO — showing cached
+//                                                  · 2 writes queued"
+//
+// Driven entirely off store fields (ddilMode + ddilLastCacheHit + ddilQueue)
+// plus a `lastSuccessAt` value lifted from the bridge view's pollers.
+// ---------------------------------------------------------------------------
+function relMs(deltaMs: number): string {
+  const sec = Math.max(0, Math.floor(deltaMs / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const remS = sec % 60;
+  if (min < 60) return remS ? `${min}m${remS}s` : `${min}m`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h${min % 60 ? ` ${min % 60}m` : ""}`;
+}
+
+const LINK_TONE: Record<DdilMode, string> = {
+  CONNECTED:    "var(--color-success)",
+  LIMITED:      "var(--color-warning)",
+  INTERMITTENT: "var(--color-warning)",
+  DISCONNECTED: "var(--color-danger)",
+};
+
+function LinkStatusStrip({ lastSuccessAt }: { lastSuccessAt: number | null }) {
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
+  const ddilLastSyncAt = useSpireStore((s) => s.ddilLastSyncAt);
+  const ddilSyncing = useSpireStore((s) => s.ddilSyncing);
+  const queueDepth = useSpireStore((s) => s.ddilQueue.length);
+
+  // Tick once a second so the "12s ago" clock advances live without the
+  // pollers having to rerender — the strip is the operator's primary
+  // honesty cue, so it has to feel alive even when the lane is silent.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const tone = LINK_TONE[ddilMode] ?? LINK_TONE.CONNECTED;
+  const isDegraded = ddilMode !== "CONNECTED";
+
+  // Pick the most honest "last fresh" timestamp we can produce.
+  //   CONNECTED   → the most recent of `lastSuccessAt` (per-tile poll
+  //                  success) and `ddilLastSyncAt` (set by CommsControl
+  //                  after a queue replay completes). The poll value is
+  //                  usually fresher; the sync value covers the case
+  //                  where we just came out of DISCONNECTED but no poll
+  //                  has fired yet.
+  //   DEGRADED    → prefer the cache-hit's `cachedAt` (the moment the
+  //                  upstream payload we're serving was actually fresh)
+  //                  and fall back through `ddilLastSyncAt` and finally
+  //                  `lastSuccessAt`. If none are known, render `—`.
+  const cacheCachedAt = ddilLastCacheHit?.cachedAt ?? null;
+  const candidates = isDegraded
+    ? [cacheCachedAt, ddilLastSyncAt, lastSuccessAt]
+    : [lastSuccessAt, ddilLastSyncAt];
+  const freshAt = candidates.reduce<number | null>(
+    (acc, v) => (v == null ? acc : acc == null ? v : Math.max(acc, v)),
+    null,
+  );
+  const freshLabel = freshAt != null ? `${relMs(now - freshAt)} ago` : "—";
+  const freshKind = isDegraded ? "LAST FRESH" : "LAST SYNC";
+
+  // Mode-specific tail text.
+  const tail = (() => {
+    if (ddilSyncing) return "syncing queued writes";
+    if (ddilMode === "CONNECTED") return null;
+    if (ddilMode === "LIMITED") return "slow lane";
+    return "showing cached";
+  })();
+
+  return (
+    <div
+      className="flex items-center gap-2 rounded-sm border px-2 py-1 font-mono text-[10px] uppercase tracking-widest"
+      role="status"
+      aria-live="polite"
+      aria-label={`Link status ${ddilMode}, ${freshKind.toLowerCase()} ${freshLabel}`}
+      style={{
+        color: tone,
+        borderColor: tone,
+        background: `color-mix(in oklab, ${tone} 10%, var(--color-surface))`,
+      }}
+    >
+      <span className="relative flex h-2 w-2" aria-hidden>
+        {isDegraded && (
+          <span
+            className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+            style={{ background: tone }}
+          />
+        )}
+        <span
+          className="relative inline-flex h-2 w-2 rounded-full"
+          style={{ background: tone }}
+        />
+      </span>
+      <span className="text-[var(--color-text-muted)]">LINK ·</span>
+      <span className="font-semibold">{ddilMode}</span>
+      <span className="text-[var(--color-text-muted)]">·</span>
+      <span className="text-[var(--color-text-muted)]">{freshKind}</span>
+      <span className="tabular-nums text-[var(--color-text-secondary)]">{freshLabel}</span>
+      {tail && (
+        <>
+          <span className="text-[var(--color-text-muted)]">—</span>
+          <span className="text-[var(--color-text-secondary)]">{tail}</span>
+        </>
+      )}
+      {queueDepth > 0 && (
+        <>
+          <span className="text-[var(--color-text-muted)]">·</span>
+          <span style={{ color: "var(--color-warning)" }}>
+            {queueDepth} write{queueDepth === 1 ? "" : "s"} queued
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // View root
 // ---------------------------------------------------------------------------
 export function DecisionBridgeView() {
   const role = useSpireStore((s) => s.role);
+  // Polling cadences are extended when the operator drives the comms
+  // control out of CONNECTED — a degraded lane shouldn't get hammered. The
+  // pollers re-mount on mode change so the new cadence takes effect at the
+  // next tick, not whenever the existing back-off would have fired.
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const cadenceMult = commsCadenceMultiplier(ddilMode);
   const nav = useNavigate();
 
   const [mission, setMission] = useState<DecisionBridgeMission | null>(null);
@@ -717,6 +937,10 @@ export function DecisionBridgeView() {
   const [mcErr, setMcErr] = useState<string | null>(null);
   const [audit, setAudit] = useState<DecisionBridgeAudit | null>(null);
   const [auditErr, setAuditErr] = useState<string | null>(null);
+  // Wall-clock of the most recent successful tile fetch — feeds the link
+  // strip's "LAST SYNC Ns AGO" line. Updated by every poller below.
+  const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
+  const noteSuccess = () => setLastSuccessAt(Date.now());
 
   // The COP is needed to resolve an alert into a building for drill-through.
   const [cop, setCop] = useState<BastionCOP | null>(null);
@@ -731,6 +955,7 @@ export function DecisionBridgeView() {
         if (!cancelled) {
           setMission(v);
           setMissionErr(null);
+          noteSuccess();
         }
       } catch (err) {
         if (!cancelled) setMissionErr(formatApiError(err));
@@ -750,53 +975,67 @@ export function DecisionBridgeView() {
     return () => { cancelled = true; };
   }, []);
 
-  // Alerts — 10s cadence (multiplier=1 disables the steady-state back-off).
+  // Alerts — 10s cadence (multiplier=1 disables the steady-state back-off
+  // because alert mix is the operator's primary scan signal). The cadence
+  // stretches by `cadenceMult` when the lane is degraded (LIM 4x / INT 6x
+  // / DISC 8x) — Task #47.
   useEffect(() => {
+    const interval = 10_000 * cadenceMult;
     const ctl = pollWithBackoff(() => api.decisionBridge.alerts(3), {
-      baseMs: 10_000,
-      maxMs: 10_000,
+      baseMs: interval,
+      maxMs: interval,
       multiplier: 1,
-      onResult: (v) => { setAlerts(v); setAlertsErr(null); },
+      onResult: (v) => { setAlerts(v); setAlertsErr(null); noteSuccess(); },
       onError: (err) => setAlertsErr(formatApiError(err)),
     });
     return () => ctl.stop();
-  }, [role]);
+  }, [role, cadenceMult]);
 
   // Shortages — 60s cadence (logistics signal evolves slowly).
   useEffect(() => {
+    const interval = 60_000 * cadenceMult;
     const ctl = pollWithBackoff(() => api.decisionBridge.shortages(3), {
-      baseMs: 60_000,
-      maxMs: 60_000,
+      baseMs: interval,
+      maxMs: interval,
       multiplier: 1,
-      onResult: (v) => { setShortages(v); setShortagesErr(null); },
+      onResult: (v) => { setShortages(v); setShortagesErr(null); noteSuccess(); },
       onError: (err) => setShortagesErr(formatApiError(err)),
     });
     return () => ctl.stop();
-  }, [role]);
+  }, [role, cadenceMult]);
 
   // MC% by unit — 60s cadence.
   useEffect(() => {
+    const interval = 60_000 * cadenceMult;
     const ctl = pollWithBackoff(() => api.decisionBridge.mcByUnit(3), {
-      baseMs: 60_000,
-      maxMs: 60_000,
+      baseMs: interval,
+      maxMs: interval,
       multiplier: 1,
-      onResult: (v) => { setMc(v); setMcErr(null); },
+      onResult: (v) => { setMc(v); setMcErr(null); noteSuccess(); },
       onError: (err) => setMcErr(formatApiError(err)),
     });
     return () => ctl.stop();
-  }, [role]);
+  }, [role, cadenceMult]);
 
-  // Audit health — 5s cadence (highest cadence for the security tile).
+  // Audit health — 5s base cadence (highest cadence for the security
+  // tile). Identical-response back-off is *intentionally* enabled (no
+  // multiplier:1 override): an unchanged hash chain doesn't need to be
+  // refetched every five seconds — the steady-state load drops to ~1/min
+  // (Task #47) but a real anomaly snaps the cadence back to baseMs. Caps
+  // at maxMs to bound the worst case during quiet stretches.
   useEffect(() => {
+    const base = 5_000 * cadenceMult;
+    const cap = 60_000 * cadenceMult;
     const ctl = pollWithBackoff(() => api.decisionBridge.audit(5), {
-      baseMs: 5_000,
-      maxMs: 5_000,
-      multiplier: 1,
-      onResult: (v) => { setAudit(v); setAuditErr(null); },
+      baseMs: base,
+      maxMs: cap,
+      // default multiplier (1.5) — restored per Task #47 so an unchanging
+      // chain stops hammering at 5s.
+      onResult: (v) => { setAudit(v); setAuditErr(null); noteSuccess(); },
       onError: (err) => setAuditErr(formatApiError(err)),
     });
     return () => ctl.stop();
-  }, []);
+  }, [cadenceMult]);
 
   const fallbackPath = useMemo(() => ROLE_DEFAULT_VIEW[role] ?? "/bastion", [role]);
 
@@ -821,6 +1060,10 @@ export function DecisionBridgeView() {
           Skip to {fallbackPath.replace(/^\//, "").toUpperCase()} →
         </Pressable>
       </div>
+
+      {/* Link-status strip — Task #47. Sits between header and tile grid so
+       * it's the first thing the operator sees when they ask "is this live?". */}
+      <LinkStatusStrip lastSuccessAt={lastSuccessAt} />
 
       {/* 6-col × 2-row hero grid. Sized so the whole thing fits a 1920×1080
        * canvas without scrolling — tile bodies use min-h-0 + overflow so an
