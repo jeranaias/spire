@@ -190,6 +190,12 @@ export interface SpireState {
   // the modal. Bumping this counter triggers an extra fetch in the
   // badge's effect — cheaper than wiring a custom event bus.
   draftsRefreshTick: number;
+  // Programmatic open of the TopBar drafts/notifications popover. Bumped
+  // by the inline "N held" pill on Risk Board rows so the operator can
+  // jump straight from a row indicator to the drafts queue without
+  // hunting for the badge in the chrome. NotificationsChip watches this
+  // nonce and opens its popover when it changes.
+  draftsPopoverOpenTick: number;
 
   // Toast queue.
   toasts: Toast[];
@@ -251,6 +257,7 @@ export interface SpireState {
   clearCannibPendingRetries: () => void;
   setDensity: (d: Density) => void;
   bumpDraftsRefresh: () => void;
+  openDraftsPopover: () => void;
   setStageMode: (b: boolean) => void;
   pushToast: (t: Omit<Toast, "id">) => string;
   dismissToast: (id: string) => void;
@@ -534,6 +541,7 @@ export const useSpireStore = create<SpireState>((set) => ({
     typeof window !== "undefined" ? loadCannibPendingRetries() : [],
   ddilLastCacheHit: null,
   draftsRefreshTick: 0,
+  draftsPopoverOpenTick: 0,
   toasts: [],
   density: typeof window !== "undefined" ? loadDensity() : "dense",
   stageMode: typeof window !== "undefined" ? loadStageMode() : false,
@@ -644,6 +652,7 @@ export const useSpireStore = create<SpireState>((set) => ({
     set({ density });
   },
   bumpDraftsRefresh: () => set((s) => ({ draftsRefreshTick: s.draftsRefreshTick + 1 })),
+  openDraftsPopover: () => set((s) => ({ draftsPopoverOpenTick: s.draftsPopoverOpenTick + 1 })),
   setStageMode: (stageMode) => {
     saveStageMode(stageMode);
     set({ stageMode });

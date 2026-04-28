@@ -52,6 +52,10 @@ export function NotificationsChip() {
   const alertCount = useSpireStore((s) => s.alertCount);
   const refreshTick = useSpireStore((s) => s.draftsRefreshTick);
   const bumpDrafts = useSpireStore((s) => s.bumpDraftsRefresh);
+  // Programmatic-open nonce — bumped by the inline "N held" pill on
+  // Risk Board rows when the operator wants to jump straight from a
+  // row indicator to the drafts queue.
+  const popoverOpenTick = useSpireStore((s) => s.draftsPopoverOpenTick);
   const setSelectedAssetId = useSpireStore((s) => s.setSelectedAssetId);
   const pushToast = useSpireStore((s) => s.pushToast);
   const nav = useNavigate();
@@ -112,6 +116,17 @@ export function NotificationsChip() {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  // Open the popover when something elsewhere in the app (e.g. the
+  // Risk Board "N held" pill) bumps the open nonce. Snap to the drafts
+  // tab so the operator lands on the queue they came to look at,
+  // assuming the role is allowed to see drafts at all.
+  useEffect(() => {
+    if (popoverOpenTick === 0) return;
+    if (!draftsAllowed) return;
+    setTab("drafts");
+    setOpen(true);
+  }, [popoverOpenTick, draftsAllowed]);
 
   // Stage presenters get the dedicated AlertBadge backstop instead.
   if (stageMode) return null;

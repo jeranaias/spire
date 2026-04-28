@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
-import { api, type RiskBoard, type RiskBoardAsset, type AssetDeepDive } from "../../api";
+import { api, type RiskBoard, type RiskBoardAsset, type AssetDeepDive, type PulseDraft } from "../../api";
 import { formatApiError, withRetry } from "../../api-retry";
 import { RiskBar } from "../../components/RiskBar";
 import { LoadingOverlay, formatAsOf } from "./FleetOverviewTab";
@@ -33,6 +33,14 @@ export function RiskBoardTab() {
   // a previous cache-hit record from before the reconnect).
   const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
   const ddilMode = useSpireStore((s) => s.ddilMode);
+  // Subscribe to the same draft-refresh nonce TopBar's NotificationsChip
+  // uses so the inline "N held" pill on each row updates the moment a
+  // draft is created (modal bumps it) or dismissed (chip bumps it).
+  const draftsRefreshTick = useSpireStore((s) => s.draftsRefreshTick);
+  // Programmatic-open of the TopBar drafts popover. The inline "N held"
+  // pill on each row uses this to jump the operator straight to the
+  // drafts queue (per W1 task #143 — "click-to-jump-to-popover").
+  const openDraftsPopover = useSpireStore((s) => s.openDraftsPopover);
   const [params, setParams] = useSearchParams();
   const explicitUnit = params.get("unit");
   const equipFilter = params.get("equipment");
@@ -100,6 +108,39 @@ export function RiskBoardTab() {
     const ageMs = now - ddilLastCacheHit.cachedAt;
     return ageMs > STALE_THRESHOLD_MS ? ageMs : null;
   }, [ddilLastCacheHit, ddilMode, now]);
+
+  // Held-drafts inline indicator. Without this, an operator who drafts an
+  // action on an asset, scrolls past it, or returns the next day, gets no
+  // hint on the row that there's already a held draft — and re-opens the
+  // Draft Action modal, risking a duplicate. We refetch on the same nonce
+  // the TopBar badge uses so create/dismiss propagate immediately.
+  const [heldDrafts, setHeldDrafts] = useState<PulseDraft[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.pulse
+      .drafts("held")
+      .then((r) => { if (!cancelled) setHeldDrafts(r.drafts); })
+      // Pill is non-critical chrome — failing softly keeps the board
+      // usable when /pulse/drafts is unreachable (DDIL, role w/o scope).
+      // Surface the cause on the console so a silent empty-pill state
+      // is still diagnosable in dev tools without UX disruption.
+      .catch((e) => {
+        if (cancelled) return;
+        setHeldDrafts([]);
+        // eslint-disable-next-line no-console
+        console.warn("[risk-board] held-drafts fetch failed:", formatApiError(e));
+      });
+    return () => { cancelled = true; };
+  }, [draftsRefreshTick, role]);
+  const heldByAsset = useMemo(() => {
+    const m = new Map<string, PulseDraft[]>();
+    for (const d of heldDrafts) {
+      const arr = m.get(d.asset_id);
+      if (arr) arr.push(d);
+      else m.set(d.asset_id, [d]);
+    }
+    return m;
+  }, [heldDrafts]);
 
   const filteredAssets = useMemo(() => {
     if (!board) return [];
@@ -271,7 +312,9 @@ export function RiskBoardTab() {
               selected={selected === a.asset_id}
               onClick={() => setSelected(a.asset_id)}
               onDraftAction={() => setDraftActionFor(a)}
+              onJumpToDrafts={openDraftsPopover}
               isTop={i === 0}
+              heldDrafts={heldByAsset.get(a.asset_id) ?? []}
             />
           ))}
           {/* Walkthrough #7 — surface a tooltip-bearing gap row when an
@@ -315,6 +358,7 @@ export function RiskBoardTab() {
       {draftActionFor && (
         <DraftActionModal
           asset={draftActionFor}
+          heldDrafts={heldByAsset.get(draftActionFor.asset_id) ?? []}
           onClose={() => setDraftActionFor(null)}
         />
       )}
@@ -433,9 +477,14 @@ function SequenceGapHints({ assets }: { assets: RiskBoardAsset[] }) {
 // click baked in.
 function DraftActionModal({
   asset,
+  heldDrafts,
   onClose,
 }: {
   asset: RiskBoardAsset;
+  // Drafts already held against this asset. The modal uses this to
+  // disable any recommended action whose KIND is already drafted —
+  // closes the duplicate-draft loop the inline pill opens.
+  heldDrafts: PulseDraft[];
   onClose: () => void;
 }) {
   const pushToast = useSpireStore((s) => s.pushToast);
@@ -444,6 +493,14 @@ function DraftActionModal({
   const [error, setError] = useState<string | null>(null);
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
   const [draftedKeys, setDraftedKeys] = useState<Set<string>>(new Set());
+  // Lowercased KINDs already held server-side for this asset. Compared
+  // case-insensitively because /pulse/recommend-actions emits kinds in
+  // mixed case while persisted PulseDraft.kind echoes whatever the
+  // POST body sent in.
+  const heldKinds = useMemo(
+    () => new Set(heldDrafts.map((d) => (d.kind || "").toLowerCase())),
+    [heldDrafts],
+  );
 
   useEffect(() => {
     api.pulse.recommendActions({ asset_id: asset.asset_id, top: 1 })
@@ -527,6 +584,17 @@ function DraftActionModal({
         <div className="mb-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
           {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · {asset.primary_factor}
         </div>
+        {heldDrafts.length > 0 && (
+          <div
+            role="status"
+            className="mb-3 rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_12%,var(--color-surface))] px-2 py-1.5 font-mono text-xs text-[var(--color-primary)] tracking-wider"
+          >
+            {heldDrafts.length} held draft{heldDrafts.length === 1 ? "" : "s"} on this asset
+            {": "}
+            {heldDrafts.map((d) => (d.kind || "").toUpperCase()).join(" · ")}
+            {" — review via the Drafts badge in the top bar."}
+          </div>
+        )}
         {!data && !error && (
           <div className="flex items-center gap-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" />
@@ -545,6 +613,21 @@ function DraftActionModal({
               const key = `${act.kind}:${act.title}:${i}`;
               const drafted = draftedKeys.has(key);
               const drafting = draftingKey === key;
+              // Already held server-side from a prior session — block the
+              // re-draft so we never write a duplicate held row against
+              // the same (asset, kind) tuple.
+              const alreadyHeld = !drafted && heldKinds.has((act.kind || "").toLowerCase());
+              const lockOut = drafted || alreadyHeld;
+              const label = drafted
+                ? "✓ Held in Drafts"
+                : alreadyHeld
+                  ? "Already held"
+                  : "Draft this";
+              const tooltip = drafted
+                ? "Draft persisted — open the Drafts badge in the top bar"
+                : alreadyHeld
+                  ? "A draft of this kind is already held for this asset · review via the Drafts badge before drafting another"
+                  : "Persist this draft to the audit chain (no auto-approval)";
               return (
                 <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
                   <div className="flex items-center justify-between">
@@ -565,15 +648,13 @@ function DraftActionModal({
                   <div className="mt-2 flex items-center justify-end">
                     <Button
                       onClick={() => draftAction(act, key)}
-                      disabled={drafted || drafting || !!draftingKey}
+                      disabled={lockOut || drafting || !!draftingKey}
                       pending={drafting}
-                      variant={drafted ? "secondary" : "primary"}
+                      variant={lockOut ? "secondary" : "primary"}
                       size="sm"
-                      title={drafted
-                        ? "Draft persisted — open the Drafts badge in the top bar"
-                        : "Persist this draft to the audit chain (no auto-approval)"}
+                      title={tooltip}
                     >
-                      {drafted ? "✓ Held in Drafts" : "Draft this"}
+                      {label}
                     </Button>
                   </div>
                 </div>
@@ -616,7 +697,9 @@ function RiskRow({
   selected,
   onClick,
   onDraftAction,
+  onJumpToDrafts,
   isTop,
+  heldDrafts,
 }: {
   asset: RiskBoardAsset;
   selected: boolean;
@@ -624,10 +707,18 @@ function RiskRow({
   // Walkthrough #20 — Draft Action surfaces the recommend_actions modal
   // for this asset (replaces the prior misroute into Forecast).
   onDraftAction?: () => void;
+  // Click handler for the inline "N held" pill — opens the TopBar
+  // drafts popover so the operator lands on the actual queue item
+  // (not just a fresh modal).
+  onJumpToDrafts?: () => void;
   // Walkthrough #37 — only the top-1 row is rendered as a filled primary
   // CTA; the rest get severity-outlined buttons so a six-row board doesn't
   // read as six identical bright primary buttons.
   isTop?: boolean;
+  // Held drafts persisted against this asset_id. Drives the inline
+  // "N held" pill so an operator scrolling past the row tomorrow knows
+  // a draft is already in the queue and won't re-open the modal blind.
+  heldDrafts?: PulseDraft[];
 }) {
   const riskScore = asset.risk_score ?? 0;
   const spark = useMemo(() => sparklineFor(asset.fault_buckets_30d), [asset.fault_buckets_30d]);
@@ -662,8 +753,39 @@ function RiskRow({
           <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · SN {asset.serial_number}
           </span>
+          {/* Held-drafts pill. Only renders when there's at least one
+            * held draft against this asset_id. Click jumps the operator
+            * to the TopBar drafts popover (matches the task's "click-to-
+            * jump-to-popover" wording — they get the actual queue item
+            * with dismiss + audit context, not a fresh recommend-actions
+            * modal). Rendered as a span with role="button" because the
+            * parent row is itself a <button> via Pressable (nested
+            * <button>s are invalid HTML). Keydown keeps it operable
+            * from the keyboard. */}
+          {heldDrafts && heldDrafts.length > 0 && onJumpToDrafts && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); onJumpToDrafts(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onJumpToDrafts();
+                }
+              }}
+              className="ml-auto cursor-pointer rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_14%,transparent)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-primary)] tracking-wider hover:bg-[color-mix(in_oklab,var(--color-primary)_24%,transparent)]"
+              title={`${heldDrafts.length} draft${heldDrafts.length === 1 ? "" : "s"} held: ${heldDrafts.map((d) => (d.kind || "").toUpperCase()).join(", ")} · click to open the Drafts queue`}
+              aria-label={`${heldDrafts.length} held draft${heldDrafts.length === 1 ? "" : "s"} on ${asset.asset_id} — open Drafts queue`}
+            >
+              {heldDrafts.length} held
+            </span>
+          )}
           <span
-            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider"
+            className={clsx(
+              "rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider",
+              heldDrafts && heldDrafts.length > 0 ? "" : "ml-auto",
+            )}
           >
             UNCLASSIFIED // SYNTHETIC
           </span>
