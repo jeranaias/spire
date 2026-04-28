@@ -8,6 +8,8 @@ import { MarkTab } from "./sentry/MarkTab";
 import { CoalitionTab } from "./sentry/CoalitionTab";
 import { useSpireStore } from "../state/store";
 import { UseCaseStrip } from "../components/UseCaseStrip";
+import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
+import { useDatasetStatus } from "../hooks/useDatasetStatus";
 
 export interface SentryContext {
   batchId: string | null;
@@ -31,6 +33,15 @@ export function SentryView() {
   const batchId = useSpireStore((s) => s.sentryBatchId);
   const jobId = useSpireStore((s) => s.sentryJobId);
   const setBatchStore = useSpireStore((s) => s.setSentryBatch);
+  // Task #183 — stage live-ingest mode. The SENTRY upload→batch
+  // pipeline (Upload, Processing) is *additive* and operates on the
+  // operator's CUI-tagging batch, not the GCSS-MC dataset, so it
+  // remains reachable in empty-boot mode. The data-dependent tabs
+  // (Review Queue, Mark Draft, Export, Coalition) cross-reference
+  // the dataset singleton and are gated with the standard
+  // "Awaiting GCSS-MC ingest" placeholder until ingest completes.
+  const datasetStatus = useDatasetStatus().status;
+  const isEmpty = datasetStatus?.empty === true;
 
   const ctx: SentryContext = {
     batchId,
@@ -38,6 +49,21 @@ export function SentryView() {
     setBatch: (b) => setBatchStore(b, jobId),
     setJob:   (j) => setBatchStore(batchId, j),
   };
+
+  // Helper — wrap a data-dependent tab so it falls back to the
+  // Awaiting placeholder while the dataset singleton is empty.
+  // Upload + Processing intentionally do *not* use this gate so
+  // the Task #177 batch-classification path keeps working from
+  // the moment SPIRE boots, even before any GCSS-MC ingest.
+  const gated = (node: React.ReactNode) =>
+    isEmpty ? (
+      <AwaitingIngestEmpty
+        surface="SENTRY"
+        description="The review queue, mark-draft canvas, export builder, and coalition release pipelines all cross-reference the live GCSS-MC dataset. Drop the three sanitized CSVs into DECISION BRIDGE to populate this view. The Upload and Processing tabs above remain available for batch CUI tagging."
+      />
+    ) : (
+      node
+    );
 
   return (
     <div className="flex h-full flex-col">
@@ -50,10 +76,10 @@ export function SentryView() {
           <Route index                  element={<UploadTab ctx={ctx} />} />
           <Route path="upload"          element={<UploadTab ctx={ctx} />} />
           <Route path="processing"      element={<ProcessingTab ctx={ctx} />} />
-          <Route path="review"          element={<ReviewQueueTab ctx={ctx} />} />
-          <Route path="mark"            element={<MarkTab />} />
-          <Route path="export"          element={<ExportTab ctx={ctx} />} />
-          <Route path="coalition"       element={<CoalitionTab />} />
+          <Route path="review"          element={gated(<ReviewQueueTab ctx={ctx} />)} />
+          <Route path="mark"            element={gated(<MarkTab />)} />
+          <Route path="export"          element={gated(<ExportTab ctx={ctx} />)} />
+          <Route path="coalition"       element={gated(<CoalitionTab />)} />
         </Routes>
       </div>
     </div>

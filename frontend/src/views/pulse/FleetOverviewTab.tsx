@@ -7,10 +7,17 @@ import { Heatmap } from "../../components/Heatmap";
 import { AlertCard } from "../../components/AlertCard";
 import { useSpireStore } from "../../state/store";
 import { Button, IconButton, Pressable, ErrorState, LoadingState } from "../../components/ui";
+import { AwaitingIngestEmpty } from "../../components/AwaitingIngestEmpty";
+import { useDatasetStatus } from "../../hooks/useDatasetStatus";
 
 type View = "heatmap" | "map";
 
 export function FleetOverviewTab() {
+  // Task #183 — short-circuit before the fleet-overview fetch fires.
+  // /api/pulse/fleet-overview returns ``{empty: true}`` while the
+  // dataset singleton is empty; the chart pipeline below would crash
+  // on the unexpected envelope, so we render the placeholder first.
+  const datasetStatus = useDatasetStatus().status;
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
   const nav = useNavigate();
@@ -30,6 +37,11 @@ export function FleetOverviewTab() {
     // which dumped HTML markup straight into the UI. Use withRetry so
     // transient deploy 5xx self-heal, and on terminal failure show a
     // human-readable message instead of the upstream HTML.
+    // Task #183 — skip the fetch while the dataset is empty. The
+    // /pulse/fleet-overview endpoint returns an ``{empty: true}`` envelope
+    // in that mode and the chart pipeline below would crash if it tried
+    // to unpack it as a populated FleetOverview.
+    if (datasetStatus?.empty) return;
     withRetry(() => api.pulse.fleetOverview())
       .then(setData)
       .catch((e) => {
@@ -41,8 +53,18 @@ export function FleetOverviewTab() {
           : raw.length > 140 ? raw.slice(0, 140) + "…" : raw;
         setError(friendly);
       });
-    api.bastion.cop().then((c) => setCopUnits(c.units)).catch(() => setCopUnits([]));
-  }, [role]);
+    api.bastion.cop()
+      .then((c) => {
+        // Same envelope guard — BASTION COP also responds with the
+        // empty-state envelope under stage live-ingest mode.
+        if ((c as unknown as { empty?: boolean }).empty) {
+          setCopUnits([]);
+          return;
+        }
+        setCopUnits(c.units);
+      })
+      .catch(() => setCopUnits([]));
+  }, [role, datasetStatus?.empty]);
 
   // Walkthrough #3, #51 — canonical MC rate by unit name from BASTION COP.
   const canonicalMc = useMemo(() => {
@@ -60,6 +82,14 @@ export function FleetOverviewTab() {
     );
   }, [data, hideEmptyColumns]);
 
+  if (datasetStatus?.empty) {
+    return (
+      <AwaitingIngestEmpty
+        surface="PULSE"
+        description="The fleet overview heatmap, MC% deltas, and forecast plots all derive from the live GCSS-MC export. Drop the three sanitized CSVs into DECISION BRIDGE to populate this view."
+      />
+    );
+  }
   if (error) {
     return (
       <div className="flex h-full items-center justify-center p-12">

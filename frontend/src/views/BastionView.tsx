@@ -9,6 +9,8 @@ import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
 import { RefreshAge } from "../components/RefreshAge";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import { UseCaseStrip } from "../components/UseCaseStrip";
+import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
+import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import {
   Button,
   IconButton,
@@ -81,6 +83,12 @@ function resolveHomeBuilding(cop: BastionCOP | null, unitName: string | null | u
 }
 
 export function BastionView() {
+  // Task #183 — stage live-ingest mode. While the dataset is empty
+  // BASTION renders the "Awaiting GCSS-MC ingest" placeholder instead
+  // of the COP map, since /api/bastion/cop returns ``{empty: true}``
+  // and there is no fleet geometry to render. The hook polls so the
+  // view auto-flips after the operator hydrates from DECISION BRIDGE.
+  const datasetStatus = useDatasetStatus().status;
   const role = useSpireStore((s) => s.role);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAlertSeverityCounts = useSpireStore((s) => s.setAlertSeverityCounts);
@@ -143,6 +151,11 @@ export function BastionView() {
     setCop(null);
     setCopError(null);
     setWaking(false);
+    // Task #183 — skip the COP fetch while the dataset is empty. The
+    // route returns ``{empty: true}`` and downstream code (MapCanvas,
+    // resolveAlertTarget) cannot consume it. The early return at the
+    // top of BastionView handles render; we just avoid the wasted call.
+    if (datasetStatus?.empty) return;
     let cancelled = false;
     (async () => {
       try {
@@ -153,6 +166,12 @@ export function BastionView() {
           },
         });
         if (cancelled) return;
+        if ((c as unknown as { empty?: boolean }).empty) {
+          // Race: ingest cleared between the dataset-status poll and
+          // this fetch. Leave cop=null; the next dataset-status tick
+          // flips empty=true and the early return takes over.
+          return;
+        }
         setCop(c);
         setWaking(false);
       } catch (e) {
@@ -170,7 +189,7 @@ export function BastionView() {
     return () => {
       cancelled = true;
     };
-  }, [role]);
+  }, [role, datasetStatus?.empty]);
 
   // Walkthrough audit: '/' focuses the alert search box (vim/Slack/Linear
   // convention). Only fires when focus isn't already in a field, so a
@@ -570,6 +589,24 @@ export function BastionView() {
     return { activeAlerts: active, ackedAlerts: acked };
   }, [alerts, searchQuery, sevFilter]);
 
+  if (datasetStatus?.empty) {
+    return (
+      <div className="flex h-full flex-col">
+        <UseCaseStrip
+          number="11"
+          title="BASTION"
+          subtitle="COMMON OPERATING PICTURE — INSTALLATION SCHEMATIC"
+          accent="var(--color-warning)"
+        />
+        <div className="flex-1 overflow-hidden">
+          <AwaitingIngestEmpty
+            surface="BASTION"
+            description="The COP map renders unit positions, MC%, and threats from the live GCSS-MC export. Drop the three sanitized CSVs into DECISION BRIDGE to populate this view."
+          />
+        </div>
+      </div>
+    );
+  }
   if (copError && !cop) {
     return (
       <ErrorState

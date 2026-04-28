@@ -85,7 +85,10 @@ async def fleet_overview(role: Optional[str] = None):
     ds = get_dataset()
     last_all = last_day_snapshots(ds)
     if not last_all:
-        raise HTTPException(status_code=503, detail="dataset empty")
+        # Stage live-ingest mode (Task #183): empty dataset is a valid
+        # state — return 200 with the empty flag so the frontend can
+        # render the "awaiting GCSS-MC ingest" empty state cleanly.
+        return {"empty": True, "message": "Awaiting GCSS-MC ingest"}
     allowed = allowed_units(ds, role)
     last = [s for s in last_all if allowed is None or s.unit_name in allowed]
     last_day = last_all[0].snapshot_date
@@ -1823,7 +1826,10 @@ def _compute_drift(ds: CanonicalDataset) -> dict:
 def _compute_model_card() -> dict:
     ds = get_dataset()
     if not ds.snapshots:
-        raise HTTPException(status_code=503, detail="dataset empty")
+        # Stage live-ingest mode (Task #183): empty dataset returns the
+        # empty-flag shape so the frontend renders the "awaiting GCSS-MC
+        # ingest" empty state on the model-card surface as well.
+        return {"empty": True, "message": "Awaiting GCSS-MC ingest"}
     first_day = ds.snapshots[0].snapshot_date
     last_day = ds.snapshots[-1].snapshot_date
     total_days = (last_day - first_day).days + 1
