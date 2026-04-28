@@ -24,14 +24,18 @@ from ..persistence import (
     DATA_DIR as PERSIST_DIR,
     decisions_for_batch,
     entries_for_subject,
+    find_sentry_batch_id_for_job,
+    load_sentry_batch,
     log as audit_log,
     record_sentry_bulk_decision,
     record_sentry_decision,
+    store_sentry_batch,
     store_uploaded_batch,
 )
 from ..scoping import (
     _normalize_classification as normalize_classification,
     SENTRY_REVIEW_ROLES,
+    allowed_units,
     classification_rank,
     require_clearance,
     require_no_downgrade,
@@ -306,6 +310,116 @@ def _aggregate_caveats_from_records(records: list[dict]) -> list[str]:
 _BATCHES: dict = {}
 
 
+# ---------------------------------------------------------------------------
+# Task #67 — batch persistence + role scoping helpers
+# ---------------------------------------------------------------------------
+#
+# `_BATCHES` was an in-memory dict; a uvicorn restart mid-demo (Fly machine
+# rolls, autosuspend, etc.) used to strand the operator on a 404 between
+# Upload and Processing. The helpers below mirror every state-mutating
+# write into SQLite (`sentry_batches`) and hydrate the in-memory cache on
+# demand so reads survive restart without forcing the operator to re-upload.
+#
+# Role scoping piggybacks on the same primitives the rest of SPIRE uses
+# (`scoping.allowed_units`); a Maint Chief routed to CLB-6 used to see
+# CLB-1 PII verbatim because /sentry/jobs and /sentry/review-queue
+# returned every record in the batch regardless of caller. The helpers
+# below filter results to the unit set the role can see and surface a
+# `scope` block on the response so the FE can render an honest footer.
+
+def _persist_batch(batch: dict) -> None:
+    """Best-effort mirror of an in-memory batch to SQLite. Caller continues
+    on DB failure — the in-memory copy is still authoritative for the
+    process lifetime."""
+    try:
+        store_sentry_batch(batch["batch_id"], batch)
+    except Exception:  # noqa: BLE001
+        # Don't let SQLite hiccups abort processing; the operator will
+        # still get the in-memory batch back for the rest of the session.
+        pass
+
+
+def _get_batch(batch_id: str) -> Optional[dict]:
+    """Look up a batch id with in-memory + SQLite fallback. After a uvicorn
+    restart the in-memory dict is empty; this method re-hydrates the batch
+    and re-stitches it into `_BATCHES` so subsequent calls stay fast."""
+    if batch_id in _BATCHES:
+        return _BATCHES[batch_id]
+    try:
+        loaded = load_sentry_batch(batch_id)
+    except Exception:  # noqa: BLE001
+        loaded = None
+    if not loaded:
+        return None
+    _BATCHES[batch_id] = loaded
+    return loaded
+
+
+def _find_batch_for_job(job_id: str) -> Optional[dict]:
+    """Find the batch that owns this job_id. In-memory walk first, SQLite
+    fallback second so /sentry/jobs/{job_id} survives a process restart."""
+    for batch in _BATCHES.values():
+        if job_id in batch.get("jobs", {}):
+            return batch
+    try:
+        bid = find_sentry_batch_id_for_job(job_id)
+    except Exception:  # noqa: BLE001
+        bid = None
+    if bid:
+        return _get_batch(bid)
+    return None
+
+
+def _allowed_units_for_role(role: Optional[str]) -> Optional[set[str]]:
+    """Wrap the canonical scoping primitive with our get_dataset() handle.
+    Returns None when the role is unrestricted (mef_commander / data_custodian
+    / security_manager / unknown), which downstream callers treat as
+    pass-through. Returns a possibly-empty set when the role is scoped to
+    a unit list."""
+    if not role:
+        return None
+    try:
+        return allowed_units(get_dataset(), role)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _scope_label(role: Optional[str], allowed: Optional[set[str]]) -> str:
+    """Marine-voice descriptor for the Processing / Review-queue footer.
+    Empty string when the role is unrestricted so the FE can decide whether
+    to render the strip at all."""
+    if allowed is None:
+        return ""
+    if not allowed:
+        return f"no units in scope for {role or 'this role'}"
+    units = sorted(allowed)
+    if len(units) <= 3:
+        return f"{' · '.join(units)} only · scoped to your billet"
+    return f"{len(units)} units · scoped to your billet"
+
+
+def _scope_block(
+    *,
+    role: Optional[str],
+    allowed: Optional[set[str]],
+    total: int,
+    scoped: int,
+) -> dict:
+    """Standard `scope` payload field included on /sentry/jobs and
+    /sentry/review-queue responses so the operator can see at a glance
+    that what they're looking at is the role-scoped slice, not the whole
+    batch. Always emitted (even when unrestricted) so FE doesn't need to
+    branch on its presence — `unrestricted=True` is the no-filter sentinel."""
+    return {
+        "role": role or "",
+        "unrestricted": allowed is None,
+        "allowed_units": sorted(allowed) if allowed else [],
+        "total_records": total,
+        "scoped_records": scoped,
+        "label": _scope_label(role, allowed),
+    }
+
+
 def _new_batch(record_source: str, records: list, schema_override: Optional[dict] = None) -> dict:
     batch_id = f"BATCH-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     # Detect data-quality defects
@@ -338,6 +452,9 @@ def _new_batch(record_source: str, records: list, schema_override: Optional[dict
         "jobs": {},
     }
     _BATCHES[batch_id] = batch
+    # Task #67 — mirror to SQLite so a uvicorn restart between Upload and
+    # Processing doesn't strand the operator with a 404.
+    _persist_batch(batch)
     return batch
 
 
@@ -621,7 +738,10 @@ async def mark_text(payload: dict, request: Request):
 
 @router.post("/process/{batch_id}")
 async def start_processing(batch_id: str):
-    batch = _BATCHES.get(batch_id)
+    # Task #67 — _get_batch hydrates from SQLite if the in-memory cache
+    # was wiped by a uvicorn restart. Without this, /sentry/process
+    # returned 404 mid-demo because the batch only ever lived in `_BATCHES`.
+    batch = _get_batch(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="batch not found")
     job_id = f"JOB-{datetime.utcnow().strftime('%H%M%S')}-{uuid.uuid4().hex[:6]}"
@@ -841,6 +961,10 @@ async def start_processing(batch_id: str):
     }
     batch["jobs"][job_id] = job
     batch["status"] = "processed"
+    # Task #67 — re-persist now that the job + results are written. The FE
+    # immediately polls /sentry/jobs/{job_id} after this returns; if the
+    # process restarts in the millisecond gap, the lookup still works.
+    _persist_batch(batch)
     return {
         "job_id": job_id,
         "batch_id": batch_id,
@@ -849,31 +973,77 @@ async def start_processing(batch_id: str):
 
 
 @router.get("/jobs/{job_id}")
-async def job_status(job_id: str):
-    for batch in _BATCHES.values():
-        if job_id in batch["jobs"]:
-            j = batch["jobs"][job_id]
-            return {
-                "job_id": j["job_id"],
-                "batch_id": j["batch_id"],
-                "records_processed": j["records_processed"],
-                "total": j["total"],
-                "tier1_handled": j["tier1_handled"],
-                "tier2_handled": j["tier2_handled"],
-                "flag_counts": j["flag_counts"],
-                "classification_counts": j["classification_counts"],
-                "mismatches": j["mismatches"],
-                "aggregation_risks": j["aggregation_risks"],
-                # Truth-in-UI (Task #65) -- engine wall-time + which engines
-                # actually ran, so the Processing tab can stop pretending the
-                # scan-line replay is live work.
-                "engine_seconds": j.get("engine_seconds", 0.0),
-                "engine_used": j.get("engine_used", "rule_based_only"),
-                "sentry_model_loaded": j.get("sentry_model_loaded", False),
-                "pulse_model_loaded": j.get("pulse_model_loaded", False),
-                "done": True,
-            }
-    raise HTTPException(status_code=404, detail="job not found")
+async def job_status(job_id: str, role: Optional[str] = None):
+    # Task #67 — survive restart (SQLite hydrate) + apply unit scoping so a
+    # Maint Chief routed to CLB-6 doesn't see CLB-1 counters in the
+    # Processing tab. The unrestricted roles (mef_commander, data_custodian,
+    # security_manager) get the full batch counters as before. Truth-in-UI
+    # (Task #65) engine fields are preserved for unrestricted callers; for
+    # scoped callers they describe the underlying job pass either way, so we
+    # also surface them.
+    batch = _find_batch_for_job(job_id)
+    if not batch or job_id not in batch.get("jobs", {}):
+        raise HTTPException(status_code=404, detail="job not found")
+    j = batch["jobs"][job_id]
+    allowed = _allowed_units_for_role(role)
+    total_records = j.get("total", len(j.get("results", [])))
+    results = j.get("results", [])
+    if allowed is None:
+        scoped = results
+        scoped_total = total_records
+        scoped_tier1 = j.get("tier1_handled", 0)
+        scoped_tier2 = j.get("tier2_handled", 0)
+        scoped_flag_counts = j.get("flag_counts", {})
+        scoped_class_counts = j.get("classification_counts", {})
+        scoped_mismatches = j.get("mismatches", 0)
+        scoped_agg_risks = j.get("aggregation_risks", [])
+    else:
+        scoped = [r for r in results if r.get("unit_name") in allowed]
+        scoped_total = len(scoped)
+        # Recount per-tier and per-flag on the scoped subset so the
+        # Processing tab counters reflect what this role can actually see.
+        scoped_tier1 = sum(1 for r in scoped if r.get("routed_to") != "tier2_llm")
+        scoped_tier2 = sum(1 for r in scoped if r.get("routed_to") == "tier2_llm")
+        scoped_flag_counts = {}
+        scoped_class_counts = {}
+        scoped_mismatches = 0
+        for r in scoped:
+            for f in r.get("flags") or []:
+                scoped_flag_counts[f] = scoped_flag_counts.get(f, 0) + 1
+            cls = r.get("detected_classification") or "UNCLASSIFIED"
+            scoped_class_counts[cls] = scoped_class_counts.get(cls, 0) + 1
+            if r.get("classification_discrepancy"):
+                scoped_mismatches += 1
+        scoped_agg_risks = [
+            a for a in j.get("aggregation_risks", [])
+            if a.get("unit") in allowed
+        ]
+    return {
+        "job_id": j["job_id"],
+        "batch_id": j["batch_id"],
+        "records_processed": scoped_total,
+        "total": scoped_total if allowed is not None else total_records,
+        "tier1_handled": scoped_tier1,
+        "tier2_handled": scoped_tier2,
+        "flag_counts": scoped_flag_counts,
+        "classification_counts": scoped_class_counts,
+        "mismatches": scoped_mismatches,
+        "aggregation_risks": scoped_agg_risks,
+        # Truth-in-UI (Task #65) -- engine wall-time + which engines actually
+        # ran, so the Processing tab can stop pretending the scan-line
+        # replay is live work. Reported regardless of scoping.
+        "engine_seconds": j.get("engine_seconds", 0.0),
+        "engine_used": j.get("engine_used", "rule_based_only"),
+        "sentry_model_loaded": j.get("sentry_model_loaded", False),
+        "pulse_model_loaded": j.get("pulse_model_loaded", False),
+        "done": True,
+        "scope": _scope_block(
+            role=role,
+            allowed=allowed,
+            total=total_records,
+            scoped=scoped_total,
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -881,20 +1051,32 @@ async def job_status(job_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/review-queue/{batch_id}")
-async def review_queue(batch_id: str):
-    batch = _BATCHES.get(batch_id)
+async def review_queue(batch_id: str, role: Optional[str] = None):
+    # Task #67 — _get_batch hydrates from SQLite if `_BATCHES` was lost to a
+    # restart. Adding `role` lets the FE filter the queue down to records
+    # the caller owns; without it a Maint Chief sees every flagged record
+    # in the batch including units they have no authority over.
+    batch = _get_batch(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="batch not found")
-    if not batch["jobs"]:
+    if not batch.get("jobs"):
         raise HTTPException(status_code=400, detail="batch not processed yet")
     # Use the most recent job's results
     job = list(batch["jobs"].values())[-1]
+
+    allowed = _allowed_units_for_role(role)
+    raw_results = job["results"]
+    total_records = len(raw_results)
+    if allowed is None:
+        scoped_results = raw_results
+    else:
+        scoped_results = [r for r in raw_results if r.get("unit_name") in allowed]
 
     auto_cleared = []
     flagged = []
     held = []
     held_reason_counts: Counter = Counter()
-    for r in job["results"]:
+    for r in scoped_results:
         # Walkthrough #11 — Held now includes ambiguous_pii / novel_pattern /
         # low_confidence_evidence in addition to classification_discrepancy.
         if r.get("is_held"):
@@ -905,6 +1087,14 @@ async def review_queue(batch_id: str):
             flagged.append(r)
         else:
             auto_cleared.append(r)
+
+    if allowed is None:
+        scoped_agg_risks = job["aggregation_risks"]
+    else:
+        scoped_agg_risks = [
+            a for a in job["aggregation_risks"] if a.get("unit") in allowed
+        ]
+
     return {
         "batch_id": batch_id,
         "auto_cleared": auto_cleared,
@@ -916,7 +1106,13 @@ async def review_queue(batch_id: str):
             "held": len(held),
         },
         "held_reason_counts": dict(held_reason_counts),
-        "aggregation_risks": job["aggregation_risks"],
+        "aggregation_risks": scoped_agg_risks,
+        "scope": _scope_block(
+            role=role,
+            allowed=allowed,
+            total=total_records,
+            scoped=len(scoped_results),
+        ),
     }
 
 
