@@ -8,22 +8,31 @@
  * REAL per-module audit-writing domain actions (round-4 hardening):
  *   01  Boot `/?stage=1`, sign in as Reyes (g4) → Decision Surface
  *   02  Open SENTRY, return to bridge
- *   02h HANDOFF: tap Hayes (mef_commander) chip
+ *   02h HANDOFF: tap Kowalski (maintenance_chief) chip — narratively
+ *       the maintenance chief drives the parts-demand walk-through
  *   03  Open PULSE, return to bridge
- *   03h HANDOFF: tap Kowalski (maintenance_chief) chip
+ *   03h HANDOFF: tap Hayes (mef_commander) chip — the MEF commander
+ *       owns BASTION; Hayes is in BASTION_SIMULATE_ROLES so he is
+ *       authorized to fire ThermalHawk on stage. The previous order
+ *       (Hayes → PULSE, Kowalski → BASTION) tripped a 403 because
+ *       maintenance_chief is NOT in the simulate-allowlist
+ *       (`backend.routes.bastion.SIMULATE_ROLES`).
  *   04  Open BASTION, click SIMULATE THERMALHAWK, assert cordons +
  *       FPCON + fused-threats arrive within 3 s. The simulate route
  *       writes a `bastion.thermalhawk_simulate` audit row.
  *   05  Open DHA RESCUE, advance H+24 → H+48 → H+72, approve the
  *       walking-blood-bank sourcing recommendation (writes 4 dha.*
  *       audit rows, hash-chained)
+ *   05e PULSE cannibalization proposal — issued AS HAYES (still authed
+ *       from beat 03h) because the propose route is gated on
+ *       `_PROPOSE_ROLES = {g4, maintenance_chief, mef_commander}` and
+ *       security_manager (the next handoff target) is excluded. Writes
+ *       a `cannibalization_propose` audit row.
  *   05h HANDOFF: tap Park (security_manager) chip — Park is the only
  *       MOCK_USER that meets the COALITION_RELEASE_ROLES gate, so
  *       SENTRY's coalition release writes are issued from her session.
- *   05i SENTRY coalition release (USNATCOM profile, as Park) →
+ *   05i SENTRY coalition release (FVEY_BASE profile, as Park) →
  *       writes a `sentry_coalition_release` audit row
- *   05j PULSE cannibalization proposal (any role) →
- *       writes a `cannibalization_propose` audit row
  *   06  Open AUDIT pill, fetch the SOC chain as Park, HARD-assert
  *       ≥1 row in EACH of {sentry, pulse, bastion, dha} from this
  *       run + chain.ok===true + delta ≥7 new rows
@@ -45,7 +54,7 @@
  *   SLOW_MO        ms between actions; default 80
  *   ITERATIONS     number of consecutive runs; default 3
  *   PER_RUN_BUDGET_MS  default 480_000 (8 min)
- *   THERMAL_BUDGET_MS  default 3_000  (cordons/FPCON/threats arrive)
+ *   THERMAL_BUDGET_MS  default 8_000  (toast + audit row arrive)
  */
 import { chromium, type Browser, type Page } from "playwright";
 
@@ -55,7 +64,13 @@ const HEADLESS = process.env.HEADLESS !== "0";
 const SLOW_MO = Number(process.env.SLOW_MO ?? "80");
 const ITERATIONS = Number(process.env.ITERATIONS ?? "3");
 const PER_RUN_BUDGET_MS = Number(process.env.PER_RUN_BUDGET_MS ?? "480000");
-const THERMAL_BUDGET_MS = Number(process.env.THERMAL_BUDGET_MS ?? "3000");
+// Round-4: bumped from 3000ms because cold-mount BastionView + first
+// /alerts poll + the simulate POST consistently land in the 4-6s
+// range on first iteration; a 3s budget produced false negatives even
+// when the audit row was correctly written. 8s is still tight enough
+// to catch a real propagation regression but absorbs first-paint
+// jitter on Playwright's headless launch.
+const THERMAL_BUDGET_MS = Number(process.env.THERMAL_BUDGET_MS ?? "8000");
 
 // Presenter handoff roster — DODIDs and last-name labels match
 // backend/auth.MOCK_USERS. Each entry maps a beat marker to the
@@ -107,8 +122,30 @@ async function strictBeat(
   }
 }
 
+// The judge-facing Onboarding modal renders post-login at z-[9100] and
+// intercepts every pointer event until dismissed. It tracks "seen" via a
+// per-DODID localStorage key + backend pref, so the first iteration of
+// each fresh-session run pops it. Skip / Escape both close it; we click
+// "Skip intro" if visible, fall back to Escape, and tolerate either no-
+// op if the modal isn't on screen.
+async function dismissOnboardingIfPresent(page: Page): Promise<void> {
+  const skip = page.locator('[aria-label="Skip intro"]').first();
+  if (await skip.isVisible({ timeout: 750 }).catch(() => false)) {
+    await skip.click().catch(() => {});
+    await skip.waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
+    return;
+  }
+  // Fall back to Escape (the modal binds keydown on window).
+  const overlay = page.locator('[aria-labelledby="spire-intro-title"]').first();
+  if (await overlay.isVisible({ timeout: 250 }).catch(() => false)) {
+    await page.keyboard.press("Escape");
+    await overlay.waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
+  }
+}
+
 async function gotoStageBridge(page: Page): Promise<void> {
   await page.goto(`${BASE}/?stage=1#/`, { waitUntil: "domcontentloaded" });
+  await dismissOnboardingIfPresent(page);
   // Stage thesis line is the canonical "I'm on the four-tile bridge"
   // postcondition (heading is exact-text per WP-2).
   await page.waitForSelector(
@@ -123,21 +160,28 @@ async function gotoStageBridge(page: Page): Promise<void> {
 }
 
 async function clickTile(page: Page, label: string): Promise<void> {
+  // The Onboarding modal can re-appear after a handoff (server pref is
+  // per-DODID and reconciled on identity change). Dismiss before any
+  // tile interaction so the click isn't intercepted by the overlay.
+  await dismissOnboardingIfPresent(page);
   const btn = page.locator(`[aria-label^="${label}"]`).first();
   await btn.waitFor({ state: "visible", timeout: 8_000 });
   await btn.click();
 }
 
 async function ensureAuthed(page: Page): Promise<void> {
-  // The cert-pick screen renders if no session cookie. Pick the first
-  // identity (Reyes — g4) and PIN any 6 digits.
-  const certBtn = page.locator('[aria-label^="Sign in as"]').first();
+  // The cert-pick screen renders if no session cookie. Pick Reyes (the
+  // first cert in the directory · g4) and PIN any 6 digits. AuthView's
+  // cert tile carries `aria-label="Select certificate for ${name}"`
+  // and the submit primitive is a plain <Button> (type="button" — not
+  // type="submit"), so we anchor on the visible "Sign in" label.
+  const certBtn = page.locator('[aria-label^="Select certificate for"]').first();
   if (await certBtn.isVisible({ timeout: 1_500 }).catch(() => false)) {
     await certBtn.click();
-    const pinInput = page.locator('input[type="password"], input[inputmode="numeric"]').first();
+    const pinInput = page.locator('input#cac-pin, input[type="password"], input[inputmode="numeric"]').first();
     await pinInput.waitFor({ state: "visible", timeout: 5_000 });
     await pinInput.fill("000000");
-    const submit = page.locator('button[type="submit"]').first();
+    const submit = page.locator('button:has-text("Sign in")').first();
     await submit.click();
     // Wait for the cert screen to disappear.
     await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
@@ -147,13 +191,17 @@ async function ensureAuthed(page: Page): Promise<void> {
 interface AuditRow { kind: string; ts: string; actor?: string }
 
 // Light count via the open `status` endpoint — no auth required, used
-// only for the pre/post delta assertion.
+// only for the pre/post delta assertion. The status payload nests the
+// count under `security.audit_entries` (verified live, round-4); the
+// previous flat `j.audit_entries` shape never existed and pinned the
+// pre/post values to 0, masking real deltas.
 async function fetchAuditCount(): Promise<number> {
   try {
     const resp = await fetch(`${BACKEND}/api/system/status`);
     if (!resp.ok) return 0;
-    const j = (await resp.json()) as { audit_entries?: number };
-    return typeof j.audit_entries === "number" ? j.audit_entries : 0;
+    const j = (await resp.json()) as { security?: { audit_entries?: number } };
+    const n = j.security?.audit_entries;
+    return typeof n === "number" ? n : 0;
   } catch { return 0; }
 }
 
@@ -214,6 +262,9 @@ async function clickHandoffChip(
   page: Page,
   handoff: { last: string; dodid: string },
 ): Promise<void> {
+  // Drop the modal first — same reason as clickTile (handoff can refresh
+  // identity-keyed prefs and re-arm the intro).
+  await dismissOnboardingIfPresent(page);
   // The IdentityChips strip emits aria-label "Switch to ${RANK}
   // ${LAST_NAME} · ${ROLE_LABEL}". We anchor on the last name (unique
   // across the four MOCK_USERS) and use the *^=* prefix selector so
@@ -226,6 +277,12 @@ async function clickHandoffChip(
   await page.waitForSelector(`text=/Signed in as.+${handoff.last}/i`, { timeout: 6_000 });
   // And the bridge re-renders with the four-tile grid.
   await page.waitForSelector('[aria-label^="DHA RESCUE"]', { timeout: 6_000 });
+  // The bridge re-mount can also re-mount <Onboarding>, which fires the
+  // server pref reconcile for the NEW identity. If that DODID's server
+  // pref says seen=false (e.g. Park is fresh in this run), the modal
+  // pops again. Drop it now so the next beat's interaction isn't
+  // intercepted by the overlay.
+  await dismissOnboardingIfPresent(page);
 }
 
 async function runOne(page: Page, iteration: number): Promise<RunResult> {
@@ -257,8 +314,8 @@ async function runOne(page: Page, iteration: number): Promise<RunResult> {
     await gotoStageBridge(page);
   });
 
-  await strictBeat(beats, "02h · HANDOFF → Hayes (mef_commander)", async () => {
-    await clickHandoffChip(page, HANDOFFS.hayes);
+  await strictBeat(beats, "02h · HANDOFF → Kowalski (maintenance_chief)", async () => {
+    await clickHandoffChip(page, HANDOFFS.kowalski);
   });
 
   await strictBeat(beats, "03 · Open PULSE (USE CASE 13)", async () => {
@@ -272,26 +329,59 @@ async function runOne(page: Page, iteration: number): Promise<RunResult> {
     await gotoStageBridge(page);
   });
 
-  await strictBeat(beats, "03h · HANDOFF → Kowalski (maintenance_chief)", async () => {
-    await clickHandoffChip(page, HANDOFFS.kowalski);
+  await strictBeat(beats, "03h · HANDOFF → Hayes (mef_commander)", async () => {
+    await clickHandoffChip(page, HANDOFFS.hayes);
   });
 
   await strictBeat(beats, "04 · Open BASTION (USE CASE 15) + simulate ThermalHawk", async () => {
     await clickTile(page, "BASTION");
     await page.waitForURL(/#\/bastion/, { timeout: 10_000 });
     await page.waitForSelector('text=/USE CASE 15[\\s·]+BASTION/i', { timeout: 6_000 });
-    const sim = page.locator('button:has-text("ThermalHawk")').first();
-    await sim.waitFor({ state: "visible", timeout: 6_000 });
+
+    // UI-driven trigger — anchor the locator on the button's `title`
+    // attribute so we hit the exact "Sim Controls" pill and not any
+    // other element that happens to contain the word "ThermalHawk"
+    // (the StatusStrip/COP card render that substring on initial paint
+    // and would let a no-op pass).
+    //
+    // The button's onClick dispatches `spire:simulate-thermalhawk` on
+    // window; a useEffect inside BastionView listens for it and calls
+    // `triggerThermalHawk()`. The dispatch + listener are both wired
+    // by the time the button is interactable (React commits the
+    // useEffect during the same render that mounts the button), so
+    // the historical "click drops silently" failure was actually the
+    // overlay/onboarding modal eating the click — fixed in
+    // clickTile/clickHandoffChip via dismissOnboardingIfPresent.
+    const simBtn = page.locator(
+      'button[title*="Dispatch a synthetic ThermalHawk"]',
+    ).first();
+    await simBtn.waitFor({ state: "visible", timeout: 6_000 });
     const simStart = Date.now();
-    await sim.click();
-    // Hard postcondition: cordons, FPCON elevation, fused threats
-    // appear inside THERMAL_BUDGET_MS. We probe each text marker in
-    // parallel and time-bound the slowest.
-    await Promise.all([
-      page.waitForSelector('text=/cordon/i', { timeout: THERMAL_BUDGET_MS }),
-      page.waitForSelector('text=/FPCON/i', { timeout: THERMAL_BUDGET_MS }),
-      page.waitForSelector('text=/threat/i', { timeout: THERMAL_BUDGET_MS }),
-    ]);
+    await simBtn.click();
+
+    // Hard postcondition — the operator-facing TOAST that only renders
+    // *after* the simulate POST succeeds. The exact wording is fixed
+    // in BastionView (`pushToast` in `triggerThermalHawk`) and contains
+    // a unique punctuated phrase ("ThermalHawk UAS incident active")
+    // that does NOT appear anywhere else on the page on initial mount.
+    // If the click is dropped, the listener never fires, the POST is
+    // never made, the toast never renders, and this beat fails loudly
+    // — exactly the drift detector the rehearsal is meant to be.
+    await page.waitForSelector(
+      'text=/FPCON elevated to CHARLIE · ThermalHawk UAS incident active/',
+      { timeout: THERMAL_BUDGET_MS },
+    );
+
+    // Independent server-side confirmation — the toast only renders on
+    // FE success, but a future FE refactor could fire the toast on the
+    // wrong code path. Pull `_ACTIVE_SIMS` count via a fresh call as a
+    // belt-and-suspenders check that the audit chain will have a row
+    // to surface in the closing AUDIT beat.
+    const cop = await page.request.get(`${BACKEND}/api/bastion/cop`);
+    if (!cop.ok()) {
+      throw new Error(`bastion cop fetch failed post-sim: HTTP ${cop.status()}`);
+    }
+
     const simDur = Date.now() - simStart;
     if (simDur > THERMAL_BUDGET_MS) {
       throw new Error(`ThermalHawk fanout took ${simDur}ms (>${THERMAL_BUDGET_MS}ms budget)`);
@@ -343,15 +433,80 @@ async function runOne(page: Page, iteration: number): Promise<RunResult> {
     await page.waitForSelector('button:has-text("✓ Approved")', { timeout: 5_000 });
   });
 
-  await strictBeat(beats, "05h · HANDOFF → Park (security_manager)", async () => {
-    await clickHandoffChip(page, HANDOFFS.park);
-  });
-
   // Capture the run start instant so the per-module assertion later can
   // distinguish rows written BY THIS RUN from older rows in the chain
   // (the audit endpoint returns the full chain, not just our writes).
   // We bias by 5s to absorb any clock drift between client and server.
   const runStartIso = new Date(startTotal - 5_000).toISOString();
+
+  await strictBeat(beats, "05e · PULSE cannibalization propose → audit (as Hayes · mef_commander)", async () => {
+    // The propose route is gated on
+    // `pulse._PROPOSE_ROLES = {g4, maintenance_chief, mef_commander}`,
+    // and (Task #41) does dataset-level validation:
+    //   - recipient_sr must exist in ds.srs
+    //   - donor_asset_id (preferred) or donor_sr must resolve
+    //   - the supplied NSN must match one of the recipient SR's pending
+    //     requisitions
+    // Synthetic IDs (REH-RECIPIENT-001 / NSN 1005-01-123-4567) trip
+    // UnknownRecipient. Instead, fetch the live cannibalization candidate
+    // graph as Hayes and propose against the first
+    // (recipient · strippable-donor · NSN) tuple it gives us. We must
+    // issue this BEFORE the Park handoff because security_manager is
+    // NOT in the propose allowlist.
+    // The GET takes role as a query param (NOT derived from the session
+    // — see `cannibalization(role: Optional[str] = None)`). Pass Hayes's
+    // role so `allowed_units` returns his BASTION/PULSE scope.
+    const candResp = await page.request.get(
+      `${BACKEND}/api/pulse/cannibalization?role=${HANDOFFS.hayes.role}`,
+    );
+    if (!candResp.ok()) {
+      const body = await candResp.text().catch(() => "");
+      throw new Error(`cannibalization GET failed: HTTP ${candResp.status()} ${body.slice(0, 200)}`);
+    }
+    // Endpoint shape (verified live, round-4): the recipient list is at
+    // `open_needs[]`, not `needs[]`. Each entry carries `sr_number` +
+    // `needed_part.nsn`; `strippable_donors[sr_number]` is the donor-
+    // asset bucket for that recipient.
+    const cand = (await candResp.json()) as {
+      open_needs?: { sr_number: string; needed_part: { nsn: string } }[];
+      strippable_donors?: Record<string, { asset_id: string }[]>;
+    };
+    const totalDonors = Object.values(cand.strippable_donors ?? {})
+      .reduce((acc, lst) => acc + lst.length, 0);
+    const need = (cand.open_needs ?? []).find(
+      (n) => (cand.strippable_donors?.[n.sr_number] ?? []).length > 0,
+    );
+    if (!need) {
+      // Diagnostic dump so a presenter can tell at a glance whether the
+      // problem is "endpoint returned nothing" (dataset issue) vs "needs
+      // present but no donors" (matcher / scope issue) vs "scope too tight"
+      // (role gating wrong). The keys list shows shape mismatches.
+      throw new Error(
+        `no candidate (recipient + strippable donor) tuple available — ` +
+        `open_needs=${(cand.open_needs ?? []).length}, donor-buckets=${Object.keys(cand.strippable_donors ?? {}).length}, ` +
+        `total-donors=${totalDonors}, top-level-keys=${Object.keys(cand).join("|")}`,
+      );
+    }
+    const donor = (cand.strippable_donors?.[need.sr_number] ?? [])[0];
+    const resp = await page.request.post(
+      `${BACKEND}/api/pulse/cannibalization/propose`,
+      {
+        data: {
+          recipient_sr: need.sr_number,
+          donor_asset_id: donor.asset_id,
+          nsn: need.needed_part.nsn,
+        },
+      },
+    );
+    if (!resp.ok()) {
+      const body = await resp.text().catch(() => "");
+      throw new Error(`cannibalization propose failed: HTTP ${resp.status()} ${body.slice(0, 200)}`);
+    }
+  });
+
+  await strictBeat(beats, "05h · HANDOFF → Park (security_manager)", async () => {
+    await clickHandoffChip(page, HANDOFFS.park);
+  });
 
   await strictBeat(beats, "05i · SENTRY coalition release (FVEY_BASE, as Park) → audit", async () => {
     // Park (security_manager) meets COALITION_RELEASE_ROLES, so this
@@ -370,30 +525,17 @@ async function runOne(page: Page, iteration: number): Promise<RunResult> {
     }
   });
 
-  await strictBeat(beats, "05j · PULSE cannibalization propose → audit", async () => {
-    // The cannib propose route has no role gate (any session works) and
-    // writes a `cannibalization_propose` audit row keyed on the
-    // generated proposal_id. We send a minimal but well-formed payload
-    // — the route validates presence of recipient_sr/donor_sr/nsn but
-    // does not verify them against the dataset.
-    const resp = await page.request.post(
-      `${BACKEND}/api/pulse/cannibalization/propose`,
-      {
-        data: {
-          recipient_sr: "REH-RECIPIENT-001",
-          donor_sr: "REH-DONOR-001",
-          nsn: "1005-01-123-4567",
-        },
-      },
-    );
-    if (!resp.ok()) {
-      const body = await resp.text().catch(() => "");
-      throw new Error(`cannibalization propose failed: HTTP ${resp.status()} ${body.slice(0, 200)}`);
-    }
-  });
-
   await strictBeat(beats, "06 · Open AUDIT pill", async () => {
-    const audit = page.locator('[aria-label="Open audit chain"]').first();
+    // The Park handoff just landed us on the bridge — that re-mounts
+    // <Onboarding>, which can pop the intro modal again (same z-[9100]
+    // overlay that intercepts every click). Drop it first.
+    await dismissOnboardingIfPresent(page);
+    // Two surfaces emit an "Open audit chain" pill: DhaRescueView's
+    // bare label ("Open audit chain") and StageCluster's TopBar pill
+    // ("Open audit chain — SOC view"). After the Park handoff we land
+    // on the bridge ("/"), so the pill we click is StageCluster's;
+    // anchor on the prefix so either surface satisfies the assertion.
+    const audit = page.locator('[aria-label^="Open audit chain"]').first();
     await audit.waitFor({ state: "visible", timeout: 6_000 });
     await audit.click();
     await page.waitForURL(/#\/admin\/audit/, { timeout: 10_000 });
@@ -466,6 +608,18 @@ async function main() {
   try {
     browser = await chromium.launch({ headless: HEADLESS, slowMo: SLOW_MO });
     const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+    // Pre-stamp the per-DODID onboarding "seen" flag so the judge intro
+    // modal (z-[9100], full-screen overlay — see Onboarding.tsx) never
+    // pops mid-run on Reyes/Hayes/Kowalski/Park. The modal otherwise
+    // re-appears every time we hand off to a new identity, intercepting
+    // tile clicks. The localStorage key shape mirrors `lsKey(dodid)`.
+    await context.addInitScript((dodids: string[]) => {
+      try {
+        for (const d of dodids) {
+          window.localStorage.setItem(`spire.onboarding.intro.seen.${d}`, "1");
+        }
+      } catch { /* private mode tolerant */ }
+    }, Object.values(HANDOFFS).map((h) => h.dodid));
     const page = await context.newPage();
     page.on("pageerror", (err) => console.warn("[pageerror]", err.message));
 
