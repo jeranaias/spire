@@ -10,9 +10,11 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
+from typing import Optional
 
 from ..state import get_dataset
+from ..auth import current_role, current_role_optional
 from ..persistence import (
     feedback_summary,
     log as audit_log,
@@ -272,13 +274,14 @@ async def dataset_info():
 
 
 @router.get("/audit")
-async def audit(limit: int = 50, role: str | None = None):
+async def audit(limit: int = 50, role: str = Depends(current_role)):
     """Append-only hash-chained audit log backed by SQLite. Each entry is
     SHA-256 chained to the previous; any mutation breaks the chain and
     verify_chain() reports the first offending id.
 
     Audit chain mining can reconstruct cross-role decision history, so
-    read access is gated to security_manager only."""
+    read access is gated to security_manager only — and the role is read
+    from the signed bearer, not a query parameter."""
     require_role(role, AUDIT_READ_ROLES, "audit.read")
     chain = verify_chain()
     entries = recent_entries(limit=limit)
@@ -294,19 +297,22 @@ async def audit(limit: int = 50, role: str | None = None):
 
 
 @router.post("/secure-wipe")
-async def _secure_wipe(payload: dict = Body(default={})):
-    """Destructive. Requires payload {'confirm': 'CONFIRM', 'actor_role': 'security_manager'}.
+async def _secure_wipe(payload: dict = Body(default={}),
+                       role: str = Depends(current_role)):
+    """Destructive. Requires payload {'confirm': 'CONFIRM'} plus a session
+    bearer for `security_manager`. Without the bearer-side gate, any role
+    could wipe the audit chain and the demo's "tamper-proof" narrative
+    collapses (the adversarial audit verified this in #7 — a
+    maintenance_chief reduced 20→1 entries before the gate landed).
 
-    Server-side gate: only security_manager may invoke. Without this gate,
-    any role could wipe the audit chain and the demo's "tamper-proof"
-    narrative collapses (verified live during adversarial audit: a
-    maintenance_chief reduced 20→1 entries, fileable as bug #7)."""
-    actor = (payload or {}).get("actor_role")
-    require_role(actor, SECURE_WIPE_ROLES, "audit.secure_wipe")
+    The actor recorded in the audit chain is the bearer-resolved role,
+    not anything the client supplied — so a forged `actor_role` field in
+    the body cannot rewrite history."""
+    require_role(role, SECURE_WIPE_ROLES, "audit.secure_wipe")
     token = (payload or {}).get("confirm", "")
     if token != "CONFIRM":
         raise HTTPException(status_code=400, detail="Send {confirm: 'CONFIRM'} to execute")
-    result = secure_wipe(actor=actor)
+    result = secure_wipe(actor=role)
     return result
 
 
@@ -338,8 +344,12 @@ async def comms_state():
 
 
 @router.post("/comms/airgap")
-async def comms_airgap(payload: dict = Body(default={})):
-    """Toggle air-gap mode. Body: {enable: bool, actor_role: str}.
+async def comms_airgap(payload: dict = Body(default={}),
+                       role: str = Depends(current_role)):
+    """Toggle air-gap mode. Body: {enable: bool}. Role comes from the
+    signed bearer — clients cannot escalate by setting an `actor_role`
+    field.
+
     When enabled: subsequent /comms/queue calls accept mutations to the
     local queue. When disabled: queue replays to the master, returns a
     sync-resolution log.
@@ -347,7 +357,7 @@ async def comms_airgap(payload: dict = Body(default={})):
     Gated to security_manager + mef_commander; lower roles return 403."""
     global _AIR_GAPPED
     enable = bool(payload.get("enable", not _AIR_GAPPED))
-    actor = payload.get("actor_role")
+    actor = role
     require_role(actor, AIRGAP_ROLES, "comms.airgap.toggle")
     if enable == _AIR_GAPPED:
         return {"ok": True, "no_change": True, "air_gap_active": _AIR_GAPPED}
@@ -705,7 +715,7 @@ async def admin_record_outcome(payload: dict = Body(default={})):
 
 
 @router.get("/admin/telemetry")
-async def admin_telemetry(role: str | None = None):
+async def admin_telemetry(role: str = Depends(current_role)):
     """Aggregate telemetry for the AdminTab dashboard.
 
     Computes per-engine + per-decision-kind accuracy rolling averages,
@@ -713,7 +723,8 @@ async def admin_telemetry(role: str | None = None):
     recommendation flag when accuracy drops below a threshold.
 
     Gated server-side to security_manager. Telemetry exposes per-actor
-    decision histories which other roles must not be able to mine."""
+    decision histories which other roles must not be able to mine. Role
+    comes from the signed bearer."""
     require_role(role, ADMIN_TELEMETRY_ROLES, "admin.telemetry.read")
     if not _DECISION_OUTCOMES:
         return {
@@ -788,10 +799,12 @@ async def admin_telemetry(role: str | None = None):
 
 
 @router.get("/admin/outcomes")
-async def admin_list_outcomes(limit: int = 50, decision_kind: Optional[str] = None, role: str | None = None):
+async def admin_list_outcomes(limit: int = 50, decision_kind: Optional[str] = None,
+                              role: str = Depends(current_role)):
     """List recent outcomes for the AdminTab activity log.
 
-    Gated server-side to security_manager — see admin_telemetry."""
+    Gated server-side to security_manager — see admin_telemetry. Role
+    comes from the signed bearer."""
     require_role(role, ADMIN_TELEMETRY_ROLES, "admin.outcomes.read")
     log = _DECISION_OUTCOMES
     if decision_kind:
@@ -840,11 +853,13 @@ async def sync_conflicts():
 
 
 @router.post("/sync/resolve/{conflict_id}")
-async def sync_resolve(conflict_id: str, payload: dict = Body(default={})):
+async def sync_resolve(conflict_id: str, payload: dict = Body(default={}),
+                       role: str = Depends(current_role)):
     """Resolve a conflict by selecting a winner. Body: {winner: 'local' |
-    'peer', actor: str}. Loser stays in the audit chain."""
+    'peer'}. Actor is the bearer-resolved role; loser stays in the audit
+    chain."""
     winner = payload.get("winner", "local")
-    actor = payload.get("actor", "security_manager")
+    actor = role
     if winner not in ("local", "peer"):
         raise HTTPException(status_code=400, detail="winner must be 'local' or 'peer'")
     resolved = _sync_resolve(conflict_id, winner, actor)
@@ -860,10 +875,12 @@ async def sync_resolve(conflict_id: str, payload: dict = Body(default={})):
 
 
 @router.post("/sync/seed-conflict")
-async def sync_seed_conflict(payload: dict = Body(default={})):
+async def sync_seed_conflict(payload: dict = Body(default={}),
+                             role: str = Depends(current_role)):
     """Demo helper: seed a deliberate conflict scenario so the CWO can
-    walk through the resolution flow without standing up a second node."""
-    actor = payload.get("actor_role", "g4")
+    walk through the resolution flow without standing up a second node.
+    Actor is the bearer-resolved role."""
+    actor = role
     conflict = _sync_seed_conflict()
     audit_log(
         "sync_demo_conflict_seeded",

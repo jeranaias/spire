@@ -34,6 +34,13 @@ COALITION_RELEASE_ROLES  = frozenset({"data_custodian", "security_manager"})
 ADMIN_TELEMETRY_ROLES    = frozenset({"security_manager"})
 AUDIT_READ_ROLES         = frozenset({"security_manager"})
 
+# Module-wide view scope. Mirrors frontend `VIEW_SCOPE` in store.ts so an
+# operator who URL-hops into a module they shouldn't see gets a 403 from
+# the API the same way the ScopeGuard overlay redirects them in the UI.
+PULSE_VIEW_ROLES   = frozenset({"maintenance_chief", "g4", "mef_commander"})
+SENTRY_VIEW_ROLES  = frozenset({"data_custodian", "security_manager"})
+BASTION_VIEW_ROLES = frozenset({"mef_commander", "g4", "security_manager", "maintenance_chief"})
+
 
 def require_role(role: Optional[str], allowed: frozenset[str], action: str) -> str:
     """Raise 403 unless `role` is in `allowed`. Returns the role on success.
