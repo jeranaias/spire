@@ -39,6 +39,12 @@ AIRGAP_ROLES             = frozenset({"security_manager", "mef_commander"})
 COALITION_RELEASE_ROLES  = frozenset({"data_custodian", "security_manager"})
 ADMIN_TELEMETRY_ROLES    = frozenset({"security_manager"})
 AUDIT_READ_ROLES         = frozenset({"security_manager"})
+# SENTRY Review Queue clearing authority. A maintenance chief can flag /
+# triage but may not approve, reject, or modify a held SR — that decision
+# touches the hash-chained marking record and must sit with the data
+# custodian / security manager / MEF commander pay grade. G-4 stays in the
+# allowlist because the operator-class persona owns the daily review pace.
+SENTRY_REVIEW_ROLES      = frozenset({"g4", "data_custodian", "security_manager", "mef_commander"})
 # Mission-clock playback controls (B4). Operator-class roles only — the
 # clock is a piece of demo plumbing, not an analyst surface.
 SCENARIO_CONTROL_ROLES   = frozenset({"security_manager", "mef_commander", "g4"})

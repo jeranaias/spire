@@ -126,11 +126,15 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts    ON audit_log(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor);
 
 CREATE TABLE IF NOT EXISTS sentry_decisions (
-    sr_number   TEXT PRIMARY KEY,
-    action      TEXT NOT NULL,            -- approve | reject | modify
-    actor_role  TEXT NOT NULL,
-    note        TEXT,
-    ts          TEXT NOT NULL
+    sr_number          TEXT PRIMARY KEY,
+    action             TEXT NOT NULL,            -- approve | reject | modify
+    actor_role         TEXT NOT NULL,
+    actor_dodid        TEXT NOT NULL DEFAULT '',
+    actor_name         TEXT NOT NULL DEFAULT '',
+    actor_unit         TEXT NOT NULL DEFAULT '',
+    actor_cert_serial  TEXT NOT NULL DEFAULT '',
+    note               TEXT,
+    ts                 TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pulse_feedback (
@@ -172,6 +176,23 @@ CREATE TABLE IF NOT EXISTS user_prefs (
 def init_db() -> None:
     with conn() as c:
         c.executescript(SCHEMA)
+        # In-place migration: add operator-identity columns to existing
+        # sentry_decisions tables that predate task #25. SQLite's ALTER
+        # TABLE ADD COLUMN is cheap and idempotent-by-try; we swallow
+        # the duplicate-column error on subsequent boots.
+        for col in (
+            "actor_dodid",
+            "actor_name",
+            "actor_unit",
+            "actor_cert_serial",
+        ):
+            try:
+                c.execute(
+                    f"ALTER TABLE sentry_decisions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
+            except sqlite3.OperationalError:
+                # Column already exists — first install or already migrated.
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -478,14 +499,57 @@ def entries_for_subject(subject_id: str, limit: int = 50) -> list[dict]:
 # Domain writes
 # ---------------------------------------------------------------------------
 
-def record_sentry_decision(sr_number: str, action: str, *, actor_role: str, note: str = "") -> None:
+def record_sentry_decision(
+    sr_number: str,
+    action: str,
+    *,
+    actor_role: str,
+    actor_dodid: str = "",
+    actor_name: str = "",
+    actor_unit: str = "",
+    actor_cert_serial: str = "",
+    note: str = "",
+) -> None:
+    """Persist a SENTRY review decision and emit the matching audit-chain row.
+
+    The actor_* fields anchor the decision to a specific Marine (DODID +
+    name + unit + CAC cert serial) so the hash-chained audit trail can
+    answer "who" — not just "which role" — for any held SR. This is the
+    backbone the inspector's audit-chain modal surfaces in the UI.
+    """
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
-            "INSERT OR REPLACE INTO sentry_decisions(sr_number, action, actor_role, note, ts) VALUES (?,?,?,?,?)",
-            (sr_number, action, actor_role, note, ts),
+            "INSERT OR REPLACE INTO sentry_decisions("
+            "sr_number, action, actor_role, actor_dodid, actor_name, "
+            "actor_unit, actor_cert_serial, note, ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                sr_number,
+                action,
+                actor_role,
+                actor_dodid,
+                actor_name,
+                actor_unit,
+                actor_cert_serial,
+                note,
+                ts,
+            ),
         )
-    log("sentry_review", actor=actor_role, subject_id=sr_number, payload={"action": action, "note": note})
+    log(
+        "sentry_review",
+        actor=actor_role,
+        subject_id=sr_number,
+        payload={
+            "action": action,
+            "note": note,
+            "actor_role": actor_role,
+            "actor_dodid": actor_dodid,
+            "actor_name": actor_name,
+            "actor_unit": actor_unit,
+            "actor_cert_serial": actor_cert_serial,
+        },
+    )
 
 
 def record_pulse_feedback(asset_id: str, correct: bool, note: str = "") -> None:
@@ -514,7 +578,9 @@ def decisions_for_batch(sr_numbers: list[str]) -> dict[str, dict]:
     placeholders = ",".join("?" for _ in sr_numbers)
     with conn() as c:
         rows = c.execute(
-            f"SELECT sr_number, action, actor_role, note, ts FROM sentry_decisions WHERE sr_number IN ({placeholders})",
+            "SELECT sr_number, action, actor_role, actor_dodid, actor_name, "
+            "actor_unit, actor_cert_serial, note, ts "
+            f"FROM sentry_decisions WHERE sr_number IN ({placeholders})",
             tuple(sr_numbers),
         ).fetchall()
     return {r["sr_number"]: dict(r) for r in rows}

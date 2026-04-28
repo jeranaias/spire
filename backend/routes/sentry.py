@@ -27,6 +27,7 @@ from ..persistence import (
 )
 from ..scoping import (
     _normalize_classification as normalize_classification,
+    SENTRY_REVIEW_ROLES,
     classification_rank,
     require_clearance,
     require_no_downgrade,
@@ -720,8 +721,89 @@ async def review_action(
     if action not in ("approve", "reject", "modify"):
         raise HTTPException(status_code=400, detail="action must be approve|reject|modify")
     payload = payload or {}
-    role = session_role(request) or "data_custodian"
+    user = getattr(request.state, "user", None) or {}
+    role = session_role(request) or user.get("role") or "unknown"
     note = payload.get("note", "")
+
+    # Role gate. Clearing a held SENTRY record edits the marking record
+    # itself, so the authority belongs with G-4 / data custodian / security
+    # manager / MEF commander — not a maintenance chief who only owns
+    # equipment status. URL-hacking past the FE returns 403 with an audit
+    # `unauthorized_review_attempt` row so the SOC sees the attempt.
+    if role not in SENTRY_REVIEW_ROLES:
+        audit_log(
+            "unauthorized_review_attempt",
+            actor=role,
+            subject_id=sr_number,
+            payload={
+                "action": f"sentry.review.{action}",
+                "actor_role": role,
+                "actor_dodid": user.get("dodid", ""),
+                "actor_name": user.get("name", ""),
+                "actor_unit": user.get("unit", ""),
+                "actor_cert_serial": user.get("cert_serial", ""),
+                "decision": "blocked",
+                "reason": "role_not_in_review_authority",
+                "roles_allowed": sorted(SENTRY_REVIEW_ROLES),
+            },
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "InsufficientPrivilege",
+                "action": f"sentry.review.{action}",
+                "role_seen": role,
+                "roles_allowed": sorted(SENTRY_REVIEW_ROLES),
+                "remediation": (
+                    "Clearing a held SENTRY record requires data-custodian "
+                    "or above. Hand the record to your G-4 / Security Manager."
+                ),
+            },
+        )
+
+    # Validate the SR exists in a processed batch and is in the held or
+    # flagged column. An unknown SR (typo, stale URL, fuzzed input) used
+    # to be silently persisted as a decision against a record nobody could
+    # see — that turned the chain into a write-anything log. 404 here
+    # keeps the chain anchored to records SENTRY actually saw.
+    found = False
+    eligible = False
+    for batch in _BATCHES.values():
+        for job in batch.get("jobs", {}).values():
+            for r in job.get("results", []):
+                if r.get("sr_number") == sr_number:
+                    found = True
+                    if r.get("is_held") or r.get("flags"):
+                        eligible = True
+                    break
+            if found:
+                break
+        if found:
+            break
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "UnknownSR",
+                "sr_number": sr_number,
+                "remediation": (
+                    "SR not found in any processed batch. Process the batch "
+                    "first or verify the SR number."
+                ),
+            },
+        )
+    if not eligible:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "SRNotInReviewQueue",
+                "sr_number": sr_number,
+                "remediation": (
+                    "Only held or flagged records can be cleared. This SR "
+                    "auto-cleared and has no review action available."
+                ),
+            },
+        )
 
     # Downgrade-write block. If the modify payload tries to lower an
     # artifact's classification (e.g. SECRET → CUI on a held record), we
@@ -750,7 +832,16 @@ async def review_action(
             subject_id=sr_number,
         )
 
-    record_sentry_decision(sr_number, action, actor_role=role, note=note)
+    record_sentry_decision(
+        sr_number,
+        action,
+        actor_role=role,
+        actor_dodid=str(user.get("dodid", "")),
+        actor_name=str(user.get("name", "")),
+        actor_unit=str(user.get("unit", "")),
+        actor_cert_serial=str(user.get("cert_serial", "")),
+        note=note,
+    )
     return {"ok": True, "sr_number": sr_number, "action": action}
 
 
@@ -1250,17 +1341,49 @@ async def coalition_release(
 
 
 @router.get("/audit/{subject_id}")
-async def audit_for_subject(subject_id: str, limit: int = 50):
+async def audit_for_subject(subject_id: str, request: Request, limit: int = 50):
     """Walkthrough #31 — per-record audit-entry viewer. Returns the chain
     entries (hash, prev_hash, ts, actor, payload) for the requested
     subject so operators can verify the audit trail without leaving
     the inspector pane.
+
+    Gated on the same clearance the export endpoint uses: we look the
+    subject's max source/detected classification up across processed
+    batches and require_clearance() against it. A lower-cleared caller
+    gets 403 + an audit `spillage_prevented` row instead of a free
+    enumeration of every chain entry tied to the SR. Subjects we can't
+    locate in batches default to SECRET — SENTRY's working floor — so
+    fishing the chain by guessing SR numbers stays gated.
     """
+    subject_cls = "SECRET"
+    subject_rank = classification_rank(subject_cls)
+    for batch in _BATCHES.values():
+        for r in batch.get("records", []):
+            if r.get("sr_number") == subject_id:
+                cand = (
+                    r.get("detected_classification_oracle")
+                    or r.get("source_classification")
+                    or "UNCLASSIFIED"
+                )
+                rk = classification_rank(cand)
+                if rk > subject_rank:
+                    subject_rank = rk
+                    subject_cls = normalize_classification(cand)
+
+    user = getattr(request.state, "user", None)
+    require_clearance(
+        user,
+        subject_cls,
+        action="sentry.audit.read",
+        audit_subject=subject_id,
+    )
+
     rows = entries_for_subject(subject_id, limit=limit)
     return {
         "subject_id": subject_id,
         "entries": rows,
         "count": len(rows),
+        "subject_classification": subject_cls,
     }
 
 
