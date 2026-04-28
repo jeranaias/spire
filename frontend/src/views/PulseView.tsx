@@ -61,7 +61,7 @@ function PulseSubnav() {
   }
 
   return (
-    <div className="h-12 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
+    <div className="h-12 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4" data-tour-id="pulse-subnav">
       <div
         role="tablist"
         aria-label="PULSE views"

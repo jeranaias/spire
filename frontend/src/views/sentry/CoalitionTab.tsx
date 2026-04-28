@@ -131,7 +131,7 @@ export function CoalitionTab() {
   );
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
+    <div className="flex h-full flex-col overflow-y-auto p-6" data-tour-id="sentry-coalition-content">
       <div className="mb-4 flex items-end justify-between gap-4">
         <div>
           <h2

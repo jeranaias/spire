@@ -260,7 +260,7 @@ export function ForecastTab() {
     // chart container (instead of flex-1 eating everything) means the
     // Recommend Actions panel renders below the chart and the page scrolls
     // when content exceeds viewport.
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4" data-tour-id="pulse-forecast-content">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2

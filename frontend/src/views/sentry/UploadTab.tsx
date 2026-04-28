@@ -72,7 +72,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
     // Walkthrough #17 — vertical scroll bottomed out at Process Batch on
     // shorter viewports. min-h-0 + pb-12 gutter keeps the action row
     // reachable; outer is the explicit scroll container.
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6 pb-12">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6 pb-12" data-tour-id="sentry-upload-content">
       <div className="mb-4">
         <h2 className="text-lg font-semibold">Data ingestion</h2>
         <div className="text-xs text-[var(--color-text-muted)]">
