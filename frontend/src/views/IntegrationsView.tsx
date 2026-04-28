@@ -32,6 +32,12 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ErrorState, LoadingState, Pressable } from "../components/ui";
 import {
+  PreAtoStamp,
+  SectionUnbuiltStrip,
+  UnbuiltBanner,
+  UNBUILT_BG,
+} from "../components/UnbuiltStamp";
+import {
   api,
   type DdilMode,
   type GcssMcCoverageSummary,
@@ -104,7 +110,11 @@ function GcssMcContractPage() {
       {/* Sticky CAPCO-chrome unbuilt banner. Sits above the scroll
        * region so a judge sees it the instant the page paints, and
        * stays pinned while they scroll through the ATO copy. */}
-      <UnbuiltBanner sticky />
+      <UnbuiltBanner
+        sticky
+        headline="UNBUILT · REFERENCE CONTRACT ONLY · NO LIVE GCSS-MC LINK"
+        subline="PRE-COORDINATION PENDING · PM GCSS-MC + IL-5 ENCLAVE AO"
+      />
       <div className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
         <ContractHeader />
         <CommsPostureBanner
@@ -139,81 +149,11 @@ function GcssMcContractPage() {
 // ---------------------------------------------------------------------------
 // Persistent UNBUILT banner + PRE-ATO stamp
 //
-// CAPCO-style solid color block, full width, white text, no gradient. Same
-// chrome the operator sees on the classification band so it reads as
-// "official integrity-of-claims notice", not decorative chip. Re-printed
-// above every section that touches ATO / auth / failure-mode claims so a
-// projector audience cannot miss it.
+// The CAPCO-chrome integrity-of-claims components live in
+// `components/UnbuiltStamp.tsx` so the Model Registry, Model Detail, and
+// Inference Economics surfaces can wear the same projection-scale chrome
+// (Task #107). This file passes the GCSS-MC-specific copy through props.
 // ---------------------------------------------------------------------------
-
-const UNBUILT_BG = "#B8460E";  // CAPCO-adjacent burnt-orange. Distinct from
-                                // the SECRET red and the FPCON warning amber
-                                // so it reads as its own integrity stamp.
-
-function UnbuiltBanner({ sticky = false }: { sticky?: boolean }) {
-  return (
-    <div
-      className={
-        (sticky ? "sticky top-0 z-20 " : "") +
-        "flex h-9 shrink-0 items-center justify-between px-4 py-1 font-mono text-sm font-semibold uppercase tracking-widest"
-      }
-      style={{ background: UNBUILT_BG, color: "#FFFFFF" }}
-      role="region"
-      aria-label="Integrations contract integrity-of-claims banner"
-    >
-      <span className="whitespace-nowrap">
-        UNBUILT · REFERENCE CONTRACT ONLY · NO LIVE GCSS-MC LINK
-      </span>
-      <span
-        className="hidden shrink-0 rounded-sm border px-2.5 py-[2px] font-mono text-xs leading-none tracking-widest sm:inline-flex"
-        style={{
-          borderColor: "rgba(255,255,255,0.55)",
-          background: "rgba(0,0,0,0.25)",
-        }}
-      >
-        PRE-COORDINATION PENDING · PM GCSS-MC + IL-5 ENCLAVE AO
-      </span>
-    </div>
-  );
-}
-
-function SectionUnbuiltStrip() {
-  // Compact, in-section repeat of the top banner. Lives at the top of every
-  // ATO/auth/failure-mode card-grid so a screenshot of a single section is
-  // never load-bearing on its own.
-  return (
-    <div
-      className="mb-3 flex items-center justify-between gap-3 rounded-sm px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-widest"
-      style={{ background: UNBUILT_BG, color: "#FFFFFF" }}
-    >
-      <span>Unbuilt · Pre-coordination pending with PM GCSS-MC and the IL-5 enclave AO</span>
-      <span
-        className="hidden shrink-0 rounded-sm border px-2 py-[1px] text-[10px] tracking-wider sm:inline-flex"
-        style={{ borderColor: "rgba(255,255,255,0.55)", background: "rgba(0,0,0,0.25)" }}
-      >
-        PRE-ATO · NOT ACCREDITED
-      </span>
-    </div>
-  );
-}
-
-function PreAtoStamp() {
-  // Per-card hard stamp. Sized to remain legible at projection scale (a
-  // 10pt corner chip is invisible from row 8 of a CDAO conference room).
-  return (
-    <div
-      className="mb-2 inline-flex items-center gap-2 rounded-sm border-2 px-2 py-[2px] font-mono text-[11px] font-bold uppercase tracking-widest"
-      style={{
-        borderColor: UNBUILT_BG,
-        color: UNBUILT_BG,
-        background: "color-mix(in oklab, " + UNBUILT_BG + " 8%, var(--color-surface))",
-      }}
-      title="This card describes a target / planned posture. SPIRE has no ATO and no live GCSS-MC link."
-    >
-      PRE-ATO · NOT ACCREDITED
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Comms posture banner — visible at the top of the page so a presenter who
@@ -777,7 +717,7 @@ function FieldMappingSection({ sample }: { sample: SamplePayload | null }) {
       title="Field mapping"
       subtitle="SPIRE entities ↔ GCSS-MC tables. Defensible against an actual logistics SME — every field is sourced from public USMC documentation. The mapping itself is documentation, not a deployed link."
     >
-      <SectionUnbuiltStrip />
+      <SectionUnbuiltStrip headline="Unbuilt · Pre-coordination pending with PM GCSS-MC and the IL-5 enclave AO" />
       <div className="overflow-x-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
         <table className="w-full min-w-[720px] font-mono text-xs">
           <thead className="bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] text-left uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -890,7 +830,7 @@ function PollingCadenceSection() {
       title="Polling cadence"
       subtitle="Target pull rates per entity, with rationale. SPIRE would be read-only against GCSS-MC and every cadence is sized to the upstream's read-replica budget, not the source-of-truth shard. None of these cadences run against a live GCSS-MC today."
     >
-      <SectionUnbuiltStrip />
+      <SectionUnbuiltStrip headline="Unbuilt · Pre-coordination pending with PM GCSS-MC and the IL-5 enclave AO" />
       <div className="overflow-x-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
         <table className="w-full min-w-[640px] font-mono text-xs">
           <thead className="bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] text-left uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -948,7 +888,7 @@ function AuthSection() {
       title="Authentication"
       subtitle="What the SPIRE session model actually is today, and what would have to change to push identity all the way to a GCSS-MC API call."
     >
-      <SectionUnbuiltStrip />
+      <SectionUnbuiltStrip headline="Unbuilt · Pre-coordination pending with PM GCSS-MC and the IL-5 enclave AO" />
       <div className="grid gap-3 md:grid-cols-2">
         <SubCard
           label="Built today · SPIRE session"
@@ -1016,7 +956,7 @@ function AtoSection() {
       title="ATO posture"
       subtitle="Pre-ATO. The cards below describe the target accreditation package SPIRE intends to pre-coordinate with PM GCSS-MC and the IL-5 enclave AO — none of it is approved or in place today."
     >
-      <SectionUnbuiltStrip />
+      <SectionUnbuiltStrip headline="Unbuilt · Pre-coordination pending with PM GCSS-MC and the IL-5 enclave AO" />
       <div className="grid gap-3 md:grid-cols-2">
         <SubCard
           label="Hosting · target"
@@ -1119,7 +1059,7 @@ function FailureModesSection() {
       title="Failure modes"
       subtitle="How the adapter is designed to behave when GCSS-MC goes dark. Logistics systems do go dark — but none of the behaviors below are wired up against a real upstream yet, because there is no real upstream wired up."
     >
-      <SectionUnbuiltStrip />
+      <SectionUnbuiltStrip headline="Unbuilt · Pre-coordination pending with PM GCSS-MC and the IL-5 enclave AO" />
       <div className="grid gap-3 md:grid-cols-3">
         <SubCard
           label="GCSS-MC unreachable · planned"
@@ -1247,7 +1187,7 @@ function SampleEndpointSection({
       title="Sample endpoint"
       subtitle="Contract-shape roundtrip. Hits the canonical SPIRE synthetic dataset and emits GCSS-MC-shaped rows. Used by the topbar last-sync indicator and any judge who wants to curl it directly. The endpoint reads SPIRE's own dataset — it is not querying GCSS-MC."
     >
-      <SectionUnbuiltStrip />
+      <SectionUnbuiltStrip headline="Unbuilt · Pre-coordination pending with PM GCSS-MC and the IL-5 enclave AO" />
       <div className="rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-primary)_4%,var(--color-bg))] p-3 font-mono text-xs">
         <div className="mb-2 flex items-center justify-between gap-2">
           <span className="uppercase tracking-widest text-[var(--color-text-muted)]">

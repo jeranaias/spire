@@ -21,6 +21,12 @@ import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
+import {
+  PreAtoStamp,
+  SectionUnbuiltStrip,
+  UnbuiltBanner,
+  UNBUILT_BG,
+} from "../../components/UnbuiltStamp";
 import { useRegistryFetch } from "./useRegistryFetch";
 import {
   DdilFreshnessBanner,
@@ -71,7 +77,18 @@ export function ModelRegistryView() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
+    <div className="flex h-full flex-col overflow-y-auto">
+      {/* Task #107 — projection-scale honesty banner. The supply-chain
+       * page reports FedRAMP statuses, hosting targets, vendor postures
+       * and validation history that are *targets / reference posture*,
+       * not in-force authorizations. The sticky CAPCO bar makes that
+       * impossible to miss from row 8 of a CDAO conference room. */}
+      <UnbuiltBanner
+        sticky
+        headline="UNBUILT · MODEL SUPPLY CHAIN · NO ATO · FEDRAMP STATUSES ARE TARGETS"
+        subline="PRE-ATO · NOT ACCREDITED · VALIDATION & VENDOR ROWS ARE REFERENCE"
+      />
+      <div className="flex flex-1 flex-col p-6">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest">
@@ -84,9 +101,30 @@ export function ModelRegistryView() {
           <div className="mt-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             Registry version {data.registry_version ?? "unknown"} · maintained by {data.owner ?? "SPIRE Engineering"}
           </div>
+          <p className="mt-3 max-w-3xl spire-body">
+            <span className="font-semibold text-[var(--color-text)]">
+              What is built today:
+            </span>{" "}
+            the registry schema, the per-model card surface, and the
+            cross-links into PULSE / SENTRY. The numbers below come from
+            <span className="font-mono"> dataset/data/model_registry.json</span>.
+            <br />
+            <span className="font-semibold text-[var(--color-text)]">
+              What is planned, not built:
+            </span>{" "}
+            every ATO authorization, FedRAMP package, and field-deployed
+            validation run. Where a row lacks a real artifact it reads
+            <span className="ml-1 font-mono italic">TBD — placeholder</span>;
+            cards that describe target posture are stamped
+            <span className="ml-1 font-semibold" style={{ color: UNBUILT_BG }}>
+              PRE-ATO · NOT ACCREDITED
+            </span>
+            so a single screenshot cannot read as "shipped".
+          </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <ClassificationBadge classification="UNCLASSIFIED" />
+          <PreAtoStamp title="SPIRE has no ATO. The supply-chain registry on this page is reference posture." />
           <FreshnessHeader loadedAt={loadedAt} refreshing={refreshing} onRefresh={refresh} />
         </div>
       </div>
@@ -127,6 +165,7 @@ export function ModelRegistryView() {
         Honesty over hand-waving — placeholder fields are labelled "TBD — placeholder" rather than fabricated.
         D1 (PULSE model card with baselines) owns the in-PULSE summary; this lane owns the canonical detail.
       </div>
+      </div>
     </div>
   );
 }
@@ -140,6 +179,10 @@ function SupplyChainHeader({ g }: { g: SupplyChainAtAGlance }) {
   // legitimately-N/A model doesn't read as a finding.
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      {/* Task #107 — repeat the unbuilt strip inside the at-a-glance
+       * card so a screenshot of just this tile cannot be paraded as a
+       * shipped FedRAMP / hosting compliance dashboard. */}
+      <SectionUnbuiltStrip headline="Targets, not authorizations · FedRAMP / hosting / vendor rows describe planned posture" />
       <div className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
         Supply chain at a glance
       </div>

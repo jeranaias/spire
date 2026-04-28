@@ -19,6 +19,11 @@ import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
+import {
+  PreAtoStamp,
+  SectionUnbuiltStrip,
+  UnbuiltBanner,
+} from "../../components/UnbuiltStamp";
 import { useRegistryFetch } from "./useRegistryFetch";
 import { DdilFreshnessBanner, FreshnessHeader, RefreshErrorBanner } from "./RegistryFreshness";
 
@@ -117,7 +122,18 @@ export function ModelDetailView() {
   );
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
+    <div className="flex h-full flex-col overflow-y-auto">
+      {/* Task #107 — same projection-scale honesty banner the registry
+       * index wears. The detail card surfaces ATO, FedRAMP, vendor and
+       * validation rows that are *target posture*, not in-force. The
+       * sticky CAPCO bar makes that legible from the back of a CDAO
+       * conference room. */}
+      <UnbuiltBanner
+        sticky
+        headline="UNBUILT · MODEL CARD · NO ATO · FEDRAMP & VALIDATION ROWS ARE TARGETS"
+        subline="PRE-ATO · NOT ACCREDITED · TBD ROWS ARE HONEST PLACEHOLDERS"
+      />
+      <div className="flex flex-1 flex-col p-6">
       <div className="mb-3">
         <Link
           to="/admin/models"
@@ -139,6 +155,7 @@ export function ModelDetailView() {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <ClassificationBadge classification="UNCLASSIFIED" />
+          <PreAtoStamp title="SPIRE has no ATO. The Authorization rows below describe target posture, not an in-force authorization." />
           <FreshnessHeader loadedAt={loadedAt} refreshing={refreshing} onRefresh={refresh} />
         </div>
       </div>
@@ -193,6 +210,7 @@ export function ModelDetailView() {
           </Button>
         </Link>
       </div>
+      </div>
     </div>
   );
 }
@@ -208,6 +226,11 @@ function ImplementationCard({ impl, headline }: { impl: ModelImplementation; hea
     acc != null && acc >= 0.85 ? "ok" : acc != null && acc >= 0.75 ? "warn" : "neutral";
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      {/* Task #107 — in-card unbuilt strip. The Authorization /
+       * FedRAMP / Validation history / Inference cost grids below are
+       * target posture, not in-force. The strip keeps any single-card
+       * screenshot honest. */}
+      <SectionUnbuiltStrip headline="Target posture · Authorization, FedRAMP, validation, and inference-cost rows are reference, not in-force" />
       <div className="mb-3 flex items-baseline justify-between">
         <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
           {headline} · {impl.kind}

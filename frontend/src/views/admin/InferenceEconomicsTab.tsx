@@ -26,6 +26,12 @@ import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { LinkStatusStrip, commsCadenceMultiplier } from "../../components/LinkStatusStrip";
 import { ErrorState, LoadingState } from "../../components/ui";
+import {
+  PreAtoStamp,
+  SectionUnbuiltStrip,
+  UnbuiltBanner,
+  UNBUILT_BG,
+} from "../../components/UnbuiltStamp";
 import { AdminTabs } from "../AdminView";
 
 export function InferenceEconomicsView() {
@@ -40,7 +46,19 @@ export function InferenceEconomicsView() {
     );
   }
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-6">
+    <div className="flex h-full flex-col overflow-y-auto">
+      {/* Task #107 — projection-scale honesty banner. The rate card is
+       * built from public list prices; the per-Marine extrapolation has
+       * no fielded base; "served locally" / IL-5 fit on every tier is a
+       * target, not an in-force authorization. The sticky CAPCO bar
+       * keeps the cost numbers below from being paraded as a fielded
+       * cost benchmark. */}
+      <UnbuiltBanner
+        sticky
+        headline="UNBUILT · COST MODEL · LIST-PRICE RATES · 180K EXTRAPOLATION HAS NO FIELDED BASE"
+        subline="PRE-ATO · NOT ACCREDITED · IL-5 FIT IS TARGET, NOT IN-FORCE"
+      />
+      <div className="flex flex-1 flex-col p-6">
       <AdminTabs active="economics" />
       {/* Link-status strip — Task #128. Mounted on the economics surface
        * so a security manager scanning cost telemetry sees a degraded
@@ -49,6 +67,7 @@ export function InferenceEconomicsView() {
         <LinkStatusStrip />
       </div>
       <InferenceEconomicsTab />
+      </div>
     </div>
   );
 }
@@ -132,17 +151,47 @@ export function InferenceEconomicsTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest">
-          Admin · Inference Economics
-        </h1>
-        <div className="mt-1 spire-body-muted">
-          Per-call cost telemetry for every model invocation. Tiered model
-          ladder defaults to the cheapest sufficient model and escalates only
-          when the cheaper rung returns insufficient confidence.{" "}
-          <span className="text-[var(--color-text-muted)]">
-            Window: rolling {econ.window_seconds}s · {econ.total_calls.toLocaleString("en-US")} calls in buffer.
-          </span>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest">
+            Admin · Inference Economics
+          </h1>
+          <div className="mt-1 spire-body-muted">
+            Per-call cost telemetry for every model invocation. Tiered model
+            ladder defaults to the cheapest sufficient model and escalates only
+            when the cheaper rung returns insufficient confidence.{" "}
+            <span className="text-[var(--color-text-muted)]">
+              Window: rolling {econ.window_seconds}s · {econ.total_calls.toLocaleString("en-US")} calls in buffer.
+            </span>
+          </div>
+          {/* Task #107 — explicit "what's built / what's a target" frame.
+           * The cost numbers below are computed from a real call buffer
+           * × a published list-price rate card. They are not a fielded
+           * benchmark and they do not reflect a negotiated DoD rate. */}
+          <p className="mt-3 max-w-3xl spire-body">
+            <span className="font-semibold text-[var(--color-text)]">
+              What is built today:
+            </span>{" "}
+            the per-call cost ledger ({econ.total_calls.toLocaleString("en-US")} calls in
+            buffer), the tier ladder, and the live extrapolation math.
+            <br />
+            <span className="font-semibold text-[var(--color-text)]">
+              What is planned, not built:
+            </span>{" "}
+            negotiated rate-card dollars, an IL-5-resident inference plane,
+            and any fielded "$/Marine/day" baseline. The
+            <span className="ml-1 font-mono">$/1k tok</span> rates are public
+            list prices; <span className="font-mono">LOCAL</span> on a tier
+            is a target, not an in-force authorization. Numbers carry the
+            <span className="ml-1 font-semibold" style={{ color: UNBUILT_BG }}>
+              PRE-ATO · NOT ACCREDITED
+            </span>{" "}
+            stamp so a single screenshot of the rate card or the 180k panel
+            cannot read as a fielded cost benchmark.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <PreAtoStamp title="Cost telemetry is computed against public list-price rates. SPIRE has no negotiated DoD rate card and no fielded 180k-Marine baseline." />
         </div>
       </div>
 
@@ -320,6 +369,12 @@ function TopCallSites({ econ }: { econ: InferenceEconomics }) {
 function RateCardBlock({ econ }: { econ: InferenceEconomics }) {
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      {/* Task #107 — the rate-card numbers below are public list prices,
+       * not negotiated DoD rates, and the LOCAL flag on each tier is a
+       * target hosting posture, not an in-force authorization. The
+       * in-card strip keeps any single-card screenshot of the rate card
+       * from being paraded as a fielded cost contract. */}
+      <SectionUnbuiltStrip headline="List-price rates · LOCAL flag is target hosting posture, not in-force authorization" />
       <div className="mb-3 flex items-baseline justify-between">
         <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
           Model Ladder · Rate Card
@@ -452,6 +507,11 @@ function DefendCostPanel({ observedMix }: { observedMix: Record<string, number> 
 
   return (
     <div className="rounded-md border-2 border-[var(--color-warning)] bg-[var(--color-surface)] p-4">
+      {/* Task #107 — the 180k-Marine extrapolation has no fielded base.
+       * Every dollar number in this panel is rate-card × synthetic mix,
+       * not a measured field cost. The strip keeps that legible if a
+       * single screenshot of this panel ends up in a deck. */}
+      <SectionUnbuiltStrip headline="No fielded 180k-Marine baseline · numbers are rate-card × synthetic mix" />
       <div className="mb-3 flex items-baseline justify-between">
         <div className="font-mono text-xs uppercase tracking-widest" style={{ color: "var(--color-warning)" }}>
           ◢◤ Defend the Cost · 180,000-Marine extrapolation

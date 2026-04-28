@@ -9,10 +9,11 @@ Key capabilities include:
 - Providing a REST API and a dynamic frontend.
 - Implementing a comprehensive authentication system with role-based access control.
 - Managing classification and export controls for sensitive data.
-- Integrating with external logistics systems and simulating communication states.
+- Integrating with external logistics systems (GCSS-MC, OMS-UCI, MIL-STD-6016).
+- Simulating communication states for disaster preparedness.
 - Maintaining a model registry for AI/ML supply chain transparency.
 - Offering a "Decision Bridge" dashboard for critical decision-making.
-- Supporting scenario-based vignettes for training and demonstration.
+- Supporting scenario-based vignettes for training and demonstrations.
 
 ## User Preferences
 
@@ -28,7 +29,7 @@ The SPIRE application features a clear separation between its backend and fronte
 
 ### UI/UX Decisions
 - **Frontend Technologies**: React 19, Vite 8, TypeScript, Tailwind 4, MapLibre, Recharts, Zustand, React Router.
-- **Authentication UI**: CAC cert-selection splash with mocked Marine roles, identity pill, and role badges in the TopBar.
+- **Authentication UI**: CAC cert-selection splash with mocked Marine roles, identity pill, and role badges in the TopBar, including specific UI elements for classification, operational indicators, and role-based access.
 - **Classification Display**: Visual representation of data classification levels.
 - **Joint COP Preview**: A simulated Navy/Joint "JLTC" shell with distinct styling and communication control for disaster preparedness drills.
 - **Decision Bridge**: A 6x2 grid layout optimized for 1920x1080 resolution.
@@ -66,7 +67,7 @@ The SPIRE application features a clear separation between its backend and fronte
 - **Development Environment**: Frontend (Vite dev server on `0.0.0.0:5000`) proxies API requests to Backend (FastAPI on `127.0.0.1:8000`).
 - **Production Deployment**: `uvicorn backend.main:app --host 0.0.0.0 --port 5000` serves the frontend from `/` and API from `/api/*`.
 - **CORS Configuration**: Widened for Replit's proxied iframe origin.
-- **Single Source of Truth**: Backend serves as the truth source for core application states.
+- **Single Source of Truth**: Backend serves as the truth source for core application states including authentication, classification, and scenario state.
 - **Modularity**: Design system primitives, dedicated modules, and separate routes for various functionalities.
 - **Determinism**: Canonical seeded dataset ensures consistent content across boots.
 - **Security**: Role-based gating, audit logging, and classification enforcement.
@@ -83,5 +84,5 @@ The SPIRE application features a clear separation between its backend and fronte
 - **GCSS-MC**: External logistics system (reference implementation).
 - **OMS-UCI**: External system for Joint COP export.
 - **MIL-STD-6016 (Link 16)**: External standard for Joint COP export.
-- **Gemma 4 26B FP8**: Self-hosted LLM model.
+- **Gemma 4 26B FP8**: Self-hosted LLM model (`copilot-llm`).
 - **Thornveil proprietary**: Proprietary model (`thermalhawk-detector`).
