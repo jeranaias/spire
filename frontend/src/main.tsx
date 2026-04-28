@@ -115,6 +115,17 @@ const DhaRescueView = lazyWithRecovery(() => import("./views/DhaRescueView").the
 // `?role=...` so the backend's scoping filter applies per-call.
 registerRoleSource(() => useSpireStore.getState().role);
 
+// Test bridge — expose the Zustand store on `window` in dev/test builds so
+// Playwright e2e specs (e.g. tests/playwright/decision_bridge_drill.spec.ts)
+// can assert preselection state (selectedBuildingId / selectedUnitId) that
+// the corresponding view consumes invisibly through a MapLibre WebGL layer
+// or a deep-link router state — neither of which is reliably DOM-testable.
+// Guarded behind import.meta.env.DEV so the bridge never ships to a
+// production bundle.
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as { __spireStore?: typeof useSpireStore }).__spireStore = useSpireStore;
+}
+
 // MDM 2026 stage-pivot — hydrate `stageMode` from the URL hash query
 // string before the store renders. HashRouter parks the query inside the
 // hash (`#/path?stage=1`), so we parse the hash first and fall back to a
