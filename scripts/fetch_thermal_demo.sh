@@ -13,20 +13,20 @@
 #
 # Usage:
 #   bash scripts/fetch_thermal_demo.sh
-#   export SPIRE_THERMALHAWK_WEIGHTS=$(pwd)/data/thermal_demo/thermalhawk_best.pt
+#   export SPIRE_THERMALHAWK_WEIGHTS=$(pwd)/data/thermal_demo/thermalhawk_wem_best.pt
 #   export SPIRE_THERMALHAWK_FRAMES=$(pwd)/data/thermal_demo/extracted/train/images
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET_DIR="$ROOT/data/thermal_demo"
-TARGET_CKPT="$TARGET_DIR/thermalhawk_best.pt"
+TARGET_CKPT="$TARGET_DIR/thermalhawk_wem_best.pt"
 TARGET_ZIP="$TARGET_DIR/thermal_drone.zip"
 TARGET_FRAMES="$TARGET_DIR/extracted"
 
 mkdir -p "$TARGET_DIR"
 
 # 1. Checkpoint — copy from local hawkstack archive if present.
-HAWKSTACK_CKPT="/d/projects/hawkstack/gh200_archive/tmp_checkpoints/thermalhawk_best.pt"
+HAWKSTACK_CKPT="/d/projects/hawkstack/gh200_archive/tmp_checkpoints/thermalhawk_wem_best.pt"
 if [ ! -f "$TARGET_CKPT" ] && [ -f "$HAWKSTACK_CKPT" ]; then
   cp "$HAWKSTACK_CKPT" "$TARGET_CKPT"
   echo "[fetch] copied ThermalHawk weights to $TARGET_CKPT"

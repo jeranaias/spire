@@ -6,10 +6,14 @@ from datetime import datetime, timedelta
 from statistics import mean
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from ..persistence import feedback_summary, record_pulse_feedback
-from ..scoping import allowed_units, filter_assets, filter_units
+from ..auth import current_role, current_role_optional
+from ..persistence import feedback_summary, record_pulse_feedback, log as audit_log
+from ..scoping import (
+    allowed_units, filter_assets, filter_units,
+    require_role, PULSE_VIEW_ROLES,
+)
 from ..state import (
     CanonicalDataset,
     get_dataset,
@@ -69,7 +73,8 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 @router.get("/fleet-overview")
-async def fleet_overview(role: Optional[str] = None):
+async def fleet_overview(role: str = Depends(current_role)):
+    require_role(role, PULSE_VIEW_ROLES, "pulse.view")
     ds = get_dataset()
     last_all = last_day_snapshots(ds)
     if not last_all:
@@ -246,7 +251,9 @@ def _severity_rank(s: str) -> int:
 # ---------------------------------------------------------------------------
 
 @router.get("/risk-board")
-async def risk_board(top: int = Query(20, ge=1, le=100), role: Optional[str] = None):
+async def risk_board(top: int = Query(20, ge=1, le=100),
+                     role: str = Depends(current_role)):
+    require_role(role, PULSE_VIEW_ROLES, "pulse.view")
     ds = get_dataset()
     allowed = allowed_units(ds, role)
     scored = top_risk(ds, n=top * 3)  # oversample then filter
@@ -421,7 +428,7 @@ async def predict_failures(
     asset_id: Optional[str] = None,
     horizon_days: int = Query(14, ge=3, le=60),
     threshold: float = Query(0.4, ge=0.0, le=0.99),
-    role: Optional[str] = None,
+    role: str = Depends(current_role),
 ):
     """Per-asset predicted-failure surface.
 
@@ -432,6 +439,7 @@ async def predict_failures(
     The prediction engine is rule-based today (engine=rule_based_v1).
     When J2 weights ship, /pulse/predict-failures swaps in the trained
     head and engine flips to `j2_v1` automatically — same response shape."""
+    require_role(role, PULSE_VIEW_ROLES, "pulse.view")
     ds = get_dataset()
     allowed = allowed_units(ds, role)
 
@@ -515,7 +523,7 @@ async def recommend_actions(
     unit: Optional[str] = None,
     asset_id: Optional[str] = None,
     top: int = Query(5, ge=1, le=20),
-    role: Optional[str] = None,
+    role: str = Depends(current_role),
 ):
     """Rank candidate actions (cannibalize / expedite / cross-level /
     redistribute) for a unit or specific asset. Returns each option with
@@ -526,6 +534,7 @@ async def recommend_actions(
     board state. Safe to call read-only; the approval step is where
     artifacts are actually created (cannibalization propose endpoint,
     requisition draft, etc.)."""
+    require_role(role, PULSE_VIEW_ROLES, "pulse.view")
     if not _REPLENISHMENT_AVAILABLE:
         raise HTTPException(status_code=503, detail="replenishment rates not loaded")
     ds = get_dataset()
@@ -750,11 +759,18 @@ async def recommend_actions(
 
 
 @router.get("/assets/{asset_id}")
-async def asset_deep_dive(asset_id: str):
+async def asset_deep_dive(asset_id: str, role: str = Depends(current_role)):
+    require_role(role, PULSE_VIEW_ROLES, "pulse.view")
     ds = get_dataset()
     asset = ds.asset(asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail="asset not found")
+    # Walkthrough audit — bug #6: deep-dive used to skip the unit-scope
+    # check, so a maintenance_chief restricted to CLB-6 could read any
+    # asset in the fleet by guessing the id. Enforce scope here too.
+    allowed = allowed_units(ds, role)
+    if allowed is not None and asset.unit_name not in allowed:
+        raise HTTPException(status_code=403, detail="asset out of scope")
 
     score = risk_score(ds, asset_id)
 
@@ -825,7 +841,8 @@ async def asset_deep_dive(asset_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/cannibalization")
-async def cannibalization(role: Optional[str] = None):
+async def cannibalization(role: str = Depends(current_role)):
+    require_role(role, PULSE_VIEW_ROLES, "pulse.view")
     ds = get_dataset()
     allowed = allowed_units(ds, role)
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
@@ -880,7 +897,17 @@ async def cannibalization(role: Optional[str] = None):
 
     matches = []
     for ev in ds.cannib_events:
-        if allowed is not None and ev.recipient_unit not in allowed and ev.donor_unit not in allowed:
+        # Bug #5 (closed): the predicate was written as
+        #   `recipient not in allowed and donor not in allowed`
+        # which only skipped events where BOTH endpoints were out of
+        # scope — meaning a maintenance_chief restricted to CLB-6 still
+        # saw cross-unit events touching MALS-31, leaking the peer
+        # unit's asset id, donor SR number, and readiness impact note.
+        # The correct predicate skips the event whenever EITHER side is
+        # out of scope, so only fully in-scope cannib events render.
+        if allowed is not None and (
+            ev.recipient_unit not in allowed or ev.donor_unit not in allowed
+        ):
             continue
         is_self = ev.donor_unit == ev.recipient_unit
         # Walkthrough #42 — surface work-order details on completed matches:
@@ -931,11 +958,14 @@ _PROPOSED_MATCHES: list[dict] = []
 
 
 @router.post("/cannibalization/propose")
-async def propose_cannibalization(payload: dict):
+async def propose_cannibalization(payload: dict = Body(default={}),
+                                  role: str = Depends(current_role)):
     """Accept an operator-proposed cross-level. The match is NOT executed
     against the dataset (that would mutate canonical fixtures); it is logged
-    to the audit chain with a PROPOSED status. A production build would add a
+    to the audit chain with a PROPOSED status — actor is the bearer-resolved
+    role, never a body-supplied string. A production build would add a
     review gate + approval chain before committing."""
+    require_role(role, PULSE_VIEW_ROLES, "pulse.cannibalization.propose")
     recipient_sr = payload.get("recipient_sr")
     donor_sr = payload.get("donor_sr")
     nsn = payload.get("nsn")
@@ -949,13 +979,13 @@ async def propose_cannibalization(payload: dict):
         "nsn": nsn,
         "status": "PROPOSED",
         "proposed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "proposed_by": role,
     }
     _PROPOSED_MATCHES.append(proposal)
     try:
-        from ..persistence import audit_log
         audit_log(
             "cannibalization_propose",
-            actor=payload.get("actor_role", "unknown"),
+            actor=role,
             subject_id=proposal["proposal_id"],
             payload=proposal,
         )
@@ -969,7 +999,9 @@ async def propose_cannibalization(payload: dict):
 # ---------------------------------------------------------------------------
 
 @router.get("/forecast")
-async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=30)):
+async def forecast(unit: Optional[str] = None,
+                   window: int = Query(14, ge=7, le=30),
+                   role: str = Depends(current_role)):
     """Monte Carlo readiness projection.
 
     Fits slope + residual std on the last 30 days of history, then samples
@@ -980,13 +1012,24 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
         rendering on the frontend)
       - threshold + probability-of-cross readout
     """
+    require_role(role, PULSE_VIEW_ROLES, "pulse.view")
     import random as _r
     import math
 
     ds = get_dataset()
+    # Per-unit scoping: a scoped role (e.g. maintenance_chief) must only see
+    # units inside its allowed set. If they pass an explicit `?unit=`, deny
+    # cross-unit reads outright; if they omit it, restrict the aggregate to
+    # in-scope units instead of returning fleet-wide data.
+    allowed = allowed_units(ds, role)
+    if unit and allowed is not None and unit not in allowed:
+        raise HTTPException(status_code=403, detail="unit out of scope")
+
     by_date = defaultdict(lambda: defaultdict(Counter))
     for s in ds.snapshots:
         if unit and s.unit_name != unit:
+            continue
+        if not unit and allowed is not None and s.unit_name not in allowed:
             continue
         by_date[s.snapshot_date]["all"][s.readiness_code] += 1
 
@@ -1108,7 +1151,11 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
 # ---------------------------------------------------------------------------
 
 @router.post("/feedback/{asset_id}")
-async def feedback(asset_id: str, payload: dict):
+async def feedback(asset_id: str, payload: dict = Body(default={}),
+                   role: str = Depends(current_role)):
+    """Record per-asset thumbs-up/down on a risk prediction. Audit trail
+    keeps the bearer-resolved role rather than anything from the body."""
+    require_role(role, PULSE_VIEW_ROLES, "pulse.feedback")
     correct = bool(payload.get("correct", False))
     note = payload.get("note", "")
     record_pulse_feedback(asset_id, correct, note=note)

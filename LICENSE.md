@@ -174,7 +174,7 @@ The integration that loads Thornveil's trained ThermalHawk weights inside the SP
 - `frontend/src/components/ThermalHawkFeed.tsx` — operator-facing live-feed surface with pause control, latency HUD, model card overlay
 - BASTION sim wiring that runs a real forward pass on each sim trigger and reports measured latency + box count
 
-The vendored architecture file `backend/ml/thermalhawk.py` is a verbatim extraction of the Thornveil proprietary architecture detector class from a Thornveil training script. The class definition itself (Section 2.1: ThermalHawk-Nano v2) is Thornveil pre-existing IP licensed for hackathon use under Section 4; the *wiring* that makes it run inside SPIRE is government-owned hackathon product.
+The vendored architecture file `backend/ml/thermalhawk_wem.py` is a verbatim extraction of the Thornveil proprietary architecture detector class from a Thornveil training script. The class definition itself (Section 2.1: ThermalHawk-Nano v2) is Thornveil pre-existing IP licensed for hackathon use under Section 4; the *wiring* that makes it run inside SPIRE is government-owned hackathon product.
 
 ---
 
@@ -243,9 +243,9 @@ SPIRO Operator Copilot ───────────────►   RigRun
                                            classification-aware proxy on
                                            Thornveil-managed compute)
 
-* Models trained during the event are gov't owned; the training methodology
-  (HawkStack/Thornveil training methodology) used to produce them is Thornveil IP. The gov't
-  may retrain models using any methodology of its choosing.
+* Models trained during the event are gov't owned; the Thornveil training
+  methodology used to produce them is Thornveil IP. The gov't may retrain
+  models using any methodology of its choosing.
 ```
 
 ---

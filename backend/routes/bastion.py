@@ -10,9 +10,13 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
-from ..scoping import allowed_units
+from ..auth import current_role
+from ..scoping import (
+    allowed_units, require_role,
+    BASTION_VIEW_ROLES,
+)
 from ..state import get_dataset, last_day_snapshots
 from .streams import all_streams
 from ..fusion import fuse_alerts
@@ -99,7 +103,8 @@ UNIT_COORDS = {
 # ---------------------------------------------------------------------------
 
 @router.get("/cop")
-async def cop(role: Optional[str] = None):
+async def cop(role: str = Depends(current_role)):
+    require_role(role, BASTION_VIEW_ROLES, "bastion.cop")
     ds = get_dataset()
     inst = _load_installation()
     last = last_day_snapshots(ds)
@@ -176,7 +181,8 @@ async def cop(role: Optional[str] = None):
 # ---------------------------------------------------------------------------
 
 @router.get("/alerts")
-async def alerts(limit: int = 30, role: Optional[str] = None):
+async def alerts(limit: int = 30, role: str = Depends(current_role)):
+    require_role(role, BASTION_VIEW_ROLES, "bastion.alerts")
     ds = get_dataset()
     allowed = allowed_units(ds, role)
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
@@ -354,17 +360,20 @@ def _is_snoozed(state: dict) -> bool:
 
 
 @router.post("/alerts/{alert_id}/{action}")
-async def alert_action(alert_id: str, action: str):
+async def alert_action(alert_id: str, action: str,
+                       role: str = Depends(current_role)):
     """ack / snooze / resolve / unack a single alert.
 
     The handler is intentionally tolerant of unknown ids — synthetic alerts
     regenerate their ids on every poll for some sources, so we accept any
     id and keep state keyed by it. Unknown actions return 400."""
+    require_role(role, BASTION_VIEW_ROLES, "bastion.alerts.action")
     now = datetime.utcnow()
     if action == "ack":
         _ALERT_STATE[alert_id] = {
             "status": "acknowledged",
             "at": now.isoformat(timespec="seconds") + "Z",
+            "actor_role": role,
         }
     elif action == "snooze":
         until = now + timedelta(hours=1)
@@ -372,11 +381,13 @@ async def alert_action(alert_id: str, action: str):
             "status": "snoozed",
             "at": now.isoformat(timespec="seconds") + "Z",
             "snooze_until": until.isoformat(timespec="seconds") + "Z",
+            "actor_role": role,
         }
     elif action == "resolve":
         _ALERT_STATE[alert_id] = {
             "status": "resolved",
             "at": now.isoformat(timespec="seconds") + "Z",
+            "actor_role": role,
         }
     elif action == "unack":
         _ALERT_STATE.pop(alert_id, None)
@@ -386,10 +397,11 @@ async def alert_action(alert_id: str, action: str):
 
 
 @router.get("/fused-threats")
-async def fused_threats(role: Optional[str] = None):
+async def fused_threats(role: str = Depends(current_role)):
     """Return the current fused-threat list independently. Useful for the
     BASTION fused-threats panel that polls more aggressively than the full
     alert stream."""
+    require_role(role, BASTION_VIEW_ROLES, "bastion.fused_threats")
     ds = get_dataset()
     allowed = allowed_units(ds, role)
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
@@ -494,7 +506,8 @@ def _response_checklist_for(incident_type: str, severity: str, *, location: Opti
 
 
 @router.get("/incidents/{incident_id}/response")
-async def incident_response(incident_id: str):
+async def incident_response(incident_id: str, role: str = Depends(current_role)):
+    require_role(role, BASTION_VIEW_ROLES, "bastion.incident.response")
     ds = get_dataset()
     incident = ds.incident(incident_id)
     if incident is None:
@@ -516,7 +529,8 @@ async def incident_response(incident_id: str):
 
 
 @router.get("/incidents")
-async def list_incidents(limit: int = 50):
+async def list_incidents(limit: int = 50, role: str = Depends(current_role)):
+    require_role(role, BASTION_VIEW_ROLES, "bastion.incidents")
     ds = get_dataset()
     out = []
     for i in list(ds.incidents)[-limit:]:
@@ -583,10 +597,12 @@ def _build_thermalhawk_model_info() -> dict:
 
 
 @router.post("/simulate/thermalhawk-detection")
-async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
+async def simulate_thermalhawk_detection(payload: Optional[dict] = Body(default=None),
+                                         role: str = Depends(current_role)):
     """Kicks off the scripted demo beat: drone detected over CLB-6 motor pool
     with ThermalHawk-Nano; auto-correlates with PULSE's CLB-6 readiness
     state; escalates to CRITICAL; emits response checklist."""
+    require_role(role, BASTION_VIEW_ROLES, "bastion.simulate")
     payload = payload or {}
     target_unit = payload.get("unit", "CLB-6")
 
@@ -707,7 +723,8 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
 
 
 @router.post("/simulate/clear/{sim_id}")
-async def clear_simulation(sim_id: str):
+async def clear_simulation(sim_id: str, role: str = Depends(current_role)):
+    require_role(role, BASTION_VIEW_ROLES, "bastion.simulate.clear")
     if sim_id in _ACTIVE_SIMS:
         del _ACTIVE_SIMS[sim_id]
     return {"ok": True}
@@ -718,12 +735,13 @@ async def clear_simulation(sim_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/thermalhawk/feed")
-async def thermalhawk_feed(frame: int = 0):
+async def thermalhawk_feed(frame: int = 0, role: str = Depends(current_role)):
     """Live thermal feed endpoint — gated behind a Thornveil license.
 
     Public builds return 503. Production deploys with Thornveil's
     private ML package installed serve a per-frame inference payload.
     Mechanism is not exposed in this repo."""
+    require_role(role, BASTION_VIEW_ROLES, "bastion.thermalhawk.feed")
     try:
         from thornveil_ml.thermal_feed import get_thermal_frame_with_detections  # type: ignore
     except Exception:
@@ -738,11 +756,12 @@ async def thermalhawk_feed(frame: int = 0):
 
 
 @router.get("/thermalhawk/feed/info")
-async def thermalhawk_feed_info():
+async def thermalhawk_feed_info(role: str = Depends(current_role)):
     """Public-facing live-feed metadata. Capability + license boundary
     only — no source-dataset specifics, no threshold tuning, no model
     architecture. Production deploys with the Thornveil ML package
     installed surface the richer detail privately."""
+    require_role(role, BASTION_VIEW_ROLES, "bastion.thermalhawk.info")
     from ..model_hooks import STATE as MS
     try:
         from thornveil_ml.thermal_feed import (  # type: ignore
@@ -773,11 +792,12 @@ async def thermalhawk_feed_info():
 
 @router.get("/tmrs")
 async def list_tmrs(limit: int = 50, status: Optional[str] = None,
-                    role: Optional[str] = None):
+                    role: str = Depends(current_role)):
     """Return the synthetic TMR records generated alongside the rest of the
     canonical dataset. Filtered by `status` if supplied (Draft/Submitted/
     Approved/Closed). Role-scoped via the standard allowed_units gate so a
     Maintenance Chief only sees their unit's submissions."""
+    require_role(role, BASTION_VIEW_ROLES, "bastion.tmrs")
     ds = get_dataset()
     tmrs = list(getattr(ds, "tmrs", []) or [])
     allowed = allowed_units(ds, role)
@@ -818,7 +838,8 @@ from .llm import call_llm_chat  # noqa: E402
 
 
 @router.post("/nl-query")
-async def nl_query(payload: dict):
+async def nl_query(payload: dict = Body(default={}),
+                   role: str = Depends(current_role)):
     """Natural-language query entry point. Detects intent (TMR submission vs
     general question) and routes appropriately:
       - TMR triggers → LLM-backed structured extraction (Gemma4 via RigRun
@@ -826,6 +847,7 @@ async def nl_query(payload: dict):
       - Everything else → LLM general-purpose answer with a defense-context
         system prompt, also with rule-based fallback
     """
+    require_role(role, BASTION_VIEW_ROLES, "bastion.nl_query")
     text = payload.get("text", "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
@@ -843,7 +865,7 @@ async def nl_query(payload: dict):
     # readiness, deadlined assets in scope — so the model never says
     # "no data available for CLB-6" while CLB-6 data is on screen next
     # to the input.
-    grounding = _build_grounding_context(role=payload.get("role"))
+    grounding = _build_grounding_context(role=role)
     try:
         sys_prompt = (
             "You are SPIRO, the operator-assistant aspect of SPIRE. The operator is a Marine "
