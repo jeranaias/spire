@@ -13,7 +13,14 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import session_role
-from ..scoping import allowed_units, require_role, BASTION_SIMULATE_ROLES
+from ..scoping import (
+    BASTION_SIMULATE_ROLES,
+    allowed_sectors,
+    allowed_units,
+    filter_buildings,
+    filter_perimeter,
+    require_role,
+)
 from ..state import get_dataset, last_day_snapshots
 from .streams import all_streams
 from ..fusion import fuse_alerts
@@ -157,6 +164,17 @@ async def cop(role: Optional[str] = None):
             "data_integrity_flags": dq_count,
         })
 
+    # F2 — installation map scoping. Buildings filtered by occupant-unit
+    # affiliation (or shared-infra sector association); ECPs and rally
+    # points filtered by sector. Sensitive types (ammunition, ARMS, fuel,
+    # hazmat, comms nodes, TOC) and CI/hazmat-flagged buildings are
+    # stripped from any non-INSTALLATION_FULL_VIEW_ROLES payload so a
+    # battalion-scope CAC isn't handed the OSINT installation product.
+    scoped_buildings = filter_buildings(inst["buildings"], ds, role)
+    sectors = allowed_sectors(ds, role, inst["buildings"])
+    scoped_ecps = filter_perimeter(inst["ecps"], sectors)
+    scoped_rps = filter_perimeter(inst.get("rally_points", []), sectors)
+
     return {
         "installation": inst["installation"],
         "center": {
@@ -164,10 +182,10 @@ async def cop(role: Optional[str] = None):
             "lon": inst["installation"]["center_lon"],
         },
         "units": units_out,
-        "buildings": inst["buildings"],
-        "buildings_count": len(inst["buildings"]),
-        "ecps": inst["ecps"],
-        "rally_points": inst.get("rally_points", []),
+        "buildings": scoped_buildings,
+        "buildings_count": len(scoped_buildings),
+        "ecps": scoped_ecps,
+        "rally_points": scoped_rps,
         "response_forces_count": len(inst["response_forces"]),
         "as_of": last_day.isoformat(),
     }

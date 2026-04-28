@@ -35,7 +35,9 @@
         "comms": "Node 1"
       },
       "lat": 34.723054,
-      "lon": -77.343689
+      "lon": -77.343689,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "PMO-101",
@@ -54,7 +56,9 @@
         "comms": "Node 1"
       },
       "lat": 34.722605,
-      "lon": -77.344071
+      "lon": -77.344071,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "CLB6-HQ",
@@ -73,7 +77,9 @@
         "comms": "Node 3"
       },
       "lat": 34.730061,
-      "lon": -77.36194
+      "lon": -77.36194,
+      "sector": "NW",
+      "occupant_unit": "CLB-6"
     },
     {
       "id": "CLB6-MP",
@@ -93,7 +99,9 @@
       },
       "notes": "Contains 60% of CLB-6 operational vehicles",
       "lat": 34.729342,
-      "lon": -77.360519
+      "lon": -77.360519,
+      "sector": "NW",
+      "occupant_unit": "CLB-6"
     },
     {
       "id": "TANK-MP",
@@ -112,7 +120,9 @@
         "comms": "Node 3"
       },
       "lat": 34.724312,
-      "lon": -77.367405
+      "lon": -77.367405,
+      "sector": "NW",
+      "occupant_unit": "3/6 Marines"
     },
     {
       "id": "LAR-MP",
@@ -131,7 +141,9 @@
         "comms": "Node 3"
       },
       "lat": 34.72548,
-      "lon": -77.363579
+      "lon": -77.363579,
+      "sector": "NW",
+      "occupant_unit": "2d LAR Bn"
     },
     {
       "id": "LAAD-TOC",
@@ -150,7 +162,9 @@
         "comms": "Node 2"
       },
       "lat": 34.728264,
-      "lon": -77.348934
+      "lon": -77.348934,
+      "sector": "NW",
+      "occupant_unit": "2d LAAD Bn"
     },
     {
       "id": "BR-200",
@@ -169,7 +183,9 @@
         "comms": "Node 1"
       },
       "lat": 34.731229,
-      "lon": -77.346093
+      "lon": -77.346093,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "BR-201",
@@ -188,7 +204,9 @@
         "comms": "Node 1"
       },
       "lat": 34.731453,
-      "lon": -77.346967
+      "lon": -77.346967,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "BR-202",
@@ -207,7 +225,9 @@
         "comms": "Node 1"
       },
       "lat": 34.731768,
-      "lon": -77.347732
+      "lon": -77.347732,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "BR-203",
@@ -226,7 +246,9 @@
         "comms": "Node 1"
       },
       "lat": 34.732082,
-      "lon": -77.348497
+      "lon": -77.348497,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "BR-204",
@@ -245,7 +267,9 @@
         "comms": "Node 1"
       },
       "lat": 34.732397,
-      "lon": -77.349372
+      "lon": -77.349372,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "DFAC-1",
@@ -264,7 +288,9 @@
         "comms": "Node 1"
       },
       "lat": 34.732756,
-      "lon": -77.348169
+      "lon": -77.348169,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "GYM-1",
@@ -283,7 +309,9 @@
         "comms": "Node 1"
       },
       "lat": 34.73325,
-      "lon": -77.346967
+      "lon": -77.346967,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "MED-1",
@@ -302,7 +330,9 @@
         "comms": "Node 2"
       },
       "lat": 34.727725,
-      "lon": -77.340628
+      "lon": -77.340628,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "FD-1",
@@ -321,7 +351,9 @@
         "comms": "Node 2"
       },
       "lat": 34.724402,
-      "lon": -77.342268
+      "lon": -77.342268,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "FD-2",
@@ -340,7 +372,9 @@
         "comms": "Node 3"
       },
       "lat": 34.727636,
-      "lon": -77.358115
+      "lon": -77.358115,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "ASP-1",
@@ -360,7 +394,9 @@
       },
       "notes": "Class V storage; ordnance handling only",
       "lat": 34.734553,
-      "lon": -77.33582
+      "lon": -77.33582,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "ASP-2",
@@ -379,7 +415,9 @@
         "comms": "Node 4"
       },
       "lat": 34.735092,
-      "lon": -77.334945
+      "lon": -77.334945,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "ASP-3",
@@ -398,7 +436,9 @@
         "comms": "Node 4"
       },
       "lat": 34.733924,
-      "lon": -77.336475
+      "lon": -77.336475,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "ARMY-1",
@@ -417,7 +457,9 @@
         "comms": "Node 2"
       },
       "lat": 34.726468,
-      "lon": -77.350027
+      "lon": -77.350027,
+      "sector": "NW",
+      "occupant_unit": "3/6 Marines"
     },
     {
       "id": "ARMY-2",
@@ -436,7 +478,9 @@
         "comms": "Node 3"
       },
       "lat": 34.729792,
-      "lon": -77.362705
+      "lon": -77.362705,
+      "sector": "NW",
+      "occupant_unit": "CLB-6"
     },
     {
       "id": "FUEL-1",
@@ -455,7 +499,9 @@
         "comms": "Node 4"
       },
       "lat": 34.728803,
-      "lon": -77.337568
+      "lon": -77.337568,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "COMM-1",
@@ -474,7 +520,9 @@
         "comms": "Node 1 primary"
       },
       "lat": 34.726917,
-      "lon": -77.342705
+      "lon": -77.342705,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "COMM-2",
@@ -493,7 +541,9 @@
         "comms": "Node 3 primary"
       },
       "lat": 34.72557,
-      "lon": -77.356366
+      "lon": -77.356366,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "TOC-MAIN",
@@ -512,7 +562,9 @@
         "comms": "Node 1"
       },
       "lat": 34.723683,
-      "lon": -77.342923
+      "lon": -77.342923,
+      "sector": "NE",
+      "occupant_unit": "2/14 Marines"
     },
     {
       "id": "WAREHOUSE-1",
@@ -531,7 +583,9 @@
         "comms": "Node 3"
       },
       "lat": 34.727097,
-      "lon": -77.358771
+      "lon": -77.358771,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "WAREHOUSE-2",
@@ -550,7 +604,9 @@
         "comms": "Node 3"
       },
       "lat": 34.727456,
-      "lon": -77.358006
+      "lon": -77.358006,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "GEN-1",
@@ -569,7 +625,9 @@
         "comms": "Node 1"
       },
       "lat": 34.724941,
-      "lon": -77.341721
+      "lon": -77.341721,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "WTP-1",
@@ -588,7 +646,9 @@
         "comms": "Node 1"
       },
       "lat": 34.722695,
-      "lon": -77.333524
+      "lon": -77.333524,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "HH-1",
@@ -607,7 +667,9 @@
         "comms": "Node 2"
       },
       "lat": 34.720719,
-      "lon": -77.352978
+      "lon": -77.352978,
+      "sector": "NW",
+      "occupant_unit": "MALS-31"
     },
     {
       "id": "HH-2",
@@ -626,7 +688,9 @@
         "comms": "Node 2"
       },
       "lat": 34.727995,
-      "lon": -77.340847
+      "lon": -77.340847,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "MWR-1",
@@ -645,7 +709,9 @@
         "comms": "Node 1"
       },
       "lat": 34.733834,
-      "lon": -77.345109
+      "lon": -77.345109,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "CHURCH-1",
@@ -664,7 +730,9 @@
         "comms": "Node 1"
       },
       "lat": 34.73042,
-      "lon": -77.346311
+      "lon": -77.346311,
+      "sector": "NW",
+      "occupant_unit": null
     },
     {
       "id": "FAM-1",
@@ -683,7 +751,9 @@
         "comms": "Node 5"
       },
       "lat": 34.737068,
-      "lon": -77.325328
+      "lon": -77.325328,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "FAM-2",
@@ -702,7 +772,9 @@
         "comms": "Node 5"
       },
       "lat": 34.736619,
-      "lon": -77.324235
+      "lon": -77.324235,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "SCH-1",
@@ -721,7 +793,9 @@
         "comms": "Node 5"
       },
       "lat": 34.735271,
-      "lon": -77.322049
+      "lon": -77.322049,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "CDC-1",
@@ -740,7 +814,9 @@
         "comms": "Node 5"
       },
       "lat": 34.73572,
-      "lon": -77.322705
+      "lon": -77.322705,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "HAZ-1",
@@ -759,7 +835,9 @@
         "comms": "Node 4"
       },
       "lat": 34.721797,
-      "lon": -77.335055
+      "lon": -77.335055,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "TRAIN-1",
@@ -778,7 +856,9 @@
         "comms": "Node 6"
       },
       "lat": 34.718383,
-      "lon": -77.317896
+      "lon": -77.317896,
+      "sector": "SE",
+      "occupant_unit": null
     },
     {
       "id": "RANGE-1",
@@ -797,7 +877,9 @@
         "comms": "Node 6"
       },
       "lat": 34.715958,
-      "lon": -77.314399
+      "lon": -77.314399,
+      "sector": "SE",
+      "occupant_unit": null
     },
     {
       "id": "RANGE-2",
@@ -816,7 +898,9 @@
         "comms": "Node 6"
       },
       "lat": 34.715329,
-      "lon": -77.312759
+      "lon": -77.312759,
+      "sector": "SE",
+      "occupant_unit": null
     },
     {
       "id": "ESB-WS",
@@ -835,7 +919,9 @@
         "comms": "Node 3"
       },
       "lat": 34.728085,
-      "lon": -77.365547
+      "lon": -77.365547,
+      "sector": "NW",
+      "occupant_unit": "7th ESB"
     },
     {
       "id": "MLG-SSC",
@@ -854,7 +940,9 @@
         "comms": "Node 3"
       },
       "lat": 34.726827,
-      "lon": -77.360519
+      "lon": -77.360519,
+      "sector": "NW",
+      "occupant_unit": "3d Maint Bn"
     },
     {
       "id": "PX-1",
@@ -873,7 +961,9 @@
         "comms": "Node 1"
       },
       "lat": 34.733115,
-      "lon": -77.336803
+      "lon": -77.336803,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "COMMISS-1",
@@ -892,7 +982,9 @@
         "comms": "Node 1"
       },
       "lat": 34.732576,
-      "lon": -77.336038
+      "lon": -77.336038,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "DL-HQ",
@@ -911,7 +1003,9 @@
         "comms": "Node 2"
       },
       "lat": 34.722605,
-      "lon": -77.350683
+      "lon": -77.350683,
+      "sector": "NW",
+      "occupant_unit": "MWSS-271"
     },
     {
       "id": "CCP-ADM",
@@ -930,7 +1024,9 @@
         "comms": "Node 2"
       },
       "lat": 34.727276,
-      "lon": -77.340191
+      "lon": -77.340191,
+      "sector": "NE",
+      "occupant_unit": null
     },
     {
       "id": "GATE-H",
@@ -949,7 +1045,9 @@
         "comms": "Node 1"
       },
       "lat": 34.718203,
-      "lon": -77.353743
+      "lon": -77.353743,
+      "sector": "SW",
+      "occupant_unit": null
     },
     {
       "id": "EOD-1",
@@ -968,7 +1066,9 @@
         "comms": "Node 4"
       },
       "lat": 34.725929,
-      "lon": -77.330355
+      "lon": -77.330355,
+      "sector": "NE",
+      "occupant_unit": null
     }
   ],
   "ecps": [
@@ -982,7 +1082,8 @@
       "commercial_access": true,
       "notes": "24/7 ops, commercial vehicle inspection",
       "lat": 34.718203,
-      "lon": -77.353743
+      "lon": -77.353743,
+      "sector": "SW"
     },
     {
       "id": "ECP-2",
@@ -994,7 +1095,8 @@
       "commercial_access": false,
       "notes": "Personnel only, 0500-2200",
       "lat": 34.739763,
-      "lon": -77.365765
+      "lon": -77.365765,
+      "sector": "NW"
     },
     {
       "id": "ECP-3",
@@ -1006,7 +1108,8 @@
       "commercial_access": true,
       "notes": "Heavy equipment lane, adjacent to ASP sector",
       "lat": 34.719102,
-      "lon": -77.324235
+      "lon": -77.324235,
+      "sector": "SE"
     },
     {
       "id": "ECP-4",
@@ -1018,7 +1121,8 @@
       "commercial_access": false,
       "notes": "Opens only at FPCON ALPHA",
       "lat": 34.738865,
-      "lon": -77.313306
+      "lon": -77.313306,
+      "sector": "NE"
     }
   ],
   "rally_points": [
@@ -1028,7 +1132,8 @@
       "grid": "18S UJ 30050 70450",
       "capacity": 600,
       "lat": 34.724042,
-      "lon": -77.344454
+      "lon": -77.344454,
+      "sector": "NE"
     },
     {
       "id": "RP-BRAVO",
@@ -1036,7 +1141,8 @@
       "grid": "18S UJ 28600 71000",
       "capacity": 400,
       "lat": 34.728983,
-      "lon": -77.360301
+      "lon": -77.360301,
+      "sector": "NW"
     },
     {
       "id": "RP-CHARLIE",
@@ -1044,7 +1150,8 @@
       "grid": "18S UJ 28100 70500",
       "capacity": 300,
       "lat": 34.724492,
-      "lon": -77.365765
+      "lon": -77.365765,
+      "sector": "NW"
     },
     {
       "id": "RP-DELTA",
@@ -1052,7 +1159,8 @@
       "grid": "18S UJ 29500 70200",
       "capacity": 250,
       "lat": 34.721797,
-      "lon": -77.350465
+      "lon": -77.350465,
+      "sector": "NW"
     },
     {
       "id": "RP-ECHO",
@@ -1060,7 +1168,8 @@
       "grid": "18S UJ 30800 71200",
       "capacity": 350,
       "lat": 34.73078,
-      "lon": -77.336257
+      "lon": -77.336257,
+      "sector": "NE"
     },
     {
       "id": "RP-FOXTROT",
@@ -1068,7 +1177,8 @@
       "grid": "18S UJ 29400 70050",
       "capacity": 200,
       "lat": 34.720449,
-      "lon": -77.351557
+      "lon": -77.351557,
+      "sector": "NW"
     },
     {
       "id": "RP-GOLF",
@@ -1076,7 +1186,8 @@
       "grid": "18S UJ 31900 71900",
       "capacity": 500,
       "lat": 34.737068,
-      "lon": -77.324235
+      "lon": -77.324235,
+      "sector": "NE"
     },
     {
       "id": "RP-HOTEL",
@@ -1084,7 +1195,8 @@
       "grid": "18S UJ 32700 69700",
       "capacity": 250,
       "lat": 34.717305,
-      "lon": -77.315491
+      "lon": -77.315491,
+      "sector": "SE"
     }
   ],
   "casualty_collection_points": [
