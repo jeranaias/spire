@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
 import { TopBar } from "./components/TopBar";
 import { StatusFooter } from "./components/StatusFooter";
 import { StatusStrip } from "./components/StatusStrip";
@@ -15,6 +15,7 @@ import { Onboarding } from "./components/Onboarding";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FailsafePlayer } from "./components/FailsafePlayer";
 import { useFailsafe } from "./state/failsafe";
+import { useScenarioPlayer } from "./state/scenarioPlayer";
 import { ROLE_DEFAULT_VIEW, useSpireStore, VIEW_SCOPE } from "./state/store";
 
 // Vimium-style two-key chord routing. `g s` → SENTRY, `g p` → PULSE,
@@ -94,21 +95,34 @@ function useGoToShortcuts() {
 }
 
 // W2 Task #39 — F9 hotkey to summon the live-demo failsafe recording.
-// Confined to /demo and /pitch so an operator on BASTION never trips it.
+//
+// Task #48 (F-01): the prior gate keyed off `loc.pathname === "/demo" ||
+// "/pitch"`, which meant the moment the presenter pressed Play and the
+// scenario player navigated them out to /bastion (or /sentry, /pulse,
+// etc.) the F9 hotkey was no longer attached. That's exactly the window
+// where the failsafe is most needed — mid-run, on a module surface, with
+// the live demo hung.
+//
+// New gate: the hotkey is armed whenever a scenario is *loaded* in the
+// scenario player (`scenarioId !== null`), regardless of route. That
+// covers every state from "on /demo with the cockpit open and a scenario
+// picked" through "deep into the third beat on /pulse". An operator who
+// never opens /demo (working on BASTION normally) still won't have F9
+// bound, so it can't be tripped accidentally during day-to-day use.
+//
 // We always confirm before activating (the failsafe overrides the live
 // surface and judges should never see it unless the live demo died).
 function useFailsafeHotkey() {
-  const loc = useLocation();
+  // We intentionally subscribe to `scenarioId` (not `status`) so the
+  // hotkey stays armed across the full lifecycle — ready / playing /
+  // paused / complete — without the effect tearing down between
+  // beat-status transitions.
+  const scenarioLoaded = useScenarioPlayer((s) => s.scenarioId !== null);
   const openFullscreen = useFailsafe((s) => s.openFullscreen);
   const mode = useFailsafe((s) => s.mode);
 
   useEffect(() => {
-    const presenterRoute =
-      loc.pathname === "/demo" ||
-      loc.pathname === "/pitch" ||
-      loc.pathname.startsWith("/demo/") ||
-      loc.pathname.startsWith("/pitch/");
-    if (!presenterRoute) return;
+    if (!scenarioLoaded) return;
 
     function inField(target: EventTarget | null): boolean {
       return (
@@ -136,7 +150,7 @@ function useFailsafeHotkey() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [loc.pathname, mode, openFullscreen]);
+  }, [scenarioLoaded, mode, openFullscreen]);
 }
 
 export default function App() {

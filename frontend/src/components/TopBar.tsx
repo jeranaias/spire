@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role, type User } from "../state/store";
+import { useScenarioPlayer } from "../state/scenarioPlayer";
+import { useFailsafe } from "../state/failsafe";
 import { api, type AuthUser, type PulseDraft } from "../api";
 import { formatApiError } from "../api-retry";
 import { NodeStatus } from "./NodeStatus";
@@ -166,6 +168,7 @@ export function TopBar() {
           <CommsControl />
           <span className="hidden xl:contents"><AirGapToggle /></span>
           <span className="hidden xl:contents"><DensityToggle /></span>
+          <FailsafePill />
           <ResetDemoButton />
           <PushToJointButton role={role} />
           <DraftsBadge role={role} />
@@ -1234,6 +1237,57 @@ function PushToJointButton({ role }: { role: Role }) {
 // already deterministic under seed 42 from boot, never mutated at
 // runtime, so the next pass is bit-identical without re-running the
 // 30–60 s synthetic generator).
+// FailsafePill — Task #48 (F-01).
+//
+// The Failsafe affordance used to live only inside the /demo cockpit
+// header. The moment the presenter pressed Play, the player navigated
+// them out to /bastion / /sentry / /pulse and the on-screen Failsafe
+// button disappeared, leaving F9 as the only escape — and F9 itself was
+// route-gated to /demo + /pitch (see App.tsx, fixed in this same task).
+//
+// This pill mounts in the TopBar so it follows the presenter onto every
+// view they touch during a scripted run. It only renders when a scenario
+// is loaded so it doesn't add chrome for operators who never opened the
+// demo cockpit. The click path mirrors the cockpit button: window.confirm
+// gate (the failsafe replaces the live demo on stage — never silent),
+// then `openFullscreen()`. We deliberately don't show it while the
+// failsafe is already up — the FailsafePlayer owns its own close
+// affordance and a second trigger from the chrome would be confusing.
+function FailsafePill() {
+  const scenarioLoaded = useScenarioPlayer((s) => s.scenarioId !== null);
+  const failsafeMode = useFailsafe((s) => s.mode);
+  const openFullscreen = useFailsafe((s) => s.openFullscreen);
+
+  if (!scenarioLoaded) return null;
+  if (failsafeMode !== "off") return null;
+
+  function activate() {
+    const ok = window.confirm(
+      "Activate failsafe? The recorded backup will replace the live demo. Press OK only if the live demo has failed.",
+    );
+    if (ok) openFullscreen();
+  }
+
+  return (
+    <Pressable
+      onClick={activate}
+      block={false}
+      aria-label="Activate failsafe — replace live demo with recorded backup (F9)"
+      title="Failsafe — replace the live demo with the recorded backup (F9)"
+      className="!min-h-0 flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_12%,var(--color-surface))] px-2.5 font-mono text-[11px] font-semibold uppercase tracking-widest text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning)_22%,var(--color-surface))]"
+    >
+      <span aria-hidden>◉</span>
+      <span>Failsafe</span>
+      <kbd
+        aria-hidden
+        className="ml-0.5 hidden rounded-sm border border-[var(--color-warning)] bg-[var(--color-bg)] px-1 py-px text-[9px] tracking-wider lg:inline"
+      >
+        F9
+      </kbd>
+    </Pressable>
+  );
+}
+
 function ResetDemoButton() {
   const role = useSpireStore((s) => s.role);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
