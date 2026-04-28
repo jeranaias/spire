@@ -24,6 +24,7 @@ the payload and the docs page; getting them wrong reads as a fake.
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections import Counter
 from datetime import date, datetime, time, timezone
 from typing import Any, Optional
@@ -34,6 +35,19 @@ from ..auth import session_role
 from ..scenario import published_wall_iso as _scenario_published_wall_iso
 from ..scoping import JOINT_RELEASE_ROLES, require_clearance, require_role
 from ..state import CanonicalDataset, get_dataset, last_day_snapshots
+
+_log = logging.getLogger(__name__)
+
+# Subscription model is the same constant for both joint exports — see the
+# `releaseAuthority` block in `/api/joint/conformance`. Kept as a module
+# constant so the audit-row payload and the envelope/header agree by
+# construction.
+JOINT_SUBSCRIPTION_MODEL = "TOPIC_FULL_MAGTF"
+
+# Classification floor on every joint export envelope/header. Mirrors the
+# stamp written into the OMS/UCI envelope and the Link 16 header so the
+# audit-chain row carries the same marking the partner sees on the bundle.
+JOINT_EXPORT_CLASSIFICATION = "SECRET"
 
 router = APIRouter()
 
@@ -134,6 +148,73 @@ def _link16_track_number(unit_name: str) -> str:
         s = "01234567"[n % 8] + s
         n //= 8
     return s
+
+
+def _log_joint_release(
+    *,
+    protocol: str,
+    action: str,
+    user: Optional[dict[str, Any]],
+    role: Optional[str],
+    message_counts: dict[str, int],
+) -> None:
+    """Stamp a `joint_export_released` row into the SPIRE audit chain.
+
+    A security manager auditing later needs to be able to answer "who pushed
+    the MAGTF picture to the JLTC at 14:32 yesterday?" — `require_clearance`
+    only logs the *blocked* (spillage_prevented) path, so successful pulls
+    were previously invisible. This helper is called from each successful
+    export handler with the partner-facing protocol name (`OMS/UCI` /
+    `Link 16`), the calling operator's identity, and the per-message-family
+    counts that shipped in the bundle.
+
+    The audit write is best-effort: never let a chain-write failure break
+    a successful export response. The export already shipped — losing one
+    audit row is degraded telemetry, not a correctness regression.
+    """
+    actor = role or (user.get("role") if user else None) or "unknown"
+    payload = {
+        "action": action,
+        "protocol": protocol,
+        "subscription_model": JOINT_SUBSCRIPTION_MODEL,
+        "classification": JOINT_EXPORT_CLASSIFICATION,
+        "message_counts": dict(message_counts),
+        "total_messages": sum(int(v) for v in message_counts.values()),
+        "operator": _operator_envelope(user, role),
+        "user_role": actor,
+        "user_dodid": (user or {}).get("dodid", ""),
+        "user_name": (user or {}).get("name", ""),
+        "decision": "released",
+        "surface": "backend",
+    }
+    try:
+        from ..persistence import log as audit_log  # noqa: WPS433
+
+        audit_log(
+            "joint_export_released",
+            actor=actor,
+            subject_id=protocol,
+            payload=payload,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Never let an audit-write failure mask the export response — the
+        # bundle already shipped. We DO want the failure to be observable
+        # so a prolonged audit outage doesn't silently erode the "every
+        # successful pull is stamped" guarantee. Log with stack so the
+        # SOC team can follow up; counter / metric belongs in a future
+        # observability pass.
+        _log.exception(
+            "audit_write_failed",
+            extra={
+                "audit_kind": "joint_export_released",
+                "audit_actor": actor,
+                "audit_subject": protocol,
+                "joint_action": action,
+                "joint_protocol": protocol,
+                "user_dodid": (user or {}).get("dodid", ""),
+                "exception_type": type(exc).__name__,
+            },
+        )
 
 
 def _operator_envelope(user: Optional[dict[str, Any]], role: Optional[str]) -> dict[str, Any]:
@@ -407,12 +488,18 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
         if incident_count >= 10:
             break
 
+    message_counts = {
+        "EntityState": len(entities),
+        "TrackData": len(tracks),
+        "LogisticsStatus": len(logistics),
+        "AlertNotification": len(alerts_out),
+    }
     payload = {
         "envelope": {
             "specification": "OMS/UCI",
             "specificationVersion": "OMS 2.4 / UCI 5.0",
             "messageStandard": "UCI Open Mission Systems",
-            "subscriptionModel": "TOPIC_FULL_MAGTF",
+            "subscriptionModel": JOINT_SUBSCRIPTION_MODEL,
             "sourceSystem": "SPIRE",
             "sourceSystemVersion": "0.1.0-SBIR",
             "sourceService": "USMC",
@@ -439,12 +526,7 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
             # role-gated, not unit-scoped, but the partner still gets to
             # know the human at the SPIRE console.
             "operator": _operator_envelope(user, actor_role),
-            "messageCounts": {
-                "EntityState": len(entities),
-                "TrackData": len(tracks),
-                "LogisticsStatus": len(logistics),
-                "AlertNotification": len(alerts_out),
-            },
+            "messageCounts": message_counts,
         },
         "messages": {
             "EntityState": entities,
@@ -453,6 +535,16 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
             "AlertNotification": alerts_out,
         },
     }
+    # Stamp a `joint_export_released` row into the audit chain so a security
+    # manager can answer "who pushed the MAGTF picture to the JLTC at 14:32
+    # yesterday?" — `require_clearance` only logs the blocked path.
+    _log_joint_release(
+        protocol="OMS/UCI",
+        action="joint:oms_uci_export",
+        user=user,
+        role=actor_role,
+        message_counts=message_counts,
+    )
     return payload
 
 
@@ -615,13 +707,20 @@ async def link16_export(request: Request) -> dict[str, Any]:
             "tn": land_tn,
         })
 
+    message_counts = {
+        "J3.5":  len(j35_messages),
+        "J3.3":  len(j33_messages),
+        "J7.0":  len(j70_messages),
+        "J7.2":  len(j72_messages),
+        "J28.2": len(j282_messages),
+    }
     payload = {
         "header": {
             "specification": "MIL-STD-6016",
             "specificationVersion": "MIL-STD-6016G (Change 1)",
             "messageFamily": "Link 16 J-series",
             "operatingMode": "EXPORT_ONLY",
-            "subscriptionModel": "TOPIC_FULL_MAGTF",
+            "subscriptionModel": JOINT_SUBSCRIPTION_MODEL,
             "sourceSystem": "SPIRE",
             "sourceJU": "01234",
             "originatorService": "USMC",
@@ -638,13 +737,7 @@ async def link16_export(request: Request) -> dict[str, Any]:
             },
             # Operator audit footer — see OMS/UCI envelope for rationale.
             "operator": _operator_envelope(user, actor_role),
-            "messageCounts": {
-                "J3.5":  len(j35_messages),
-                "J3.3":  len(j33_messages),
-                "J7.0":  len(j70_messages),
-                "J7.2":  len(j72_messages),
-                "J28.2": len(j282_messages),
-            },
+            "messageCounts": message_counts,
         },
         "messages": {
             "J3_5_LandPointTrack":     j35_messages,
@@ -654,6 +747,14 @@ async def link16_export(request: Request) -> dict[str, Any]:
             "J28_2_LogisticsStatus":   j282_messages,
         },
     }
+    # Stamp the audit chain — same rationale as OMS/UCI above.
+    _log_joint_release(
+        protocol="Link 16",
+        action="joint:link16_export",
+        user=user,
+        role=actor_role,
+        message_counts=message_counts,
+    )
     return payload
 
 

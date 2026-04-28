@@ -27,6 +27,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend import persistence
 from backend.scoping import JOINT_RELEASE_ROLES
 
 
@@ -205,6 +206,113 @@ def test_conformance_documents_topic_subscription_and_role_gate(client):
     gate = body["classificationPosture"]["gate"]
     assert "require_clearance" in gate
     assert "require_role" in gate or "JOINT_RELEASE_ROLES" in gate
+
+
+# ---------------------------------------------------------------------------
+# Audit chain — every successful pull must leave a `joint_export_released`
+# row so a later auditor can answer "who pushed the MAGTF picture to the
+# JLTC at 14:32 yesterday?" (Task #102). Spillage / role-deny are already
+# logged via require_clearance / require_role; this is the *successful*
+# path that was previously invisible.
+# ---------------------------------------------------------------------------
+
+def _joint_release_rows_for(dodid: str, protocol: str) -> list[dict]:
+    """Return joint_export_released rows in the chain for this operator
+    and protocol. Walks recent_entries so the assertion is independent
+    of the SOC view's filtering plumbing."""
+    out: list[dict] = []
+    for r in persistence.recent_entries(limit=200, include_payload=True):
+        if r.get("kind") != "joint_export_released":
+            continue
+        payload = r.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("user_dodid") != dodid:
+            continue
+        if payload.get("protocol") != protocol:
+            continue
+        out.append(r)
+    return out
+
+
+@pytest.mark.parametrize(
+    ("dodid", "role", "endpoint", "protocol", "action"),
+    [
+        ("3456789012", "security_manager", "/api/joint/oms-uci/export", "OMS/UCI", "joint:oms_uci_export"),
+        ("4567890123", "mef_commander",    "/api/joint/oms-uci/export", "OMS/UCI", "joint:oms_uci_export"),
+        ("3456789012", "security_manager", "/api/joint/link16/export",  "Link 16", "joint:link16_export"),
+        ("4567890123", "mef_commander",    "/api/joint/link16/export",  "Link 16", "joint:link16_export"),
+    ],
+)
+def test_successful_joint_pull_stamps_audit_chain(client, dodid, role, endpoint, protocol, action):
+    _login_role_matrix(client, dodid, role)
+
+    before = len(_joint_release_rows_for(dodid, protocol))
+    r = client.get(endpoint)
+    assert r.status_code == 200, r.text
+
+    rows = _joint_release_rows_for(dodid, protocol)
+    assert len(rows) == before + 1, (
+        f"expected exactly one new joint_export_released row for {role}/{protocol}; "
+        f"saw {len(rows) - before}"
+    )
+    new_row = rows[0]  # recent_entries returns DESC by id
+
+    assert new_row["actor"] == role
+    assert new_row["subject_id"] == protocol
+
+    payload = new_row["payload"]
+    assert payload["action"] == action
+    assert payload["protocol"] == protocol
+    assert payload["subscription_model"] == "TOPIC_FULL_MAGTF"
+    assert payload["classification"] == "SECRET"
+    assert payload["decision"] == "released"
+    assert payload["user_role"] == role
+    assert payload["user_dodid"] == dodid
+
+    counts = payload["message_counts"]
+    assert isinstance(counts, dict) and counts, "message_counts must be populated"
+    assert all(isinstance(v, int) for v in counts.values())
+    if protocol == "OMS/UCI":
+        assert counts.get("EntityState") == 10
+        assert counts.get("TrackData") == 10
+        assert counts.get("LogisticsStatus") == 10
+    else:  # Link 16
+        assert counts.get("J3.5") == 10
+        assert counts.get("J7.0") == 10
+        assert counts.get("J28.2") == 10
+
+    op = payload["operator"]
+    assert op["role"] == role
+    assert op["dodid"] == dodid
+    assert op["name"], "operator name must be stamped into the audit row"
+
+
+@pytest.mark.parametrize(
+    ("dodid", "role", "endpoint"),
+    [
+        ("1234567890", "g4",                "/api/joint/oms-uci/export"),
+        ("2345678901", "maintenance_chief", "/api/joint/oms-uci/export"),
+        ("1234567890", "g4",                "/api/joint/link16/export"),
+        ("2345678901", "maintenance_chief", "/api/joint/link16/export"),
+    ],
+)
+def test_blocked_joint_pull_does_not_stamp_release_row(client, dodid, role, endpoint):
+    """Operator-class roles get a `role_denied` row from `require_role`; they
+    must NOT also get a `joint_export_released` row, because nothing was
+    released. Guards against a future refactor that moves the audit write
+    above the role gate."""
+    _login_role_matrix(client, dodid, role)
+    protocol = "OMS/UCI" if "oms" in endpoint else "Link 16"
+
+    before = len(_joint_release_rows_for(dodid, protocol))
+    r = client.get(endpoint)
+    assert r.status_code == 403, r.text
+    after = len(_joint_release_rows_for(dodid, protocol))
+    assert after == before, (
+        f"blocked pull must not stamp a joint_export_released row; "
+        f"saw {after - before} new rows for {role}/{protocol}"
+    )
 
 
 # ---------------------------------------------------------------------------

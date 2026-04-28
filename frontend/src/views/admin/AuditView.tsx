@@ -883,7 +883,7 @@ function AuditRow({
               style={{ background: anomalyMark.color }}
             />
           )}
-          {row.kind}
+          <span title={row.kind}>{kindLabel(row)}</span>
         </div>
       </td>
       <td className="px-2 py-1.5 text-[var(--color-text-secondary)]" title={row.subject_id || "—"}>
@@ -1053,6 +1053,27 @@ function IdentityBadge({
   );
 }
 
+/**
+ * Human-readable label for an audit `kind`. The chain stores the raw
+ * machine kind (`joint_export_released`, `spillage_prevented`, …) so
+ * filters and SQL stay stable; the SOC view renders the friendly label
+ * so an analyst can scan the queue without decoding snake_case.
+ *
+ * For `joint_export_released` we lean on the `protocol` field stamped
+ * into the payload by `backend.routes.joint._log_joint_release` so the
+ * row reads as `Joint export — OMS/UCI` or `Joint export — Link 16`.
+ * Falls back to the generic label if the payload is missing for any
+ * reason (older rows, hand-injected entries).
+ */
+function kindLabel(row: AuditEntry): string {
+  if (row.kind === "joint_export_released") {
+    const proto = row.payload?.protocol;
+    const protocol = (typeof proto === "string" && proto) || row.subject_id || "";
+    return protocol ? `Joint export — ${protocol}` : "Joint export";
+  }
+  return row.kind;
+}
+
 function anomalyMeta(tag: AuditEntry["anomaly_tag"]): { color: string; title: string } | null {
   switch (tag) {
     case "broken_chain":
@@ -1121,8 +1142,11 @@ function RowDrawer({
             <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
               Audit entry · id {row.id}
             </div>
-            <div className="mt-1 font-mono text-base font-semibold text-[var(--color-text)] tracking-wide">
-              {row.kind}
+            <div
+              className="mt-1 font-mono text-base font-semibold text-[var(--color-text)] tracking-wide"
+              title={row.kind}
+            >
+              {kindLabel(row)}
             </div>
             <div className="mt-0.5 font-mono text-[11px] tabular-nums text-[var(--color-text-secondary)]">
               {row.ts}
