@@ -1001,6 +1001,16 @@ SENTRY_MARK_ROLES = frozenset({"data_custodian", "security_manager"})
 SENTRY_MARK_ENGINE = "SENTRY Pattern Engine (rule-based)"
 SENTRY_MARK_ENGINE_VERSION = "v1"
 
+# Task-92 — hard cap on /sentry/mark text. The body itself is not stored
+# (only its SHA-256 lands in the audit chain) but every successful call
+# still appends a fresh hash-chained row, so an attacker holding
+# data_custodian or security_manager credentials could spam huge inputs to
+# bloat the chain and slow the pattern engine. 16 KB matches the size of a
+# multi-page operational remark — well above any legitimate Mark Draft —
+# and the other ingest surfaces (SENTRY upload, stage ingest) already cap
+# payloads with a 413 in the same shape.
+MARK_TEXT_MAX_BYTES = 16 * 1024
+
 
 @router.post("/mark")
 async def mark_text(payload: dict, request: Request):
@@ -1026,6 +1036,21 @@ async def mark_text(payload: dict, request: Request):
     text = payload.get("text", "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
+    # Task-92 — cap input *before* hashing or appending to the audit chain
+    # so an oversized request never gets a chain-index id back. UTF-8 byte
+    # length matches what the rest of SPIRE caps on (multi-byte code points
+    # cost what they cost on the wire).
+    text_bytes = len(text.encode("utf-8"))
+    if text_bytes > MARK_TEXT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Mark Draft text is {text_bytes:,} bytes — over the "
+                f"{MARK_TEXT_MAX_BYTES:,}-byte cap. Trim the input "
+                "(or split into multiple drafts) and re-submit; the "
+                "pattern engine is sized for paragraph-scale remarks."
+            ),
+        )
     release = payload.get("release_authority", "US_ONLY")
     tier1 = tier1_classify(text)
     cls = tier1["classification"]

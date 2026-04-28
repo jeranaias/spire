@@ -33,6 +33,14 @@ const REL_TO_FALLBACK: Record<Auth, string> = {
   NATO:    "REL TO NATO",
 };
 
+// Task-92 — client-side mirror of the server's MARK_TEXT_MAX_BYTES. The
+// backend is authoritative (a curl from a privileged session must still
+// 413 over the cap), but we surface the limit on the textarea and gate
+// scheduleMark so operators don't watch the engine spin on a paste they'll
+// only get rejected for. UTF-8 byte length matches what the server
+// measures, so multi-byte glyphs eat their own weight here too.
+const MARK_TEXT_MAX_BYTES = 16 * 1024;
+
 const SAMPLES = [
   {
     label: "Motor pool fault remark",
@@ -70,9 +78,16 @@ export function MarkTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  // Task-92 — counter for the byte-cap chip beside Release Authority. We
+  // recompute on every keystroke (uncontrolled textarea) and use it to
+  // both render the usage and short-circuit scheduleMark when the operator
+  // pastes something past the cap, so the engine isn't spammed and the
+  // audit chain doesn't get a 413 round-trip per keystroke.
+  const [textBytes, setTextBytes] = useState(0);
   const pushToast = useSpireStore((s) => s.pushToast);
   const debounceRef = useRef<number | null>(null);
   const latestTextRef = useRef<string>("");
+  const overCap = textBytes > MARK_TEXT_MAX_BYTES;
 
   if (role !== "data_custodian" && role !== "security_manager") {
     return (
@@ -96,8 +111,27 @@ export function MarkTab() {
     // engine would run on stale DOM contents.
     const text = (overrideText ?? textareaRef.current?.value ?? "").trim();
     latestTextRef.current = text;
+    // Task-92 — keep the byte counter in sync on every keystroke so the
+    // chip and over-cap gating reflect what the operator just typed/pasted,
+    // not the previous render's value.
+    const bytes = new TextEncoder().encode(text).length;
+    setTextBytes(bytes);
     if (!text) {
       setResult(null);
+      setError(null);
+      return;
+    }
+    if (bytes > MARK_TEXT_MAX_BYTES) {
+      // Task-92 — short-circuit before the network: we already know the
+      // server will 413, so don't spam the audit chain with rejected
+      // requests on every keystroke past the cap. Mirror the server-side
+      // detail so the operator sees the same numbers either way.
+      setLoading(false);
+      setResult(null);
+      setError(
+        `Input is ${bytes.toLocaleString()} bytes — over the ${MARK_TEXT_MAX_BYTES.toLocaleString()}-byte cap. ` +
+          "Trim the draft or split into multiple submissions.",
+      );
       return;
     }
     const ms = immediate ? 0 : 250;
@@ -182,7 +216,16 @@ export function MarkTab() {
           key={textVersion}
           onChange={() => scheduleMark(false)}
           placeholder="Paste a draft paragraph, SR remark, or operational text..."
-          className="min-h-[240px] flex-1 resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-sm leading-relaxed text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+          // Task-92 — also caps the typed/pasted size at 2x cap so the
+          // browser refuses to paste in 1 MB of junk; the byte-counter
+          // chip and server 413 still authoritatively gate over the cap.
+          maxLength={MARK_TEXT_MAX_BYTES * 2}
+          className={clsx(
+            "min-h-[240px] flex-1 resize-y rounded-md border bg-[var(--color-surface)] p-3 font-mono text-sm leading-relaxed text-[var(--color-text)] focus:outline-none",
+            overCap
+              ? "border-[var(--color-danger)] focus:border-[var(--color-danger)]"
+              : "border-[var(--color-border)] focus:border-[var(--color-primary)]",
+          )}
         />
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -196,8 +239,24 @@ export function MarkTab() {
             options={RELEASE_AUTHS.map((r) => ({ value: r.value, label: r.label }))}
             onChange={setRelease}
           />
+          {/* Task-92 — byte counter mirrors the server's MARK_TEXT_MAX_BYTES.
+              Renders muted under the cap, danger over the cap, so an
+              operator pasting in too much text sees the limit before
+              the engine refuses to run. */}
+          <span
+            className={clsx(
+              "font-mono text-xs tabular-nums tracking-wider",
+              overCap
+                ? "text-[var(--color-danger)]"
+                : "text-[var(--color-text-muted)]",
+            )}
+            data-testid="mark-byte-counter"
+            title="Max input the SENTRY pattern engine will accept per request"
+          >
+            {textBytes.toLocaleString()} / {MARK_TEXT_MAX_BYTES.toLocaleString()} B
+          </span>
           <span className="ml-auto font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            {loading ? "Marking …" : "Live · auto-refreshes"}
+            {loading ? "Marking …" : overCap ? "Over cap · won't submit" : "Live · auto-refreshes"}
           </span>
           {error && <span className="text-xs text-[var(--color-danger)]">{error}</span>}
         </div>
