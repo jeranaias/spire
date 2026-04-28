@@ -35,14 +35,19 @@ export function AuthView() {
   // If a session is already restored from sessionStorage when the user
   // arrives at /auth (e.g. typed the path manually), skip the splash and
   // route them home.
+  //
+  // W1 #83: also honor `loc.state?.from` here so a 401-mid-action that
+  // bounced the operator off /admin/models/:id (or any other deep route)
+  // returns them to that exact page after re-auth instead of dumping them
+  // on the Decision Bridge. Previously this effect always navigated to
+  // "/" the moment `currentUser` flipped to non-null, which raced with
+  // the submit() handler's `nav(dest)` and erased the intended target.
   useEffect(() => {
     if (currentUser) {
-      // W1 / Task #24: arriving at /auth with a restored session bounces
-      // to the Decision Bridge ("/") rather than the role-default view —
-      // the Decision Bridge is the universal entry surface.
-      nav("/", { replace: true });
+      const dest = loc.state?.from || "/";
+      nav(dest, { replace: true });
     }
-  }, [currentUser, nav]);
+  }, [currentUser, loc, nav]);
 
   useEffect(() => {
     loadUsers();

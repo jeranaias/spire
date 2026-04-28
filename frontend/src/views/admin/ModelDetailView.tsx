@@ -8,18 +8,17 @@
  * Restricted to security_manager. Inline guard mirrors the backend
  * MODEL_REGISTRY_ROLES gate.
  */
-import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   api,
   type ModelImplementation,
-  type ModelRegistryDetailResponse,
 } from "../../api";
-import { withRetry, formatApiError } from "../../api-retry";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
+import { useRegistryFetch } from "./useRegistryFetch";
+import { DdilFreshnessBanner, FreshnessHeader } from "./RegistryFreshness";
 
 export function ModelDetailView() {
   const role = useSpireStore((s) => s.role);
@@ -35,34 +34,13 @@ export function ModelDetailView() {
     );
   }
 
-  const [data, setData] = useState<ModelRegistryDetailResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [waking, setWaking] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    setError(null);
-    (async () => {
-      try {
-        const resp = await withRetry(() => api.system.adminModelDetail(modelId), {
-          onAttempt: (attempt) => {
-            if (!cancelled) setWaking(attempt > 1);
-          },
-        });
-        if (cancelled) return;
-        setData(resp);
-        setWaking(false);
-      } catch (e) {
-        if (cancelled) return;
-        setError(formatApiError(e));
-        setWaking(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [modelId]);
+  // W1 #83 — same lifecycle as the registry index. Keying on `modelId`
+  // resets `data`/`loadedAt` cleanly when the operator navigates between
+  // model cards, so a stale "loaded HH:MM" never bleeds across cards.
+  const { data, error, waking, loadedAt, refreshing, refresh } = useRegistryFetch(
+    () => api.system.adminModelDetail(modelId),
+    `model:${modelId}`,
+  );
 
   if (error && !data) {
     return (
@@ -70,7 +48,8 @@ export function ModelDetailView() {
         title="Model Card Unavailable"
         description={`Could not load model card for ${modelId}.`}
         detail={error}
-        onRetry={() => window.location.reload()}
+        onRetry={refresh}
+        retrying={refreshing}
       />
     );
   }
@@ -94,8 +73,8 @@ export function ModelDetailView() {
           ← Model supply chain
         </Link>
       </div>
-      <div className="mb-4 flex items-baseline justify-between gap-4">
-        <div>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest">
             {m.name}
           </h1>
@@ -105,10 +84,13 @@ export function ModelDetailView() {
             registry version {data.registry_version ?? "unknown"}
           </div>
         </div>
-        <div className="shrink-0">
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <ClassificationBadge classification="UNCLASSIFIED" />
+          <FreshnessHeader loadedAt={loadedAt} refreshing={refreshing} onRefresh={refresh} />
         </div>
       </div>
+
+      <DdilFreshnessBanner loadedAt={loadedAt} />
 
       {m.in_app_surfaces && m.in_app_surfaces.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
