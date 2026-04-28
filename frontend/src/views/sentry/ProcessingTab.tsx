@@ -55,7 +55,18 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const [job, setJob] = useState<SentryJob | null>(null);
   const [queue, setQueue] = useState<SentryReviewQueue | null>(null);
   const [displayIdx, setDisplayIdx] = useState(0);
-  const [counts, setCounts] = useState({ tier1: 0, tier2: 0, pii: 0, geo: 0, comms: 0, classified: 0, controlled: 0 });
+  type CountsState = {
+    tier1: number;
+    tier2: number;
+    pii: number;
+    geo: number;
+    comms: number;
+    classified: number;
+    controlled: number;
+  };
+  type FlagKey = "pii" | "geo" | "comms" | "classified" | "controlled";
+  const FLAG_KEYS: readonly FlagKey[] = ["pii", "geo", "comms", "classified", "controlled"] as const;
+  const [counts, setCounts] = useState<CountsState>({ tier1: 0, tier2: 0, pii: 0, geo: 0, comms: 0, classified: 0, controlled: 0 });
   const [error, setError] = useState<string | null>(null);
   const [release, setRelease] = useState<ReleasePreview>("US_ONLY");
   const [retryNonce, setRetryNonce] = useState(0);
@@ -122,7 +133,9 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
             if (rec.routed_to === "tier2_llm") next.tier2 += 1;
             else next.tier1 += 1;
             for (const f of rec.flags || []) {
-              if (f in next) (next as any)[f] += 1;
+              if ((FLAG_KEYS as readonly string[]).includes(f)) {
+                next[f as FlagKey] += 1;
+              }
             }
             return next;
           });

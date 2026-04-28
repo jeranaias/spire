@@ -32,7 +32,15 @@ from config import (
     SIMULATION_DAYS,
     WIP_DAYS_PER_LABOR_HOUR,
 )
+from defect_codes import sample_defect_code
+from echelon import (
+    NUMERIC_TO_LABEL as ECHELON_NUMERIC_TO_LABEL,
+    LABEL_TO_NUMERIC as ECHELON_LABEL_TO_NUMERIC,
+    sample_echelon,
+    sample_service_request_type,
+)
 from faults import FaultEvent, check_for_fault
+from priority import format_priority, sample_priority, sample_priority_numeric
 from remarks import generate_remark
 from supply import (
     PartRequisition,
@@ -67,6 +75,17 @@ class ServiceRequest:
     fault_component: str = ""
     tm_reference: str = ""
     maintenance_level: str = "Organizational"
+    # GCSS-MC schema-parity additions (WP-3, WP-4):
+    # - service_request_type mirrors the real export's SERVICE_REQUEST_TYPE
+    #   column (~99% "Maintenance - CM"); WP-5 emits this verbatim.
+    # - echelon_numeric is the integer form of maintenance_level (1/2/3/4)
+    #   the real export ships in ECHELON_OF_MAINT.
+    # - deadlined_date is the calendar day the SR was first marked
+    #   deadlined (mirrors the real export's DEADLINED_DATE column; null
+    #   when the asset never went non-mission-capable for this SR).
+    service_request_type: str = "Maintenance - CM"
+    echelon_numeric: int = 1
+    deadlined_date: Optional[date] = None
     remark_text: str = ""
     source_classification: str = "UNCLASSIFIED"   # the marking the operator put on the record
     detected_classification: str = "UNCLASSIFIED" # what SENTRY thinks it should be
@@ -237,9 +256,16 @@ def _open_pmcs_sr(asset, d: date, rng: random.Random) -> ServiceRequest:
         open_date=d,
         job_status="COMPLETED",
         condition="Minor",
-        priority="10",
+        # PMCS records use the GCSS-MC SERVICE_REQUEST_TYPE for preventive
+        # maintenance and a routine priority. They are excluded from the
+        # CM-only real export, but we keep them in the canonical synth
+        # corpus for PULSE / MARK consumers.
+        priority=format_priority(13),
         defect_code_primary="SCHD",
         defect_code_secondary="PMCS",
+        service_request_type="Maintenance - PM",
+        echelon_numeric=1,
+        maintenance_level="Organizational",
         tm_reference=tm_ref,
         remark_text=remark,
         source_classification="UNCLASSIFIED",
@@ -313,13 +339,25 @@ def _open_corrective_sr(
     parts_cost = fault_event.avg_parts_cost * rng.uniform(0.70, 1.45)
     labor_hours = fault_event.avg_repair_hours * rng.uniform(0.7, 1.5)
 
-    priority = {
-        "Deadlined": rng.choice(["02", "03"]),
-        "Degraded":  rng.choice(["05", "06"]),
-        "Minor":     rng.choice(["10", "13"]),
-        "Supply":    "10",
-        "Service":   rng.choice(["10", "13"]),
-    }.get(fault_event.condition_impact, "10")
+    # WP-2: priority now emits the full GCSS-MC string ("06 B-Urgent") and
+    # is sampled to match the real export distribution conditioned on the
+    # SR's condition impact.
+    priority = sample_priority(rng, condition=fault_event.condition_impact)
+
+    # WP-1: defect codes drawn from the real-export vocabulary (FCON.CBB,
+    # WPNS.CBB, ELEC.INOP, ...) with component-aware bias and the dirty
+    # trailing-period signal SENTRY's ingest adapter must clean.
+    defect_primary, defect_secondary, _ = sample_defect_code(
+        rng, fault_component=fault_event.component
+    )
+
+    # WP-3: ECHELON_OF_MAINT (numeric 1/2/3/4) is sampled from the real
+    # distribution biased by the fault's declared maintenance level. The
+    # human-readable label is derived from the numeric so the two stay
+    # consistent end-to-end.
+    echelon_numeric, echelon_label = sample_echelon(
+        rng, declared_level=fault_event.maintenance_level
+    )
 
     sr = ServiceRequest(
         sr_number=sr_number,
@@ -333,12 +371,15 @@ def _open_corrective_sr(
         open_date=current_date,
         condition=fault_event.condition_impact,
         priority=priority,
-        defect_code_primary=fault_event.defect_code[0],
-        defect_code_secondary=fault_event.defect_code[1],
+        defect_code_primary=defect_primary,
+        defect_code_secondary=defect_secondary,
         fault_id=fault_event.fault_id,
         fault_component=fault_event.component,
         tm_reference=fault_event.tm_reference,
-        maintenance_level=fault_event.maintenance_level,
+        maintenance_level=echelon_label,
+        service_request_type=sample_service_request_type(rng),
+        echelon_numeric=echelon_numeric,
+        deadlined_date=current_date if fault_event.condition_impact == "Deadlined" else None,
         remark_text=remark,
         source_classification=source_cls,
         detected_classification=ground_truth_cls,
@@ -353,9 +394,9 @@ def _open_corrective_sr(
     )
 
     # For Intermediate / Depot-level repairs, the asset gets evacuated.
-    if fault_event.maintenance_level in ("Intermediate", "Depot"):
+    if echelon_label in ("Intermediate", "Depot"):
         sr.job_status = "EVACUATED"
-        sr.evacuated_to = _evacuation_target(fault_event.maintenance_level, asset, rng)
+        sr.evacuated_to = _evacuation_target(echelon_label, asset, rng)
 
     reqs = create_requisitions_for_sr(sr_number, asset, fault_event, current_date, rng)
     sr.requisitions = reqs

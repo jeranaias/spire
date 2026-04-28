@@ -20,6 +20,11 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from ..auth import session_role
+from ..integrations.sentry_gcss_adapter import (
+    EXPECTED_HEADER_COLUMNS as GCSS_HEADER_COLUMNS,
+    ingest_sr_header_csv,
+    report_to_dict as gcss_report_to_dict,
+)
 from ..persistence import (
     DATA_DIR as PERSIST_DIR,
     decisions_for_batch,
@@ -587,14 +592,181 @@ async def demo_batch(limit: int = 500):
     return _public_batch(batch)
 
 
+UPLOAD_MAX_BYTES = 100 * 1024 * 1024  # 100 MB hard cap on uploads
+
+
+def _looks_like_gcss_sr_header(raw: bytes) -> bool:
+    """Sniff the first line of a CSV upload to see if the column set matches
+    the real GCSS-MC SR-header export (12 well-known columns). Tolerates a
+    UTF-8 BOM and a small amount of preamble noise."""
+    try:
+        head = raw[:4096].decode("utf-8-sig", errors="replace")
+    except Exception:  # noqa: BLE001
+        return False
+    first_line = head.splitlines()[0] if head else ""
+    # Strip surrounding double-quotes too — the SPIRE-emitted GCSS export
+    # uses csv.QUOTE_NONNUMERIC so every header lands quoted on the wire,
+    # while the real GCSS-MC export ships unquoted headers. Both must
+    # sniff equally.
+    cols = {
+        c.strip().strip('"').upper()
+        for c in first_line.split(",")
+        if c.strip()
+    }
+    if not cols:
+        return False
+    expected = set(GCSS_HEADER_COLUMNS)
+    overlap = cols & expected
+    # Accept as GCSS shape iff at least 9 of the 12 canonical columns are
+    # present. Looser than equality so files with one or two extra columns
+    # still get the GCSS adapter; tighter than `any()` so generic CSVs
+    # aren't misclassified.
+    return len(overlap) >= 9
+
+
+def _records_from_gcss_ingest(report) -> list[dict]:
+    """Project the ingest-report rows into SENTRY's canonical record shape.
+    The downstream pattern-engine + processing pipeline only requires
+    these fields; everything else is best-effort or empty.
+    """
+    out: list[dict] = []
+    for r in report.rows:
+        # Compose a best-effort `remark` from the problem summary so the
+        # rule-based marking pass has text to work with on real records.
+        defect_full = r.defect_code_primary
+        if r.defect_code_secondary:
+            defect_full = f"{r.defect_code_primary}.{r.defect_code_secondary}"
+        rec = {
+            "sr_number": r.sr_number,
+            "asset_id": "",
+            "unit_uic": r.unit_uic_hashed,  # already-hashed; never clear
+            "unit_name": r.unit_uic_hashed[:12] if r.unit_uic_hashed else "UNKNOWN",
+            "equipment_type": r.tamcn or "UNKNOWN",
+            "tamcn": r.tamcn,
+            "nsn": "",
+            "serial_number": r.serial_number,
+            "open_date": r.open_date.isoformat() if r.open_date else "",
+            "job_status": "Active" if not r.job_status_date else "Closed",
+            "condition": "Deadlined" if r.deadlined_date else "Operational",
+            "fault_component": defect_full,
+            "tm_reference": "",
+            "maintenance_level": str(r.echelon_numeric or ""),
+            "source_classification": "UNCLASSIFIED",
+            "detected_classification_oracle": "UNCLASSIFIED",
+            "sensitive_flags_oracle": [],
+            "data_quality_flag": "warnings_present" if r._warnings else None,
+            "is_pmcs": "PM" in (r.service_request_type or "").upper(),
+            "remark": r.problem_summary or "",
+            # Provenance trail so the downstream review queue can see *which*
+            # record came from a GCSS-MC ingest vs a generic CSV upload.
+            "_gcss_provenance": {
+                "ingest_path": "sentry_gcss_adapter",
+                "uic_source": r.unit_uic_source,
+                "warnings": list(r._warnings),
+                "defect_code_raw": r.defect_code_raw,
+                "service_request_type": r.service_request_type,
+                "priority": r.priority,
+                "deadlined_date": r.deadlined_date.isoformat() if r.deadlined_date else "",
+                "job_status_date": r.job_status_date.isoformat() if r.job_status_date else "",
+            },
+        }
+        out.append(rec)
+    return out
+
+
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    """Accept a CSV/XLSX/JSON upload, parse with pandas/openpyxl, detect schema,
-    and stage as a batch. Schema mapping runs a fuzzy match from user columns
-    onto SPIRE's canonical SR schema. Raw bytes persist to SQLite so a rerun
-    after restart works without re-upload."""
+    """Accept a CSV/XLSX/JSON upload, parse it, detect schema, and stage as
+    a batch.
+
+    The route uses a two-stage strategy:
+
+    1. **GCSS-MC sniff.** If the first line of the upload matches the real
+       GCSS-MC SR-header export (12 known columns, see
+       ``sentry_gcss_adapter.EXPECTED_HEADER_COLUMNS``) the file is routed
+       through the schema-aligned ingest adapter. The adapter normalizes
+       trailing-period defect codes, parses Oracle ``DD-MON-YY`` dates,
+       and enforces the **hash-gate**: every ``OWNER_UNIT_ADDRESS_CODE``
+       must already be in the sanitized
+       ``OWNER_UNIT_<sha256-trunc-20>`` form. If any row contains a clear
+       UIC, the entire upload is rejected with HTTP 400 — defense in
+       depth so a mis-routed un-sanitized file never lands in SENTRY's
+       review queue.
+    2. **Generic CSV/XLSX/JSON.** Anything that doesn't sniff as GCSS-MC
+       falls back to the historical pandas-driven schema-mapping path.
+
+    Raw bytes persist to SQLite for both paths so a uvicorn restart
+    between Upload and Processing does not strand the operator.
+    """
     raw = await file.read()
     filename = file.filename or "upload.bin"
+    if len(raw) > UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Upload {filename} is {len(raw):,} bytes — over the "
+                f"{UPLOAD_MAX_BYTES:,}-byte SENTRY ingest cap. Split the "
+                "file or use the streaming GCSS-MC pull endpoint."
+            ),
+        )
+    name_lower = filename.lower()
+    is_csv_like = name_lower.endswith((".csv", ".txt", ".tsv"))
+    if is_csv_like and _looks_like_gcss_sr_header(raw):
+        # Route through the schema-aligned GCSS-MC adapter.
+        try:
+            text = raw.decode("utf-8-sig", errors="replace")
+            report = ingest_sr_header_csv(text, cm_only=True)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=400,
+                detail=f"GCSS-MC adapter failed on {filename}: {exc}",
+            )
+        # ── Sanitization gate ────────────────────────────────────────
+        # Reject the upload outright if any of the four sensitive fields
+        # (SR_NUMBER, SERIAL_NUMBER, TAMCN, OWNER_UNIT_ADDRESS_CODE)
+        # carries a clear value. The real GCSS-MC sanitized export ships
+        # all four pre-hashed in the canonical
+        # ``<lowercase_prefix>_<base64url-20>`` form.
+        unsanitized = report.unsanitized_field_counts
+        if unsanitized:
+            offenders = ", ".join(
+                f"{k}={v}" for k, v in sorted(unsanitized.items()) if v
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Sanitization gate: rejected {filename}. "
+                    f"Unsanitized rows by field: {offenders}. The "
+                    "GCSS-MC sanitized export must ship SR_NUMBER, "
+                    "SERIAL_NUMBER, TAMCN, and OWNER_UNIT_ADDRESS_CODE "
+                    "pre-hashed. Re-export with the sanitization step "
+                    "enabled and retry the upload."
+                ),
+            )
+        records = _records_from_gcss_ingest(report)
+        # Build the schema-detected payload so the UI can show which
+        # canonical fields landed cleanly vs are GCSS-only context.
+        detected_schema: dict[str, str] = {}
+        for canonical in CANONICAL_FIELDS:
+            detected_schema[canonical] = (
+                "mapped" if any(rec.get(canonical) for rec in records) else "missing"
+            )
+        ingest_summary = gcss_report_to_dict(report, include_rows=False)
+        ingest_summary["unique_sr_numbers"] = len({r.sr_number for r in report.rows})
+        ingest_summary["adapter"] = "sentry_gcss_adapter/v0.1.0"
+        ingest_summary["sanitization_gate"] = "enforced"
+        batch = _new_batch(
+            record_source=f"upload:{filename} (gcss-mc adapter)",
+            records=records,
+            schema_override=detected_schema,
+        )
+        # Stash the ingest report on the batch so the UI can surface it.
+        batch["gcss_ingest_report"] = ingest_summary
+        batch["provenance"] = "GCSS-MC sanitized export"
+        _persist_batch(batch)
+        store_uploaded_batch(batch["batch_id"], filename, len(records), detected_schema, raw)
+        return _public_batch(batch)
+    # ── Fallback: generic CSV/XLSX/JSON path ────────────────────────
     try:
         records, detected_schema = _parse_upload(raw, filename)
     except Exception as exc:  # noqa: BLE001
@@ -2295,7 +2467,7 @@ async def download_export(export_id: str, request: Request):
 
 def _public_batch(batch: dict) -> dict:
     preview = batch["records"][:10]
-    return {
+    out = {
         "batch_id": batch["batch_id"],
         "source": batch["source"],
         "created_at": batch["created_at"],
@@ -2315,3 +2487,8 @@ def _public_batch(batch: dict) -> dict:
         ],
         "jobs": list(batch["jobs"].keys()),
     }
+    if "gcss_ingest_report" in batch:
+        out["gcss_ingest_report"] = batch["gcss_ingest_report"]
+    if "provenance" in batch:
+        out["provenance"] = batch["provenance"]
+    return out

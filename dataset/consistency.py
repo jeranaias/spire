@@ -200,13 +200,15 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
         serial_number=recipient_asset.serial_number,
         open_date=open_date,
         condition="Deadlined",
-        priority="02",
-        defect_code_primary="NMAJ",
-        defect_code_secondary="ENGN",
+        priority="02 A-Critical",
+        defect_code_primary="ENG",
+        defect_code_secondary="RPLC",
         fault_id="DEMO-TURBO-FAIL",
         fault_component="turbo",
         tm_reference="TM 9-2320-457-13&P",
         maintenance_level="Organizational",
+        echelon_numeric=1,
+        deadlined_date=open_date,
         remark_text=(
             "Demo fixture: PULSE predicted turbocharger failure 5d prior; failure "
             "confirmed on operator road test — boost pressure drop, oil in intake. "
@@ -230,7 +232,7 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
         nomenclature="TURBOCHARGER ASSY",
         qty_ordered=1,
         unit_cost=4200.00,
-        priority="02",
+        priority="02 A-Critical",
         supply_path="backordered",
         ordered_date=open_date,
         current_status="BP",
@@ -251,13 +253,15 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
         serial_number=donor_asset.serial_number,
         open_date=donor_open,
         condition="Deadlined",
-        priority="03",
-        defect_code_primary="NMAJ",
-        defect_code_secondary="TRSM",
+        priority="03 A-Critical",
+        defect_code_primary="TRAN",
+        defect_code_secondary="FAIL",
         fault_id="DEMO-EVAC-MAJOR",
         fault_component="transmission",
         tm_reference="TM 9-2320-457-23",
         maintenance_level="Depot",
+        echelon_numeric=3,
+        deadlined_date=donor_open,
         remark_text=(
             "Demo fixture: vehicle evacuated to MCLB Albany on long-cycle depot "
             "teardown for transmission rebuild. Engine bay still RFI; turbocharger "

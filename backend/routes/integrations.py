@@ -17,12 +17,27 @@ the demo.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
+import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse, Response
 
+from ..integrations.gcss_hash import (
+    hash_document_number,
+    hash_nsn_ordered,
+    hash_owner_unit,
+    hash_rnsn,
+    hash_serial_number,
+    hash_sos,
+    hash_sr_number,
+    hash_tamcn,
+)
 from ..state import get_dataset, last_day_snapshots
 
 
@@ -327,3 +342,392 @@ async def gcss_mc_sample(
             ),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# T6 — GCSS-MC export adapter
+#
+# Emit the synthetic dataset back out in the *exact* shape of the real
+# GCSS-MC sanitized exports SPIRE was schema-aligned against. Three CSVs:
+#   - SR header  (12 columns, DD-MON-YY dates, hashed UICs)
+#   - SR repair parts  (6 columns)
+#   - Due-In         (subset of the 95 columns, the ones SPIRE actually
+#                     populates — see `gcss_dictionary.json`)
+# Plus a JSON dictionary endpoint that backs the Field Dictionary tab.
+# ---------------------------------------------------------------------------
+
+# 12 columns of the real SR header export, in canonical order.
+_GCSS_HEADER_COLUMNS: tuple[str, ...] = (
+    "SERVICE_REQUEST_TYPE",
+    "SR_NUMBER",
+    "DEFECT_CODE",
+    "PROBLEM_SUMMARY",
+    "DATE_RECEIVED_IN_SHOP",
+    "ECHELON_OF_MAINT",
+    "SERIAL_NUMBER",
+    "TAMCN",
+    "DEADLINED_DATE",
+    "MASTER_PRIORITY_CODE",
+    "OWNER_UNIT_ADDRESS_CODE",
+    "JOB_STATUS_DATE",
+)
+
+# 6 columns of the real SR repair parts export.
+_GCSS_PARTS_COLUMNS: tuple[str, ...] = (
+    "SR_NUMBER",
+    "SERVICE_ACTIVITY",
+    "RNSN",
+    "QUANTITY_REQUIRED",
+    "PARTS_CHARGE",
+    "DOCUMENT_NUMBER",
+)
+
+# Full 82-column due-in export shape (matches the real GCSS-MC sanitized
+# export header row exactly). SPIRE only populates the ~12 columns it
+# actually consumes; the remaining columns are emitted as empty strings
+# so the schema is byte-stable for downstream tooling that pre-allocates
+# columns.
+_GCSS_DUE_IN_COLUMNS: tuple[str, ...] = (
+    "DOC_NBR",
+    "DIC",
+    "NSN_ORDERED",
+    "PRI_CD",
+    "PURPOSE_CD",
+    "ESTABLISHED_DT",
+    "MAX_STAT_DT",
+    "SUPP_ADD",
+    "SR_NUMBER",
+    "ADVICE_CODE",
+    "ITEM_TYPE",
+    "RCVR_CD",
+    "CEC",
+    "SAC",
+    "SOS",
+    "UNIT_PRICE",
+    "STATUS_QTY",
+    "REMAIN_DUE_RULE",
+    "DOC_STATUS",
+    "RULE_ASSIGNED",
+    "BO_QTY_FIRST",
+    "BO_QTY_LAST",
+    "QTY_PEND_SHIP",
+    "BM_QTY",
+    "BZ_BV_QTY",
+    "BG_QTY",
+    "BJ_QTY",
+    "QTY_CANCELLED",
+    "D9_QTY",
+    "QTY_SHIPPED",
+    "QTY_RECEIVED",
+    "DRA_QTY",
+    "COR_QTY",
+    "DRB_QTY",
+    "DRF_QTY",
+    "MAX_DT_EST",
+    "MIN_BO_DT",
+    "MAX_BO_DT",
+    "MIN_BA_DT",
+    "MAX_BA_DT",
+    "MIN_BM_DT",
+    "MAX_BM_DT",
+    "MIN_BJ_DT",
+    "MAX_BJ_DT",
+    "MIN_BG_DT",
+    "MAX_BG_DT",
+    "MIN_CANC_DT",
+    "MAX_CANC_DT",
+    "MIN_AS1_DT",
+    "MAX_AS1_DT",
+    "MIN_D6_DT",
+    "MAX_D6_DT",
+    "MIN_DRA_DT",
+    "MAX_DRA_DT",
+    "MIN_COR_DT",
+    "MAX_COR_DT",
+    "MIN_DRB_DT",
+    "MAX_DRB_DT",
+    "MIN_DRF_DT",
+    "MAX_DRF_DT",
+    "MIN_D9_DT",
+    "MAX_D9_DT",
+    "ESTABLISHED_TO_MRO",
+    "MRO_TO_SHIP",
+    "OST",
+    "LRT",
+    "CWT",
+    "DOC_FY",
+    "FY_QTR",
+    "DOC_FY_QTR",
+    "SIGNAL_CD",
+    "APPROVED_DT",
+    "FY_MTH",
+    "CONDITION_CODE",
+    "TASK_NBR",
+    "RDD_CAL_DT",
+    "RDD_CAL_DT_CURATED",
+    "RDD_DAYS_FROM_BASE",
+    "RDD_DAYS_FROM_TODAY",
+    "RDD_MEANING",
+    "RDD_ERROR",
+    "CURATED_RDD_MEANING",
+)
+
+_MONTH_NAMES = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+
+
+def _to_oracle_date(d: Any) -> str:
+    """Format a `date`/`datetime`/None as Oracle DD-MON-YY ("12-MAR-26")."""
+    if not d:
+        return ""
+    try:
+        day = d.day
+        mon = _MONTH_NAMES[d.month - 1]
+        yr = d.year % 100
+        return f"{day:02d}-{mon}-{yr:02d}"
+    except Exception:
+        return ""
+
+
+def _defect_code_full(sr) -> str:
+    """`FCON.CBB`, or `FCON.` for the trailing-period dirty signal, or
+    `FCON` if no secondary."""
+    a = (getattr(sr, "defect_code_primary", "") or "").strip()
+    b = (getattr(sr, "defect_code_secondary", "") or "").strip()
+    if not a and not b:
+        return ""
+    if not b:
+        return a
+    return f"{a}.{b}"
+
+
+def _problem_summary(sr) -> str:
+    """Use the SR remark text if present, otherwise compose a terse
+    summary from defect code + maintenance level."""
+    text = (getattr(sr, "remark_text", "") or "").strip()
+    if text:
+        # Strip newlines so the CSV stays single-line per row.
+        return " ".join(text.split())[:250]
+    primary = getattr(sr, "defect_code_primary", "") or ""
+    return f"{primary} fault — {getattr(sr, 'maintenance_level', '')}"
+
+
+def _service_activity(req) -> str:
+    """Map PartRequisition to a real-export SERVICE_ACTIVITY label."""
+    sa = getattr(req, "service_activity", None)
+    if sa:
+        return sa
+    return "Issue from Inventory"
+
+
+def _row_for_header(sr) -> Dict[str, Any]:
+    return {
+        "SERVICE_REQUEST_TYPE": getattr(sr, "service_request_type", "Maintenance - CM"),
+        "SR_NUMBER": hash_sr_number(sr.sr_number),
+        "DEFECT_CODE": _defect_code_full(sr),
+        "PROBLEM_SUMMARY": _problem_summary(sr),
+        "DATE_RECEIVED_IN_SHOP": _to_oracle_date(sr.open_date),
+        "ECHELON_OF_MAINT": getattr(sr, "echelon_numeric", "") or "",
+        "SERIAL_NUMBER": hash_serial_number(sr.serial_number),
+        "TAMCN": hash_tamcn(sr.tamcn),
+        "DEADLINED_DATE": _to_oracle_date(getattr(sr, "deadlined_date", None)),
+        "MASTER_PRIORITY_CODE": sr.priority,
+        "OWNER_UNIT_ADDRESS_CODE": hash_owner_unit(sr.unit_uic),
+        "JOB_STATUS_DATE": _to_oracle_date(sr.close_date or sr.open_date),
+    }
+
+
+def _row_for_parts(req) -> Dict[str, Any]:
+    return {
+        "SR_NUMBER": hash_sr_number(req.sr_number),
+        "SERVICE_ACTIVITY": _service_activity(req),
+        "RNSN": hash_rnsn(req.nsn),
+        "QUANTITY_REQUIRED": req.qty_ordered,
+        "PARTS_CHARGE": float(getattr(req, "total_cost", 0.0) or 0.0),
+        "DOCUMENT_NUMBER": hash_document_number(req.document_number),
+    }
+
+
+def _row_for_due_in(req) -> Dict[str, Any]:
+    """Populate the 12 due-in columns SPIRE actually models. The other 70
+    are emitted as empty strings so the on-the-wire row preserves the
+    full real-export schema width and column order. Downstream tooling
+    that pre-allocates columns can rely on byte-stable headers regardless
+    of which fields SPIRE chooses to fill."""
+    received = getattr(req, "received_date", None)
+    ordered = getattr(req, "ordered_date", None)
+    fy = ordered.year if ordered else ""
+    fy_qtr = ""
+    fy_mth = ""
+    doc_fy_qtr = ""
+    if ordered:
+        # USG fiscal year starts Oct 1. FY26 = Oct 2025 - Sep 2026.
+        fy_year = ordered.year + 1 if ordered.month >= 10 else ordered.year
+        fy = fy_year
+        # Quarter 1 = Oct-Dec, Q2 = Jan-Mar, Q3 = Apr-Jun, Q4 = Jul-Sep.
+        m = ordered.month
+        if m >= 10:
+            q = 1
+        elif m <= 3:
+            q = 2
+        elif m <= 6:
+            q = 3
+        else:
+            q = 4
+        fy_qtr = f"Q{q}"
+        doc_fy_qtr = f"FY{fy_year % 100:02d}-Q{q}"
+        fy_mth = f"{fy_year % 100:02d}-{_MONTH_NAMES[m - 1]}"
+    return {
+        # SPIRE-populated columns (12 of 82):
+        "DOC_NBR": hash_document_number(req.document_number),
+        "DIC": getattr(req, "dic", "") or "",
+        "NSN_ORDERED": hash_nsn_ordered(req.nsn),
+        "PRI_CD": req.priority,
+        "ESTABLISHED_DT": _to_oracle_date(ordered),
+        "MAX_STAT_DT": _to_oracle_date(req.projected_delivery_date),
+        "SR_NUMBER": hash_sr_number(req.sr_number),
+        "SOS": hash_sos(getattr(req, "service_activity", "") or ""),
+        "ITEM_TYPE": getattr(req, "item_type", "I"),
+        "DOC_STATUS": getattr(req, "doc_status", "") or "",
+        "UNIT_PRICE": float(getattr(req, "unit_cost", 0.0) or 0.0),
+        "QTY_SHIPPED": req.qty_ordered if received else 0,
+        "QTY_RECEIVED": req.qty_ordered if received else 0,
+        # Light-touch derived bookkeeping (kept here so the byte shape
+        # stays useful to downstream tools, not just empty padding):
+        "DOC_FY": fy,
+        "FY_QTR": fy_qtr,
+        "DOC_FY_QTR": doc_fy_qtr,
+        "FY_MTH": fy_mth,
+        "APPROVED_DT": _to_oracle_date(ordered),
+        "MAX_DT_EST": _to_oracle_date(req.projected_delivery_date),
+        # Remaining 63 columns implicitly default to "" via _csv_response.
+    }
+
+
+def _csv_response(columns: tuple[str, ...], rows: List[Dict[str, Any]], filename: str) -> Response:
+    """Build a CSV response that mirrors the real GCSS-MC export shape.
+
+    Real `hashed_header.csv` ships an unquoted header row and only quotes
+    body values when the value contains a comma, quote, or newline (i.e.
+    `csv.QUOTE_MINIMAL` semantics). Switching to QUOTE_MINIMAL makes
+    `curl ... | head -1` byte-equal to the real header.
+    """
+    buf = io.StringIO()
+    # `lineterminator="\n"` matches the real export's Unix line endings
+    # (Python's csv default of `\r\n` would break byte-for-byte parity).
+    writer = csv.DictWriter(
+        buf,
+        fieldnames=list(columns),
+        quoting=csv.QUOTE_MINIMAL,
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({c: r.get(c, "") for c in columns})
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Spire-Adapter": "gcss-mc-export/0.1.0",
+            "X-Spire-Mock": "REFERENCE_IMPLEMENTATION",
+        },
+    )
+
+
+# Export endpoints live in `backend/routes/gcss_export.py` and are mounted
+# at /api/gcss/export/ (canonical) and /api/integrations/gcss-mc/export/
+# (alias) by `backend/main.py`. The shared row helpers and column
+# constants above are imported from there.
+
+
+@router.get("/gcss-mc/coverage-summary")
+async def gcss_mc_coverage_summary():
+    """Lightweight summary of how much of the 163-column GCSS-MC schema
+    SPIRE actually consumes vs. drops. Backs the Field Dictionary tab's
+    header pills and the overview hero card."""
+    dict_path = Path(__file__).resolve().parents[2] / "dataset" / "data" / "gcss_dictionary.json"
+    if not dict_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="gcss_dictionary.json not present — run "
+            "`python -m dataset.scripts.build_gcss_dictionary` to regenerate.",
+        )
+    with dict_path.open("r", encoding="utf-8") as f:
+        d = json.load(f)
+    sections_summary = []
+    grand_total = 0
+    grand_consumed = 0
+    grand_partial = 0
+    for s in d.get("sections", []):
+        cov_counts = {"consumed": 0, "partial": 0, "dropped": 0}
+        for c in s.get("columns", []):
+            lvl = (c.get("coverage", {}) or {}).get("level", "dropped")
+            cov_counts[lvl] = cov_counts.get(lvl, 0) + 1
+        total = sum(cov_counts.values())
+        sections_summary.append({
+            "id": s.get("id"),
+            "title": s.get("title"),
+            "total_columns": total,
+            "consumed": cov_counts["consumed"],
+            "partial": cov_counts["partial"],
+            "dropped": cov_counts["dropped"],
+            "row_count_real_export": s.get("row_count_real_export", 0),
+        })
+        grand_total += total
+        grand_consumed += cov_counts["consumed"]
+        grand_partial += cov_counts["partial"]
+    return {
+        "generated_at": d.get("_meta", {}).get("generated_at"),
+        "totals": {
+            "columns": grand_total,
+            "consumed": grand_consumed,
+            "partial": grand_partial,
+            "dropped": grand_total - grand_consumed - grand_partial,
+            "consumed_pct": round(100.0 * grand_consumed / grand_total, 1) if grand_total else 0.0,
+        },
+        "sections": sections_summary,
+    }
+
+
+@router.get("/gcss-mc/dictionary")
+async def gcss_mc_dictionary(
+    section: Optional[str] = Query(None, description="header|parts|due_in (optional filter)"),
+):
+    """Serve the derived GCSS-MC field dictionary. Backs the Field
+    Dictionary tab on the Integrations page."""
+    dict_path = Path(__file__).resolve().parents[2] / "dataset" / "data" / "gcss_dictionary.json"
+    if not dict_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="gcss_dictionary.json not present — run "
+            "`python -m dataset.scripts.build_gcss_dictionary` to regenerate.",
+        )
+    with dict_path.open("r", encoding="utf-8") as f:
+        d = json.load(f)
+    if section:
+        wanted = section.lower()
+        d = {
+            "_meta": d.get("_meta", {}),
+            "sections": [s for s in d.get("sections", []) if s.get("id") == wanted],
+        }
+    return JSONResponse(content=d)
+
+
+# WP-8 acceptance: the Field Dictionary UI links here so a reviewer can
+# open the full schema fidelity report inline. Served as text/markdown so
+# a curl recipe in DDIL still works and the browser can pretty-print via
+# the Markdown viewer extension or the user's editor of choice.
+@router.get("/gcss-mc/fidelity-report")
+async def gcss_mc_fidelity_report():
+    report_path = (
+        Path(__file__).resolve().parents[2] / "docs" / "gcss_fidelity_report.md"
+    )
+    if not report_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="gcss_fidelity_report.md not present — run "
+            "`python -m dataset.scripts.generate_fidelity_report` to regenerate.",
+        )
+    md = report_path.read_text(encoding="utf-8")
+    return Response(content=md, media_type="text/markdown; charset=utf-8")

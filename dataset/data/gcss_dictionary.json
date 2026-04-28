@@ -1,0 +1,2378 @@
+{
+  "_meta": {
+    "source": "GCSS-MC sanitized data dictionary CSVs",
+    "generated_at": "2026-04-28T13:59:42.849314Z",
+    "real_profile": "dataset/data/gcss_real_profile.json"
+  },
+  "sections": [
+    {
+      "id": "header",
+      "title": "SR Header",
+      "source_csv": "sr_header_dict.csv",
+      "row_count_real_export": 103686,
+      "columns": [
+        {
+          "column": "SERVICE_REQUEST_TYPE",
+          "data_type": "VARCHAR2(25 BYTE)",
+          "nullable": true,
+          "comment": "Type of serveice request submitted.",
+          "real_top_3": [
+            {
+              "value": "Maintenance - CM",
+              "count": 103686,
+              "pct": 100.0
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.service_request_type",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "SR_NUMBER",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "THE SERVICE REQUEST NUMBER ASSIGNED IN GCSS",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.sr_number",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "JOB_STATUS_CODE",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "STATUS OF THE SR",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.job_status",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "DEFECT_CODE",
+          "data_type": "VARCHAR2(25 BYTE)",
+          "nullable": true,
+          "comment": "PROBLEM_CODE and dff attribute1  Primary defect code of equipment in maintenance.",
+          "real_top_3": [
+            {
+              "value": "FCON.CBB",
+              "count": 49882,
+              "pct": 48.1087
+            },
+            {
+              "value": "WPNS.CBB",
+              "count": 17406,
+              "pct": 16.7872
+            },
+            {
+              "value": "ELEC.INOP",
+              "count": 3196,
+              "pct": 3.0824
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.defect_code_primary + defect_code_secondary",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "OPERATIONAL_STATUS",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "THE OPERATIONAL STATUS OF THE NSN IN MAINTENANCE (E.G. DEADLINED, OP-DEGRADABLE, OP-MINOR)",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "PROBLEM_SUMMARY",
+          "data_type": "VARCHAR2(400 BYTE)",
+          "nullable": true,
+          "comment": "A SUMMARY OF THE PROBLEM FOR WHICH THE SERVICE REQUEST WAS CREATED",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.remark_text (header summary)",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "DATE_RECEIVED_IN_SHOP",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "Date Received in Shop (DRIS) is is the date stamp service request was placed in a status of  EQUIP ACCEPTED.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.open_date",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "ECHELON_OF_MAINT",
+          "data_type": "VARCHAR2(5 BYTE)",
+          "nullable": true,
+          "comment": "The Echelon of Maintenance at which the holder of the equipment is performing the repairs.",
+          "real_top_3": [
+            {
+              "value": "2",
+              "count": 57870,
+              "pct": 55.8127
+            },
+            {
+              "value": "3",
+              "count": 38029,
+              "pct": 36.6771
+            },
+            {
+              "value": "1",
+              "count": 7354,
+              "pct": 7.0926
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.echelon_numeric (+ maintenance_level label)",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "NSN_IN_MAINTENANCE",
+          "data_type": "VARCHAR2(15 BYTE)",
+          "nullable": true,
+          "comment": "National Stock Number of the item in maintenance",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SERIAL_NUMBER",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "A number assigned to an item of equipment to distinguish it from all other items of the same equipment types.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.serial_number",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "QUANTITY_INDUCTED",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "TOTAL NUMBER OF ITEMS SUBMITTED TO MAINTENANCE",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "UNIT_ISSUE_CODE",
+          "data_type": "VARCHAR2(2 BYTE)",
+          "nullable": true,
+          "comment": "A CODE USED TO INDICATE WHAT UNIT OF MEASURE THE ITEM IS ISSUED BY (e.g. BOX, EA, PK)",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "TAMCN",
+          "data_type": "VARCHAR2(7 BYTE)",
+          "nullable": true,
+          "comment": "Table of Authorized Materiel Control Number (TAMCN):  Alphanumeric set that identifies a piece of equipment within the USMC inventory:1. Employed by the Marine Corps to establish that an item is essential to the operational readiness of a weapons systems. 2. Indicates that a repair part contributes to the tactical and essential operations of an end item, component, or assembly whose failure would make the end item inoperable or incapable of fulfilling its mission. 3. Also used to indicate that a repair or secondary depot reparable component is required for the safety and health of personnel or is required by state or local laws.",
+          "real_top_3": [
+            {
+              "value": "tamcn_LdTtAkWe7qujsAQoWR97",
+              "count": 6571,
+              "pct": 6.3374
+            },
+            {
+              "value": "tamcn_s7bbHIZOgqbgJ9iYyaDQ",
+              "count": 6486,
+              "pct": 6.2554
+            },
+            {
+              "value": "tamcn_g8nshKjOtiBVdkzVsuYH",
+              "count": 6429,
+              "pct": 6.2005
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.tamcn",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "DEADLINED_DATE",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "DATE THAT THE END-ITEM WAS RENDERED DEADLINED OR DYSFUNCTIONAL",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.deadlined_date",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "MAINT_CATEGORY_CODE",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "INCIDENT_TYPE (Service type)  Maintenance Category Code per TM-4700-15/1",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MASTER_PRIORITY_CODE",
+          "data_type": "VARCHAR2(40 BYTE)",
+          "nullable": true,
+          "comment": "(PRIORITY/SEVIORITY)  Maintenance Priority per MCO 4400.16",
+          "real_top_3": [
+            {
+              "value": "06 B-Urgent",
+              "count": 56337,
+              "pct": 54.3342
+            },
+            {
+              "value": "05 B-Urgent",
+              "count": 21028,
+              "pct": 20.2805
+            },
+            {
+              "value": "13 C-Routine",
+              "count": 8994,
+              "pct": 8.6743
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.priority",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "HOLD_UNIT_IDENT_CODE",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "GROUP  UIC of the Unit conducting maintenance (Has physical custody of the equipment).",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "OWNER_UNIT_ADDRESS_CODE",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "OWNER_PARTY_ACCOUNT_ID (uic)  UIC of Equipment Owner.",
+          "real_top_3": [
+            {
+              "value": "owner_unit_address_code_ynbYZ7_knLyR6XDMEn32",
+              "count": 4960,
+              "pct": 4.7837
+            },
+            {
+              "value": "owner_unit_address_code_PGdDfNkynkfxA2a9vsHk",
+              "count": 3005,
+              "pct": 2.8982
+            },
+            {
+              "value": "owner_unit_address_code_jLj-J5GFPLPBAGZodf-q",
+              "count": 1905,
+              "pct": 1.8373
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.unit_uic (mapped via fleet)",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "UNIT_NAME",
+          "data_type": "VARCHAR2(400 BYTE)",
+          "nullable": true,
+          "comment": "OWNER_PARTY_ID/ OWNER_PARTY",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "ITEM_DESIGNATOR_NUMBER",
+          "data_type": "VARCHAR2(7 BYTE)",
+          "nullable": true,
+          "comment": "ATTR_NAME= PLM_ITEM_DESIGNATOR_NUM  IDN of NSN in maintenance.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "JOB_STATUS_DATE",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "DATE OF THE LAST STATUS CHANGE",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "ServiceRequest.close_date / status timestamp",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "SR_XREF",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "The number of any related SR's to the one in question.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SR_OPENED_BY",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "NAME OF USER THAT OPENED THE SERVICE REQUEST",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "DATE_CLOSED",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "DATE THE SERVICE REQUEST WAS CLOSED",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "OPENED_DATE",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "DATE THE SERVICE REQUEST WAS OPEN",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "EQUIP_OPER_TIME_CODE",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "ID1 (TIME_CODE_UNITS from OKS_TIME_CODE_UNITS_V)  D for day, R rounds, H for Hours, and M for miles.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "METER_READING",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "METER READING ON THE END ITEM IN MAINTENANCE",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MILITARY_LABOR_HOURS",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "Accumulated military maintenance man hours incurred in the completion of the requested maintenance.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "TOTAL_CIV_LAB_EXPENSE",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "SERVICE ACTIVITY = GCSS-CIVIL THEN GET PRICE  The total civilian labor charge to the nearest cent.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "TOTAL_EQUIP_OPER_TIME",
+          "data_type": "VARCHAR2(20 BYTE)",
+          "nullable": true,
+          "comment": "SUM( COUNTER_READING) WHERE CS_COUNTERS.NAME=LAB EXP  The operating time indicator reading at the time the equipment was repaired.  The reading is taken to the nearest whole mile/hour.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "TASK_NAME",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "The task name assigned.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "LAST_UPDATE_DATE",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "LAST_UPDATE_DATE (of the item record)",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "FILE_ID",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "THIS IS THE FILE IMPORT TRACKING NUMBER WHICH IS ASSIGNED TO EVERY DATA IMPORT FILE LOADED INTO THE MASTER DATA REPOSITORY.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "LEGACY_FILE_DTTM",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "THIS IS THE LEGACY FILE SYSTEM DATE USED FOR TRACKING PURPOSES IN THE MASTER DATA REPOSITORY.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "ORACLE_REPLC_DTTM",
+          "data_type": "TIMESTAMP(6)",
+          "nullable": true,
+          "comment": "THIS IS THE ORACLE REPLICATION TIMESTAMP INDICATING THE DATE AND TIME THE ROW WAS INSERTED INTO THE LCMI TABLE.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "CUSTOMER_NAME",
+          "data_type": "VARCHAR2(65 BYTE)",
+          "nullable": true,
+          "comment": "AAC OF UNIT THAT REQUESTED THE TASK",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIMMS_RAC",
+          "data_type": "VARCHAR2(6 BYTE)",
+          "nullable": true,
+          "comment": "Marine Corps Integrated Maintenance Management System  Readiness Assessment Code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RESOURCE_NAME_OWNER",
+          "data_type": "VARCHAR2(40 BYTE)",
+          "nullable": true,
+          "comment": "Name of the user who is assigned as owner of the SR.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SR_CUSTOMER",
+          "data_type": "VARCHAR2(25 BYTE)",
+          "nullable": true,
+          "comment": "Identifies the owner of the equipment.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SR_HOLDER",
+          "data_type": "VARCHAR2(35 BYTE)",
+          "nullable": true,
+          "comment": "Identifies the current owner of the SR.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RECORD_LAST_CHG_DATE",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "LAST_UPDATE_DATE (of the item record)",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SR_RANK",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "service request order it was received",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "NIIN",
+          "data_type": "VARCHAR2(9 BYTE)",
+          "nullable": true,
+          "comment": "The NIIN is the last nine digits of the NSN that differentiates each individual supply item from all other supply items. The first two digits signify the National Codification Bureau that assigned the NIIN, while the last seven digits are non-significant and are sequentially assigned by the FLIS.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        }
+      ]
+    },
+    {
+      "id": "parts",
+      "title": "SR Repair Parts",
+      "source_csv": "sr_repair_part_dict.csv",
+      "row_count_real_export": 98210,
+      "columns": [
+        {
+          "column": "SR_NUMBER",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "THE SERVICE REQUEST NUMBER ASSIGNED IN GCSS",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.sr_number",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "TASK_NUMBER",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "THE TASK NUMBER ASSIGNED WITHIN A SERVICE REQUEST IN GCSS",
+          "real_top_3": [],
+          "coverage": {
+            "level": "partial",
+            "spire_field": "rolled into SR-level remarks",
+            "badge": "amber",
+            "label": "Partial"
+          }
+        },
+        {
+          "column": "SERVICE_ACTIVITY",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "Describes the applicable activity that is being conducted. Any record with Service Activity : GCSSMC-Labor and Record NIIN: Labor is a labor hours record.",
+          "real_top_3": [
+            {
+              "value": "Issue from Inventory",
+              "count": 57994,
+              "pct": 59.051
+            },
+            {
+              "value": "null",
+              "count": 34564,
+              "pct": 35.194
+            },
+            {
+              "value": "SECREP Exchange",
+              "count": 3585,
+              "pct": 3.6503
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.service_activity",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "ORGANIZATION_CODE",
+          "data_type": "VARCHAR2(3 BYTE)",
+          "nullable": true,
+          "comment": "ORG CODE THAT CURRENTLY HOLDS THE PURCHASE ORDER (PERTAINING TO EACH RECORD)",
+          "real_top_3": [],
+          "coverage": {
+            "level": "partial",
+            "spire_field": "rolled into unit_uic mapping",
+            "badge": "amber",
+            "label": "Partial"
+          }
+        },
+        {
+          "column": "RNSN",
+          "data_type": "VARCHAR2(15 BYTE)",
+          "nullable": true,
+          "comment": "RECORD NATIONAL STOCK NUMBER - UNIQUE IDENTIFYING STOCK NUMBER FOR ITEM THAT WAS REQUISITIONED",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.nsn",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "QUANTITY_REQUIRED",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "QUANTITY OF REQUISITION ITEM REQUIRED TO FULFILL SERVICE REQUEST OBLIGATIONS",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.qty_ordered",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "DEMAND_CODE",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "1. Indicates to the management element of a distribution system whether the demand on an item is anticipated to be recurring or non-recurring. 2. Originators of requisitions enter the appropriate Demand Code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SIGNAL_CODE",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "1. Designates the fields that contain the intended consignee (Ship To) and the Activity (Bill To) to receive the bills and effect payment when applicable.2. Requisitions will cite the Signal Codes which indicate whether the Requisitioner (RP 30-35), the Supplemental Addressee (RP 45-50) or the Fund Code (RP 52-530 is to be used to find the Bill-To address. Marine Corps activities are authorized to use Signal Codes E and N which indicates the Bill-To address is in the remarks field.3. When ASA Signal Code is cited and the item is SFA, the requisition will be rejected citing Status Code CM. If SFA Signal Code is cited and the item is ASA, status BN will be furnished, the Signal Code changed to W or X as appropriate, and supply action continued.4. Identifies where requested material is to be shipped and who is to be billed for funded items. This information will be provided to the Source of Supply on requisitions and due-out details.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "PARTS_CHARGE",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "The accumulated parts charge for all parts obtained from any source for and ERO.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.total_cost",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "DOCUMENT_NUMBER",
+          "data_type": "VARCHAR2(15 BYTE)",
+          "nullable": true,
+          "comment": "1. Used to identify the Document during the entire processing cycle. It is comprised of either a standard DoD document number (DOCUMENT-NUM), a FEDSTRIP agency document number (DOCUMENT-NUM-FEDSTRIP), or a Foreign Military Sales/Military Assistance Program document number (DOCUMENT-NUM-FMS-MAP).2. MAARS-description: the Document Number is constructed in MILSTRIP format and used by all activities for all inputs. The first six positions are the DoD Activity Address Code (DODAAC), the next four positions are the year and Julian date, and the last four positions are the Activity Serial Number.3. A 14-digit reference number assigned to a requisition or a release/receipt document in order to identify the transaction throughout the logistics system until retirement of the document is authorized in official reports of audit.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.document_number",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "STATUS_DATE",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "DATE THAT THE STATUS WAS POSTED",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "DATE_RECEIVED_CANCELLED",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "THE DATE THAT THE DOCUMENT WAS RECEIPTED WITH DRA OR CANCELLED",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SUPP_STATUS_DIC",
+          "data_type": "VARCHAR2(250 BYTE)",
+          "nullable": true,
+          "comment": "TRANSACTION_TYPE /  DOCUMENT_IDENTIFIER  Document Identifier Code for the Supply Status.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "LAST_UPDATE_DATE",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "LAST_UPDATE_DATE (of the item record)",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "FILE_ID",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "THIS IS THE FILE IMPORT TRACKING NUMBER WHICH IS ASSIGNED TO EVERY DATA IMPORT FILE LOADED INTO THE MASTER DATA REPOSITORY.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "LEGACY_FILE_DTTM",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "THIS IS THE LEGACY FILE SYSTEM DATE USED FOR TRACKING PURPOSES IN THE MASTER DATA REPOSITORY.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "ORACLE_REPLC_DTTM",
+          "data_type": "TIMESTAMP(6)",
+          "nullable": true,
+          "comment": "THIS IS THE ORACLE REPLICATION TIMESTAMP INDICATING THE DATE AND TIME THE ROW WAS INSERTED INTO THE LCMI TABLE.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "REQUIREMENT_NUMBER",
+          "data_type": "VARCHAR2(20 BYTE)",
+          "nullable": true,
+          "comment": "Identifies the Part Requirement which generated the demand.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SERIAL_NUMBER",
+          "data_type": "VARCHAR2(30 BYTE)",
+          "nullable": true,
+          "comment": "A number assigned to an item of equipment to distinguish it from all other items of the same equipment types.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "REPLACEMENT_SDN",
+          "data_type": "VARCHAR2(15 BYTE)",
+          "nullable": true,
+          "comment": "New Standard Document number for material",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SALES_ORDER_NUMBER",
+          "data_type": "VARCHAR2(20 BYTE)",
+          "nullable": true,
+          "comment": "Sales order of the transaction (as applicable)",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAT_TRANS_ID_NUM",
+          "data_type": "NUMBER",
+          "nullable": true,
+          "comment": "TRANSACTION ID NUMBER THAT WAS AUTOMATICALLY CREATED BY GCSS-MC",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "TRANS_LAST_UPDATE",
+          "data_type": "DATE",
+          "nullable": true,
+          "comment": "LATEST DATE ASSOCIATED WITH THE TRANSACTION",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "UNIT_OF_ISSUE",
+          "data_type": "VARCHAR2(3 BYTE)",
+          "nullable": true,
+          "comment": "Code indicating the physical measurement of material or repair part.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "NIIN",
+          "data_type": "VARCHAR2(9 BYTE)",
+          "nullable": true,
+          "comment": "The NIIN is the last nine digits of the NSN that differentiates each individual supply item from all other supply items. The first two digits signify the National Codification Bureau that assigned the NIIN, while the last seven digits are non-significant and are sequentially assigned by the FLIS.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        }
+      ]
+    },
+    {
+      "id": "due_in",
+      "title": "Due-In",
+      "source_csv": "due_in_data_dict.csv",
+      "row_count_real_export": 38108,
+      "columns": [
+        {
+          "column": "DOC_NBR",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Used to identify the Document during the entire processing cycle. The R-001 Doc_history is the base of the feed. It is comprised of either a standard DoD document number (DOCUMENT-NUM), Only including the following Document Identifiers as the base:  A0A, A01, A2A, A21, A3A, A31, Z2M, ZBE",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.document_number",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "DIC",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Document Identifier code that established the requisition, redistribution within GCSS-MC",
+          "real_top_3": [
+            {
+              "value": "A0A",
+              "count": 26458,
+              "pct": 69.429
+            },
+            {
+              "value": "A01",
+              "count": 8098,
+              "pct": 21.2501
+            },
+            {
+              "value": "A2A",
+              "count": 2820,
+              "pct": 7.4
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.dic",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "NSN_ORDERED",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Fifteen character national stock nuber. The first 4 characters are the FSC, the next 9 characters are the NIIN.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.nsn",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "NIIN",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The NIIN is the last nine digits of the NSN that differentiates each individual supply item from all other supply items. The first two digits signify the National Codification Bureau that assigned the NIIN, while the last seven digits are non-significant and are sequentially assigned by the FLIS.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.nsn (last 9 digits)",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "PRI_CD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "1. THIS DATA ITEM INDICATES TO THE SUPPLIER THE URGENCY OF THE MATERIEL REQUIREMENTS FOR THE REQUISITIONER.2. A PRECEDENCE APPLIED TO SUPPLY REQUISITIONS, WHICH IS BASED UPON THE REQUESTING UNITS MISSION, FORCED ACTIVITY DESIGNATOR, AND DEGREE OF COMBAT ENGAGEMENT. 3. PRIORITY INDICATES A PRIORITY OF CUSTOMERS RELATIVE NEEDS BASED UPON THEIR MISSIONS.",
+          "real_top_3": [
+            {
+              "value": "6",
+              "count": 19853,
+              "pct": 52.0967
+            },
+            {
+              "value": "5",
+              "count": 6494,
+              "pct": 17.041
+            },
+            {
+              "value": "3",
+              "count": 5510,
+              "pct": 14.4589
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.priority",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "IPG",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Issue Priority Groups (IPGs) categorize works or material requisitions based on urgency, with IPG 1(highest) reserved for critical, mission-stopping, or immediate needs, often designated by priority codes (01-03), IPG 2 (04-08) and IPG 3 (09-15).",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RDD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The julian date or proper code (777, 999) that relays to the provider when the materiel is required in order to support unit operations.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "PROJECT_CD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Assigned by a military service or the Department of Defense (DoD) to identify a specific project of a general or specific program nature for recognition throughout the distribution system to identify the requisition and related documents applicable to specific projects or programs, the shipments of material for specific projects or programs and the specific programs to provide for funding and costing of extraordinary programs at the requisitioner or supplier level.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "PURPOSE_CD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "indicates purpose code that the requisition is processed for.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "ESTA",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "D_DT\" IS 'Utilizes the status_received_date that is provided with the initiating DIC as mention in the Document number field.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.ordered_date",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "MAX_STAT_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maxium status_Received_date identified within the GCSS-MC R-001 data feed.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.projected_delivery_date",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "SUPP_ADD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "FINAL DESTINATION/RECEIVING UNIT OF REQUISITIONED ITEM if utilizing Signal code J, else it could represent a section within the unit.",
+          "real_top_3": [
+            {
+              "value": "YARM",
+              "count": 6140,
+              "pct": 16.1121
+            },
+            {
+              "value": "YMT",
+              "count": 3019,
+              "pct": 7.9222
+            },
+            {
+              "value": "YOPT",
+              "count": 2459,
+              "pct": 6.4527
+            }
+          ],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SR_NUMBER",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Identifies applicable Service Request number from which the demand was created.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.sr_number",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "ADVICE_CODE",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "ALPHA/NUMERIC FIELD PROVIDING CODED INSTRUCTION TO SUPPLIER PERTAINING TO SUBJECT SDN - see DLM 4400.25-1 Appendix 2.15 for details.",
+          "real_top_3": [
+            {
+              "value": "null",
+              "count": 38108,
+              "pct": 100.0
+            }
+          ],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "ITEM_TYPE",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "INDICATES WHETHER THE ITEM IS AN INVENTORY (CONSUMABLE) ITEM OR SECREP.",
+          "real_top_3": [
+            {
+              "value": "I",
+              "count": 34246,
+              "pct": 89.8656
+            },
+            {
+              "value": "SECREP",
+              "count": 3862,
+              "pct": 10.1344
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.item_type",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "RCVR_CD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "PLM_RECOVERABILITY_CD  Indicates the disposition action on unserviceable items.  Also, fifth position in the Source Maintenance Recoverability Code.",
+          "real_top_3": [
+            {
+              "value": "Z",
+              "count": 30929,
+              "pct": 81.1614
+            },
+            {
+              "value": "F",
+              "count": 1474,
+              "pct": 3.868
+            },
+            {
+              "value": "D",
+              "count": 1415,
+              "pct": 3.7131
+            }
+          ],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "CEC",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "CODE ASSIGNED TO CRITICAL ITEMS INDICATING THE ITEM IS ESSENTIAL TO MILITARY MISISONS.  ITEM MAY BE FUNCTIONAL PART OF AN END ITEM, COMPONENT, OR ASSEMBLY WHERE FAILURE OF SUBJECT ITEM WOULD MAKE THE END ITEM INOPERABLE OR INCAPABLE OF FULFILLING ITS MISSION.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SAC",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "STORES_ACCOUNT_CODE-STATES THE FUNDS REQUIRED TO OBTAIN ITEM (UNIT FUNDS, HQMC.)",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SOS",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "THE RIC FOR THE ORGANIZATION THAT SUPPLIES THE ITEM",
+          "real_top_3": [
+            {
+              "value": "sos_KaVbhcpv0pjDblSRAq8q",
+              "count": 33365,
+              "pct": 87.5538
+            },
+            {
+              "value": "sos_cbcuqWBBRp0KrOC_VSIP",
+              "count": 2456,
+              "pct": 6.4448
+            },
+            {
+              "value": "sos_2-6UEUaC4vrGcCUWkHsf",
+              "count": 1031,
+              "pct": 2.7055
+            }
+          ],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "UNIT_PRICE",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "[Unit Price] Provides the unit price prescribed from the source of supply for the item.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.unit_cost",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "STATUS_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Applicable Quantity of the original requirement for the received status.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "REMAIN_DUE",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "After receipts, cancellations, adjustments from the SOS, this represents the balance still due in.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "REMAIN_DUE_RULE",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Indicates which rule was applied when determining the Remain_due.  There are approximately 60 Rules that may be applied. Helps to determine which rule and why based on the data.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "DOC_STATUS",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Determined by a CASE statement within the code by looking across all statuses received and applied and indicate current state ie., Backordered, Shipped, etc.",
+          "real_top_3": [
+            {
+              "value": "Complete",
+              "count": 33088,
+              "pct": 86.8269
+            },
+            {
+              "value": "Cancelled",
+              "count": 5020,
+              "pct": 13.1731
+            }
+          ],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.doc_status",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "RULE_ASSIGNED",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Indicates which rule was applied when determining the Doc Status that was applied. The rules are contained within the code.",
+          "real_top_3": [
+            {
+              "value": "2",
+              "count": 30017,
+              "pct": 78.7682
+            },
+            {
+              "value": "12",
+              "count": 5016,
+              "pct": 13.1626
+            },
+            {
+              "value": "4",
+              "count": 2899,
+              "pct": 7.6073
+            }
+          ],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "BO_QTY_FIRST",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "There is a Look up (LU) table within the MDR that assigns a category to all Backorder type status (BB, BD, etc.,) based on the category and the minimum status received date, this is used to show the first backorder status.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "BO_QTY_LAST",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "There is a Look up (LU) table within the MDR that assigns a category to all Backorder type status (BB, BD, etc.,) based on the category and the maximum status received date, this is used to show the last backorder status.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "QTY_PEND_SHIP",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "An average of the various status codes that indicate an item is being prepared for shipment, such as BA, SRO, A5A, etc., Then it is used within various case statements to help determine overall status.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "BM_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "This qty is based on the BM status along with various document number suffix codes to help determine what the qty is that is being passed to a SOS.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "BZ_BV_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "This qty is pulled when the status code is either BZ or BV.  At times, this qty can adjust the original qty ordered either up or down, based on quantity of pack.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "BG_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "This qty is pulled when the status code is BG.  At times, this qty can adjust the original qty ordered either up or down, based on quantity of pack.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "BJ_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "This qty is pulled when the status code is BJ.  At times, this qty can adjust the original qty ordered either up or down, based on quantity of pack.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "QTY_CANCELLED",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "There is a Look up (LU) table within the MDR that assigns a category to all cancellation type statuses (CA, CS, CJ, etc.,) based on the category and the maximum status received date.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "D9_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "This qty is pulled with the Document Identifier code is like D9L, which indicates a lost shipment.  At times other types of D9s are processed as well to reduce the qty.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "QTY_SHIPPED",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The qty based on various document identifier codes that represents an item has been shipped, such as AS1.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.qty_ordered (best-effort)",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "QTY_RECEIVED",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The qty based on various document identifier codes that represent an item has been receipt for, such as D6T, D6A.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "DRA_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The qty based on document identifier codes that represents an item has been receipt for, such as DRA.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "COR_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The qty based on document identifier codes that represents an item has been receipt for, such as COR.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "DRB_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The qty based on document identifier codes that represents an item has been receipt for, such as DRB.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "DRF_QTY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The qty based on document identifier codes that represents an item has been receipt for, such as DRF.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_DT_EST",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_BO_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on back order type statuses.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_BO_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on back order type statuses.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_BA_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on items being prepared for shipment type statuses.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_BA_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on items being prepared for shipment type statuses.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_BM_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the BM status code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_BM_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the BM status code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_BJ_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the BJ status code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_BJ_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the BJ status code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_BG_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the BG status code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_BG_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the BG status code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_CANC_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the cancellation type status code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_CANC_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the cancellation type status code.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_AS1_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the shipped type document identifiers such as AS1.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_AS1_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the shipped type document identifiers such as AS1.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_D6_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as D6T, D6A.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_D6_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as D6T, D6A.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_DRA_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as DRA.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_DRA_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as DRA.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_COR_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as COR.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_COR_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as COR.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_DRB_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as DRB.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_DRB_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as DRB.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_DRF_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as DRF.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_DRF_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as DRF.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MIN_D9_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the minimum status received date on the entire history of the document based on the document identifiers such as D9L.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "MAX_D9_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the maximum status received date on the entire history of the document based on the document identifiers such as D9L.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "ESTA",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "D_TO_MRO\" IS 'set t.established_to_mro = round((t.ba_dt_min - t.established_dt), 4 ).",
+          "real_top_3": [],
+          "coverage": {
+            "level": "consumed",
+            "spire_field": "PartRequisition.ordered_date",
+            "badge": "green",
+            "label": "Consumed"
+          }
+        },
+        {
+          "column": "MRO_TO_SHIP",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "set t.mro_to_ship = case When t.as1_dt_max >= t.ba_dt_max  then round((t.as1_dt_max - t.ba_dt_max), 4 )  When t.ba_dt_max  >= t.as1_dt_max then abs(round((t.as1_dt_max - t.ba_dt_max), 4 )) end.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "OST",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "set t.ost = case When t.as1_dt_max <= t.d6_dt_max and round((nvl(t.as1_dt_max, t.ba_dt_max)  - t.established_dt),4) > 0 then round((nvl(t.as1_dt_max, t.ba_dt_max)  - t.established_dt),4)   When round((coalesce(t.ba_dt_max, t.d6_dt_max, t.dra_dt_max)- t.established_dt), 4) > 0                then round((coalesce(t.ba_dt_max, t.d6_dt_max, t.dra_dt_max)- t.established_dt), 4) end.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "partial",
+            "spire_field": "Order-to-ship time (lead-time profile)",
+            "badge": "amber",
+            "label": "Partial"
+          }
+        },
+        {
+          "column": "LRT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "set t.lrt = round((nvl(t.d6_dt_max,  t.dra_dt_max) - t.established_dt),4).",
+          "real_top_3": [],
+          "coverage": {
+            "level": "partial",
+            "spire_field": "Logistics response time (lead-time profile)",
+            "badge": "amber",
+            "label": "Partial"
+          }
+        },
+        {
+          "column": "CWT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "set t.cwt = round((nvl(t.cor_dt_max, t.d6_dt_max)  - t.established_dt),4).",
+          "real_top_3": [],
+          "coverage": {
+            "level": "partial",
+            "spire_field": "Customer wait time (lead-time profile)",
+            "badge": "amber",
+            "label": "Partial"
+          }
+        },
+        {
+          "column": "DOC_FY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the Fiscal Year that the document was established based on the status received date.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "FY_QTR",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the Fiscal year and quarter the document was established based on the status received date.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "DOC_FY_QTR",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The quarter in which the document was established.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "SIGNAL_CD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "1. Designates the fields that contain the intended consignee (Ship To) and the Activity (Bill To) to receive the bills and effect payment when applicable.2. Requisitions will cite the Signal Codes which indicate whether the Requisitioner (RP 30-35), the Supplemental Addressee (RP 45-50) or the Fund Code (RP 52-530 is to be used to find the Bill-To address. Marine Corps activities are authorized to use Signal Codes E and N which indicates the Bill-To address is in the remarks field.3. When ASA Signal Code is cited and the item is SFA, the requisition will be rejected citing Status Code CM. If SFA Signal Code is cited and the item is ASA, status BN will be furnished, the Signal Code changed to W or X as appropriate, and supply action continued.4. Identifies where requested material is to be shipped and who is to be billed for funded items. This information will be provided to the Source of Supply on requisitions and due-out details.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "APPROVED_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Extracted from the GCSS-MC approver comments.  Helps to understand a potential gap between approved and established.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "FY_MTH",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The fiscal year month the document was established.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "ACQ_ADV_CD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "ALPHA/NUMERIC FIELD PROVIDING CODED INSTRUCTION TO SUPPLIER PERTAINING TO SUBJECT SDN - see DLM 4400.25-1 Appendix 2.15 for details.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "#VALUE!",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "R_OPEN\" IS 'Based on the incident number (sr number) of the requisition compared to the gcss sr header information to determine if the SR is open/closed.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "IMPORT_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the date and time the table was loaded.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "CONDITION_CODE",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "CODE USED TO CLASSIFY MATERIEL IN TERMS OF READINESS FOR ISSUE AND USE OR TO IDENTIFY ACTIONS NECESSARY TO CHANGE THE STATUS OF MATERIEL.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RCPT_COND_CD",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the actual condition of the materiel when the unit received the item.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "FILLED_BY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Indicates the SOS that filled the requisition, if more than one provider, then multiple is used to indicate more than one provider.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "TASK_NBR",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "The task number from GCSS-MC that the requisition is part of.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "CUR_SR_NBR",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "GCSS-MC does not provide an updated sr-number when a requisition is transferred to a new sr_number.  MDR created a process to pull current sr_number for a requisition via the OAS reports from GCSS-MC.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "COCOM",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents which MEF the requisitioner is part of.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RDD_CAL_DT",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the calculated date based on the RDD when it is a julian date.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "partial",
+            "spire_field": "lead-time forecast (PULSE consumes derived value)",
+            "badge": "amber",
+            "label": "Partial"
+          }
+        },
+        {
+          "column": "RDD_CAL_DT_CURATED",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the curated calculated date based on if the RDD is a 777, 999, 555, 444 and the number of days from the established date as to when an item should be received once shipped.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RDD_DAYS_FROM_BASE",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the number of days it has been since the requisition has been established.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RDD_DAYS_FROM_TODAY",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents the number of days from today it has been since requisition was processed.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RDD_MEANING",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "English description of the RDD - Required Delivery Date represents.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "RDD_ERROR",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents if there is a problem with the assigned julian date.  Either the RDD is before the established date or is greater than 100 days from date established.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "CURATED_RDD_MEANING",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Represents a meaning for the RDD if the RDD is abnormal.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        },
+        {
+          "column": "ARCHIVE_FLAG",
+          "data_type": "\u2014",
+          "nullable": true,
+          "comment": "Identifies open/closed status. L=Live, N=Near to Archiving, F=Archived.",
+          "real_top_3": [],
+          "coverage": {
+            "level": "dropped",
+            "spire_field": "",
+            "badge": "red",
+            "label": "Dropped"
+          }
+        }
+      ]
+    }
+  ]
+}

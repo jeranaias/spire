@@ -453,6 +453,20 @@ export const api = {
         undefined,
         false,
       ),
+    // WP-7 — published GCSS-MC field dictionary + coverage summary. Backend
+    // routes live at /api/integrations/gcss-mc/{coverage-summary,dictionary}.
+    gcssMcCoverageSummary: () =>
+      jsonFetch<GcssMcCoverageSummary>(
+        "/integrations/gcss-mc/coverage-summary",
+        undefined,
+        false,
+      ),
+    gcssMcDictionary: () =>
+      jsonFetch<GcssMcDictionary>(
+        "/integrations/gcss-mc/dictionary",
+        undefined,
+        false,
+      ),
     // Task #25 — return SPIRE to a clean t=0 demo state. Gated server-side
     // to the demo operator (g4); the topbar reset button is hidden for
     // every other role so this client method is never reachable from the
@@ -812,6 +826,69 @@ export interface GcssMcLastSync {
   next_poll_at: string;
   polling_interval_seconds_nominal: number;
   label_warning: string;
+}
+
+// Task #177 — schema-fidelity surfaces. The dictionary endpoint serves the
+// derived `dataset/data/gcss_dictionary.json`; the coverage-summary
+// endpoint rolls up the consumed/partial/dropped column counts so the
+// Integrations hero card can render a single honest pill.
+export interface GcssMcCoverageSection {
+  id: string;
+  title: string;
+  total_columns: number;
+  consumed: number;
+  partial: number;
+  dropped: number;
+  row_count_real_export: number;
+}
+
+export interface GcssMcCoverageSummary {
+  generated_at: string | null;
+  totals: {
+    columns: number;
+    consumed: number;
+    partial: number;
+    dropped: number;
+    consumed_pct: number;
+  };
+  sections: GcssMcCoverageSection[];
+}
+
+export interface GcssMcDictionaryTopValue {
+  value: string;
+  count: number;
+  pct: number;
+}
+
+export interface GcssMcDictionaryColumn {
+  column: string;
+  data_type: string;
+  nullable: boolean;
+  comment: string;
+  real_top_3: GcssMcDictionaryTopValue[];
+  coverage: {
+    level: "consumed" | "partial" | "dropped";
+    spire_field: string;
+    badge: "green" | "amber" | "red";
+    label: string;
+  };
+}
+
+export interface GcssMcDictionarySection {
+  id: string;
+  title: string;
+  source_csv: string;
+  row_count_real_export: number;
+  columns: GcssMcDictionaryColumn[];
+}
+
+export interface GcssMcDictionary {
+  _meta: {
+    source: string;
+    generated_at: string;
+    real_profile: string;
+  };
+  sections: GcssMcDictionarySection[];
 }
 
 export interface HeroMetrics {
@@ -1608,6 +1685,36 @@ export interface SentryBatch {
     source_classification: string;
   }[];
   jobs: string[];
+  // Set when an upload is detected as a real GCSS-MC SR-header export.
+  // Backed by `backend/integrations/sentry_gcss_adapter.IngestReport`.
+  // Absent for canonical demo seeds and generic CSV/XLSX/JSON uploads.
+  gcss_ingest_report?: GcssIngestReport;
+}
+
+export interface GcssIngestReport {
+  rows_total: number;
+  rows_kept: number;
+  rows_filtered_pmcs: number;
+  rows_with_warnings: number;
+  defect_code_trailing_period_normalized: number;
+  date_parse_failures: number;
+  schema_warnings: string[];
+  unique_sr_numbers: number;
+  adapter: string;
+  // "enforced" when no clear (non-hashed) UICs were accepted.
+  sanitization_gate: "enforced" | string;
+}
+
+// Task #67 — `scope` is the role-scoping descriptor SENTRY routes return
+// so the FE can render an honest "Showing N of M (CLB-6 only)" footer.
+// `unrestricted=true` means the caller's role sees the entire batch.
+export interface SentryScope {
+  role: string;
+  unrestricted: boolean;
+  allowed_units: string[];
+  total_records: number;
+  scoped_records: number;
+  label: string;
 }
 
 // Task #67 — `scope` is the role-scoping descriptor SENTRY routes return

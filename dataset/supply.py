@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from typing import List, Optional
 
 from config import BACKORDER_RATE, SUPPLY_PATHS, SUPPLY_STATUS_CODES
+from dic import sample_supply_tags
 
 
 @dataclass
@@ -37,6 +38,15 @@ class PartRequisition:
     # known at creation, used by PULSE for "expected arrival" displays.
     projected_delivery_date: Optional[date] = None
     estimated_ship_date: Optional[date] = None
+    # GCSS-MC supply schema tagging (WP-4 / WP-5):
+    # - item_type: "I" (inventory) or "SECREP" (secondary reparable).
+    # - dic: Document Identifier Code (A0A / A01 / A2A / A21).
+    # - service_activity: "Issue from Inventory" / "SECREP Exchange" / etc.
+    # - doc_status: "Complete" / "Cancelled" (due-in row close-out state).
+    item_type: str = "I"
+    dic: str = "A0A"
+    service_activity: str = "Issue from Inventory"
+    doc_status: str = "Complete"
 
     @property
     def total_cost(self) -> float:
@@ -75,13 +85,16 @@ def _path_for_part(part_cost: float, rng: random.Random) -> str:
 
 
 def _priority_for_condition(condition: str) -> str:
+    """Return a GCSS-MC priority string ("06 B-Urgent") matching the SR
+    condition. Mirrors lifecycle.py so a requisition's priority lines up
+    with its parent SR's priority band."""
     return {
-        "Deadlined": "02",
-        "Degraded": "05",
-        "Minor": "10",
-        "Supply": "10",
-        "Service": "13",
-    }.get(condition, "10")
+        "Deadlined": "02 A-Critical",
+        "Degraded":  "05 B-Urgent",
+        "Minor":     "13 C-Routine",
+        "Supply":    "13 C-Routine",
+        "Service":   "13 C-Routine",
+    }.get(condition, "13 C-Routine")
 
 
 def create_requisitions_for_sr(
@@ -99,6 +112,11 @@ def create_requisitions_for_sr(
         path = _path_for_part(part["cost"], rng)
         doc_num = f"{asset.unit_uic}-{_julian(sr_date)}-{_next_sequence(asset.unit_uic):04d}"
 
+        # WP-4 / WP-5: stamp GCSS-MC supply schema tags (item_type, dic,
+        # service_activity, doc_status) consistently per requisition. The
+        # tag draws are correlated (SECREP -> A2A/A21, etc.) so the synth
+        # supply traffic mirrors the real-export distribution.
+        tags = sample_supply_tags(rng, part_cost=part["cost"], supply_path=path)
         req = PartRequisition(
             document_number=doc_num,
             sr_number=sr_number,
@@ -110,6 +128,10 @@ def create_requisitions_for_sr(
             priority=priority,
             supply_path=path,
             ordered_date=sr_date,
+            item_type=tags["item_type"],
+            dic=tags["dic"],
+            service_activity=tags["service_activity"],
+            doc_status=tags["doc_status"],
         )
 
         # Compute the planned status timeline with gamma-distributed per-step
