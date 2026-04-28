@@ -24,6 +24,7 @@ import {
 import { withRetry, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { InsufficientPrivilege } from "../components/InsufficientPrivilege";
+import { LinkStatusStrip, commsCadenceMultiplier } from "../components/LinkStatusStrip";
 import { ErrorState, LoadingState } from "../components/ui";
 import { Link } from "react-router-dom";
 
@@ -44,6 +45,10 @@ export function AdminView() {
 }
 
 function TrainingFlywheelTab() {
+  // Honor degraded comms (Task #128) — back the 8s telemetry poll off
+  // when the lane is lossy.
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const cadenceMult = commsCadenceMultiplier(ddilMode);
   const [tel, setTel] = useState<AdminTelemetry | null>(null);
   const [outcomes, setOutcomes] = useState<DecisionOutcome[]>([]);
   const [feedback, setFeedback] = useState<FeedbackRecord[]>([]);
@@ -98,12 +103,14 @@ function TrainingFlywheelTab() {
       }
     };
     fetchAll(true);
-    const id = setInterval(() => fetchAll(false), 8000);
+    // Cadence multiplier (Task #128) stretches the poll interval on
+    // degraded comms so we don't hammer a queued lane.
+    const id = setInterval(() => fetchAll(false), 8000 * cadenceMult);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [cadenceMult]);
 
   if (error && !tel) {
     return (
@@ -134,6 +141,12 @@ function TrainingFlywheelTab() {
        * the rebase so the Flywheel page still cross-links to the model
        * registry without forcing the operator into the tab strip. */}
       <AdminTabs active="flywheel" />
+      {/* Link-status strip — Task #128. Lives at the top of every ADMIN
+       * surface so the security manager sees a degraded lane while
+       * scanning telemetry, not just on the bridge. */}
+      <div className="mb-3 flex items-center justify-end">
+        <LinkStatusStrip />
+      </div>
       <div className="mb-4 flex items-baseline justify-between gap-4">
         <div>
           {/* Promoted from h2 to h1 — this view is the document, not a

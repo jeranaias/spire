@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { api, type FusedThreat } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
+import { commsCadenceMultiplier } from "./LinkStatusStrip";
 import { Pressable } from "./ui";
 import { RefreshAge } from "./RefreshAge";
 
@@ -31,6 +32,10 @@ export function FusedThreatsPanel({
   onSelectFused?: (t: FusedThreat) => void;
 }) {
   const role = useSpireStore((s) => s.role);
+  // Honor degraded comms (Task #128) so this panel's poller backs off
+  // alongside the bridge / view pollers when the lane is lossy.
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const cadenceMult = commsCadenceMultiplier(ddilMode);
   const [threats, setThreats] = useState<FusedThreat[]>(initialThreats ?? []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Wall-clock ms timestamp of the last successful /fused-threats poll.
@@ -53,8 +58,8 @@ export function FusedThreatsPanel({
     // Switch to pollWithBackoff: 5s base, drops to 60s when nothing
     // changes, retries with backoff on errors.
     const ctrl = pollWithBackoff(() => api.bastion.fusedThreats(), {
-      baseMs: 5000,
-      maxMs: 60000,
+      baseMs: 5000 * cadenceMult,
+      maxMs: 60000 * cadenceMult,
       fingerprint: (r) =>
         (r.fused_threats || []).map((t) => `${t.id}:${t.severity}`).join(","),
       onResult: (r) => {
@@ -63,7 +68,7 @@ export function FusedThreatsPanel({
       },
     });
     return () => ctrl.stop();
-  }, [initialThreats, role]);
+  }, [initialThreats, role, cadenceMult]);
 
   if (threats.length === 0) {
     // Quiet "all clear" line. The empty-state audit flagged the silent return

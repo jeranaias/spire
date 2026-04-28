@@ -24,6 +24,7 @@ import {
 } from "../../api";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
+import { LinkStatusStrip, commsCadenceMultiplier } from "../../components/LinkStatusStrip";
 import { ErrorState, LoadingState } from "../../components/ui";
 import { AdminTabs } from "../AdminView";
 
@@ -41,6 +42,12 @@ export function InferenceEconomicsView() {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <AdminTabs active="economics" />
+      {/* Link-status strip — Task #128. Mounted on the economics surface
+       * so a security manager scanning cost telemetry sees a degraded
+       * lane immediately, not just on the bridge. */}
+      <div className="mb-3 flex items-center justify-end">
+        <LinkStatusStrip />
+      </div>
       <InferenceEconomicsTab />
     </div>
   );
@@ -79,6 +86,10 @@ function fmtBigInt(v: number): string {
 }
 
 export function InferenceEconomicsTab() {
+  // Honor degraded comms (Task #128) — back the 8s telemetry poll off
+  // when the lane is lossy so we don't hammer a queued lane.
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const cadenceMult = commsCadenceMultiplier(ddilMode);
   const [econ, setEcon] = useState<InferenceEconomics | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,13 +108,13 @@ export function InferenceEconomicsTab() {
       }
     };
     tick();
-    const id = setInterval(tick, 8000);
+    const id = setInterval(tick, 8000 * cadenceMult);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cadenceMult]);
 
   if (error && !econ) {
     return (

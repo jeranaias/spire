@@ -10,6 +10,7 @@ import { useSpireStore } from "../state/store";
 import { UseCaseStrip } from "../components/UseCaseStrip";
 import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
+import { LinkStatusStrip } from "../components/LinkStatusStrip";
 
 export interface SentryContext {
   batchId: string | null;
@@ -70,6 +71,12 @@ export function SentryView() {
       {/* Single h1 per view for screen-reader document outline. */}
       <h1 className="sr-only">SENTRY · Classification &amp; Release</h1>
       <UseCaseStrip number="14" title="SENTRY" subtitle="CUI AUTO-TAGGING — DoDM 5200.01" accent="var(--color-info)" />
+      {/* Link-status strip — Task #128. Mounted at the top of the SENTRY
+       * shell so the operator sees a degraded lane while reviewing the
+       * queue, not just on the bridge. */}
+      <div className="flex shrink-0 items-center justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
+        <LinkStatusStrip />
+      </div>
       <SentrySubnav />
       <div className="flex-1 overflow-hidden">
         <Routes>

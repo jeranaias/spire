@@ -9,6 +9,7 @@ import { ModelTab } from "./pulse/ModelTab";
 import { UseCaseStrip } from "../components/UseCaseStrip";
 import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
+import { LinkStatusStrip } from "../components/LinkStatusStrip";
 
 // Walkthrough #28 — numbered prefix on each tab + ARIA tablist + arrow
 // keyboard navigation. Active tab gets a thicker underline + bg tint.
@@ -34,6 +35,12 @@ export function PulseView() {
     <div className="flex h-full flex-col">
       <h1 className="sr-only">PULSE · Readiness &amp; Forecast</h1>
       <UseCaseStrip number="13" title="PULSE" subtitle="PARTS DEMAND FORECASTING — CONTESTED LOG · Class IX MAGTF" accent="var(--color-warning)" />
+      {/* Link-status strip — Task #128. Same honesty cue the bridge
+       * shows; mounted here so it follows the operator across every
+       * PULSE subview (overview / risk / cannib / forecast / model). */}
+      <div className="flex shrink-0 items-center justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
+        <LinkStatusStrip />
+      </div>
       <PulseSubnav />
       <div className="flex-1 overflow-hidden">
         {isEmpty ? (

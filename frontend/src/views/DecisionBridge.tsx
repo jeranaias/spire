@@ -33,7 +33,7 @@ import {
   isEmptyEnvelope,
 } from "../api";
 import { pollWithBackoff, formatApiError } from "../api-retry";
-import { ROLE_DEFAULT_VIEW, useSpireStore, type DdilMode } from "../state/store";
+import { ROLE_DEFAULT_VIEW, useSpireStore } from "../state/store";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import { StageIngestHero } from "../components/StageIngestHero";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
@@ -43,6 +43,7 @@ import {
   LoadingState,
   Pressable,
 } from "../components/ui";
+import { LinkStatusStrip, commsCadenceMultiplier } from "../components/LinkStatusStrip";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -234,24 +235,6 @@ function DatasetBadge({ day }: { day: string | null | undefined }) {
       AS OF {label}
     </span>
   );
-}
-
-// ---------------------------------------------------------------------------
-// DDIL-aware polling cadence.
-//
-// Task #47 wants the bridge to honor the operator-driven comms posture: when
-// the link is degraded the tile pollers should slow down (4–8x) instead of
-// hammering against a lossy/queued lane. Returns the multiplier applied to
-// both `baseMs` and `maxMs`.
-// ---------------------------------------------------------------------------
-function commsCadenceMultiplier(mode: DdilMode): number {
-  switch (mode) {
-    case "LIMITED":      return 4;
-    case "INTERMITTENT": return 6;
-    case "DISCONNECTED": return 8;
-    case "CONNECTED":
-    default:             return 1;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -884,133 +867,12 @@ function AuditTile({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Link-status strip — Task #47.
-//
-// Sits between the bridge header and the tile grid. Tells the operator at a
-// glance whether what they're looking at is fresh or cached:
-//
-//   CONNECTED    → "LINK · CONNECTED · LAST SYNC 12s AGO"
-//   LIMITED      → "LINK · LIMITED · LAST SYNC 18s AGO — slow lane"
-//   INTERMITTENT → "LINK · INTERMITTENT · LAST FRESH 1m48s AGO — showing cached"
-//   DISCONNECTED → "LINK · DISCONNECTED · LAST FRESH 4m12s AGO — showing cached
-//                                                  · 2 writes queued"
-//
-// Driven entirely off store fields (ddilMode + ddilLastCacheHit + ddilQueue)
-// plus a `lastSuccessAt` value lifted from the bridge view's pollers.
-// ---------------------------------------------------------------------------
-function relMs(deltaMs: number): string {
-  const sec = Math.max(0, Math.floor(deltaMs / 1000));
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  const remS = sec % 60;
-  if (min < 60) return remS ? `${min}m${remS}s` : `${min}m`;
-  const hr = Math.floor(min / 60);
-  return `${hr}h${min % 60 ? ` ${min % 60}m` : ""}`;
-}
-
-const LINK_TONE: Record<DdilMode, string> = {
-  CONNECTED:    "var(--color-success)",
-  LIMITED:      "var(--color-warning)",
-  INTERMITTENT: "var(--color-warning)",
-  DISCONNECTED: "var(--color-danger)",
-};
-
-function LinkStatusStrip({ lastSuccessAt }: { lastSuccessAt: number | null }) {
-  const ddilMode = useSpireStore((s) => s.ddilMode);
-  const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
-  const ddilLastSyncAt = useSpireStore((s) => s.ddilLastSyncAt);
-  const ddilSyncing = useSpireStore((s) => s.ddilSyncing);
-  const queueDepth = useSpireStore((s) => s.ddilQueue.length);
-
-  // Tick once a second so the "12s ago" clock advances live without the
-  // pollers having to rerender — the strip is the operator's primary
-  // honesty cue, so it has to feel alive even when the lane is silent.
-  const [now, setNow] = useState<number>(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  const tone = LINK_TONE[ddilMode] ?? LINK_TONE.CONNECTED;
-  const isDegraded = ddilMode !== "CONNECTED";
-
-  // Pick the most honest "last fresh" timestamp we can produce.
-  //   CONNECTED   → the most recent of `lastSuccessAt` (per-tile poll
-  //                  success) and `ddilLastSyncAt` (set by CommsControl
-  //                  after a queue replay completes). The poll value is
-  //                  usually fresher; the sync value covers the case
-  //                  where we just came out of DISCONNECTED but no poll
-  //                  has fired yet.
-  //   DEGRADED    → prefer the cache-hit's `cachedAt` (the moment the
-  //                  upstream payload we're serving was actually fresh)
-  //                  and fall back through `ddilLastSyncAt` and finally
-  //                  `lastSuccessAt`. If none are known, render `—`.
-  const cacheCachedAt = ddilLastCacheHit?.cachedAt ?? null;
-  const candidates = isDegraded
-    ? [cacheCachedAt, ddilLastSyncAt, lastSuccessAt]
-    : [lastSuccessAt, ddilLastSyncAt];
-  const freshAt = candidates.reduce<number | null>(
-    (acc, v) => (v == null ? acc : acc == null ? v : Math.max(acc, v)),
-    null,
-  );
-  const freshLabel = freshAt != null ? `${relMs(now - freshAt)} ago` : "—";
-  const freshKind = isDegraded ? "LAST FRESH" : "LAST SYNC";
-
-  // Mode-specific tail text.
-  const tail = (() => {
-    if (ddilSyncing) return "syncing queued writes";
-    if (ddilMode === "CONNECTED") return null;
-    if (ddilMode === "LIMITED") return "slow lane";
-    return "showing cached";
-  })();
-
-  return (
-    <div
-      className="flex items-center gap-2 rounded-sm border px-2 py-1 font-mono text-[10px] uppercase tracking-widest"
-      role="status"
-      aria-live="polite"
-      aria-label={`Link status ${ddilMode}, ${freshKind.toLowerCase()} ${freshLabel}`}
-      style={{
-        color: tone,
-        borderColor: tone,
-        background: `color-mix(in oklab, ${tone} 10%, var(--color-surface))`,
-      }}
-    >
-      <span className="relative flex h-2 w-2" aria-hidden>
-        {isDegraded && (
-          <span
-            className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
-            style={{ background: tone }}
-          />
-        )}
-        <span
-          className="relative inline-flex h-2 w-2 rounded-full"
-          style={{ background: tone }}
-        />
-      </span>
-      <span className="text-[var(--color-text-muted)]">LINK ·</span>
-      <span className="font-semibold">{ddilMode}</span>
-      <span className="text-[var(--color-text-muted)]">·</span>
-      <span className="text-[var(--color-text-muted)]">{freshKind}</span>
-      <span className="tabular-nums text-[var(--color-text-secondary)]">{freshLabel}</span>
-      {tail && (
-        <>
-          <span className="text-[var(--color-text-muted)]">—</span>
-          <span className="text-[var(--color-text-secondary)]">{tail}</span>
-        </>
-      )}
-      {queueDepth > 0 && (
-        <>
-          <span className="text-[var(--color-text-muted)]">·</span>
-          <span style={{ color: "var(--color-warning)" }}>
-            {queueDepth} write{queueDepth === 1 ? "" : "s"} queued
-          </span>
-        </>
-      )}
-    </div>
-  );
-}
+// LinkStatusStrip + commsCadenceMultiplier were lifted into
+// `components/LinkStatusStrip.tsx` so other top-level views (BASTION,
+// PULSE, SENTRY, ADMIN) can mount the same operator honesty cue —
+// Task #128. The bridge keeps tracking a `lastSuccessAt` from its tile
+// pollers and passes it through; views that don't track it rely on the
+// store's `ddilLastSyncAt` instead.
 
 // ---------------------------------------------------------------------------
 // MDM 2026 stage-pivot — four hero use-case tiles. Replaces the 5-tile

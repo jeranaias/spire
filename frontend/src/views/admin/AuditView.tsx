@@ -27,6 +27,7 @@ import {
 import { withRetry, formatApiError } from "../../api-retry";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
+import { LinkStatusStrip, commsCadenceMultiplier } from "../../components/LinkStatusStrip";
 import { Button, ErrorState, LoadingState, EmptyState, IconButton } from "../../components/ui";
 import { ClassifiedExport } from "../../components/classification/ClassifiedExport";
 import { useClearance } from "../../components/classification/useClearance";
@@ -142,6 +143,10 @@ function computeBundleClassification(rows: AuditEntry[]): {
 
 export function AuditView() {
   const role = useSpireStore((s) => s.role);
+  // Honor degraded comms (Task #128) so the 12s audit poll backs off
+  // alongside the bridge / BASTION pollers when the lane is lossy.
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const cadenceMult = commsCadenceMultiplier(ddilMode);
   // MDM 2026 stage-pivot — bypass the security_manager scope check
   // when the session is in stage mode. The on-stage flow lets the
   // host close the BASTION beat by jumping into the audit chain to
@@ -293,7 +298,7 @@ export function AuditView() {
         .then((r) => { if (!controller.signal.aborted) setData(r); })
         .catch(() => { /* AbortError + transient errors: poll silently retries on next tick */ });
     };
-    const id = setInterval(tick, 12_000);
+    const id = setInterval(tick, 12_000 * cadenceMult);
     const onVis = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") tick();
     };
@@ -307,7 +312,7 @@ export function AuditView() {
         document.removeEventListener("visibilitychange", onVis);
       }
     };
-  }, [queryParams]);
+  }, [queryParams, cadenceMult]);
 
   // Bundle classification computed from the *export window* (the same
   // 500-row fetch that `onExport` will download), NOT from the currently
@@ -419,6 +424,12 @@ export function AuditView() {
     <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-4 pt-4">
         <AdminTabs active="audit" />
+      </div>
+      {/* Link-status strip — Task #128. Mounted at the top of the audit
+       * surface so the SOC analyst sees a degraded lane while triaging
+       * the chain, not just on the bridge. */}
+      <div className="flex shrink-0 items-center justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
+        <LinkStatusStrip />
       </div>
       {/* Header */}
       <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">

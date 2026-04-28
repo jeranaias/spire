@@ -11,6 +11,7 @@ import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import { UseCaseStrip } from "../components/UseCaseStrip";
 import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
+import { LinkStatusStrip, commsCadenceMultiplier } from "../components/LinkStatusStrip";
 import {
   Button,
   IconButton,
@@ -90,6 +91,11 @@ export function BastionView() {
   // view auto-flips after the operator hydrates from DECISION BRIDGE.
   const datasetStatus = useDatasetStatus().status;
   const role = useSpireStore((s) => s.role);
+  // Per-view pollers slow down on degraded comms (Task #128) — same
+  // multiplier the bridge uses, so the lane backs off everywhere not
+  // just on the Decision Bridge.
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const cadenceMult = commsCadenceMultiplier(ddilMode);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAlertSeverityCounts = useSpireStore((s) => s.setAlertSeverityCounts);
   const setSelectedUnitIdGlobal = useSpireStore((s) => s.setSelectedUnitId);
@@ -324,11 +330,13 @@ export function BastionView() {
     // Base 5s, backs off to 60s when the alert list is unchanged. The toast
     // wall doesn't move during quiet stretches; reviewer caught the fixed
     // setInterval as one of three components polling on the same cadence.
+    // On degraded comms (Task #128) base+cap stretch by `cadenceMult` so
+    // the alert lane backs off rather than hammering against a queued lane.
     const ctrl = pollWithBackoff(
       () => withRetry(() => api.bastion.alerts(40)),
       {
-        baseMs: 5000,
-        maxMs: 60000,
+        baseMs: 5000 * cadenceMult,
+        maxMs: 60000 * cadenceMult,
         fingerprint: (r) =>
           `${r.alerts.length}|${r.alerts.map((a) => a.id).join(",")}`,
         onResult: (r) => applyAlertsResponse(r),
@@ -336,7 +344,7 @@ export function BastionView() {
       },
     );
     return () => ctrl.stop();
-  }, [applyAlertsResponse]);
+  }, [applyAlertsResponse, cadenceMult]);
 
   // Per-alert action — ack / snooze / resolve. Optimistic update so the
   // operator sees the row move (or vanish) immediately; if the backend
@@ -696,6 +704,12 @@ export function BastionView() {
     // operator mode so this wrapper has no visual impact off-stage.
     <div className="flex h-full flex-col overflow-hidden">
       <UseCaseStrip number="15" title="BASTION" subtitle="INSTALLATION COP AGGREGATOR · gates · utilities · emergency · weather · sensors" accent="var(--color-danger)" />
+      {/* Link-status strip — Task #128. Lives at the top of every primary
+       * view so the operator can't lose track of a degraded lane while
+       * scrolling the alert stream or working a building. */}
+      <div className="flex shrink-0 items-center justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1">
+        <LinkStatusStrip />
+      </div>
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left sidebar: alert stream — collapses to a 48px rail in Map
        * Focus Mode (#37). The rail still surfaces the active count + a
@@ -1989,6 +2003,11 @@ function G4CommandSummary({
   alerts: BastionAlert[];
   onAlertClick: (a: BastionAlert) => void;
 }) {
+  // Match the bridge: slow the fused-threat poller down on degraded comms
+  // (Task #128) so the lane backs off rather than hammering against a
+  // queued/cached payload.
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const cadenceMult = commsCadenceMultiplier(ddilMode);
   const [mcRates, setMcRates] = useState<Record<string, number | null>>({});
   const [fused, setFused] = useState<Array<{ id: string; severity: string; title: string }>>([]);
 
@@ -2019,15 +2038,16 @@ function G4CommandSummary({
 
   useEffect(() => {
     // Base 5s, backs off to 60s when the fused-threat list is unchanged.
+    // On degraded comms (Task #128) base+cap stretch by `cadenceMult`.
     const ctrl = pollWithBackoff(() => api.bastion.fusedThreats(), {
-      baseMs: 5000,
-      maxMs: 60000,
+      baseMs: 5000 * cadenceMult,
+      maxMs: 60000 * cadenceMult,
       fingerprint: (r) =>
         (r.fused_threats || []).slice(0, 3).map((t) => `${t.id}:${t.severity}`).join(","),
       onResult: (r) => setFused((r.fused_threats || []).slice(0, 3)),
     });
     return () => ctrl.stop();
-  }, []);
+  }, [cadenceMult]);
 
   const topAlerts = useMemo(() => {
     const sevRank: Record<string, number> = { CRITICAL: 5, HIGH: 4, MODERATE: 3, LOW: 2, INFO: 1 };
