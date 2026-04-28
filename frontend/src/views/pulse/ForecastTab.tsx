@@ -115,6 +115,54 @@ export function ForecastTab() {
       });
   }, [unit, horizon]);
 
+  // Task #129 — background auto-refresh so the freshness chip / STALE
+  // warning stays a real exception instead of just decaying with the
+  // wall clock when an operator leaves the tab open through a long
+  // demo. Cadence is 90s (matches the spirit of "sane cadence" in the
+  // task — fast enough that the chip rarely flips to STALE during a
+  // meeting, slow enough to not hammer the Monte Carlo endpoint or
+  // burn cycles in a contested-bandwidth scenario). Paused while the
+  // tab is hidden via `document.hidden` + `visibilitychange` so a
+  // backgrounded tab doesn't tax SATCOM. The manual Refresh button
+  // resets the cadence so we don't double-fire seconds after a click.
+  const REFRESH_INTERVAL_MS = 90_000;
+  const intervalRef = useRef<number | null>(null);
+  const stopInterval = useCallback(() => {
+    if (intervalRef.current !== null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+  const startInterval = useCallback(() => {
+    stopInterval();
+    intervalRef.current = window.setInterval(() => {
+      // Belt-and-suspenders: skip if the tab went hidden between the
+      // visibilitychange handler firing and this tick landing.
+      if (document.hidden) return;
+      refetch();
+    }, REFRESH_INTERVAL_MS);
+  }, [refetch, stopInterval]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) stopInterval();
+      else startInterval();
+    };
+    if (!document.hidden) startInterval();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      stopInterval();
+    };
+  }, [startInterval, stopInterval]);
+
+  const onManualRefresh = useCallback(() => {
+    refetch();
+    // Reset cadence so the next auto-tick is a full interval out from
+    // the click, not whatever fraction of the prior interval remained.
+    if (!document.hidden) startInterval();
+  }, [refetch, startInterval]);
+
   // Re-sync local state if the navigation state changes (back / forward
   // nav lands us on a different deep link).
   useEffect(() => {
@@ -258,7 +306,7 @@ export function ForecastTab() {
           <div className="mt-1 spire-body-muted">
             200 forward paths, drift fit on last {data?.data_window_days ?? 30} days of history. Shaded band = 10–90 percentile.
           </div>
-          <ForecastFreshness data={data} now={now} onRefresh={refetch} />
+          <ForecastFreshness data={data} now={now} onRefresh={onManualRefresh} />
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
