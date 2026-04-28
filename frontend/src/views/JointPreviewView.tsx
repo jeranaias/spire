@@ -472,10 +472,18 @@ function ReadinessChip({ code }: { code: string }) {
 }
 
 function SeverityChip({ sev }: { sev: string }) {
+  // Mirrors the backend ALERT_SEVERITY_ENUM in backend/routes/joint.py:
+  //   CRITICAL > HIGH > MODERATE > LOW
+  // CRITICAL gets its own brighter red so it doesn't read as just another
+  // HIGH; LOW gets a deliberate cool-blue tone instead of falling to the
+  // neutral catch-all (P1-9 from the joint-cop critique).
+  const norm = (sev || "").toUpperCase();
   const tone =
-    sev === "HIGH" || sev === "CRITICAL" ? { bg: "#3a1414", fg: "#ff9b95", border: "#7a2222" } :
-    sev === "MODERATE" ? { bg: "#3a2810", fg: "#f0c682", border: "#825a1f" } :
-                         { bg: "#0c2233", fg: "#9ec3df", border: "#2d6cb6" };
+    norm === "CRITICAL" ? { bg: "#4a0a0a", fg: "#ffd5d0", border: "#c43a2f" } :
+    norm === "HIGH"     ? { bg: "#3a1414", fg: "#ff9b95", border: "#7a2222" } :
+    norm === "MODERATE" ? { bg: "#3a2810", fg: "#f0c682", border: "#825a1f" } :
+    norm === "LOW"      ? { bg: "#0c2233", fg: "#9ec3df", border: "#2d6cb6" } :
+                          { bg: "#1a232c", fg: "#9caab6", border: "#2c3a48" };
   return (
     <span style={{ display: "inline-block", padding: "2px 8px", background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, borderRadius: 2, letterSpacing: "0.12em", fontWeight: 600 }}>
       {sev}

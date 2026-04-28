@@ -25,14 +25,14 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import session_role
 from ..scoping import allowed_units, require_clearance
-from ..state import get_dataset, last_day_snapshots
+from ..state import CanonicalDataset, get_dataset, last_day_snapshots
 
 router = APIRouter()
 
@@ -62,6 +62,50 @@ UNIT_COORDS: dict[str, tuple[float, float]] = {
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _snapshot_published_iso(ds: CanonicalDataset, last: list) -> str:
+    """Return the canonical 'published-at' timestamp for the joint payload.
+
+    Sourced from the underlying dataset snapshot, NOT wall-clock time, so two
+    back-to-back exports return identical `publishedAtUtc` when nothing in
+    the dataset has changed. The JLTC topbar's "Published" pill consumes
+    this value and must reflect actual dataset freshness.
+
+    Anchor is the latest `snapshot_date` (a date — pinned to end-of-day UTC
+    so the field is a full RFC3339 datetime). Falls back to the dataset's
+    own `generated_at` if the snapshot list is empty.
+    """
+    last_day: Optional[date] = None
+    if last:
+        last_day = last[0].snapshot_date
+    elif ds.snapshots:
+        last_day = ds.snapshots[-1].snapshot_date
+    if last_day is None:
+        return ds.generated_at or _now_iso()
+    return datetime.combine(last_day, time(23, 59, 59), tzinfo=timezone.utc).isoformat(timespec="seconds")
+
+
+# Canonical alert severity vocabulary. Joint partners parse `severity` as an
+# enum so the export keeps incident pass-through values (`LOW`, `CRITICAL`)
+# and synthesized readiness values (`HIGH`, `MODERATE`) under a single,
+# documented set. Anything outside this set is coerced to MODERATE so a
+# garbled severity never ships to a partner.
+ALERT_SEVERITY_ENUM: tuple[str, ...] = ("LOW", "MODERATE", "HIGH", "CRITICAL")
+
+
+def _norm_severity(value: Any) -> str:
+    s = str(value or "").strip().upper()
+    if s in ALERT_SEVERITY_ENUM:
+        return s
+    # Common synonyms that show up in upstream data.
+    if s in ("MED", "MEDIUM", "WARN", "WARNING"):
+        return "MODERATE"
+    if s in ("FATAL", "SEVERE", "P0"):
+        return "CRITICAL"
+    if s in ("INFO", "NOTICE", "MINOR"):
+        return "LOW"
+    return "MODERATE"
 
 
 def _stable_track_id(prefix: str, key: str) -> str:
@@ -98,28 +142,46 @@ def _readiness_status(mc_rate: float) -> dict[str, str]:
 
 
 def _sym2525(unit_name: str) -> str:
-    """Approximate a 2525C-style SIDC for each unit. Friendly / present /
-    ground unit / unit. The 4th-position function-id digit varies by
-    nominal mission (combat service support, infantry, aviation support,
-    air defense, engineer, ...). Joint partners read SIDC, not USMC
-    nicknames."""
+    """Approximate a MIL-STD-2525C/D SIDC for each unit. Friendly / present /
+    ground unit / unit. The 4th-position function-id field varies by nominal
+    mission (combat service support, infantry, aviation support, air defense,
+    engineer, ...). Joint partners read SIDC, not USMC nicknames.
+
+    A conformant 2525C SIDC is exactly 15 characters: 4-char prefix
+    (CodingScheme + StandardIdentity + BattleDimension + Status) followed
+    by an 11-char function-id field. The function code is right-padded with
+    `-` to fill positions 5-15. Anything shorter trips a SME's eye on the
+    very first curl.
+    """
     n = unit_name.upper()
     if "CLB" in n or "ESB" in n:
-        function = "UCFSS-----"   # combat service support / sustainment
+        function = "UCFSS"   # combat service support / sustainment
     elif "MARINES" in n and ("3/6" in n or "2/14" in n):
-        function = "UCI------"    # infantry / artillery
+        function = "UCI"     # infantry / artillery
     elif "LAR" in n:
-        function = "UCRVA-----"   # reconnaissance, light armor
+        function = "UCRVA"   # reconnaissance, light armor
     elif "MAINT" in n:
-        function = "UCFSM-----"   # maintenance
+        function = "UCFSM"   # maintenance
     elif "MALS" in n or "MWSS" in n:
-        function = "UCAA------"   # aviation support
+        function = "UCAA"    # aviation support
     elif "LAAD" in n:
-        function = "UCDA------"   # air defense
+        function = "UCDA"    # air defense
     else:
-        function = "UC-------"
+        function = "UC"
+    # Pad function code to 11 chars so 4 (prefix) + 11 (function) = 15.
+    function = function.ljust(11, "-")
     # Standard Identity F (friend), Battle dim G (ground), Status P (present)
-    return f"SFGP{function}"
+    sidc = f"SFGP{function}"
+    assert len(sidc) == 15, f"SIDC must be 15 chars, got {len(sidc)}: {sidc!r}"
+    return sidc
+
+
+def _link16_surface_track_number(unit_name: str) -> str:
+    """Distinct J3.3 surface-track TN for a unit that also reports a J3.5
+    land point. Real Link 16 networks emit each message family under its own
+    track number, then use J7.2 Track Correlation to tell receivers the two
+    TNs refer to the same entity. Same name -> same TN across calls."""
+    return _link16_track_number(f"{unit_name}::J33_SURFACE")
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +209,11 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
     last = last_day_snapshots(ds)
     if not last:
         raise HTTPException(status_code=503, detail="dataset empty")
+
+    # Single freshness anchor for the whole envelope. Sourced from the
+    # snapshot date, NOT wall-clock, so back-to-back exports are byte-stable
+    # when the dataset hasn't changed (P0-3 in the joint-cop critique).
+    published_iso = _snapshot_published_iso(ds, last)
 
     allowed = allowed_units(ds, role)
     by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
@@ -195,7 +262,7 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
             },
             "OperationalStatus": ready["text"],
             "ReadinessRating": ready["code"],
-            "asOfTime": _now_iso(),
+            "asOfTime": published_iso,
         })
 
         tracks.append({
@@ -215,7 +282,7 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 "speedMetersPerSecond": 0.0,
                 "stationary": True,
             },
-            "asOfTime": _now_iso(),
+            "asOfTime": published_iso,
         })
 
         # LogisticsStatus mirrors UCI's LogisticsStatusMessage shape (sustained
@@ -236,7 +303,7 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 for eqp in sorted(equip_by_unit[u.name])
             ],
             "missionCapableRate": round(mc_rate, 4),
-            "asOfTime": _now_iso(),
+            "asOfTime": published_iso,
         })
 
     # AlertNotification messages mirror SPIRE alerts (readiness + cannib +
@@ -256,10 +323,10 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 "messageType": "AlertNotification",
                 "uciMessageId": _stable_track_id("UCI-ALT-", f"rd:{u.uic}"),
                 "alertCategory": "OPERATIONAL_READINESS",
-                "severity": "HIGH" if mc_rate < 0.60 else "MODERATE",
+                "severity": _norm_severity("HIGH" if mc_rate < 0.60 else "MODERATE"),
                 "EntityIdentifierRef": _stable_track_id("UCI-ENT-", u.uic),
                 "summary": f"{u.name} mission-capable rate {mc_rate*100:.1f}% — below joint threshold",
-                "asOfTime": _now_iso(),
+                "asOfTime": published_iso,
             })
 
     incident_count = 0
@@ -279,10 +346,10 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
             "messageType": "AlertNotification",
             "uciMessageId": _stable_track_id("UCI-ALT-", f"inc:{inc.incident_number}"),
             "alertCategory": "INCIDENT",
-            "severity": inc.severity,
+            "severity": _norm_severity(inc.severity),
             "EntityIdentifierRef": _stable_track_id("UCI-ENT-", unit_for_inc.uic),
             "summary": f"{inc.type.replace('_', ' ').title()} · {unit_for_inc.name} · FPCON {inc.fpcon_at_time}",
-            "asOfTime": inc.date_time.isoformat(timespec="seconds") if hasattr(inc.date_time, "isoformat") else _now_iso(),
+            "asOfTime": inc.date_time.isoformat(timespec="seconds") if hasattr(inc.date_time, "isoformat") else published_iso,
         })
         incident_count += 1
         if incident_count >= 10:
@@ -297,7 +364,7 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
             "sourceSystemVersion": "0.1.0-SBIR",
             "sourceService": "USMC",
             "sourceUnit": "II MEF / 3d MLR",
-            "publishedAtUtc": _now_iso(),
+            "publishedAtUtc": published_iso,
             "classification": {
                 "marking": "SECRET",
                 "releasability": "REL TO USA, FVEY",
@@ -361,6 +428,11 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
     if not last:
         raise HTTPException(status_code=503, detail="dataset empty")
 
+    # Snapshot-derived freshness anchor for the Link 16 header. Same rule as
+    # the OMS/UCI envelope: deterministic across calls when the dataset
+    # hasn't changed.
+    published_iso = _snapshot_published_iso(ds, last)
+
     allowed = allowed_units(ds, role)
     by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     for s in last:
@@ -383,12 +455,12 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
         mc_rate = (c.get("MC", 0) / total) if total else 0.0
         ready = _readiness_status(mc_rate)
         lat, lon = UNIT_COORDS.get(u.name, (34.658, -77.398))
-        track_no = _link16_track_number(u.name)
+        land_tn = _link16_track_number(u.name)
 
         j35_messages.append({
             "messageNumber": "J3.5",
             "label": "LAND_POINT_TRACK",
-            "trackNumber": track_no,
+            "trackNumber": land_tn,
             "exerciseIndicator": "LIVE",
             "trackQuality": min(15, 8 + int(mc_rate * 7)),
             "identity": "FRIEND",
@@ -403,14 +475,20 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
             "readinessC": ready["code"],
             "callsign": u.name,
             "uic": u.uic,
-            "tn": track_no,
+            "tn": land_tn,
         })
 
+        # J3.3 surface tracks ride a *separate* TN from the J3.5 land point
+        # so the J7.2 correlation below can pair two distinct TNs — that's
+        # the whole point of correlation in Link 16. A single-TN
+        # "correlation" against itself is the giveaway tell P0-2 calls out.
+        surface_tn: Optional[str] = None
         if "LAR" in u.name or "Marines" in u.name or "ESB" in u.name or "Maint" in u.name:
+            surface_tn = _link16_surface_track_number(u.name)
             j33_messages.append({
                 "messageNumber": "J3.3",
                 "label": "SURFACE_TRACK",
-                "trackNumber": track_no,
+                "trackNumber": surface_tn,
                 "exerciseIndicator": "LIVE",
                 "identity": "FRIEND",
                 "platform": "GROUND_VEHICLE",
@@ -419,32 +497,33 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
                 "latitudeDegrees": lat,
                 "longitudeDegrees": lon,
                 "trackQuality": min(15, 8 + int(mc_rate * 7)),
-                "tn": track_no,
+                "tn": surface_tn,
             })
 
         j70_messages.append({
             "messageNumber": "J7.0",
             "label": "TRACK_MANAGEMENT",
-            "trackNumber": track_no,
+            "trackNumber": land_tn,
             "managementAction": "NEW_OR_UPDATE",
             "originatorJU": "01234",       # Source JU placeholder for SPIRE
             "linkStatus": "PARTICIPATING",
-            "tn": track_no,
+            "tn": land_tn,
         })
 
-        # J7.2 correlation — pair the J3.5 land point with the J3.3 surface
-        # track when both are present. Real Link 16 networks emit J7.2 to
-        # tell receivers "these two TNs refer to the same entity." We just
-        # echo the trackNumber against itself for the units with single
-        # representations; for dual-rep entities we emit a real correlation.
-        j72_messages.append({
-            "messageNumber": "J7.2",
-            "label": "TRACK_CORRELATION",
-            "primaryTN": track_no,
-            "secondaryTN": track_no,  # same entity, multiple message families
-            "correlationType": "POSITIVE",
-            "originatorJU": "01234",
-        })
+        # J7.2 correlation — emit ONLY when the entity has both a J3.5 land
+        # point AND a J3.3 surface track, and pair the two distinct TNs.
+        # Real Link 16 networks emit J7.2 to tell receivers "these two TNs
+        # refer to the same entity"; pairing a TN against itself is
+        # malformed and is the P0-2 tell from the joint-cop critique.
+        if surface_tn is not None and surface_tn != land_tn:
+            j72_messages.append({
+                "messageNumber": "J7.2",
+                "label": "TRACK_CORRELATION",
+                "primaryTN": land_tn,
+                "secondaryTN": surface_tn,
+                "correlationType": "POSITIVE",
+                "originatorJU": "01234",
+            })
 
         # J28.2 logistics status — one per unit. Real J28.2 is a request
         # message; we coopt the field shape for status broadcast since
@@ -453,13 +532,13 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
         j282_messages.append({
             "messageNumber": "J28.2",
             "label": "LOGISTICS_STATUS_BROADCAST",
-            "trackNumber": track_no,
+            "trackNumber": land_tn,
             "supplyClass": "VII",
             "missionCapableRate": round(mc_rate, 4),
             "missionCapablePlatforms": c.get("MC", 0),
             "totalPlatforms": total,
             "readinessC": ready["code"],
-            "tn": track_no,
+            "tn": land_tn,
         })
 
     payload = {
@@ -471,7 +550,7 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
             "sourceSystem": "SPIRE",
             "sourceJU": "01234",
             "originatorService": "USMC",
-            "publishedAtUtc": _now_iso(),
+            "publishedAtUtc": published_iso,
             "classification": {
                 "marking": "SECRET",
                 "releasability": "REL TO USA, FVEY",
