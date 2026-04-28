@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import re
+import time
 import uuid
 import zipfile
 from collections import Counter, defaultdict
@@ -570,6 +571,10 @@ async def start_processing(batch_id: str):
 
     # Kick off the synchronous classification pass. SENTRY processes on the
     # order of 500 records in <2s -- we don't need async work queues.
+    # We measure wall-clock so the Processing tab can surface the *real*
+    # engine time instead of pretending the scan-line replay reflects work
+    # in progress. Truth-in-UI: see Task #65.
+    engine_started = time.perf_counter()
     tier1_count = 0
     tier2_count = 0
     flag_counts = Counter()
@@ -742,10 +747,31 @@ async def start_processing(batch_id: str):
                 "recommended_action": recommendation,
             })
 
+    engine_seconds = round(time.perf_counter() - engine_started, 3)
+
+    # Truth-in-UI (Task #65): the Processing tab used to advertise a
+    # "Tier 2 (LLM)" handler. Torch is unloaded in this build, so no
+    # LLM is ever called -- the ~30% routing above is a deterministic
+    # marker for records *that would route* to a Tier-2 model when one
+    # is present. We surface the live model-load flags so the UI can
+    # honestly say "rule-based fallback" instead of implying inference.
+    try:
+        from ..model_hooks import is_sentry_loaded, is_pulse_loaded
+        sentry_loaded = bool(is_sentry_loaded())
+        pulse_loaded = bool(is_pulse_loaded())
+    except Exception:  # noqa: BLE001 -- defensive; never fail processing on a status read
+        sentry_loaded = False
+        pulse_loaded = False
+    engine_used = "rule_based_only" if not (sentry_loaded or pulse_loaded) else "rule_based_plus_model"
+
     job = {
         "job_id": job_id,
         "batch_id": batch_id,
         "started_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "engine_seconds": engine_seconds,
+        "engine_used": engine_used,
+        "sentry_model_loaded": sentry_loaded,
+        "pulse_model_loaded": pulse_loaded,
         "records_processed": len(results),
         "total": len(batch["records"]),
         "tier1_handled": tier1_count,
@@ -781,6 +807,13 @@ async def job_status(job_id: str):
                 "classification_counts": j["classification_counts"],
                 "mismatches": j["mismatches"],
                 "aggregation_risks": j["aggregation_risks"],
+                # Truth-in-UI (Task #65) -- engine wall-time + which engines
+                # actually ran, so the Processing tab can stop pretending the
+                # scan-line replay is live work.
+                "engine_seconds": j.get("engine_seconds", 0.0),
+                "engine_used": j.get("engine_used", "rule_based_only"),
+                "sentry_model_loaded": j.get("sentry_model_loaded", False),
+                "pulse_model_loaded": j.get("pulse_model_loaded", False),
                 "done": True,
             }
     raise HTTPException(status_code=404, detail="job not found")
