@@ -27,7 +27,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -189,10 +189,13 @@ CREATE TABLE IF NOT EXISTS user_prefs (
 -- Risk Board "Draft Action" submissions. Persisting these turned the
 -- Draft button from a toast-only no-op into a real artifact a judge
 -- can drill into ("where did that go?" → here, plus an audit_log row).
--- status transitions: held → approved | rejected | dismissed. The
--- approval queue ships an approver action (g4 / maintenance_chief /
+-- status transitions: held → approved | rejected | dismissed | expired.
+-- The approval queue ships an approver action (g4 / maintenance_chief /
 -- mef_commander, never the originator); originators may still dismiss
--- their own drafts to clear the queue.
+-- their own drafts to clear the queue. The auto-expiry sweep
+-- (expire_stale_pulse_drafts() — task #144) also rotates stale `held`
+-- rows to `expired` based on TTL + per-unit cap so the queue / badge
+-- can't grow forever.
 CREATE TABLE IF NOT EXISTS pulse_drafts (
     draft_id    TEXT PRIMARY KEY,
     asset_id    TEXT NOT NULL,
@@ -859,7 +862,9 @@ def record_pulse_draft(
 
 def list_pulse_drafts(*, status: str = "held", limit: int = 50) -> list[dict]:
     """Return drafts ordered newest-first. Default scope is held drafts so
-    the TopBar badge only counts the active queue."""
+    the TopBar badge only counts the active queue. `expired` is the bucket
+    auto-rotated out of `held` by `expire_stale_pulse_drafts` (TTL +
+    per-unit cap)."""
     with conn() as c:
         rows = c.execute(
             "SELECT draft_id, asset_id, unit_name, kind, title, description, "
@@ -877,6 +882,138 @@ def list_pulse_drafts(*, status: str = "held", limit: int = 50) -> list[dict]:
             d["artifact"] = {}
         out.append(d)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Held-draft rotation — cap the queue so it can't grow forever.
+# ---------------------------------------------------------------------------
+#
+# Without this sweep the only path out of `held` is an explicit Dismiss
+# click (or an Approve / Reject from the new approver flow), so a
+# long-running demo (or any real deployment) will silently accumulate
+# drafts and the audit log will fill with create rows that never see a
+# matching exit row. Two complementary controls:
+#
+#   1. **TTL** — any held draft older than `SPIRE_DRAFT_TTL_HOURS`
+#      (default 72h) is moved to `expired` with an audit row tagged
+#      `pulse_draft_expire` and reason `ttl`.
+#   2. **Per-unit cap** — for each `unit_name`, only the
+#      `SPIRE_DRAFT_CAP_PER_UNIT` (default 25) most-recent held drafts
+#      are kept; older ones are moved to `expired` with reason `cap`.
+#
+# Both transitions write through the chained audit log so the existing
+# `pulse_draft_action` row gets a matching `pulse_draft_expire` row keyed
+# by the same `subject_id` (draft_id) — the audit chain stays honest.
+
+def _draft_ttl_hours() -> float:
+    raw = os.environ.get("SPIRE_DRAFT_TTL_HOURS", "72")
+    try:
+        v = float(raw)
+        return v if v > 0 else 72.0
+    except (TypeError, ValueError):
+        return 72.0
+
+
+def _draft_cap_per_unit() -> int:
+    raw = os.environ.get("SPIRE_DRAFT_CAP_PER_UNIT", "25")
+    try:
+        v = int(raw)
+        return v if v > 0 else 25
+    except (TypeError, ValueError):
+        return 25
+
+
+def expire_stale_pulse_drafts(
+    *,
+    actor: str = "system",
+    now: Optional[datetime] = None,
+) -> list[dict]:
+    """Sweep `held` drafts: move TTL-old rows and per-unit-cap overflow
+    rows to status `expired` and audit-log each transition. Returns the
+    list of expired-row summaries (draft_id + reason + age) — useful for
+    tests and for the route handler to surface debug counters.
+
+    Safe to call on every `/pulse/drafts` request: SQLite handles the
+    UPDATE in O(rows-to-expire) and the common case is zero work."""
+    ttl_hours = _draft_ttl_hours()
+    cap = _draft_cap_per_unit()
+    cutoff = (now or datetime.utcnow()) - timedelta(hours=ttl_hours)
+    cutoff_iso = cutoff.isoformat(timespec="seconds") + "Z"
+    ts = (now or datetime.utcnow()).isoformat(timespec="seconds") + "Z"
+
+    expired_rows: list[tuple[str, str, str, str]] = []  # (draft_id, asset_id, unit_name, reason)
+
+    with conn() as c:
+        # 1) TTL pass — anything created before cutoff. The UPDATE is gated
+        #    on `status = 'held'` and we only record (and audit) the row
+        #    when rowcount == 1, so two interleaved sweeps can't both
+        #    claim the same draft and write duplicate `pulse_draft_expire`
+        #    audit rows.
+        ttl_targets = c.execute(
+            "SELECT draft_id, asset_id, COALESCE(unit_name, '') AS unit_name "
+            "FROM pulse_drafts WHERE status = 'held' AND created_at < ? "
+            "ORDER BY created_at ASC",
+            (cutoff_iso,),
+        ).fetchall()
+        for row in ttl_targets:
+            cur = c.execute(
+                "UPDATE pulse_drafts SET status = 'expired' "
+                "WHERE draft_id = ? AND status = 'held'",
+                (row["draft_id"],),
+            )
+            if cur.rowcount == 1:
+                expired_rows.append((row["draft_id"], row["asset_id"], row["unit_name"], "ttl"))
+
+        # 2) Per-unit cap — for each unit, keep only the N newest still-held
+        #    drafts; move the older overflow to `expired`. We re-query after
+        #    the TTL pass so cap math sees the post-TTL state. Same
+        #    conditional-update + rowcount idempotency guard as above.
+        units = [
+            r["unit_name"]
+            for r in c.execute(
+                "SELECT DISTINCT COALESCE(unit_name, '') AS unit_name "
+                "FROM pulse_drafts WHERE status = 'held'"
+            ).fetchall()
+        ]
+        for unit in units:
+            overflow = c.execute(
+                "SELECT draft_id, asset_id, COALESCE(unit_name, '') AS unit_name "
+                "FROM pulse_drafts WHERE status = 'held' "
+                "AND COALESCE(unit_name, '') = ? "
+                "ORDER BY created_at DESC LIMIT -1 OFFSET ?",
+                (unit, cap),
+            ).fetchall()
+            for row in overflow:
+                cur = c.execute(
+                    "UPDATE pulse_drafts SET status = 'expired' "
+                    "WHERE draft_id = ? AND status = 'held'",
+                    (row["draft_id"],),
+                )
+                if cur.rowcount == 1:
+                    expired_rows.append((row["draft_id"], row["asset_id"], row["unit_name"], "cap"))
+
+    summaries: list[dict] = []
+    for draft_id, asset_id, unit_name, reason in expired_rows:
+        log(
+            "pulse_draft_expire",
+            actor=actor,
+            subject_id=draft_id,
+            payload={
+                "asset_id": asset_id,
+                "unit_name": unit_name,
+                "reason": reason,
+                "ttl_hours": ttl_hours,
+                "cap_per_unit": cap,
+                "expired_at": ts,
+            },
+        )
+        summaries.append({
+            "draft_id": draft_id,
+            "asset_id": asset_id,
+            "unit_name": unit_name,
+            "reason": reason,
+        })
+    return summaries
 
 
 def dismiss_pulse_draft(

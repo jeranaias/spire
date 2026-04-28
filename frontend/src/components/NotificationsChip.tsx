@@ -62,6 +62,8 @@ export function NotificationsChip() {
 
   const draftsAllowed = DRAFT_ROLES.has(role);
   const [drafts, setDrafts] = useState<PulseDraft[]>([]);
+  const [expiredDrafts, setExpiredDrafts] = useState<PulseDraft[]>([]);
+  const [showExpired, setShowExpired] = useState(false);
   const [draftsUnreachable, setDraftsUnreachable] = useState(false);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"drafts" | "alerts">(
@@ -99,6 +101,27 @@ export function NotificationsChip() {
       if (timer) clearTimeout(timer);
     };
   }, [draftsAllowed, refreshTick]);
+
+  // Expired drafts are loaded on-demand the first time the operator
+  // toggles "Show expired" — keeping them out of the default fetch is
+  // what guarantees they don't count toward the badge.
+  useEffect(() => {
+    if (!draftsAllowed || !showExpired) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.pulse.drafts("expired");
+        if (cancelled) return;
+        setExpiredDrafts(r.drafts);
+      } catch {
+        if (cancelled) return;
+        setExpiredDrafts([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [draftsAllowed, showExpired, refreshTick]);
 
   useEffect(() => {
     if (!open) return;
@@ -311,8 +334,24 @@ export function NotificationsChip() {
 
           {(tab === "drafts" && draftsAllowed) && (
             <div>
-              <div className="border-b border-[var(--color-border)] px-4 py-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
-                Risk Board · held drafts · audit-tracked
+              <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
+                <span>Risk Board · held drafts · audit-tracked</span>
+                {/* "Show expired" toggle — task #144. Expired rows are
+                    rotated out of `held` by the backend TTL/cap sweep
+                    and are hidden by default so they don't count toward
+                    the badge. Operators can opt in to audit them. */}
+                <label className="flex cursor-pointer items-center gap-1.5 normal-case tracking-normal">
+                  <input
+                    type="checkbox"
+                    checked={showExpired}
+                    onChange={(e) => setShowExpired(e.target.checked)}
+                    data-testid="notifications-show-expired"
+                    className="h-3 w-3 cursor-pointer accent-[var(--color-primary)]"
+                  />
+                  <span className="text-[10px] uppercase tracking-widest">
+                    Show expired
+                  </span>
+                </label>
               </div>
               {draftsUnreachable && (
                 <div className="border-b border-[var(--color-border)] px-4 py-2 font-mono text-[11px] text-[var(--color-warning)] tracking-wide">
@@ -419,6 +458,50 @@ export function NotificationsChip() {
                     );
                   })}
                 </ul>
+              )}
+              {showExpired && (
+                <div
+                  className="border-t border-[var(--color-border)]"
+                  data-testid="notifications-expired-section"
+                >
+                  <div className="px-4 py-2 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
+                    Expired ({expiredDrafts.length}) · auto-rotated, audit-tracked
+                  </div>
+                  {expiredDrafts.length === 0 ? (
+                    <div className="px-4 py-3 text-center font-mono text-[11px] text-[var(--color-text-muted)] tracking-wide">
+                      No expired drafts on record.
+                    </div>
+                  ) : (
+                    <ul className="max-h-[40vh] divide-y divide-[var(--color-border)] overflow-y-auto opacity-75">
+                      {expiredDrafts.map((d) => (
+                        <li key={d.draft_id} className="p-3">
+                          <div className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-widest">
+                            <span className="text-[var(--color-text-muted)]">
+                              {d.kind?.toUpperCase()}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => openOnAsset(d)}
+                              className="font-semibold text-[var(--color-text-secondary)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-primary)]"
+                              title="Open this asset on the Risk Board"
+                            >
+                              {d.asset_id}
+                            </button>
+                            {d.unit_name && (
+                              <span className="text-[var(--color-text-muted)]">· {d.unit_name}</span>
+                            )}
+                          </div>
+                          <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)] tracking-wide">
+                            {d.title}
+                          </div>
+                          <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                            {d.draft_id} · by {d.actor} · {formatAge(d.created_at)}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
           )}

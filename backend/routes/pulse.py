@@ -16,6 +16,7 @@ from ..bom import (
 from ..persistence import (
     approve_pulse_draft,
     dismiss_pulse_draft,
+    expire_stale_pulse_drafts,
     feedback_summary,
     get_pulse_draft,
     list_pulse_drafts,
@@ -1424,9 +1425,20 @@ async def get_drafts(
 ):
     """Return persisted Risk Board drafts (default: held only). Scope-
     filtered by role so a maintenance chief sees only drafts on assets
-    in their unit."""
-    if status not in ("held", "dismissed"):
-        raise HTTPException(status_code=400, detail="status must be 'held' or 'dismissed'")
+    in their unit.
+
+    Lazy-ticks the held-queue rotation sweep first so TTL-old / over-cap
+    drafts roll into `expired` before this caller sees the count. The
+    sweep is cheap when there's nothing to do (single SELECT)."""
+    if status not in ("held", "dismissed", "expired"):
+        raise HTTPException(
+            status_code=400,
+            detail="status must be 'held', 'dismissed', or 'expired'",
+        )
+    # Run the rotation sweep on every request — keeps the badge honest
+    # without needing a background scheduler. Audit rows for the
+    # transition are written inside the helper.
+    expire_stale_pulse_drafts()
     drafts = list_pulse_drafts(status=status, limit=limit)
     role = session_role(request)
     ds = get_dataset()

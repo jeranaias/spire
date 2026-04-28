@@ -582,7 +582,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    drafts: (status: "held" | "dismissed" = "held") =>
+    drafts: (status: "held" | "dismissed" | "expired" = "held") =>
       jsonFetch<{ drafts: PulseDraft[]; count: number; status: string }>(
         `/pulse/drafts?status=${status}`,
       ),
@@ -1705,7 +1705,7 @@ export interface PulseDraft {
   time_to_effect_hours: number | null;
   artifact: Record<string, unknown>;
   actor: string;
-  status: "held" | "dismissed";
+  status: "held" | "dismissed" | "expired";
   created_at: string;
 }
 
