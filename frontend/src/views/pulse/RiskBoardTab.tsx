@@ -581,8 +581,31 @@ function DraftActionModal({
             <span aria-hidden>✕</span>
           </IconButton>
         </div>
-        <div className="mb-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
-          {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · {asset.primary_factor}
+        {/* QA #54 — surface the risk score directly in the modal header so
+         * the operator can see it matches the originating Risk Board row.
+         * Prefer the originating row's risk_score (passed in via the asset
+         * stub) so the value renders the moment the modal opens; fall back
+         * to data.risk_score from /recommend-actions once it loads (this
+         * covers the PredictedFailurePanel entry point where the asset
+         * stub had risk_score=null). The "0" fallback the QA-Explorer hit
+         * was the action description text — the backend now populates
+         * that consistently — but rendering the canonical score here makes
+         * any future regression visually obvious instead of buried in
+         * description prose. */}
+        <div className="mb-3 flex items-center gap-3 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
+          <span data-test="draft-modal-risk-score">
+            Risk score{" "}
+            <span className="text-[var(--color-text)] tabular-nums">
+              {(() => {
+                const rs = asset.risk_score ?? data?.risk_score ?? null;
+                return rs == null ? "—" : Math.round(rs);
+              })()}
+            </span>
+          </span>
+          <span aria-hidden className="text-[var(--color-text-muted)]">·</span>
+          <span>
+            {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · {asset.primary_factor}
+          </span>
         </div>
         {heldDrafts.length > 0 && (
           <div

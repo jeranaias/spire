@@ -567,7 +567,21 @@ async def recommend_actions(
             raise HTTPException(status_code=404, detail="asset not found")
         if allowed is not None and a.unit_name not in allowed:
             raise HTTPException(status_code=403, detail="asset out of scope")
-        candidates.append({"asset_id": asset_id, "asset": a})
+        # QA #54 — when called with a specific asset_id (the Draft Action
+        # modal's path), look the risk score up explicitly. The fleet-wide
+        # branch below seeds risk_score from top_risk(); without this
+        # lookup the asset_id branch left the field unset, the
+        # `c.get("risk_score") or 0` fallback below kicked in, and the
+        # preposition_spares action description rendered as "Risk score 0
+        # ..." even when the originating row's risk was non-zero. The
+        # response's per-asset risk_score field also went out as null,
+        # which broke any caller that wanted to surface it.
+        scored = risk_score(ds, asset_id)
+        candidates.append({
+            "asset_id": asset_id,
+            "asset": a,
+            "risk_score": scored.get("risk_score"),
+        })
     else:
         # Walkthrough audit: prior code asked top_risk for 20 fleet-wide and
         # then filtered by role/unit. A Maintenance Chief whose unit didn't

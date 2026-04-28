@@ -153,7 +153,7 @@ closed with a comment naming Task #185.
 | `#50` | Critical Assets KPI — drill-in already exists from the Risk Board card; KPI tile is summary-only by design. Answered. |
 | `#51` | "Avg Days NMC 48.6 / target ≤14d" reads as out-of-target — that's the truth: the synthetic data is intentionally bad to give the demo a reason to draft actions. Documented. |
 | `#52` | Recharts width/height -1 console warnings — known suspense-layout race; harmless visually, deferred to PULSE polish lane. |
-| `#54` | Draft Action modal showing "Risk score 0" — bug; needs investigation in PULSE Draft Action store wiring. Triaged. |
+| `#54` | Draft Action modal showing "Risk score 0" — **fixed in Task #198**. Root cause was backend, not frontend store wiring: `recommend_actions` did not seed `risk_score` into the candidate dict on the asset-id branch, so the `c.get("risk_score") or 0` fallback fired in the `preposition_spares` action description. Fix: `backend/routes/pulse.py` looks up `risk_score(ds, asset_id)` on the asset-id branch; `frontend/src/views/pulse/RiskBoardTab.tsx` adds a visible Risk Score chip to the modal header so any future regression is obvious. Locked down by `backend/tests/test_pulse_recommend_actions_risk_score.py` and the `#54` spec in `tests/playwright/qa_regression.spec.ts`. |
 | `#57` | Sparklines have no accessible name — added to a11y backlog. |
 | `#62` | Predicted Failures vs Risk Board count discrepancy — by design (top 30 sorted vs all flagged). Answered. |
 | `#65` | Sort buttons spacing — small CSS tweak; deferred with #44 family into chrome typography pass. |

@@ -23,6 +23,8 @@
  *   #95    DRAFTS chip opens its popover on click (g4)
  *   #47    Mission Clock shows neutral placeholder until /scenario/state
  *          hydrates the store (no apparent H+0 → H+72 jump on tab swap)
+ *   #54    Draft Action modal renders the originating row's risk score
+ *          (no "Risk score 0" fallback) — Task #198.
  *
  * The DRAFTS popover and account-menu specs assert the open-state
  * directly (DOM mutation), which is the regression QA-Explorer's #88
@@ -177,6 +179,50 @@ test.describe("QA-pass regression sweep (Task #195)", () => {
   // ---------------------------------------------------------------
   // Cluster F — Mission Clock placeholder
   // ---------------------------------------------------------------
+
+  // ---------------------------------------------------------------
+  // Cluster E — PULSE Draft Action modal risk score (Task #198 / issue #54)
+  // ---------------------------------------------------------------
+
+  test("#54 Draft Action modal renders the originating row's risk score (not 0)", async ({ page }) => {
+    // Land on the PULSE Risk Board.
+    await gotoHash(page, "#/pulse/risk");
+
+    // Wait for at least one risk row to render. The first card is the
+    // top-1 row; its Draft Action button is the canonical entry point
+    // QA-Explorer hit when reproducing #54.
+    const draftButton = page
+      .getByRole("button", { name: /^Draft Action$/i })
+      .first();
+    await draftButton.waitFor({ state: "visible", timeout: 15_000 });
+    await draftButton.click();
+
+    // Modal opens; assert the new risk-score chip in the header is
+    // present and does NOT read 0. The chip is anchored on a
+    // data-test attribute so the assertion is robust to future copy
+    // tweaks. We accept any non-zero integer or "—" while the score
+    // hydrates, but never literal 0 — the regression QA filed.
+    const dialog = page.getByRole("dialog", { name: /Draft Action/i });
+    await dialog.waitFor({ state: "visible", timeout: 5_000 });
+    const chip = dialog.locator("[data-test='draft-modal-risk-score']");
+    await chip.waitFor({ state: "visible", timeout: 5_000 });
+    const text = (await chip.textContent()) ?? "";
+    // The string format is "Risk score <N>" (or "Risk score —").
+    expect(text).toMatch(/Risk score/);
+    expect(text).not.toMatch(/Risk score\s+0(?!\d)/);
+
+    // Wait for /recommend-actions to settle (loading indicator
+    // disappears) so any preposition_spares description that might
+    // surface is in the DOM. None of those descriptions should ever
+    // contain "Risk score 0" for an asset with a non-zero row score.
+    await dialog
+      .getByText(/Computing recommended actions/)
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => {
+        /* tolerate already-hidden race */
+      });
+    await expect(dialog).not.toContainText(/Risk score\s+0(?!\d)/);
+  });
 
   test("#47 Mission Clock renders neutral placeholder before scenario state hydrates", async ({ page }) => {
     // Block the scenario/state poll so the store stays unhydrated.
