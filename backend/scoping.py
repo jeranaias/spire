@@ -45,6 +45,11 @@ AUDIT_READ_ROLES         = frozenset({"security_manager"})
 # custodian / security manager / MEF commander pay grade. G-4 stays in the
 # allowlist because the operator-class persona owns the daily review pace.
 SENTRY_REVIEW_ROLES      = frozenset({"g4", "data_custodian", "security_manager", "mef_commander"})
+# SENTRY sanitized export + download. The Export tab is custodian-class only;
+# operator/commander roles see the FE InsufficientPrivilege panel and the
+# backend mirrors that with `require_user_role` so a curl past the FE gate
+# returns 403 with `InsufficientRole` rather than a 2,306-record bundle.
+SENTRY_EXPORT_ROLES      = frozenset({"data_custodian", "security_manager"})
 # Mission-clock playback controls (B4). Operator-class roles only — the
 # clock is a piece of demo plumbing, not an analyst surface.
 SCENARIO_CONTROL_ROLES   = frozenset({"security_manager", "mef_commander", "g4"})
@@ -388,6 +393,72 @@ def require_view_scope(view: str, allowed: frozenset[str]):
         )
 
     return _dep
+
+
+def require_user_role(
+    user: Optional[dict],
+    allowed: frozenset[str],
+    action: str,
+    *,
+    audit_subject: Optional[str] = None,
+) -> str:
+    """Backend role-gate companion to `require_clearance`.
+
+    Companion (not replacement) of `require_role` because this variant takes
+    the full session `user` dict — same shape `require_clearance` consumes —
+    and writes a structured `role_denied` audit entry on a miss. The dict
+    surface lets the audit row carry the user's DoDID alongside the role,
+    which an investigator needs to chase a misuse claim back to the cert.
+
+    The error body uses `InsufficientRole` (distinct from the legacy
+    `InsufficientPrivilege` shape `require_role` returns) so frontends can
+    branch on the wire contract without grepping action strings. Both
+    helpers write `role_denied` audit rows so the SOC view sees a single
+    consistent kind regardless of which gate fired.
+    """
+    if user is None:
+        # Should never happen behind session_middleware, but defend anyway.
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Unauthenticated",
+                "action": action,
+                "roles_allowed": sorted(allowed),
+            },
+        )
+    role = user.get("role")
+    if not role or role not in allowed:
+        # Append-only role-denial record. Lazy-import for the same reason
+        # require_clearance does — keep CLI tools from triggering DB init.
+        try:
+            from .persistence import log as audit_log  # noqa: WPS433
+            audit_log(
+                "role_denied",
+                actor=role or "unknown",
+                subject_id=audit_subject or action,
+                payload={
+                    "action": action,
+                    "user_dodid": user.get("dodid"),
+                    "user_role": role,
+                    "user_clearance": user.get("clearance"),
+                    "roles_allowed": sorted(allowed),
+                    "decision": "blocked",
+                    "surface": "backend",
+                },
+            )
+        except Exception:
+            # Never let an audit-write failure mask the 403.
+            pass
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "InsufficientRole",
+                "action": action,
+                "roles_allowed": sorted(allowed),
+                "user_role": role,
+            },
+        )
+    return role
 
 
 ROLE_TO_UNITS_FILTER: dict[str, dict] = {

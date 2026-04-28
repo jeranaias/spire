@@ -36,6 +36,8 @@ from ..scoping import (
     require_clearance,
     require_no_downgrade,
     require_role,
+    require_user_role,
+    SENTRY_EXPORT_ROLES,
 )
 from ..state import get_dataset
 
@@ -1107,6 +1109,17 @@ async def export_sanitized(request: Request, payload: dict):
     include_audit = bool(payload.get("include_audit", True))
     batch_id = payload.get("batch_id")
 
+    # Role gate runs FIRST — before any validation, work, or clearance check.
+    # A non-custodian role (g4 / maintenance_chief / mef_commander) that
+    # curls past the FE InsufficientPrivilege panel never reaches the
+    # bundle-builder, AND can't probe `release_authority` / `batch_id`
+    # validation to learn what values are accepted. Even a TS//SCI clearance
+    # can't cover the missing role; the gate writes a `role_denied` audit
+    # row distinct from `spillage_prevented` so the SOC view can split the
+    # two failure modes.
+    user = getattr(request.state, "user", None)
+    require_user_role(user, SENTRY_EXPORT_ROLES, action="sentry.export")
+
     # Task-69 — release_authority must be one of the four doctrinal values.
     # Previously an unknown value (e.g. "EYES_ONLY") fell through to a 500
     # KeyError on DISTRIBUTION_STATEMENT[release].
@@ -1168,7 +1181,7 @@ async def export_sanitized(request: Request, payload: dict):
 
     # Backend gate (truth source). The FE primitive mirrors this — but a
     # url-hacked direct call still terminates here with 403 + audit.
-    user = getattr(request.state, "user", None)
+    # `user` was hydrated by the role gate above; reuse it.
     bundle_class = require_clearance(
         user,
         bundle_class,
@@ -1814,15 +1827,23 @@ async def audit_for_subject(subject_id: str, request: Request, limit: int = 50):
 
 @router.get("/download/{export_id}")
 async def download_export(export_id: str, request: Request):
+    # Authz runs BEFORE the existence check so a non-custodian role can't
+    # enumerate valid EXP-IDs by diffing 404 ("doesn't exist") from 403
+    # ("exists but you can't have it"). Off-role users get a uniform 403
+    # whether the ID is real, expired, or fabricated.
+    user = getattr(request.state, "user", None)
+    require_user_role(
+        user,
+        SENTRY_EXPORT_ROLES,
+        action="sentry.download",
+        audit_subject=export_id,
+    )
     entry = _EXPORTS.get(export_id)
     if not entry:
         raise HTTPException(status_code=404, detail="export not found or expired")
-    # Re-check on download. Even though the operator was cleared at the
-    # build call, identity may have rotated between build and stream — and
-    # an enumeration attack on EXP-IDs would otherwise hand any signed-in
-    # user the bytes. Reuse the same gate so the audit chain emits an
-    # identical spillage_prevented event on either surface.
-    user = getattr(request.state, "user", None)
+    # Clearance re-check on download. Even though the operator was cleared
+    # at the build call, identity may have rotated between build and stream.
+    # Same gate emits an identical spillage_prevented event on either surface.
     require_clearance(
         user,
         entry.get("classification", "UNCLASSIFIED"),
