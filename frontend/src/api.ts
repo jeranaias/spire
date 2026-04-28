@@ -2010,6 +2010,11 @@ export interface MarkResult {
     status: "ok" | "warn" | "block";
     issues: string[];
   };
+  // Task-171 — set when status="block" and the engine self-introduced a
+  // caveat (NOFORN / FOUO//LES) from a redactable span. Holds the operator's
+  // input with the offending span(s) replaced by [REDACTED:RULE] tokens, so
+  // the right pane can offer a one-click "Use sanitized excerpt" button.
+  sanitized_text?: string | null;
   // Task-61 — engine-derived distribution + single REL TO so the panel
   // stops rendering a hardcoded "Distribution C" for every sample.
   distribution_statement?: {

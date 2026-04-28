@@ -157,6 +157,36 @@ def tier1_classify(text: str) -> dict:
     }
 
 
+def _sanitize_with_highlights(original: str, highlights: list[dict]) -> str:
+    """Replace each highlight span in ``original`` with a ``[REDACTED:RULE]``
+    token, returning the rewritten string.
+
+    Mirrors the per-span redaction the SENTRY export bundle's sample-diff
+    preview applies (see :func:`export_sanitized` ~line 2000+) so the /mark
+    "Use sanitized excerpt" affordance and the export bundle can't drift on
+    the token format an operator sees in two places. The caller is
+    responsible for filtering highlights down to the spans that should be
+    redacted (e.g. only the classified-TM spans whose presence forced the
+    NOFORN auto-caveat). Highlights are sorted defensively in case the
+    caller hands us tier1_classify output as-is.
+    """
+    sorted_h = sorted(highlights, key=lambda h: h.get("start", 0))
+    out: list[str] = []
+    cursor = 0
+    for h in sorted_h:
+        s, e = h.get("start", 0), h.get("end", 0)
+        if s < cursor:
+            continue
+        if s > cursor:
+            out.append(original[cursor:s])
+        rule = (h.get("rule") or h.get("category") or "PII")
+        out.append(f"[REDACTED:{str(rule).upper()}]")
+        cursor = e
+    if cursor < len(original):
+        out.append(original[cursor:])
+    return "".join(out)
+
+
 # ---------------------------------------------------------------------------
 # Walkthrough #5 — Distribution Statements (A-F) per DoDI 5230.24, kept
 # separate from REL TO caveats. Distribution Statement controls *who can
@@ -1051,6 +1081,34 @@ async def mark_text(payload: dict, request: Request):
         if not replaced:
             issues.insert(0, evidence_msg)
 
+    # Task-171 — when the engine self-introduced a caveat that hard-blocked
+    # the release, also surface the redacted form of the operator's text so
+    # the right pane can offer a one-click "Use sanitized excerpt". The
+    # evidence message above tells them *what* to remove; this gives them
+    # the rewritten paragraph instead of forcing a manual rewrite.
+    #
+    # We only redact spans whose category triggered an auto-caveat that
+    # contributed to the block — classified→NOFORN and controlled→FOUO//LES.
+    # Other highlights (PII, geo, comms) didn't cause the release-authority
+    # conflict and rewriting them would over-redact the operator's draft.
+    sanitized_text: str | None = None
+    if status == "block" and auto_caveats:
+        category_for: dict[str, str] = {
+            "NOFORN":    "classified",
+            "FOUO//LES": "controlled",
+        }
+        blocking_categories = {
+            category_for[c["caveat"]]
+            for c in auto_caveats
+            if c["caveat"] in category_for
+        }
+        spans = [
+            h for h in tier1["highlights"]
+            if h.get("category") in blocking_categories
+        ]
+        if spans:
+            sanitized_text = _sanitize_with_highlights(text, spans)
+
     # Explanation
     rule_reasons = []
     for h in tier1["highlights"]:
@@ -1122,6 +1180,12 @@ async def mark_text(payload: dict, request: Request):
             "status": status,
             "issues": issues,
         },
+        # Task-171 — present whenever an auto-added caveat hard-blocks the
+        # release. Lets the right pane render a "Use sanitized excerpt"
+        # button that loads this string back into the textarea and re-runs
+        # the engine, instead of forcing the operator to manually rewrite
+        # the paragraph the engine just refused.
+        "sanitized_text": sanitized_text,
         "audit": {
             # Walkthrough audit: prior string claimed 'SENTRY Pattern
             # Engine + Language Model Reviewer' but only the pattern

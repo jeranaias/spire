@@ -55,9 +55,16 @@ export function MarkTab() {
   const role = useSpireStore((s) => s.role);
   const navigate = useNavigate();
   // Walkthrough #3 — uncontrolled textarea so fast typing doesn't drop
-  // characters through React's controlled-input round-trip.
+  // characters through React's controlled-input round-trip. Sample/sanitize
+  // updates remount the textarea by bumping `textVersion` so React applies
+  // the new `defaultValue` (Task-171: this used to be a hardcoded "" and the
+  // textarea visually emptied after a sample load, even though the API
+  // call captured the preset; now we seed it from `textareaSeed` so the
+  // visible value matches what the engine ran on, and a subsequent
+  // release-authority click re-fires correctly).
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [textVersion, setTextVersion] = useState(0);
+  const [textareaSeed, setTextareaSeed] = useState("");
   const [release, setRelease] = useState<Auth>("US_ONLY");
   const [result, setResult] = useState<MarkResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -77,12 +84,17 @@ export function MarkTab() {
     );
   }
 
-  function scheduleMark(immediate = false) {
+  function scheduleMark(immediate = false, overrideText?: string) {
     if (debounceRef.current) {
       window.clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
-    const text = (textareaRef.current?.value ?? "").trim();
+    // Task-171 — `overrideText` lets sample/sanitize callers pass the new
+    // text directly, because React hasn't yet remounted the textarea (the
+    // ref still points at the previous DOM node with the prior value) at
+    // the moment we want to fire the engine. Without this override, the
+    // engine would run on stale DOM contents.
+    const text = (overrideText ?? textareaRef.current?.value ?? "").trim();
     latestTextRef.current = text;
     if (!text) {
       setResult(null);
@@ -115,11 +127,22 @@ export function MarkTab() {
   }, [release]);
 
   function loadSample(preset: string) {
-    if (textareaRef.current) {
-      textareaRef.current.value = preset;
-    }
+    setTextareaSeed(preset);
     setTextVersion((v) => v + 1);
-    scheduleMark(true);
+    // Pass the preset directly: the textarea won't remount with the new
+    // defaultValue until React commits, so reading textareaRef here would
+    // return the prior (or empty) value.
+    scheduleMark(true, preset);
+  }
+
+  // Task-171 — "Use sanitized excerpt" loads the engine's redacted form
+  // back into the textarea and re-fires /mark so the operator sees the
+  // unblocked recommendation without typing. Same remount + override
+  // pattern as loadSample.
+  function useSanitizedExcerpt(sanitized: string) {
+    setTextareaSeed(sanitized);
+    setTextVersion((v) => v + 1);
+    scheduleMark(true, sanitized);
   }
 
   return (
@@ -150,7 +173,12 @@ export function MarkTab() {
           ref={textareaRef}
           // Walkthrough #3 — uncontrolled. defaultValue avoids the batched-
           // render path that was dropping fast-typed characters.
-          defaultValue=""
+          // Task-171 — defaultValue is now seeded by `textareaSeed`, so a
+          // sample chip / "Use sanitized excerpt" click that bumps
+          // `textVersion` (key) actually shows the new text in the textarea
+          // instead of leaving it blank while only the API call carried the
+          // value forward.
+          defaultValue={textareaSeed}
           key={textVersion}
           onChange={() => scheduleMark(false)}
           placeholder="Paste a draft paragraph, SR remark, or operational text..."
@@ -189,6 +217,7 @@ export function MarkTab() {
             setDownloading={setDownloading}
             pushToast={pushToast}
             textareaRef={textareaRef}
+            onUseSanitized={useSanitizedExcerpt}
           />
         )}
       </div>
@@ -209,6 +238,7 @@ function MarkResultPanel({
   setDownloading,
   pushToast,
   textareaRef,
+  onUseSanitized,
 }: {
   result: MarkResult;
   release: Auth;
@@ -216,6 +246,7 @@ function MarkResultPanel({
   setDownloading: (v: boolean) => void;
   pushToast: ReturnType<typeof useSpireStore.getState>["pushToast"];
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  onUseSanitized?: (sanitized: string) => void;
 }) {
   const navigate = useNavigate();
   const piiRedaction = usePiiRedaction(result.recommended_classification);
@@ -229,9 +260,17 @@ function MarkResultPanel({
     <>
       <MarkingBanner result={result} />
 
-      {/* Walkthrough #4 — release-authority validator banner. */}
+      {/* Walkthrough #4 — release-authority validator banner.
+          Task-171 — when the engine self-introduced a blocking caveat from
+          a redactable span, the banner offers a one-click "Use sanitized
+          excerpt" that loads the engine's redacted form back into the
+          textarea and re-runs /mark. */}
       {result.release_compatibility && result.release_compatibility.status !== "ok" && (
-        <ReleaseCompatibilityBanner compat={result.release_compatibility} />
+        <ReleaseCompatibilityBanner
+          compat={result.release_compatibility}
+          sanitizedText={result.sanitized_text ?? null}
+          onUseSanitized={onUseSanitized}
+        />
       )}
 
       {/* Walkthrough #5 / Task-61 — Distribution Statement + REL TO
@@ -540,14 +579,24 @@ function MarkingBanner({ result }: { result: MarkResult }) {
 }
 
 // Walkthrough #4 — release-authority validator banner.
+// Task-171 — when the engine self-introduces a blocking caveat from a
+// redactable span, the backend now ships a `sanitized_text` alongside the
+// block message. We render a "Use sanitized excerpt" button next to the
+// issue list so the operator can one-click load the rewritten paragraph
+// back into the textarea instead of manually retyping it.
 function ReleaseCompatibilityBanner({
   compat,
+  sanitizedText,
+  onUseSanitized,
 }: {
   compat: NonNullable<MarkResult["release_compatibility"]>;
+  sanitizedText?: string | null;
+  onUseSanitized?: (sanitized: string) => void;
 }) {
   const isBlock = compat.status === "block";
   const color = isBlock ? "var(--color-danger)" : "var(--color-warning)";
   const label = isBlock ? "Release Blocked" : "Release Warning";
+  const canSanitize = isBlock && !!sanitizedText && !!onUseSanitized;
   return (
     <div
       className="mb-4 rounded-sm border-l-[6px] p-3"
@@ -571,6 +620,27 @@ function ReleaseCompatibilityBanner({
           <li key={i} className="leading-snug">{issue}</li>
         ))}
       </ul>
+      {canSanitize && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Pressable
+            onClick={() => onUseSanitized!(sanitizedText!)}
+            block={false}
+            className="rounded border px-3 py-1 font-mono text-xs font-semibold uppercase tracking-wider"
+            style={{
+              borderColor: color,
+              color,
+              background: `color-mix(in oklab, ${color} 8%, var(--color-surface))`,
+            }}
+            title="Replace the textarea with the engine's redacted form and re-run"
+          >
+            Use sanitized excerpt
+          </Pressable>
+          <span className="text-xs text-[var(--color-text-muted)]">
+            Replaces the offending span with{" "}
+            <span className="font-mono">[REDACTED:…]</span> and re-runs the engine.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
