@@ -2243,8 +2243,76 @@ def _build_eval_pairs(ds: CanonicalDataset, val_end):
             "random": pred_random,
             "sop": pred_sop,
             "prior": pred_prior,
+            # Continuous prediction surface for MAE / calibration scoring.
+            # The model emits a probability in [0,1]; SOP / prior-contractor
+            # are binary heuristics so their "probability" is just their
+            # 0/1 prediction. We persist both so the same eval set drives
+            # the binary metrics block above AND the holdout-MAE block.
+            "model_prob": max(0.0, min(1.0, prob)),
+            "sop_prob": float(pred_sop),
+            "prior_prob": float(pred_prior),
         })
     return pairs
+
+
+def _holdout_mae(
+    pairs: list[dict],
+    pred_key: str,
+    *,
+    n_bootstrap: int = 1000,
+    seed: int = 42,
+) -> dict:
+    """Compute MAE between a continuous prediction and the binary label,
+    plus a 95% bootstrap confidence interval.
+
+    For a prediction p in [0,1] and a label y in {0,1}, MAE = mean(|p - y|).
+    For binary heuristics (SOP, prior-year contractor) p is 0 or 1, so
+    MAE collapses to the misclassification rate (1 - accuracy). For the
+    PULSE risk scorer p is a continuous probability so MAE measures both
+    discrimination AND calibration — a confident wrong prediction is
+    penalised more than a hedged wrong one.
+
+    Bootstrap: sample the eval set with replacement `n_bootstrap` times
+    using a deterministic seed so the published number is reproducible
+    bit-for-bit from the script in the repo. CI is the percentile method
+    (2.5 / 97.5).
+    """
+    import random as _r
+
+    if not pairs:
+        return {
+            "mae": 0.0,
+            "ci_lower_95": 0.0,
+            "ci_upper_95": 0.0,
+            "n": 0,
+            "n_bootstrap": n_bootstrap,
+            "seed": seed,
+            "method": "percentile bootstrap (2.5 / 97.5)",
+        }
+
+    abs_errors = [abs(p[pred_key] - p["label"]) for p in pairs]
+    mae = sum(abs_errors) / len(abs_errors)
+
+    rng = _r.Random(seed)
+    n = len(abs_errors)
+    boot_means: list[float] = []
+    for _ in range(n_bootstrap):
+        sample_sum = 0.0
+        for _i in range(n):
+            sample_sum += abs_errors[rng.randrange(n)]
+        boot_means.append(sample_sum / n)
+    boot_means.sort()
+    lo_idx = max(0, int(0.025 * n_bootstrap))
+    hi_idx = min(n_bootstrap - 1, int(0.975 * n_bootstrap))
+    return {
+        "mae": round(mae, 4),
+        "ci_lower_95": round(boot_means[lo_idx], 4),
+        "ci_upper_95": round(boot_means[hi_idx], 4),
+        "n": n,
+        "n_bootstrap": n_bootstrap,
+        "seed": seed,
+        "method": "percentile bootstrap (2.5 / 97.5)",
+    }
 
 
 def _binary_metrics(pairs: list[dict], field_key: str) -> dict:
@@ -2366,6 +2434,54 @@ def _compute_model_card() -> dict:
     # only the next-30-day NMC binary classifier metrics).
     forecast_calibration = _compute_forecast_calibration(_build_forecast_history())
 
+    # Holdout MAE — the published accuracy claim. We anchor this to the
+    # FY24 G-4 SOP heuristic (the rule the Marine Corps would actually
+    # recognise as "the standing rule") so the diff is interpretable as
+    # "PULSE-Risk vs the rule today's J-4 follows", not vs an invented
+    # straw-man baseline. Bootstrap CI is deterministic (seed=42, 1000
+    # iterations) so the slide / model-card numbers stay reproducible.
+    model_mae = _holdout_mae(pairs, "model_prob")
+    sop_mae = _holdout_mae(pairs, "sop_prob")
+    unique_assets = len(pairs)  # one row per asset at the val/test boundary
+    if sop_mae["mae"] > 0:
+        baseline_diff_pct = round(
+            (sop_mae["mae"] - model_mae["mae"]) / sop_mae["mae"] * 100.0, 1
+        )
+    else:
+        baseline_diff_pct = 0.0
+    holdout_window_start = (val_end + timedelta(days=1)).isoformat()
+    holdout_window_end = last_day.isoformat()
+    holdout_mae_block = {
+        "model": model_mae,
+        "baseline": {
+            **sop_mae,
+            "name": "FY24 G-4 SOP heuristic",
+            "rule": "predict NMC iff today's readiness code starts with 'NMC'",
+            "key": "sop",
+        },
+        "baseline_diff_pct": baseline_diff_pct,
+        "frozen_holdout": {
+            "window_start": holdout_window_start,
+            "window_end": holdout_window_end,
+            "asset_pool_n": unique_assets,
+            "asset_pool_description": (
+                "Every asset with a snapshot at or before the val/test boundary "
+                "and at least one observed snapshot inside the holdout window. "
+                "Unit scope: full SPIRE synthetic fleet under RANDOM_SEED=42."
+            ),
+            "evaluation_horizon_days": 30,
+            "label_definition": (
+                "y = 1 if any snapshot in (val_end, val_end+30d] has readiness "
+                "code starting with 'NMC', else 0."
+            ),
+        },
+        "metric_definition": (
+            "MAE = mean(|prediction - label|). Predictions are continuous in "
+            "[0,1] for PULSE-Risk and 0/1 for the SOP baseline; lower is better."
+        ),
+        "reproducibility_script": "scripts/pulse_baseline_eval.py",
+    }
+
     from ..model_hooks import STATE
 
     return {
@@ -2449,6 +2565,7 @@ def _compute_model_card() -> dict:
             "split": "test (held-out 15% by date)",
         },
         "drift": drift,
+        "holdout_mae": holdout_mae_block,
         "last_validation": {
             "date": last_day.isoformat(),
             "validator": "SPIRE PULSE eval harness",

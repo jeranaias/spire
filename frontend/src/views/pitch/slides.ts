@@ -144,15 +144,20 @@ export const SLIDES: SlideSpec[] = [
       "Forecast: PULSE-Risk v0.3, gradient-boosted on 14 maintenance signals.",
       "Every prediction is reproducible: model card cites training window, features, and seed.",
       "DDIL behavior: read-through cache + queued writes; UI degrades, never lies.",
-      "Validation history is open — accuracy claims will be earned on a published holdout, not asserted on stage.",
+      // Honest holdout claim. Numbers are reproducible from
+      // `scripts/pulse_baseline_eval.py` and the live `/api/pulse/model-card`
+      // (`holdout_mae` block). Update both this line AND PitchVisual.tsx
+      // when the trained-weights swap lands and the score moves.
+      "Holdout MAE 0.177 vs FY24 G-4 SOP heuristic 0.114 on 2026-03-04 → 2026-04-26 (n=352, 95% CI bootstrap, seed=42) — rule-based fallback under-performs SOP today; trained-weights swap is the unlock.",
       "No model is shipped without a security_manager-signed lifecycle record.",
     ],
     visual: "model-card",
     targetSeconds: 60,
     speakerNotes: [
-      "If the judge is technical: open the model card live — point at the training window and the features list, not at a percentage.",
-      "If the judge is not technical: lead with 'every prediction has a paper trail' — auditability over algorithms.",
-      "Do NOT volunteer a holdout-MAE number on stage. We have not yet defined a baseline the Marine Corps would recognize; the honest answer is 'reproducibility first, accuracy claims when the holdout is published'.",
+      "If the judge is technical: open the model card live — point at the holdout-MAE row, the FY24 SOP baseline, and the seed=42 bootstrap CI. Then the training window and the features list. Don't dodge that the rule-based fallback currently loses on MAE — the calibration penalty on hedged probabilistic predictions is a known mode, the trained-weights swap is the planned win.",
+      "If the judge is not technical: lead with 'every prediction has a paper trail' — auditability over algorithms — then add 'we publish the score even when we lose; the SOP baseline beats our rule-based fallback today, and that's the bar we have to clear before we ship the trained model'.",
+      "Reproducibility script: `scripts/pulse_baseline_eval.py`. Numbers also live in the live model card at `/admin/models/pulse-risk-scorer` (and the in-PULSE summary at `/api/pulse/model-card → holdout_mae`). If the judge asks 'where did 0.177 come from', open the script, then open the model card.",
+      "Do NOT round or improve the numbers verbally on stage. The point is they are real and reproducible, not that they are flattering.",
     ],
   },
   {

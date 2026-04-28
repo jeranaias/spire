@@ -1877,6 +1877,40 @@ export interface ModelCard {
     alerts: ModelCardDriftAlert[];
     method: string;
   };
+  holdout_mae: {
+    model: {
+      mae: number;
+      ci_lower_95: number;
+      ci_upper_95: number;
+      n: number;
+      n_bootstrap: number;
+      seed: number;
+      method: string;
+    };
+    baseline: {
+      mae: number;
+      ci_lower_95: number;
+      ci_upper_95: number;
+      n: number;
+      n_bootstrap: number;
+      seed: number;
+      method: string;
+      name: string;
+      rule: string;
+      key: string;
+    };
+    baseline_diff_pct: number;
+    frozen_holdout: {
+      window_start: string;
+      window_end: string;
+      asset_pool_n: number;
+      asset_pool_description: string;
+      evaluation_horizon_days: number;
+      label_definition: string;
+    };
+    metric_definition: string;
+    reproducibility_script: string;
+  };
   last_validation: {
     date: string;
     validator: string;

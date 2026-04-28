@@ -163,6 +163,10 @@ export function ModelTab() {
           </div>
         </Panel>
 
+        <Panel title="Holdout MAE · published accuracy claim">
+          <HoldoutMaeBlock card={card} />
+        </Panel>
+
         <div className="grid grid-cols-2 gap-4">
           <Panel title="Train / val / test split">
             <SplitTable card={card} />
@@ -738,6 +742,124 @@ function LastValidation({ card }: { card: ModelCard }) {
           → full methodology · /admin/models/pulse-risk-scorer
         </a>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Holdout-MAE block — the published accuracy claim (Task #87).
+//
+// Renders the model + baseline MAE side by side with bootstrap CIs, the
+// frozen holdout window, and the relative diff. Same numbers the slide-5
+// one-liner cites; same numbers `scripts/pulse_baseline_eval.py` prints.
+// ---------------------------------------------------------------------------
+
+function HoldoutMaeBlock({ card }: { card: ModelCard }) {
+  const h = card.holdout_mae;
+  if (!h) return null;
+  const diff = h.baseline_diff_pct;
+  const diffPositive = diff >= 0;
+  const diffColor = diffPositive ? "var(--color-success)" : "var(--color-warning)";
+  const diffSign = diffPositive ? "+" : "";
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3">
+        <MaeCard
+          label="PULSE-Risk"
+          sublabel={`engine · ${card.engine.public_label}`}
+          mae={h.model.mae}
+          ciLower={h.model.ci_lower_95}
+          ciUpper={h.model.ci_upper_95}
+          n={h.model.n}
+        />
+        <MaeCard
+          label={h.baseline.name}
+          sublabel={`rule · ${h.baseline.rule}`}
+          mae={h.baseline.mae}
+          ciLower={h.baseline.ci_lower_95}
+          ciUpper={h.baseline.ci_upper_95}
+          n={h.baseline.n}
+        />
+      </div>
+      <div
+        className="rounded-sm border px-3 py-2 font-mono text-xs uppercase tracking-wider"
+        style={{ color: diffColor, borderColor: diffColor }}
+      >
+        Relative MAE vs baseline · <span className="tabular-nums">{diffSign}{diff.toFixed(1)}%</span>
+        {!diffPositive ? " · rule-based fallback under-performs SOP today (continuous prob incurs calibration penalty); trained-weights swap is the planned win" : ""}
+      </div>
+      <div className="grid grid-cols-2 gap-3 spire-body-muted">
+        <div>
+          <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+            Frozen window ·{" "}
+          </span>
+          <span className="tabular-nums">{h.frozen_holdout.window_start} → {h.frozen_holdout.window_end}</span>
+          <div className="mt-1">
+            <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+              Asset pool ·{" "}
+            </span>
+            n = <span className="tabular-nums">{h.frozen_holdout.asset_pool_n}</span> · horizon{" "}
+            {h.frozen_holdout.evaluation_horizon_days}d
+          </div>
+        </div>
+        <div>
+          <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+            CI methodology ·{" "}
+          </span>
+          {h.model.method} · {h.model.n_bootstrap} resamples · seed={h.model.seed}
+          <div className="mt-1">
+            <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+              Reproduce ·{" "}
+            </span>
+            <code className="rounded-sm bg-[var(--color-bg)] px-1 py-0.5 text-[var(--color-text)]">
+              python -m {h.reproducibility_script.replace(/\.py$/, "").replace(/\//g, ".")}
+            </code>
+          </div>
+        </div>
+      </div>
+      <div className="spire-body-muted">
+        <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+          Metric ·{" "}
+        </span>
+        {h.metric_definition}
+      </div>
+      <div className="spire-body-muted">
+        <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+          Label ·{" "}
+        </span>
+        {h.frozen_holdout.label_definition}
+      </div>
+    </div>
+  );
+}
+
+function MaeCard({
+  label,
+  sublabel,
+  mae,
+  ciLower,
+  ciUpper,
+  n,
+}: {
+  label: string;
+  sublabel: string;
+  mae: number;
+  ciLower: number;
+  ciUpper: number;
+  n: number;
+}) {
+  return (
+    <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+      <div className="font-mono text-xs uppercase tracking-widest text-[var(--color-primary)]">
+        {label}
+      </div>
+      <div className="mt-2 font-mono text-2xl font-semibold tabular-nums tracking-wide text-[var(--color-text)]">
+        {mae.toFixed(4)}
+      </div>
+      <div className="mt-1 spire-body-muted">
+        95% CI <span className="tabular-nums">{ciLower.toFixed(4)} – {ciUpper.toFixed(4)}</span> · n={n}
+      </div>
+      <div className="mt-1 spire-body-muted">{sublabel}</div>
     </div>
   );
 }

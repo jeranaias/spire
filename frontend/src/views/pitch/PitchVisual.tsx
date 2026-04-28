@@ -132,30 +132,44 @@ function DemoRunning() {
 
 // ─── 05 · model card miniature ─────────────────────────────────────────────
 function ModelCard() {
+  // Holdout-MAE and baseline-diff numbers are reproducible from
+  // `scripts/pulse_baseline_eval.py` and the live `/api/pulse/model-card`
+  // (`holdout_mae` block). The slide-5 line uses the same values; if the
+  // trained-weights swap moves the numbers, update both this visual AND
+  // the slides.ts copy in the same change.
   return (
     <Frame>
-      <rect x="30" y="35" width="140" height="130" rx="4" fill="var(--color-surface-raised)"
+      <rect x="20" y="30" width="160" height="146" rx="4" fill="var(--color-surface-raised)"
         stroke={STROKE} strokeWidth="1" />
-      <text x="40" y="55" fontFamily="ui-monospace, monospace" fontSize="9"
+      <text x="30" y="48" fontFamily="ui-monospace, monospace" fontSize="9"
         fill={MUTED} letterSpacing="1.5">MODEL CARD</text>
-      <text x="40" y="72" fontFamily="ui-monospace, monospace" fontSize="11"
+      <text x="30" y="64" fontFamily="ui-monospace, monospace" fontSize="11"
         fontWeight="700" fill={FG}>PULSE-Risk v0.3</text>
-      <line x1="40" y1="80" x2="160" y2="80" stroke={STROKE} strokeWidth="1" />
+      <line x1="30" y1="72" x2="170" y2="72" stroke={STROKE} strokeWidth="1" />
       {[
-        // Reproducibility-first model card — no accuracy claim is rendered
-        // until a published holdout is defined (see slides.ts slide 05).
         ["features", "14"],
         ["seed", "0xC0FFEE"],
-        ["status", "pre-holdout"],
+        // Holdout-MAE row: continuous-prediction L1 error on the frozen
+        // holdout (2026-03-04 → 2026-04-26, n=352).
+        ["holdout MAE", "0.177"],
+        // Baseline-diff row: relative MAE vs FY24 G-4 SOP heuristic
+        // ("predict NMC iff today's code starts with NMC"). Negative
+        // means the rule-based fallback under-performs the baseline.
+        ["vs SOP base", "−56%"],
         ["signed by", "sec-mgr"],
-      ].map(([k, v], i) => (
-        <g key={i}>
-          <text x="40" y={98 + i * 14} fontFamily="ui-monospace, monospace"
-            fontSize="9" fill={MUTED}>{k}</text>
-          <text x="160" y={98 + i * 14} textAnchor="end"
-            fontFamily="ui-monospace, monospace" fontSize="9" fill={FG}>{v}</text>
-        </g>
-      ))}
+      ].map(([k, v], i) => {
+        const isDiff = k === "vs SOP base";
+        return (
+          <g key={i}>
+            <text x="30" y={88 + i * 14} fontFamily="ui-monospace, monospace"
+              fontSize="9" fill={MUTED}>{k}</text>
+            <text x="170" y={88 + i * 14} textAnchor="end"
+              fontFamily="ui-monospace, monospace" fontSize="9"
+              fontWeight={isDiff ? 700 : 400}
+              fill={isDiff ? WARN : FG}>{v}</text>
+          </g>
+        );
+      })}
     </Frame>
   );
 }
