@@ -223,6 +223,90 @@ def test_alert_action_unauthenticated_returns_401(client):
     assert r.status_code == 401
 
 
+# ---------------------------------------------------------------------------
+# Task-104 — simulate/clear/{sim_id} role gate + 404 on unknown id + audit
+# ---------------------------------------------------------------------------
+
+def _dispatch_sim(client: TestClient) -> str:
+    """Helper: stand up an active sim as a privileged role and return its id."""
+    _login(client, SECURITY_MANAGER)
+    r = client.post("/api/bastion/simulate/thermalhawk-detection", json={})
+    assert r.status_code == 200, r.text
+    sim_id = r.json()["sim_id"]
+    _logout(client)
+    return sim_id
+
+
+def test_simulate_clear_blocked_for_maintenance_chief(client):
+    """A Maintenance Chief CAC must NOT be able to wipe an active sim a
+    presenter just dispatched. Reproduces the open hole described in
+    task #104 — task #54 closed the dispatch endpoint but left the
+    companion clear endpoint wide open."""
+    sim_id = _dispatch_sim(client)
+    try:
+        _login(client, MAINT_CHIEF)
+        r = client.post(f"/api/bastion/simulate/clear/{sim_id}")
+        assert r.status_code == 403, r.text
+        detail = r.json()["detail"]
+        assert detail["error"] == "InsufficientPrivilege"
+        assert detail["action"] == "bastion.simulate_clear"
+        assert detail["role_seen"] == "maintenance_chief"
+
+        # The sim is still active — the deny did not silently delete it.
+        _logout(client)
+        _login(client, SECURITY_MANAGER)
+        # And the audit chain has the role_denied breadcrumb keyed on sim_id.
+        denies = [
+            e for e in entries_for_subject(sim_id, limit=20)
+            if e.get("kind") == "role_denied"
+        ]
+        assert denies, "expected a role_denied audit row keyed on sim_id"
+        payload = denies[0]["payload"]
+        assert payload["action"] == "bastion.simulate_clear"
+        assert payload["user_role"] == "maintenance_chief"
+        assert "mef_commander" in payload["roles_allowed"]
+    finally:
+        # Tear the sim down with a privileged role so the suite is idempotent.
+        if "sim_id" in locals():
+            _logout(client)
+            _login(client, SECURITY_MANAGER)
+            client.post(f"/api/bastion/simulate/clear/{sim_id}")
+
+
+def test_simulate_clear_unknown_id_returns_404(client):
+    """Previously the endpoint returned 200 silently for any id, including
+    typos and probes. It now returns 404 so a guess-attempt is observable."""
+    _login(client, SECURITY_MANAGER)
+    r = client.post("/api/bastion/simulate/clear/SIM-deadbeef-not-real")
+    assert r.status_code == 404, r.text
+    assert "SIM-deadbeef-not-real" in r.json()["detail"]
+
+
+def test_simulate_clear_allowed_for_simulate_roles(client):
+    """Positive control: every role in BASTION_SIMULATE_ROLES can clear
+    a sim they (or a peer) dispatched."""
+    for dodid in (G4, SECURITY_MANAGER, MEF_COMMANDER):
+        sim_id = _dispatch_sim(client)
+        _login(client, dodid)
+        r = client.post(f"/api/bastion/simulate/clear/{sim_id}")
+        assert r.status_code == 200, (
+            f"role {dodid} unexpectedly denied: {r.status_code} {r.text}"
+        )
+        assert r.json()["ok"] is True
+        # Second clear of the same id is now a 404 (idempotency removed
+        # so probes are observable).
+        r2 = client.post(f"/api/bastion/simulate/clear/{sim_id}")
+        assert r2.status_code == 404
+        _logout(client)
+
+
+def test_simulate_clear_unauthenticated_returns_401(client):
+    """Sanity: middleware still rejects unauthenticated calls before the
+    route's role gate runs."""
+    r = client.post("/api/bastion/simulate/clear/SIM-anything")
+    assert r.status_code == 401
+
+
 def test_fused_threat_id_from_feed_is_actionable(client):
     """Regression for the code-review block: fused threat ids surfaced in
     /api/bastion/alerts must be actionable via /alerts/{id}/{action}.

@@ -1062,9 +1062,37 @@ async def simulate_thermalhawk_detection(
 
 
 @router.post("/simulate/clear/{sim_id}")
-async def clear_simulation(sim_id: str):
-    if sim_id in _ACTIVE_SIMS:
-        del _ACTIVE_SIMS[sim_id]
+async def clear_simulation(sim_id: str, request: Request):
+    """Clear an active ThermalHawk sim by id.
+
+    Authorization (task #104):
+      * Role-gated to the same `BASTION_SIMULATE_ROLES` set that gates
+        `/simulate/thermalhawk-detection` (task #54). Without this gate
+        any authenticated session can wipe a sim a presenter just
+        dispatched in front of judges — including a Maintenance Chief
+        whose CAC is scoped to one battalion.
+      * Unknown sim ids return 404 instead of a silent 200 so a probe
+        that guesses ids is observable rather than hidden behind an "ok".
+      * Cross-role denies are appended to the audit chain so the floor
+        knows who cancelled the demo.
+    """
+    user = getattr(request.state, "user", None) or {}
+    actor_role = session_role(request) or user.get("role")
+    require_role(
+        actor_role,
+        BASTION_SIMULATE_ROLES,
+        "bastion.simulate_clear",
+        audit_subject=sim_id,
+        user_dodid=user.get("dodid"),
+    )
+
+    if sim_id not in _ACTIVE_SIMS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown sim id: {sim_id}",
+        )
+
+    del _ACTIVE_SIMS[sim_id]
     return {"ok": True}
 
 
