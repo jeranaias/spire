@@ -18,7 +18,9 @@
  */
 import { useEffect, useState } from "react";
 import { useScenarioPlayer } from "../state/scenarioPlayer";
+import { useFailsafe } from "../state/failsafe";
 import { Pressable } from "./ui";
+import { ClassificationBadge } from "./classification/ClassificationBadge";
 
 export function NarrationOverlay() {
   const status = useScenarioPlayer((s) => s.status);
@@ -32,6 +34,13 @@ export function NarrationOverlay() {
   const setNarrationVisible = useScenarioPlayer((s) => s.setNarrationVisible);
   const next = useScenarioPlayer((s) => s.next);
   const togglePlay = useScenarioPlayer((s) => s.togglePlay);
+  // Task #48 (F-02): when the failsafe is up, the recorded backup must
+  // own the screen alone. The narration strip used z-[7800] vs the
+  // failsafe's z-[200], so the live narration + its Next button were
+  // painting on top of the recording. Short-circuit instead of fighting
+  // z-indexes — the live narration is meaningless once the live demo has
+  // been replaced by a pre-recorded take.
+  const failsafeMode = useFailsafe((s) => s.mode);
 
   // Hide whenever the player has nothing to say. "ready" is the loaded-
   // but-not-started state; we still hide there so the operator's first
@@ -39,7 +48,10 @@ export function NarrationOverlay() {
   // intro view.
   const beat = beats[idx];
   const shouldRender =
-    visible && beat && (status === "playing" || status === "paused" || status === "complete");
+    failsafeMode === "off" &&
+    visible &&
+    beat &&
+    (status === "playing" || status === "paused" || status === "complete");
 
   // Tick a redraw at ~10Hz so the per-beat progress bar advances
   // smoothly without the store re-rendering on every wall tick. The
@@ -99,10 +111,11 @@ export function NarrationOverlay() {
         )}
 
         <div className="flex items-start gap-4 px-4 py-3">
-          {/* Beat counter + phase pill */}
-          <div className="flex shrink-0 flex-col items-center gap-1 pt-0.5 font-mono text-[10px] uppercase tracking-widest">
+          {/* Beat counter + phase pill — bumped to 13px so the back row
+            * can read it on a 1080p projector (Task #50 / F-05). */}
+          <div className="flex shrink-0 flex-col items-center gap-1 pt-0.5 font-mono text-[13px] uppercase tracking-widest">
             <span
-              className="rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_15%,var(--color-surface))] px-1.5 py-0.5 font-semibold text-[var(--color-primary)] tabular-nums"
+              className="rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_15%,var(--color-surface))] px-2 py-0.5 font-semibold text-[var(--color-primary)] tabular-nums"
               aria-label={`Beat ${idx + 1} of ${total}`}
             >
               {String(idx + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
@@ -110,21 +123,38 @@ export function NarrationOverlay() {
             <span className="text-[var(--color-text-muted)]">{beat.phase}</span>
           </div>
 
-          {/* Beat title + narration prose */}
+          {/* Beat title + narration prose. Task #50 (F-08): stamp the
+            * per-beat classification + DEMO DATA chip ABOVE the title so
+            * a single-frame screenshot of the overlay carries the prose's
+            * marking on the same surface as the prose. The narration
+            * itself names units / bases / forward Class VIII PARs and
+            * cannot rely on the global app-shell banner alone. */}
           <div className="min-w-0 flex-1">
+            <div className="mb-1 flex flex-wrap items-center gap-1.5">
+              <ClassificationBadge
+                classification={beat.classification ?? "CUI"}
+                size="lg"
+              />
+              <span
+                className="inline-flex items-center rounded-sm border border-dashed border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-[13px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]"
+                title="Synthetic units, bases, and Class VIII PARs — SPIRE demo data, not real operational data."
+              >
+                Demo data · not real units
+              </span>
+            </div>
             <div className="flex flex-wrap items-baseline gap-2">
-              <h2 className="font-sans text-sm font-semibold text-[var(--color-text)]">
+              <h2 className="font-sans text-[15px] font-semibold text-[var(--color-text)]">
                 {beat.title}
               </h2>
-              <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+              <span className="font-mono text-[13px] uppercase tracking-widest text-[var(--color-text-muted)]">
                 {speed}× · {autoAdvance ? "auto" : "spacebar to advance"}
               </span>
             </div>
-            <p className="mt-1 max-w-[80ch] font-sans text-[13px] leading-snug text-[var(--color-text-secondary)]">
+            <p className="mt-1 max-w-[80ch] font-sans text-[14px] leading-snug text-[var(--color-text-secondary)]">
               {beat.narration}
             </p>
             {callouts.length > 0 && (
-              <ul className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+              <ul className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[13px] uppercase tracking-wider text-[var(--color-text-muted)]">
                 {callouts.map((c, i) => (
                   <li key={i} className="flex items-center gap-1">
                     <span aria-hidden style={{ color: "var(--color-primary)" }}>·</span>

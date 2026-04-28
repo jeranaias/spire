@@ -54,6 +54,12 @@ export function CoalitionTab() {
     profile: string;
     partners: string[];
     created_at: string;
+    /** F13 — manifest hash + record count surfaced so an investigator
+     * can later prove what shipped, not just that something did. Older
+     * cached entries (pre-F13) won't carry these; the panel renders
+     * "—" so the operator can tell which rows pre-date the audit fix. */
+    manifest_sha256?: string;
+    record_count?: number;
   }[]>(() => {
     try {
       const raw = window.localStorage.getItem("spire.sentry.recent_releases");
@@ -62,6 +68,12 @@ export function CoalitionTab() {
       return [];
     }
   });
+  // F2 — confirmation gate. Bright-green Generate Release used to fire on
+  // a single click and immediately write to the audit chain. The
+  // idempotency guard prevented double-tap but not first-tap-by-mistake.
+  // Now: click opens this modal, operator types RELEASE, only then does
+  // the audit event fire.
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     api.sentry.coalitionProfiles().then((r) => setProfiles(r.profiles)).catch(() => {});
@@ -104,6 +116,8 @@ export function CoalitionTab() {
               profile: r.profile,
               partners: r.partners,
               created_at: r.created_at,
+              manifest_sha256: r.manifest_sha256,
+              record_count: r.record_count,
             },
           ].slice(-10);
           try {
@@ -115,7 +129,7 @@ export function CoalitionTab() {
         });
         pushToast({
           tone: "ok",
-          text: `✓ Release ${r.release_id} prepared for ${r.partners.join(", ")} · audit logged · see Recent Releases below`,
+          text: `✓ Release ${r.release_id} · ${r.record_count} records · manifest ${r.manifest_sha256.slice(0, 12)}… · audit logged`,
           ttlMs: 6000,
         });
       } catch (e) {
@@ -217,60 +231,124 @@ export function CoalitionTab() {
 
       {view && (
         <>
-          {/* Header banner — distribution statement */}
-          <div
-            className="mb-4 rounded-md border-l-[6px] p-4"
-            style={{
-              borderLeftColor: "var(--color-primary)",
-              background: "color-mix(in oklab, var(--color-primary) 8%, var(--color-surface))",
-              borderTop: "1px solid var(--color-border)",
-              borderRight: "1px solid var(--color-border)",
-              borderBottom: "1px solid var(--color-border)",
-            }}
-          >
-            <div className="flex items-baseline justify-between gap-3">
-              <div>
-                <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
-                  Active Coalition Profile
-                </div>
-                <div className="mt-1 font-mono text-xl font-semibold uppercase text-[var(--color-text)] tracking-wide">
-                  {view.display_name}
-                </div>
-                <div className="mt-1 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
-                  Partners: {view.partners.join(" · ")}
-                  {view.embargo_days_after_event > 0 && (
-                    <span className="ml-3 text-[var(--color-warning)]">
-                      Embargo: {view.embargo_days_after_event}d post-event
-                    </span>
-                  )}
-                </div>
-              </div>
-              <Button
-                onClick={generateRelease}
-                disabled={releasing}
-                pending={releasing}
-                variant="primary"
-                className="border-[var(--color-success)] bg-[var(--color-success)] hover:brightness-110"
+          {/* Header banner — distribution statement + classification ceiling. */}
+          {(() => {
+            // F1 — pick the highest authorized classification as the
+            // ceiling label, and decide whether the in-scope sample
+            // contains records *above* that ceiling. When it does, the
+            // Generate Release button tints red (instead of neutral)
+            // so a Marine on JPN_COALITION (UNCLASSIFIED-only) sees a
+            // red "this isn't safe yet" before clicking.
+            const authCls = view.authorized_classifications ?? [];
+            // Prefer the rank-derived ceiling field from the backend; fall
+            // back to the last element of `authorized_classifications` only
+            // for older view payloads without the explicit field.
+            const ceiling =
+              view.classification_ceiling ??
+              (authCls.length === 0
+                ? "UNCLASSIFIED"
+                : (authCls[authCls.length - 1] ?? "UNCLASSIFIED"));
+            const overCeiling = view.scope.sample_srs_over_ceiling ?? 0;
+            const ceilingTone =
+              ceiling === "UNCLASSIFIED" || ceiling === "UNCLASSIFIED//FOUO"
+                ? "var(--color-success)"
+                : ceiling.includes("TOP SECRET")
+                  ? "var(--color-danger)"
+                  : "var(--color-warning)";
+            return (
+              <div
+                className="mb-4 rounded-md border-l-[6px] p-4"
+                style={{
+                  borderLeftColor: "var(--color-primary)",
+                  background: "color-mix(in oklab, var(--color-primary) 8%, var(--color-surface))",
+                  borderTop: "1px solid var(--color-border)",
+                  borderRight: "1px solid var(--color-border)",
+                  borderBottom: "1px solid var(--color-border)",
+                }}
               >
-                Generate Release Package
-              </Button>
-            </div>
-            <div className="mt-3 spire-body-muted text-base">
-              {view.distribution_statement}
-            </div>
-            {view.caveats_applied.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {view.caveats_applied.map((c) => (
-                  <span
-                    key={c}
-                    className="rounded-sm border border-[var(--color-primary)] px-2 py-[2px] font-mono text-xs uppercase text-[var(--color-primary)] tracking-wider"
+                <div className="flex items-baseline justify-between gap-3">
+                  <div>
+                    <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
+                      Active Coalition Profile
+                    </div>
+                    <div className="mt-1 font-mono text-xl font-semibold uppercase text-[var(--color-text)] tracking-wide">
+                      {view.display_name}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
+                      <span>Partners: {view.partners.join(" · ")}</span>
+                      {/* F1 — classification ceiling chip rendered at the
+                          same eye level as the Release button. */}
+                      <span
+                        data-testid="coalition-ceiling-chip"
+                        className="inline-flex items-center rounded-sm border px-2 py-[2px] font-mono text-xs font-semibold uppercase tracking-wider"
+                        style={{
+                          color: ceilingTone,
+                          borderColor: ceilingTone,
+                          background: `color-mix(in oklab, ${ceilingTone} 12%, transparent)`,
+                        }}
+                        title={`Partner is authorized up to ${ceiling}. Records above this ceiling are blocked from release.`}
+                      >
+                        Ceiling: {ceiling}
+                      </span>
+                      {view.embargo_days_after_event > 0 && (
+                        <span className="text-[var(--color-warning)]">
+                          Embargo: {view.embargo_days_after_event}d post-event
+                        </span>
+                      )}
+                      {overCeiling > 0 && (
+                        <span
+                          className="rounded-sm border border-[var(--color-danger)] px-2 py-[2px] font-mono text-xs font-semibold uppercase text-[var(--color-danger)] tracking-wider"
+                          style={{
+                            background: "color-mix(in oklab, var(--color-danger) 14%, transparent)",
+                          }}
+                          title={`${overCeiling} record(s) in the inspected sample exceed the ${ceiling} ceiling and would be blocked.`}
+                        >
+                          {overCeiling} above ceiling
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {/* F2 — neutral button until the operator confirms.
+                      Click opens the confirmation modal; the audit event
+                      only fires after typed RELEASE inside the modal.
+                      Tint red when the inspected sample contains records
+                      above the ceiling — the operator should pause before
+                      proceeding. */}
+                  <Button
+                    onClick={() => setConfirmOpen(true)}
+                    disabled={releasing || confirmOpen}
+                    pending={releasing}
+                    variant="primary"
+                    data-testid="coalition-release-button"
+                    className={
+                      overCeiling > 0
+                        ? "border-[var(--color-danger)] bg-[var(--color-danger)] hover:brightness-110"
+                        : undefined
+                    }
                   >
-                    {c}
-                  </span>
-                ))}
+                    {overCeiling > 0
+                      ? "Generate Release Package · Review"
+                      : "Generate Release Package…"}
+                  </Button>
+                </div>
+                <div className="mt-3 spire-body-muted text-base">
+                  {view.distribution_statement}
+                </div>
+                {view.caveats_applied.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {view.caveats_applied.map((c) => (
+                      <span
+                        key={c}
+                        className="rounded-sm border border-[var(--color-primary)] px-2 py-[2px] font-mono text-xs uppercase text-[var(--color-primary)] tracking-wider"
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })()}
 
           {/* Walkthrough #14 — hoist a compact Authorized Units strip
               directly under the header banner so the operator sees in-scope
@@ -450,12 +528,32 @@ export function CoalitionTab() {
             {[...recentReleases].reverse().map((r) => (
               <div
                 key={r.release_id}
-                className="flex items-baseline gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm"
+                data-testid="coalition-recent-release"
+                className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm"
               >
                 <span className="font-semibold text-[var(--color-text)]">{r.release_id}</span>
                 <span className="text-xs text-[var(--color-text-muted)] tracking-wide">
                   {r.profile} · {r.partners.join(" · ")}
                 </span>
+                {/* F13 — manifest hash + record count surfaced inline so an
+                    investigator can later prove what shipped. The
+                    truncated hash is the click-target; full hash on hover. */}
+                {r.manifest_sha256 ? (
+                  <span
+                    data-testid="coalition-recent-manifest"
+                    className="rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-text-secondary)] tracking-wider"
+                    title={`SHA-256 manifest: ${r.manifest_sha256}\nCovers ${r.record_count ?? "?"} in-scope SR records + redaction policy.`}
+                  >
+                    {r.record_count ?? "?"} recs · sha256 {r.manifest_sha256.slice(0, 12)}…
+                  </span>
+                ) : (
+                  <span
+                    className="rounded-sm border border-dashed border-[var(--color-border)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-text-muted)] tracking-wider"
+                    title="This release predates the manifest-hash audit fix (F13). Newer releases will record a SHA-256 over the in-scope SR set."
+                  >
+                    manifest —
+                  </span>
+                )}
                 {/* Walkthrough #9 — render UTC timestamp consistently with
                     the release_id (which embeds UTC). Mixing local time +
                     UTC release_id produced two valid times for one event. */}
@@ -486,6 +584,183 @@ export function CoalitionTab() {
           </div>
         </div>
       )}
+
+      {confirmOpen && view && (
+        <CoalitionReleaseConfirmModal
+          view={view}
+          releasing={releasing}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={async () => {
+            setConfirmOpen(false);
+            await generateRelease();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// F2 — confirmation gate. The Generate Release click used to write to the
+// audit chain on first tap; this modal puts a typed-RELEASE between the
+// click and the audit event. It names the partner, ceiling, record count
+// and caveats so the operator commits with intent (and a teammate
+// looking over their shoulder can read the same summary out loud).
+function CoalitionReleaseConfirmModal({
+  view,
+  releasing,
+  onCancel,
+  onConfirm,
+}: {
+  view: CoalitionView;
+  releasing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const authCls = view.authorized_classifications ?? [];
+  // Same rank-derived ceiling preference as the header banner — fall back
+  // to last-element only for older view payloads.
+  const ceiling =
+    view.classification_ceiling ??
+    (authCls.length === 0
+      ? "UNCLASSIFIED"
+      : (authCls[authCls.length - 1] ?? "UNCLASSIFIED"));
+  const overCeiling = view.scope.sample_srs_over_ceiling ?? 0;
+  // Estimate of what the audit row will record. Authoritative count comes
+  // from the backend (it walks the full dataset, not the sample); this
+  // gives the operator a representative figure so the confirm dialog
+  // isn't blank where the count belongs.
+  const inScopeSample = view.scope.sample_srs_allowed;
+  const ready = typed.trim().toUpperCase() === "RELEASE" && !releasing;
+  return (
+    <div
+      className="fixed inset-0 z-[8500] flex items-center justify-center bg-black/60 p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="coalition-release-confirm-title"
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
+      >
+        <div
+          id="coalition-release-confirm-title"
+          className="font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-warning)]"
+        >
+          Confirm Coalition Release
+        </div>
+        <div className="mt-2 spire-body text-sm">
+          You are about to release {view.display_name} data to{" "}
+          <strong>{view.partners.join(", ")}</strong>.
+        </div>
+
+        <dl className="mt-3 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 font-mono text-xs">
+          <dt className="text-[var(--color-text-muted)] tracking-wider uppercase">Partner</dt>
+          <dd className="text-[var(--color-text)]">{view.partners.join(" · ")}</dd>
+          <dt className="text-[var(--color-text-muted)] tracking-wider uppercase">Ceiling</dt>
+          <dd
+            className="font-semibold"
+            style={{
+              color:
+                ceiling === "UNCLASSIFIED" || ceiling === "UNCLASSIFIED//FOUO"
+                  ? "var(--color-success)"
+                  : ceiling.includes("TOP SECRET")
+                    ? "var(--color-danger)"
+                    : "var(--color-warning)",
+            }}
+          >
+            {ceiling}
+          </dd>
+          <dt className="text-[var(--color-text-muted)] tracking-wider uppercase">Records (est.)</dt>
+          <dd className="text-[var(--color-text)]">
+            ≈{inScopeSample.toLocaleString("en-US")} SR records (sampled from{" "}
+            {view.scope.sample_srs_total_inspected} inspected) ·{" "}
+            <span className="text-[var(--color-text-muted)]">
+              backend hashes the full dataset; exact count appears in the
+              audit row
+            </span>
+          </dd>
+          {view.caveats_applied.length > 0 && (
+            <>
+              <dt className="text-[var(--color-text-muted)] tracking-wider uppercase">Caveats</dt>
+              <dd className="text-[var(--color-text)]">
+                {view.caveats_applied.join(" · ")}
+              </dd>
+            </>
+          )}
+          {view.embargo_days_after_event > 0 && (
+            <>
+              <dt className="text-[var(--color-text-muted)] tracking-wider uppercase">Embargo</dt>
+              <dd className="text-[var(--color-warning)]">
+                {view.embargo_days_after_event}d post-event
+              </dd>
+            </>
+          )}
+        </dl>
+
+        {overCeiling > 0 && (
+          <div
+            className="mt-3 rounded-sm border border-[var(--color-danger)] px-3 py-2 font-mono text-xs text-[var(--color-danger)] tracking-wider"
+            style={{
+              background: "color-mix(in oklab, var(--color-danger) 12%, transparent)",
+            }}
+          >
+            ⚠ {overCeiling} record(s) in the inspected sample exceed the {ceiling} ceiling.
+            Those records will be blocked, but the release event itself will still fire.
+          </div>
+        )}
+
+        <div className="mt-4">
+          <label
+            htmlFor="coalition-release-confirm-input"
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
+          >
+            Type <strong className="text-[var(--color-text)]">RELEASE</strong> to confirm
+          </label>
+          <input
+            id="coalition-release-confirm-input"
+            data-testid="coalition-release-confirm-input"
+            autoFocus
+            type="text"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && ready) onConfirm();
+              if (e.key === "Escape") onCancel();
+            }}
+            className="mt-1 w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm tracking-widest text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
+            placeholder="RELEASE"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <Button onClick={onCancel} variant="secondary" size="sm">
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            disabled={!ready}
+            pending={releasing}
+            variant="primary"
+            size="sm"
+            data-testid="coalition-release-confirm-button"
+            className={
+              ready
+                ? "border-[var(--color-success)] bg-[var(--color-success)] hover:brightness-110"
+                : undefined
+            }
+          >
+            Generate Release · audit log
+          </Button>
+        </div>
+        <div className="mt-2 font-mono text-[10px] italic text-[var(--color-text-muted)] tracking-wider">
+          A SHA-256 manifest of the in-scope SR set + redaction policy will be
+          stamped into the audit row. The release event is irrevocable.
+        </div>
+      </div>
     </div>
   );
 }

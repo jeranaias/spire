@@ -7,13 +7,17 @@
  *   1. Hook                              0:30
  *   2. Customer (3d MLR CLB-Det)         0:45
  *   3. Live demo handoff (verbal)        0:30
- *   4. Live demo (driven by /demo)       3:15
+ *   4. Live demo (driven by /demo)       2:45
  *   5. Tech depth                        1:00
  *   6. Security                          1:00
  *   7. Transition                        1:00
  *   8. Close + ask                       0:30
  *                                        ─────
  *                                        8:00
+ *
+ * Sanity: TOTAL_BUDGET_SECONDS below MUST equal 480. The PitchView header
+ * also derives its "{N}-minute deck" copy from this constant, so the literal
+ * and the computed total cannot drift apart on stage.
  *
  * Per the task brief: each slide title, ≤5 supporting points, ≤1 visual,
  * speaker notes. No paragraphs in `points` — keep them scannable from the
@@ -121,10 +125,10 @@ export const SLIDES: SlideSpec[] = [
       "Click 'Start demo' to enter the scripted scenario player.",
       "Driven by lane A1 (`/demo`) — this slide is the launchpad, not the demo itself.",
       "Return to the deck with 'Return to pitch — slide 5' from inside the demo player.",
-      "Target run-time: 3:15. Hard stop at 3:45 — pull back to slide 5 manually.",
+      "Target run-time: 2:45. Hard stop at 3:15 — pull back to slide 5 manually.",
     ],
     visual: "demo-running",
-    targetSeconds: 195,
+    targetSeconds: 165,
     isDemoHandoff: true,
     speakerNotes: [
       "Click 'Start demo'. The demo player owns the next ~3 minutes of stage time.",
@@ -138,17 +142,17 @@ export const SLIDES: SlideSpec[] = [
     eyebrow: "Slide 05 · Tech",
     points: [
       "Forecast: PULSE-Risk v0.3, gradient-boosted on 14 maintenance signals.",
-      "Baselines: beats GCSS-MC rules-of-thumb by 21% MAE on the holdout fleet.",
+      "Every prediction is reproducible: model card cites training window, features, and seed.",
       "DDIL behavior: read-through cache + queued writes; UI degrades, never lies.",
-      "Every prediction links back to a model card with provenance + validation history.",
+      "Validation history is open — accuracy claims will be earned on a published holdout, not asserted on stage.",
       "No model is shipped without a security_manager-signed lifecycle record.",
     ],
     visual: "model-card",
     targetSeconds: 60,
     speakerNotes: [
-      "If the judge is technical: lead with the holdout-MAE number; offer to open the model card live.",
+      "If the judge is technical: open the model card live — point at the training window and the features list, not at a percentage.",
       "If the judge is not technical: lead with 'every prediction has a paper trail' — auditability over algorithms.",
-      "Do NOT claim production accuracy. The number is on the holdout, not in the field.",
+      "Do NOT volunteer a holdout-MAE number on stage. We have not yet defined a baseline the Marine Corps would recognize; the honest answer is 'reproducibility first, accuracy claims when the holdout is published'.",
     ],
   },
   {
@@ -160,14 +164,14 @@ export const SLIDES: SlideSpec[] = [
       "Audit: every approve/dispatch/sign event written to an append-only ledger.",
       "Classification: U/S/TS gates enforced on every export and joint push.",
       "Hosting: IL-5-targeted; FedRAMP High path mapped via shared services.",
-      "Spillage drill demonstrated: low-clearance identity blocked end-to-end.",
+      "Spillage block designed end-to-end: clearance gate code + audit-ledger entry shown on request.",
     ],
     visual: "lock-shield",
     targetSeconds: 60,
     speakerNotes: [
       "If asked about ATO: 'we are pre-ATO; the IL-5 target is the destination, not the claim.'",
       "Offer to show the audit ledger live if pressed. It is reachable from /admin/audit.",
-      "Spillage drill is the strongest single artefact — name-drop it even if you can't show it.",
+      "On the spillage block: today's mock CAC roster carries SECRET / TS//SCI personas only — there is no UNCLASSIFIED CAC seeded yet, so we cannot drive the block from a low-clearance login on stage. If pressed for a live demo, walk the judge through the gate code (auth.py classification check) and show the corresponding 'access_denied' entry in the audit ledger. Do NOT claim the drill was performed end-to-end against a live low-clearance user.",
     ],
   },
   {
@@ -175,7 +179,7 @@ export const SLIDES: SlideSpec[] = [
     title: "Transition — pathway, sustainment, team, IP, 12-mo plan",
     eyebrow: "Slide 07 · Transition",
     points: [
-      "Pathway: SBIR Phase II → MTA-Rapid Prototyping (10 USC 4022).",
+      "Pathway: SBIR Phase II → MTA-Rapid Prototyping (10 USC 4023).",
       "IP: Government Purpose Rights, DFARS 252.227-7013/7014 from day one.",
       "Sustainment: Y1 / Y3 / Y5 cost lines published; assumptions cited.",
       "Team: operator + engineer + acquisition translator (named on /about/team).",

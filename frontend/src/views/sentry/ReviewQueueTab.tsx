@@ -14,6 +14,25 @@ import {
   fireIdempotent,
   pushUndoToast,
 } from "../../components/ui";
+import {
+  CLASS_RANK,
+  CLASS_LABEL,
+  CLASS_COLOR as CAPCO_COLOR,
+  normalizeClassification,
+  useClearance,
+} from "../../components/classification";
+
+// Walkthrough #34 — bulk-approve gates. Hard-cap below requires only modal
+// click; ≥ TYPED_CONFIRM_THRESHOLD requires the operator to type the literal
+// `APPROVE N` / `REJECT N` string before the action fires. Mirrors the
+// destructive-confirmation pattern used elsewhere for secure-wipe.
+const BULK_TYPED_CONFIRM_THRESHOLD = 50;
+
+// PII span categories that the inspector masks by default. `geo` (MGRS) and
+// `pii` (EDIPI / SSN4 / POC / ext) carry persistent identifiers; `controlled`
+// (USA/USMC serials) is operationally sensitive but not PII per se. The
+// presenter "REDACTED for projection" toggle masks all categories regardless.
+const PII_MASK_CATEGORIES = new Set(["pii", "geo"]);
 
 type Column = "auto_cleared" | "flagged" | "held";
 type Action = "approve" | "reject";
@@ -155,26 +174,34 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
       // Capture the SR list so the undo handler can revert resolved-state
       // and emit a counter-action without re-reading column state.
       const srNumbers = items.map((r) => r.sr_number as string);
-      // Optimistic bulk: mark all resolved immediately, fire in parallel.
+      // Optimistic bulk: mark all resolved immediately, then fire one
+      // server-side bulk request that writes ONE chained audit entry
+      // naming every SR (vs the prior fan-out of N independent rows).
       setResolved((prev) => {
         const next = { ...prev };
         for (const sr of srNumbers) next[sr] = action;
         return next;
       });
       try {
-        await Promise.all(
-          srNumbers.map((sr) =>
-            fireIdempotent(`sentry:review:${sr}:${action}`, () =>
-              api.sentry.review(sr, action),
-            ).catch(() => null),
-          ),
-        );
+        await fireIdempotent(
+          `sentry:review:bulk:${col}:${action}:${srNumbers.length}:${srNumbers[0] ?? ""}`,
+          () => api.sentry.reviewBulk(action, srNumbers, col),
+        ).catch((err) => {
+          // Roll back on failure so the queue redraws and the operator can retry.
+          setResolved((prev) => {
+            const next = { ...prev };
+            for (const sr of srNumbers) delete next[sr];
+            return next;
+          });
+          pushToast({ tone: "error", text: `Bulk ${action} failed: ${formatApiError(err)}` });
+          throw err;
+        });
         // Destructive contract: bulk approve/reject also gets an undo toast
-        // with the ≥5s floor. Undo fires the inverse review on every SR
-        // (idempotent-keyed) and clears local resolved state.
+        // with the ≥5s floor. Undo fires the inverse bulk request (one entry,
+        // not N) and clears local resolved state.
         pushUndoToast({
           tone: action === "approve" ? "ok" : "warn",
-          text: `${items.length} records ${action === "approve" ? "approved" : "rejected"}`,
+          text: `${items.length} records ${action === "approve" ? "approved" : "rejected"} · 1 audit entry`,
           onUndo: () => {
             const inverse: Action = action === "approve" ? "reject" : "approve";
             setResolved((prev) => {
@@ -182,13 +209,14 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
               for (const sr of srNumbers) delete next[sr];
               return next;
             });
-            for (const sr of srNumbers) {
-              fireIdempotent(`sentry:review:${sr}:${inverse}`, () =>
-                api.sentry.review(sr, inverse),
-              ).catch(() => {});
-            }
+            fireIdempotent(
+              `sentry:review:bulk:${col}:${inverse}:${srNumbers.length}:${srNumbers[0] ?? ""}:undo`,
+              () => api.sentry.reviewBulk(inverse, srNumbers, col, "undo"),
+            ).catch(() => {});
           },
         });
+      } catch {
+        // Already toasted in the catch above; swallow so React doesn't log.
       } finally {
         setBulkRunning(false);
       }
@@ -235,6 +263,49 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Walkthrough #35 — page classification banner. Reflects the highest
+  // classification across every record currently visible (auto_cleared +
+  // flagged + held + the inspector selection), mirroring the export-banner
+  // pattern in `backend/routes/sentry.py:831`. Re-derives on every queue
+  // mutation so resolving the last SECRET record drops the page back to CUI
+  // automatically — the banner cannot lie about what the operator is
+  // actually staring at. Declared *before* the loading/error early-returns
+  // so React's hook order stays stable across renders.
+  const pageClassification = useMemo(() => {
+    let bestRank = 0;
+    let bestKey = "UNCLASSIFIED";
+    const consider = (raw: any) => {
+      if (!raw) return;
+      const norm = normalizeClassification(String(raw));
+      const r = CLASS_RANK[norm];
+      if (r > bestRank) {
+        bestRank = r;
+        bestKey = norm;
+      }
+    };
+    const sweep = (xs: any[] | undefined) => {
+      if (!xs) return;
+      for (const r of xs) {
+        consider(r.detected_classification);
+        consider(r.source_classification);
+      }
+    };
+    if (filteredQueue) {
+      sweep(filteredQueue.auto_cleared);
+      sweep(filteredQueue.flagged);
+      sweep(filteredQueue.held);
+      if (selected) {
+        const list: any[] = (filteredQueue as any)[selected.col] ?? [];
+        const rec = list[selected.idx];
+        if (rec) {
+          consider(rec.detected_classification);
+          consider(rec.source_classification);
+        }
+      }
+    }
+    return bestKey as keyof typeof CAPCO_COLOR;
+  }, [filteredQueue, selected]);
+
   if (!ctx.batchId) {
     return (
       <div className="flex h-full items-center justify-center p-12">
@@ -276,7 +347,12 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-xs tracking-wider">
+      {/* Walkthrough #35 — top sticky classification banner (CAPCO color
+          block per DoDM 5200.01). Mirrored at the bottom of the page so a
+          screenshot from any scroll position carries marking. */}
+      <ClassificationStripe classification={pageClassification} position="top" />
+
+      <div className="sticky top-0 z-[40] flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-xs tracking-wider">
         <div className="flex items-center gap-6">
           <span className="tabular-nums text-[var(--color-text-muted)]">
             {totalRemaining} / {(queue?.auto_cleared.length ?? 0) + (queue?.flagged.length ?? 0) + (queue?.held.length ?? 0)} records
@@ -304,13 +380,32 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
           </span>
         </div>
         {queue && queue.aggregation_risks.length > 0 && (
-          <Button onClick={() => setShowAggregation((v) => !v)} variant="warning" size="sm">
+          <Button
+            onClick={() => setShowAggregation((v) => !v)}
+            variant="warning"
+            size="sm"
+            // Walkthrough #36 — same red glow as the Held column dot so the
+            // warning count reads as urgent even before the operator clicks.
+            // The matrix also renders inline (left rail) so this button only
+            // toggles the prose detail panel and is no longer the only way
+            // to surface the matrix.
+            style={{
+              boxShadow: "0 0 6px color-mix(in oklab, var(--color-danger) 60%, transparent)",
+            }}
+          >
             {queue.aggregation_risks.length} aggregation risk{queue.aggregation_risks.length === 1 ? "" : "s"}
           </Button>
         )}
       </div>
 
       <div className="flex flex-1 overflow-hidden tracking-wider">
+        {/* Walkthrough #36 — when aggregation_risks fire, the matrix lives
+            in the left rail of the queue (always-on, judge-visible) instead
+            of being hidden behind a button a 12-second Marine will not
+            click. The detail prose panel still toggles below. */}
+        {queue && queue.aggregation_risks.length > 0 && (
+          <AggregationRiskRail risks={queue.aggregation_risks} />
+        )}
         <div className={clsx("flex flex-1 overflow-hidden", selectedRecord && "pr-0")}>
           <ReviewColumn
             title="Auto-cleared"
@@ -363,6 +458,9 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
         <AggregationRiskPanel risks={queue.aggregation_risks} onClose={() => setShowAggregation(false)} />
       )}
 
+      {/* Walkthrough #35 — bottom sticky classification banner. */}
+      <ClassificationStripe classification={pageClassification} position="bottom" />
+
       {/* Walkthrough #22 — bulk-action confirmation modal. */}
       {bulkConfirm && (
         <BulkConfirmModal
@@ -381,9 +479,148 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
   );
 }
 
-// Walkthrough #22 — confirmation modal so a stray click on the column-
-// header bulk button never silently approves 374 records. Names the count
-// + records the audit consequence so the operator commits with intent.
+// Walkthrough #35 — sticky CAPCO classification stripe rendered at the top
+// and bottom of the Review Queue page. Required on every screen that
+// renders SECRET-adjacent content so a screenshot or projector frame
+// always carries marking. Color comes from CAPCO_COLOR in
+// components/classification/levels.ts so the stripe matches the badge.
+function ClassificationStripe({
+  classification,
+  position,
+}: {
+  classification: keyof typeof CAPCO_COLOR;
+  position: "top" | "bottom";
+}) {
+  const colors = CAPCO_COLOR[classification] ?? CAPCO_COLOR.UNCLASSIFIED;
+  const label = CLASS_LABEL[classification] ?? "UNCLASSIFIED";
+  return (
+    <div
+      role="status"
+      aria-label={`Page classification ${label}`}
+      className={clsx(
+        "sticky z-[60] flex items-center justify-center font-mono text-[11px] font-bold uppercase tracking-[0.18em]",
+        position === "top" ? "top-0" : "bottom-0",
+      )}
+      style={{
+        background: colors.bg,
+        color: colors.fg,
+        padding: "3px 12px",
+        borderTop: position === "bottom" ? "1px solid rgba(0,0,0,0.25)" : undefined,
+        borderBottom: position === "top" ? "1px solid rgba(0,0,0,0.25)" : undefined,
+      }}
+    >
+      <span>// {label} //</span>
+    </div>
+  );
+}
+
+// Walkthrough #36 — left-rail aggregation matrix. Renders the unit ×
+// equipment_type matrix the same way `AggregationRiskPanel` does, but
+// docked into the queue layout so it is visible the moment the page loads
+// rather than gated behind a button.
+function AggregationRiskRail({ risks }: { risks: any[] }) {
+  const units = useMemo(() => Array.from(new Set(risks.map((r) => r.unit))).sort(), [risks]);
+  const equipTypes = useMemo(
+    () => Array.from(new Set(risks.map((r) => r.equipment_type))).sort(),
+    [risks],
+  );
+  const cell = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const r of risks) m.set(`${r.unit}::${r.equipment_type}`, r);
+    return m;
+  }, [risks]);
+  return (
+    <aside
+      className="flex w-56 shrink-0 flex-col overflow-hidden border-r border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_14%,var(--color-surface))]"
+      aria-label="Aggregation risk matrix"
+    >
+      <div className="border-b border-[color-mix(in_oklab,var(--color-warning)_40%,var(--color-border))] px-2 py-2">
+        <div className="flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-warning)]">
+          <span
+            className="inline-block h-2 w-2 rounded-full bg-[var(--color-danger)]"
+            style={{ boxShadow: "0 0 5px var(--color-danger)" }}
+          />
+          Agg. risk
+          <span className="tabular-nums text-[var(--color-text-muted)]">({risks.length})</span>
+        </div>
+        <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          unit × equipment
+        </div>
+      </div>
+      <div className="flex-1 overflow-auto p-2">
+        <table className="border-collapse font-mono text-[10px]">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 bg-transparent p-1 text-left text-[var(--color-text-muted)]" />
+              {equipTypes.map((e) => (
+                <th
+                  key={e}
+                  className="p-0 text-left text-[10px] text-[var(--color-text-muted)]"
+                  style={{
+                    transform: "rotate(-45deg)",
+                    transformOrigin: "bottom left",
+                    height: 60,
+                    width: 14,
+                    verticalAlign: "bottom",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={e}
+                >
+                  {e.length > 18 ? `${e.slice(0, 16)}…` : e}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {units.map((u) => (
+              <tr key={u}>
+                <td
+                  className="sticky left-0 z-10 max-w-[7rem] truncate whitespace-nowrap bg-transparent px-1 py-[1px] text-[var(--color-text)]"
+                  title={u}
+                >
+                  {u}
+                </td>
+                {equipTypes.map((e) => {
+                  const r = cell.get(`${u}::${e}`);
+                  if (!r) {
+                    return (
+                      <td
+                        key={e}
+                        className="border border-[var(--color-border)] bg-[var(--color-bg)] p-0"
+                        style={{ height: 14, width: 14 }}
+                      />
+                    );
+                  }
+                  return (
+                    <td
+                      key={e}
+                      title={r.warning}
+                      className="cursor-help border border-[color-mix(in_oklab,var(--color-warning)_40%,var(--color-border))]"
+                      style={{
+                        height: 14,
+                        width: 14,
+                        background: "color-mix(in oklab, var(--color-danger) 50%, var(--color-bg))",
+                        boxShadow: "inset 0 0 4px color-mix(in oklab, var(--color-danger) 40%, transparent)",
+                      }}
+                    />
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </aside>
+  );
+}
+
+// Walkthrough #22 / #34 — confirmation modal so a stray click on the column-
+// header bulk button never silently approves 374 records. The earlier modal's
+// copy promised "an entry" but the implementation wrote N — fixed: one
+// `sentry_bulk_review` chain entry containing the SR list. For counts ≥
+// BULK_TYPED_CONFIRM_THRESHOLD the operator must type the literal
+// "APPROVE N" / "REJECT N" string, which prevents an accidental enter-press
+// from clearing the entire auto-cleared column.
 function BulkConfirmModal({
   col,
   action,
@@ -399,6 +636,10 @@ function BulkConfirmModal({
 }) {
   const verb = action === "approve" ? "approve" : "reject";
   const colLabel = col === "auto_cleared" ? "auto-cleared" : col === "flagged" ? "flagged" : "held";
+  const requireTyped = count >= BULK_TYPED_CONFIRM_THRESHOLD;
+  const typedTarget = `${action.toUpperCase()} ${count}`;
+  const [typed, setTyped] = useState("");
+  const canConfirm = !requireTyped || typed.trim() === typedTarget;
   return (
     <div
       className="fixed inset-0 z-[8500] flex items-center justify-center bg-black/60 p-6"
@@ -418,21 +659,42 @@ function BulkConfirmModal({
           {colLabel} records?
         </div>
         <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-          A bulk-{verb} entry will be written to the SHA-256 chained audit
-          log. Individual undo is still available per-record from toasts.
+          One <span className="text-[var(--color-text)]">sentry_bulk_review</span> entry
+          containing every SR will be written to the SHA-256 chained audit
+          log. Individual undo is available for ≥5 s after this completes.
         </div>
+        {requireTyped && (
+          <div className="mt-3">
+            <div className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-danger)]">
+              Type <span className="rounded-sm bg-[var(--color-danger-muted)] px-1 text-[var(--color-text)]">{typedTarget}</span> to confirm
+            </div>
+            <input
+              autoFocus
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={typedTarget}
+              aria-label={`Type ${typedTarget} to confirm bulk ${verb}`}
+              className="mt-1 w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-sm tracking-wider text-[var(--color-text)] outline-none focus:border-[var(--color-danger)]"
+            />
+            <div className="mt-1 font-mono text-[10px] tracking-wider text-[var(--color-text-muted)]">
+              Bulk size ≥ {BULK_TYPED_CONFIRM_THRESHOLD} requires typed confirmation. The string is exact-match (case + space).
+            </div>
+          </div>
+        )}
         <div className="mt-4 flex items-center justify-end gap-2">
           <Button onClick={onCancel} variant="secondary" size="sm">
             Cancel
           </Button>
           <Button
             onClick={onConfirm}
+            disabled={!canConfirm}
             variant="primary"
             size="sm"
             className={clsx(
               action === "approve"
                 ? "border-[var(--color-success)] bg-[var(--color-success)] hover:brightness-110"
                 : "border-[var(--color-danger)] bg-[var(--color-danger)] hover:brightness-110",
+              !canConfirm && "cursor-not-allowed opacity-50",
             )}
           >
             Confirm {verb} {count.toLocaleString("en-US")}
@@ -660,17 +922,36 @@ function InspectorPane({
   // W1 #30 — gate the model-card cross-link on role; supply-chain page
   // is restricted to security_manager.
   const role = useSpireStore((s) => s.role);
+  // Walkthrough #37 — PII masking. The inspector renders highlighted PII
+  // spans (EDIPI, POC, MGRS) as opaque blocks by default. The operator can
+  // click-to-reveal each individual span only if their clearance meets the
+  // record's detected classification. The presenter can also flip the
+  // header "REDACTED for projection" toggle to mask everything (regardless
+  // of category, regardless of clearance) for stage projection.
+  const clearance = useClearance();
+  const recordClass = normalizeClassification(
+    record.detected_classification ?? record.source_classification ?? "UNCLASSIFIED",
+  );
+  const canRevealPII = clearance.can(recordClass);
+  const [projectionMode, setProjectionMode] = useState(false);
+  const [revealed, setRevealed] = useState<Set<number>>(new Set());
+  // Reset reveal-state on record change so revealed spans from one record
+  // never carry over visually to another. Projection mode is preserved on
+  // purpose — the presenter sets it once for the demo and it should stick.
+  useEffect(() => {
+    setRevealed(new Set());
+  }, [record.sr_number]);
   const highlights: { start: number; end: number; category: string }[] = record.highlights || [];
   const remark: string = record.remark || "";
-  const segments: { text: string; category?: string }[] = [];
+  const segments: { text: string; category?: string; idx: number }[] = [];
   let cursor = 0;
   const sorted = [...highlights].sort((a, b) => a.start - b.start);
-  for (const h of sorted) {
-    if (h.start > cursor) segments.push({ text: remark.slice(cursor, h.start) });
-    segments.push({ text: remark.slice(h.start, h.end), category: h.category });
+  sorted.forEach((h, i) => {
+    if (h.start > cursor) segments.push({ text: remark.slice(cursor, h.start), idx: -1 });
+    segments.push({ text: remark.slice(h.start, h.end), category: h.category, idx: i });
     cursor = h.end;
-  }
-  if (cursor < remark.length) segments.push({ text: remark.slice(cursor) });
+  });
+  if (cursor < remark.length) segments.push({ text: remark.slice(cursor), idx: -1 });
 
   const detected = record.detected_classification;
   const detectedColor = CLASS_COLOR[detected] ?? "var(--color-text-secondary)";
@@ -695,6 +976,33 @@ function InspectorPane({
           <IconButton onClick={onClose} aria-label="Close inspector" variant="ghost" size="sm">
             <span aria-hidden>✕</span>
           </IconButton>
+        </div>
+        {/* Walkthrough #37 — projection/redaction toggle. When ON, every
+            highlighted span renders as a black block regardless of category
+            or operator clearance — safe for projector / camera. */}
+        <div className="mt-2 flex items-center justify-between gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            {projectionMode
+              ? "REDACTED for projection · all spans masked"
+              : canRevealPII
+                ? "PII masked · click to reveal"
+                : `PII masked · ${recordClass} clearance required to reveal`}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={projectionMode}
+            aria-label="Toggle projection redaction"
+            onClick={() => setProjectionMode((v) => !v)}
+            className={clsx(
+              "rounded-sm border px-2 py-[2px] font-mono text-[10px] font-semibold uppercase tracking-widest transition-colors",
+              projectionMode
+                ? "border-[var(--color-danger)] bg-[var(--color-danger)] text-white"
+                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-danger)]",
+            )}
+          >
+            {projectionMode ? "REDACTED ✓" : "REDACT for projection"}
+          </button>
         </div>
       </div>
       <div className="flex flex-col gap-4 p-4">
@@ -721,22 +1029,102 @@ function InspectorPane({
             Remark · Highlighted
           </div>
           <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-base leading-relaxed text-[var(--color-text)]">
-            {segments.map((s, i) =>
-              s.category ? (
+            {segments.map((s, i) => {
+              if (!s.category) return <span key={i}>{s.text}</span>;
+              const isPii = PII_MASK_CATEGORIES.has(s.category);
+              const shouldMask =
+                projectionMode || (isPii && !revealed.has(s.idx));
+              const flagColor = FLAG_COLOR[s.category] || "#fff";
+              if (shouldMask) {
+                // Black-block redaction. Width matches the underlying token
+                // length so layout doesn't reflow when the operator reveals.
+                const blockWidth = `${Math.max(2, s.text.length)}ch`;
+                return (
+                  <span
+                    key={i}
+                    role={canRevealPII && !projectionMode ? "button" : undefined}
+                    tabIndex={canRevealPII && !projectionMode ? 0 : -1}
+                    title={
+                      projectionMode
+                        ? "Masked for projection"
+                        : canRevealPII
+                          ? `Click to reveal ${s.category.toUpperCase()} span`
+                          : `Reveal blocked — ${recordClass} clearance required`
+                    }
+                    aria-label={
+                      projectionMode
+                        ? `Redacted ${s.category} span`
+                        : canRevealPII
+                          ? `Reveal ${s.category} span`
+                          : `Masked ${s.category} span (insufficient clearance)`
+                    }
+                    onClick={() => {
+                      if (projectionMode || !canRevealPII) return;
+                      setRevealed((prev) => {
+                        const next = new Set(prev);
+                        next.add(s.idx);
+                        return next;
+                      });
+                    }}
+                    onKeyDown={(e) => {
+                      if (projectionMode || !canRevealPII) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setRevealed((prev) => {
+                          const next = new Set(prev);
+                          next.add(s.idx);
+                          return next;
+                        });
+                      }
+                    }}
+                    className={clsx(
+                      "mx-px inline-block select-none align-baseline rounded-sm",
+                      canRevealPII && !projectionMode && "cursor-pointer",
+                    )}
+                    style={{
+                      background: "#0a0a0a",
+                      color: "#0a0a0a",
+                      minWidth: blockWidth,
+                      borderBottom: `2px solid ${flagColor}`,
+                      lineHeight: 1.1,
+                    }}
+                  >
+                    {"█".repeat(Math.max(2, s.text.length))}
+                  </span>
+                );
+              }
+              const revealedSpan = (
                 <span
                   key={i}
                   className="rounded-sm px-0.5"
                   style={{
-                    background: `color-mix(in oklab, ${FLAG_COLOR[s.category] || "#fff"} 28%, transparent)`,
-                    color: FLAG_COLOR[s.category] || "inherit",
+                    background: `color-mix(in oklab, ${flagColor} 28%, transparent)`,
+                    color: flagColor,
                   }}
+                  title={
+                    isPii
+                      ? `Revealed ${s.category.toUpperCase()} span — click again to re-mask`
+                      : undefined
+                  }
+                  onClick={
+                    isPii
+                      ? () => {
+                          setRevealed((prev) => {
+                            const next = new Set(prev);
+                            next.delete(s.idx);
+                            return next;
+                          });
+                        }
+                      : undefined
+                  }
+                  role={isPii ? "button" : undefined}
+                  tabIndex={isPii ? 0 : -1}
                 >
                   {s.text}
                 </span>
-              ) : (
-                <span key={i}>{s.text}</span>
-              ),
-            )}
+              );
+              return revealedSpan;
+            })}
           </div>
         </section>
 
@@ -911,25 +1299,75 @@ function AuditChainModal({ subjectId, onClose }: { subjectId: string; onClose: (
               a marking decision, review action, or release event fires.
             </div>
           )}
-          {data && data.entries.map((e, i) => (
-            <div
-              key={i}
-              className="mb-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2"
-            >
-              <div className="mb-1 flex items-baseline gap-2">
-                <span className="text-[var(--color-primary)]">{e.kind}</span>
-                <span className="text-[var(--color-text-muted)]">{e.ts}</span>
-                <span className="ml-auto text-[var(--color-text-muted)]">actor: {e.actor}</span>
+          {data && data.entries.map((e, i) => {
+            // Task #25 — surface the operator's name (from the chain
+            // payload) in addition to the role string. The role alone
+            // ("g4", "security_manager") doesn't tell an investigator
+            // who actually keyed the decision; the payload now carries
+            // actor_name + actor_dodid + actor_unit + actor_cert_serial
+            // so the modal renders a proper Marine identity.
+            const p = e.payload || {};
+            const operatorName =
+              typeof p.actor_name === "string" && p.actor_name.trim()
+                ? p.actor_name
+                : null;
+            const operatorDodid =
+              typeof p.actor_dodid === "string" && p.actor_dodid.trim()
+                ? p.actor_dodid
+                : null;
+            const operatorUnit =
+              typeof p.actor_unit === "string" && p.actor_unit.trim()
+                ? p.actor_unit
+                : null;
+            const operatorCert =
+              typeof p.actor_cert_serial === "string" && p.actor_cert_serial.trim()
+                ? p.actor_cert_serial
+                : null;
+            return (
+              <div
+                key={i}
+                className="mb-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2"
+              >
+                <div className="mb-1 flex items-baseline gap-2">
+                  <span className="text-[var(--color-primary)]">{e.kind}</span>
+                  <span className="text-[var(--color-text-muted)]">{e.ts}</span>
+                  <span className="ml-auto text-[var(--color-text-muted)]">
+                    role: {e.actor}
+                  </span>
+                </div>
+                {(operatorName || operatorDodid || operatorUnit || operatorCert) && (
+                  <div className="mb-1 text-[var(--color-text)]">
+                    operator:{" "}
+                    <span className="font-semibold">
+                      {operatorName || "(unknown)"}
+                    </span>
+                    {operatorDodid && (
+                      <span className="ml-2 text-[var(--color-text-muted)]">
+                        DODID {operatorDodid}
+                      </span>
+                    )}
+                    {operatorUnit && (
+                      <span className="ml-2 text-[var(--color-text-muted)]">
+                        · {operatorUnit}
+                      </span>
+                    )}
+                    {operatorCert && (
+                      <span className="ml-2 text-[var(--color-text-muted)]">
+                        · cert {operatorCert}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="break-all text-[var(--color-text-muted)]">prev_hash: {e.prev_hash}</div>
+                <div className="break-all text-[var(--color-text)]">self_hash: {e.self_hash}</div>
+                {p && Object.keys(p).length > 0 && (
+                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[var(--color-text-secondary)]">
+                    {JSON.stringify(p, null, 2)}
+                  </pre>
+                )}
               </div>
-              <div className="break-all text-[var(--color-text-muted)]">prev_hash: {e.prev_hash}</div>
-              <div className="break-all text-[var(--color-text)]">self_hash: {e.self_hash}</div>
-              {e.payload && Object.keys(e.payload).length > 0 && (
-                <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[var(--color-text-secondary)]">
-                  {JSON.stringify(e.payload, null, 2)}
-                </pre>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

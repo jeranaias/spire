@@ -143,11 +143,26 @@ export interface SpireState {
   // stale" per the W1 brief).
   ddilLastCacheHit: { key: string; cachedAt: number; servedAt: number } | null;
 
+  // PULSE Risk Board "Draft Action" queue refresh nonce. The TopBar
+  // drafts badge polls /pulse/drafts on an interval, but the operator
+  // expects the count to bump immediately after they hit Draft this in
+  // the modal. Bumping this counter triggers an extra fetch in the
+  // badge's effect — cheaper than wiring a custom event bus.
+  draftsRefreshTick: number;
+
   // Toast queue.
   toasts: Toast[];
 
   // Track-G3 — density toggle. Persisted per role in localStorage.
   density: Density;
+
+  // MDM 2026 stage-pivot. When `stageMode` is true the chrome collapses
+  // to the four hero use-case tiles for the 8-min stage demo. Activated
+  // via `?stage=1` URL param (hydrated in main.tsx) and persisted to
+  // localStorage so a hard reload, a fresh tab, or a popout window all
+  // inherit the stage posture. Operator (non-stage) UX is byte-identical
+  // when `false`. Cleared by visiting `?stage=0`.
+  stageMode: boolean;
 
   signIn: (user: User) => void;
   signOut: () => void;
@@ -182,6 +197,8 @@ export interface SpireState {
   setDdilLastSyncAt: (n: number | null) => void;
   setDdilDrillActive: (b: boolean) => void;
   setDensity: (d: Density) => void;
+  bumpDraftsRefresh: () => void;
+  setStageMode: (b: boolean) => void;
   pushToast: (t: Omit<Toast, "id">) => string;
   dismissToast: (id: string) => void;
 }
@@ -191,7 +208,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   // common widths. Marine-shorthand fits without ellipsis; the unit
   // assignment surfaces in the role brief and on the StatusStrip.
   maintenance_chief: "Maint Chief",
-  g4: "G-4 / 2d MLG",
+  g4: "G-4 / 3d MLR",
   mef_commander: "MEF Commander",
   data_custodian: "Data Custodian",
   security_manager: "Security Mgr",
@@ -251,6 +268,31 @@ function loadDensity(): Density {
 function saveDensity(d: Density): void {
   try {
     window.localStorage.setItem(DENSITY_KEY, d);
+  } catch {
+    /* tolerant */
+  }
+}
+
+// Stage-mode persistence — localStorage per WP-1 spec, so the stage
+// posture survives a fresh tab as well as a hard reload. The presenter
+// flips it on once via `?stage=1` in the URL, then any new tab opened
+// during the demo (e.g. JointPreview popout) inherits stage mode
+// without rerunning the URL hydration. Operator users explicitly clear
+// it with `?stage=0`.
+const STAGE_KEY = "spire.stageMode";
+function loadStageMode(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(STAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function saveStageMode(b: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (b) window.localStorage.setItem(STAGE_KEY, "1");
+    else window.localStorage.removeItem(STAGE_KEY);
   } catch {
     /* tolerant */
   }
@@ -325,8 +367,10 @@ export const useSpireStore = create<SpireState>((set) => ({
   ddilLastSyncAt: null,
   ddilDrillActive: false,
   ddilLastCacheHit: null,
+  draftsRefreshTick: 0,
   toasts: [],
   density: typeof window !== "undefined" ? loadDensity() : "dense",
+  stageMode: typeof window !== "undefined" ? loadStageMode() : false,
   signIn: (user) => {
     saveUser(user);
     set({ currentUser: user, role: user.role });
@@ -388,6 +432,11 @@ export const useSpireStore = create<SpireState>((set) => ({
   setDensity: (density) => {
     saveDensity(density);
     set({ density });
+  },
+  bumpDraftsRefresh: () => set((s) => ({ draftsRefreshTick: s.draftsRefreshTick + 1 })),
+  setStageMode: (stageMode) => {
+    saveStageMode(stageMode);
+    set({ stageMode });
   },
   pushToast: (t) => {
     const id = uid();

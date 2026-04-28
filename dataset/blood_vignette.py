@@ -62,6 +62,13 @@ class ScenarioBeat:
     expected_duration_seconds_at_1x: int
     inject: list[dict[str, Any]]
     sources: list[str]
+    # Per-beat classification stamp (Task #50). Each beat narration
+    # describes doctrine-shaped activity (unit IDs, base names, forward
+    # PARs); the cockpit + narration overlay render it verbatim, so a
+    # single screenshot needs the classification on the same surface as
+    # the prose. Defaults to "CUI" when omitted — synthetic exercise
+    # data is still controlled-unclass under DoDI 5200.48.
+    classification: str
     raw: dict[str, Any]  # full JSON for callers that want everything
 
 
@@ -150,6 +157,7 @@ def beats_sorted() -> list[ScenarioBeat]:
                 expected_duration_seconds_at_1x=int(raw["expected_duration_seconds_at_1x"]),
                 inject=list(raw["inject"]),
                 sources=list(raw.get("sources", [])),
+                classification=str(raw.get("classification", "CUI")),
                 raw=raw,
             )
         )

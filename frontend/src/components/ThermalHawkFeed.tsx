@@ -33,14 +33,21 @@ export function ThermalHawkFeed() {
         if (cancelled) return;
         setInfo(i);
         if (!i.model_loaded) {
+          // Operator-facing copy. Finding F4: the prior message named
+          // an internal env var (SPIRE_THERMALHAWK_WEIGHTS) — that's
+          // a deploy-config detail, not something a Marine running a
+          // CASEVAC can act on. Tell them what's happening on the
+          // panel they're looking at, in their own language.
           setError(
-            "ThermalHawk model not loaded — set SPIRE_THERMALHAWK_WEIGHTS to enable the live feed."
+            "Live thermal feed unavailable. Falling back to scripted incident profile."
           );
         }
       })
       .catch(() => {
         if (cancelled) return;
-        setError("Could not reach the thermal feed endpoint.");
+        setError(
+          "Live thermal feed unavailable. Falling back to scripted incident profile."
+        );
       });
     return () => {
       cancelled = true;
@@ -71,8 +78,14 @@ export function ThermalHawkFeed() {
         const f = await api.bastion.thermalhawkFeedFrame(idxRef.current);
         setFrame(f);
         idxRef.current = (idxRef.current + 1) % Math.max(1, f.frame_count_in_loop);
-      } catch (e: any) {
-        setError(`Feed error: ${String(e).slice(0, 120)}`);
+      } catch {
+        // Operator-facing copy: never leak raw exception text into the
+        // response panel. Mirror the init-path fallback so the operator
+        // sees the same language whether the feed never started or
+        // dropped mid-incident (finding F4).
+        setError(
+          "Live thermal feed unavailable. Falling back to scripted incident profile."
+        );
       } finally {
         inFlightRef.current = false;
         const elapsed = performance.now() - t0;

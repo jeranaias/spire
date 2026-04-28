@@ -7,10 +7,16 @@
  *
  * Surface contract
  *   - One slide on screen at a time, 16:9-ish content frame.
- *   - Keyboard nav: ← / → / Space / PageUp / PageDown / Home / End.
+ *   - Keyboard nav: ← / → / Space / PageUp / PageDown for clicker.
+ *     Shift+Home / Shift+End jump to first / last slide. The bare
+ *     Home / End / P keys are deliberately *not* live — those are too
+ *     easy to fat-finger on stage (a bare 'p' used to dump speaker
+ *     notes onto the projector; see Task #58).
  *   - Slide counter + dot strip in the footer.
- *   - Presenter mode toggle (P) shows speaker notes + a per-slide timer
- *     with a pacing badge against the slide's `targetSeconds` budget.
+ *   - Presenter mode toggle (Shift+P) opens speaker notes in a *separate
+ *     window* via `window.open` so the audience screen never sees them.
+ *     If the browser blocks the pop-up, we confirm-gate before falling
+ *     back to an inline panel on the active monitor.
  *   - Slide 4 (live demo handoff) has the "Start demo" button that
  *     opens `/demo` in the same tab. After the demo, "Return to pitch
  *     — slide 5" jumps to slide 5.
@@ -18,15 +24,20 @@
  *     in this component.
  *
  * Architecture notes
- *   - This view sits inside the App shell, so the ClassificationBand
+ *   - This view sits inside the App shell, so the ClassificationBannerStrip
  *     stays visible (per the W2 brief: "Deck is part of the app").
  *   - We use the `?slide=N` query param so the presenter can deep-link
  *     into a specific slide (rehearsal jump, /demo's "back to pitch
  *     slide 5" affordance once lane A1 lands).
  *   - URL is the source of truth for current slide — the timer state
  *     resets when the slide index changes (see effect below).
+ *   - Failsafe / Rehearsal buttons in the header are gated to presenter
+ *     mode — they telegraph low confidence to the audience otherwise.
+ *     The hidden F9 hotkey (App.tsx) remains the always-on trigger so
+ *     a true panic still works without pre-arming presenter mode.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import clsx from "clsx";
 import { Button } from "../../components/ui";
@@ -39,7 +50,18 @@ import {
 import { PitchVisual } from "./PitchVisual";
 
 const SLIDE_PARAM = "slide";
-const PRESENTER_KEY = "spire.pitch.presenter";
+
+/**
+ * Presenter-mode placement.
+ *  - "off"     — no notes anywhere (default, safe for stage).
+ *  - "popup"   — notes rendered in a separate `window.open` window,
+ *                which the presenter drags to a confidence monitor.
+ *                The audience screen shows nothing presenter-facing.
+ *  - "inline"  — notes rendered below the slide on the active monitor.
+ *                Only reached after an explicit confirm when the popup
+ *                was blocked. The header still warns by toggling state.
+ */
+type PresenterMode = "off" | "popup" | "inline";
 
 // Helpers ─────────────────────────────────────────────────────────────────
 function clampIndex(n: number): number {
@@ -91,23 +113,103 @@ export function PitchView() {
   const urlIndex = clampIndex(Number(params.get(SLIDE_PARAM) ?? "1") - 1);
   const slide = SLIDES[urlIndex];
 
-  // Persist presenter-mode preference per browser — a presenter who toggles
-  // it on during rehearsal expects it on during the live talk too.
-  const [presenter, setPresenter] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(PRESENTER_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  // Presenter mode is *not* persisted (Task #58). Each page load starts
+  // "off" so a refresh on the projector can never auto-restore a state
+  // that leaks speaker notes onto the audience screen. Operators
+  // explicitly enable it with Shift+P or the header button at run time.
+  const [presenter, setPresenter] = useState<PresenterMode>("off");
+  // The opened presenter window AND the element inside it that holds the
+  // React portal. We compute both in the user-gesture handler so the
+  // child component never has to mutate a popup it received as a prop —
+  // React 19's lint rules (correctly) treat that as a code smell.
+  const [presenterPortal, setPresenterPortal] = useState<{
+    win: Window;
+    root: HTMLElement;
+  } | null>(null);
 
+  // Refs let togglePresenter stay stable across renders so the keyboard
+  // listener doesn't have to rebind every time presenter state shifts.
+  const presenterRef = useRef(presenter);
+  const presenterPortalRef = useRef(presenterPortal);
   useEffect(() => {
-    try {
-      localStorage.setItem(PRESENTER_KEY, presenter ? "1" : "0");
-    } catch {
-      // Private mode / quota — non-fatal; preference reverts on reload.
-    }
+    presenterRef.current = presenter;
   }, [presenter]);
+  useEffect(() => {
+    presenterPortalRef.current = presenterPortal;
+  }, [presenterPortal]);
+
+  // On unmount (route change, full reload), close any presenter popup we
+  // own so we don't leave an orphaned window that re-binds to a fresh
+  // PitchView mount with stale slide data.
+  useEffect(() => {
+    return () => {
+      const w = presenterPortalRef.current?.win;
+      if (w && !w.closed) {
+        try {
+          w.close();
+        } catch {
+          /* tab closing — non-fatal */
+        }
+      }
+    };
+  }, []);
+
+  const closePresenter = useCallback(() => {
+    const w = presenterPortalRef.current?.win;
+    if (w && !w.closed) {
+      try {
+        w.close();
+      } catch {
+        /* non-fatal */
+      }
+    }
+    setPresenterPortal(null);
+    setPresenter("off");
+  }, []);
+
+  const togglePresenter = useCallback(() => {
+    if (presenterRef.current !== "off") {
+      closePresenter();
+      return;
+    }
+    // First choice: open a *separate* window. window.open requires a
+    // user gesture, which we have because togglePresenter is invoked
+    // from a click handler or keydown. The named target lets the same
+    // window be reused if the presenter toggles off then on again.
+    const opened = window.open(
+      "",
+      "spire-presenter-notes",
+      "width=560,height=780,menubar=no,toolbar=no,location=no,status=no,resizable=yes",
+    );
+    if (opened && !opened.closed) {
+      // Set the document up *here*, in the gesture handler, so the
+      // portal child is pure-render: it only reads `root` and renders
+      // into it, never mutates the cross-window document.
+      try {
+        const root = preparePresenterDocument(opened);
+        setPresenterPortal({ win: opened, root });
+        setPresenter("popup");
+        return;
+      } catch {
+        // Cross-origin / write-blocked popup — close it and fall through
+        // to the confirm-gated inline fallback so we don't strand the
+        // presenter with an empty window.
+        try {
+          opened.close();
+        } catch {
+          /* non-fatal */
+        }
+      }
+    }
+    // Pop-up blocker fired (or write-blocked). Notes on the active
+    // monitor are the dangerous fallback — confirm-gate so the presenter
+    // has to opt in knowing the audience will see them.
+    const ok = window.confirm(
+      "Couldn't open a separate presenter window (your browser may be blocking pop-ups).\n\n" +
+        "Show speaker notes on THIS screen instead? The audience will see them.",
+    );
+    if (ok) setPresenter("inline");
+  }, [closePresenter]);
 
   const goToIndex = useCallback(
     (i: number) => {
@@ -125,7 +227,9 @@ export function PitchView() {
 
   // Keyboard navigation. We listen at window level so the slide responds
   // even when focus is on the slide chrome's buttons. Skip when typing,
-  // and skip when the user is using a modifier (don't fight Cmd-Left).
+  // and skip when the user is using ctrl/meta/alt (don't fight Cmd-Left).
+  // Shift IS allowed because Shift is the guard for the dangerous keys
+  // (Home/End/P) — see Task #58.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (inField(e.target)) return;
@@ -143,27 +247,36 @@ export function PitchView() {
           prev();
           break;
         case "Home":
-          e.preventDefault();
-          goToIndex(0);
+          // Shift-guarded — bare Home on a clicker is a misfire risk.
+          if (e.shiftKey) {
+            e.preventDefault();
+            goToIndex(0);
+          }
           break;
         case "End":
-          e.preventDefault();
-          goToIndex(SLIDES.length - 1);
+          // Shift-guarded — symmetrical with Home.
+          if (e.shiftKey) {
+            e.preventDefault();
+            goToIndex(SLIDES.length - 1);
+          }
           break;
         case "p":
         case "P":
-          // Presenter toggle. Lowercase only so a 'g p' chord routing to
-          // PULSE (handled in App.tsx) still resolves first.
-          if (e.key === "p") {
+          // Presenter toggle is the highest-risk shortcut on this view:
+          // a stray bare 'p' used to dump the entire speaker script onto
+          // the projector. Shift required (Task #58). Lowercase 'p' is
+          // also tolerated *only* when shift is held (caps-lock + shift
+          // can flip casing on some layouts).
+          if (e.shiftKey) {
             e.preventDefault();
-            setPresenter((v) => !v);
+            togglePresenter();
           }
           break;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [next, prev, goToIndex]);
+  }, [next, prev, goToIndex, togglePresenter]);
 
   // Per-slide timer. Reset to 0 when the slide changes; tick every 1s.
   // We run the interval regardless of presenter mode so toggling on
@@ -202,14 +315,15 @@ export function PitchView() {
         slideNumber={slideNumber}
         slideCount={SLIDES.length}
         presenter={presenter}
-        onTogglePresenter={() => setPresenter((v) => !v)}
+        onTogglePresenter={togglePresenter}
         totalBudget={totalBudget}
         failsafeRehearsal={failsafeMode === "rehearsal"}
         onToggleRehearsal={toggleRehearsalFailsafe}
         onActivateFailsafe={activateFailsafe}
       />
 
-      {/* Slide canvas — fills remaining space; presenter notes live below. */}
+      {/* Slide canvas — fills remaining space; presenter notes only
+       * render below in inline-fallback mode. */}
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center px-8 py-6">
           <SlideCanvas
@@ -219,11 +333,8 @@ export function PitchView() {
           />
         </div>
 
-        {presenter && (
-          <PresenterPanel
-            slide={slide}
-            elapsedSec={elapsedSec}
-          />
+        {presenter === "inline" && (
+          <PresenterPanel slide={slide} elapsedSec={elapsedSec} />
         )}
       </div>
 
@@ -235,6 +346,18 @@ export function PitchView() {
         onNext={next}
         onJump={goToIndex}
       />
+
+      {/* Out-of-tree presenter window. Renders nothing into the audience
+       * DOM; the portal target lives in a separate browser window. */}
+      {presenter === "popup" && presenterPortal && (
+        <PresenterNotesWindow
+          slide={slide}
+          elapsedSec={elapsedSec}
+          win={presenterPortal.win}
+          containerEl={presenterPortal.root}
+          onClosed={closePresenter}
+        />
+      )}
     </div>
   );
 }
@@ -244,7 +367,7 @@ export function PitchView() {
 interface HeaderProps {
   slideNumber: number;
   slideCount: number;
-  presenter: boolean;
+  presenter: PresenterMode;
   onTogglePresenter: () => void;
   totalBudget: number;
   failsafeRehearsal: boolean;
@@ -255,6 +378,13 @@ function PitchHeader({
   slideNumber, slideCount, presenter, onTogglePresenter, totalBudget,
   failsafeRehearsal, onToggleRehearsal, onActivateFailsafe,
 }: HeaderProps) {
+  const presenterOn = presenter !== "off";
+  const presenterLabel =
+    presenter === "popup"
+      ? "Presenter · window"
+      : presenter === "inline"
+        ? "Presenter · ON SCREEN"
+        : "Presenter · off";
   return (
     <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-6 py-3">
       <div className="flex items-baseline gap-3">
@@ -262,7 +392,7 @@ function PitchHeader({
           SPIRE · Pitch
         </div>
         <div className="font-mono text-xs text-[var(--color-text-muted)]">
-          8-minute deck · target {formatMmSs(totalBudget)} total
+          {Math.round(totalBudget / 60)}-minute deck · target {formatMmSs(totalBudget)} total
         </div>
       </div>
       <div className="flex items-center gap-3">
@@ -276,32 +406,40 @@ function PitchHeader({
           <span className="text-[var(--color-text-muted)]"> / {slideCount}</span>
         </div>
         <Button
-          variant={presenter ? "primary" : "secondary"}
+          variant={presenterOn ? "primary" : "secondary"}
           size="sm"
           onClick={onTogglePresenter}
-          aria-pressed={presenter}
-          title="Toggle presenter mode (P)"
+          aria-pressed={presenterOn}
+          title="Toggle presenter mode (Shift+P) — opens speaker notes in a separate window"
         >
-          {presenter ? "Presenter · ON" : "Presenter · off"}
+          {presenterLabel}
         </Button>
-        {/* W2 Task #39 — failsafe affordances. Same pair as /demo. */}
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onToggleRehearsal}
-          aria-pressed={failsafeRehearsal}
-          title="Show recording side-by-side for drift checks"
-        >
-          {failsafeRehearsal ? "Rehearsal · ON" : "Rehearsal"}
-        </Button>
-        <Button
-          variant="warning"
-          size="sm"
-          onClick={onActivateFailsafe}
-          title="Replace the live demo with the recorded backup (F9)"
-        >
-          Failsafe
-        </Button>
+        {/* W2 Task #39 / #58 — failsafe affordances are presenter-only.
+         * Keeping them visible all the time telegraphs low confidence
+         * before the demo even starts, and a stray click activates the
+         * failsafe. F9 (App.tsx) remains the always-on hidden trigger
+         * so a true panic still works even without presenter mode. */}
+        {presenterOn && (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onToggleRehearsal}
+              aria-pressed={failsafeRehearsal}
+              title="Show recording side-by-side for drift checks"
+            >
+              {failsafeRehearsal ? "Rehearsal · ON" : "Rehearsal"}
+            </Button>
+            <Button
+              variant="warning"
+              size="sm"
+              onClick={onActivateFailsafe}
+              title="Replace the live demo with the recorded backup (F9)"
+            >
+              Failsafe
+            </Button>
+          </>
+        )}
       </div>
     </header>
   );
@@ -381,16 +519,17 @@ function SlideCanvas({ slide, onStartDemo, onReturnToPostDemo }: CanvasProps) {
   );
 }
 
-// ─── Presenter notes panel ─────────────────────────────────────────────────
+// ─── Presenter notes panel (inline-fallback only) ──────────────────────────
+//
+// Reached only when popups are blocked AND the operator explicitly
+// confirms they want the notes on the audience screen. Kept visually
+// distinct (warning band) so it is obvious notes are live-on-stage.
 
 interface PresenterProps {
   slide: typeof SLIDES[number];
   elapsedSec: number;
 }
 function PresenterPanel({ slide, elapsedSec }: PresenterProps) {
-  // Pacing badge: green while under target, amber within 25% over,
-  // red beyond. Numbers chosen so a 30s slide doesn't flip amber the
-  // instant it goes 1s long — that's a 3% nudge, not a pace problem.
   const target = slide.targetSeconds;
   const ratio = elapsedSec / Math.max(1, target);
   const tone = useMemo(() => {
@@ -401,12 +540,12 @@ function PresenterPanel({ slide, elapsedSec }: PresenterProps) {
 
   return (
     <section
-      aria-label="Speaker notes"
-      className="border-t border-[var(--color-border)] bg-[var(--color-surface-raised)] px-6 py-4"
+      aria-label="Speaker notes (visible to audience)"
+      className="border-t-2 border-amber-500/60 bg-[var(--color-surface-raised)] px-6 py-4"
     >
       <header className="mb-2 flex flex-wrap items-center gap-3">
-        <div className="font-mono text-xs uppercase tracking-[0.22em] text-[var(--color-primary)]">
-          Speaker notes
+        <div className="font-mono text-xs uppercase tracking-[0.22em] text-amber-300">
+          Speaker notes · ON AUDIENCE SCREEN
         </div>
         <div className="font-mono text-xs text-[var(--color-text-muted)]">
           target {formatMmSs(target)}
@@ -435,6 +574,135 @@ function PresenterPanel({ slide, elapsedSec }: PresenterProps) {
         ))}
       </ul>
     </section>
+  );
+}
+
+// ─── Presenter notes window (separate display) ─────────────────────────────
+//
+// Renders speaker notes via React.createPortal into a previously-prepared
+// element living in a popup window's document. The popup setup happens
+// in PitchView's gesture handler (`preparePresenterDocument` below) so
+// this component is pure-render: it only reads its props.
+//
+// We inline the popup's CSS instead of cloning the host stylesheet —
+// the panel is small, and decoupling it from Tailwind/Vite means the
+// popup keeps working even after a dev-server hot reload that would
+// otherwise shred a cloned <link rel="stylesheet">.
+
+/**
+ * Imperatively prepare a freshly-opened popup window: write title,
+ * meta, inline CSS, and append a single root element we'll portal into.
+ * Returns the root element. Throws if the popup's document is not
+ * writable (cross-origin / extension blocked) so the caller can fall
+ * back to the inline path.
+ */
+function preparePresenterDocument(win: Window): HTMLElement {
+  win.document.title = "SPIRE — Presenter notes";
+  win.document.head.innerHTML = `
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      html,body{margin:0;padding:0;background:#0b1220;color:#e6edf6;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+      body{padding:20px 22px 64px;line-height:1.45;}
+      .eyebrow{font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:#93c5fd;}
+      .slide-title{font-size:22px;font-weight:600;margin:6px 0 14px;line-height:1.25;}
+      .timer-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:10px;margin:6px 0 4px;}
+      .timer{font-size:38px;font-variant-numeric:tabular-nums;font-weight:600;}
+      .target{font-size:12px;color:#94a3b8;}
+      .badge{font-size:10px;letter-spacing:0.14em;text-transform:uppercase;padding:3px 8px;border:1px solid;border-radius:4px;}
+      .badge-on{color:#6ee7b7;border-color:rgba(16,185,129,0.4);background:rgba(16,185,129,0.12);}
+      .badge-warn{color:#fcd34d;border-color:rgba(245,158,11,0.4);background:rgba(245,158,11,0.12);}
+      .badge-over{color:#fca5a5;border-color:rgba(239,68,68,0.5);background:rgba(239,68,68,0.12);}
+      h2{font-size:12px;letter-spacing:0.22em;text-transform:uppercase;color:#93c5fd;margin:22px 0 8px;}
+      ul{padding:0;margin:0;list-style:none;}
+      li{display:flex;gap:10px;padding:6px 0;font-size:15px;color:#cbd5e1;align-items:flex-start;}
+      li::before{content:"\u2022";color:#64748b;flex:none;}
+      .footer{position:fixed;left:0;right:0;bottom:0;background:#0f172a;border-top:1px solid #1e293b;padding:8px 16px;font-size:11px;color:#64748b;display:flex;justify-content:space-between;gap:8px;}
+    </style>
+  `;
+  // Wipe any prior body content (named-target reuse) and append our root.
+  win.document.body.innerHTML = "";
+  const root = win.document.createElement("div");
+  win.document.body.appendChild(root);
+  return root;
+}
+
+interface NotesWindowProps {
+  slide: typeof SLIDES[number];
+  elapsedSec: number;
+  win: Window;
+  containerEl: HTMLElement;
+  onClosed: () => void;
+}
+function PresenterNotesWindow({
+  slide, elapsedSec, win, containerEl, onClosed,
+}: NotesWindowProps) {
+  // Latest-onClosed ref so the polling loop never invokes a stale
+  // callback (parent re-renders pass new closures every tick).
+  const onClosedRef = useRef(onClosed);
+  useEffect(() => {
+    onClosedRef.current = onClosed;
+  }, [onClosed]);
+
+  useEffect(() => {
+    // Detect manual close of the popup window so the parent state
+    // syncs back to "off" and the header button reflects reality.
+    const poll = window.setInterval(() => {
+      if (win.closed) {
+        window.clearInterval(poll);
+        onClosedRef.current();
+      }
+    }, 400);
+
+    // If the parent tab unloads, take the popup with it — orphaned
+    // windows can't reach the React tree anymore and just confuse the
+    // operator.
+    const onParentUnload = () => {
+      // Reading `win.closed` is safe (no mutation); we close the popup
+      // via our own captured reference.
+      const w = win;
+      if (!w.closed) {
+        try {
+          w.close();
+        } catch {
+          /* non-fatal */
+        }
+      }
+    };
+    window.addEventListener("beforeunload", onParentUnload);
+
+    return () => {
+      window.clearInterval(poll);
+      window.removeEventListener("beforeunload", onParentUnload);
+    };
+  }, [win]);
+
+  const target = slide.targetSeconds;
+  const ratio = elapsedSec / Math.max(1, target);
+  const badgeClass = ratio < 1 ? "badge-on" : ratio < 1.25 ? "badge-warn" : "badge-over";
+  const badgeLabel = ratio < 1 ? "on pace" : ratio < 1.25 ? "slightly long" : "over budget";
+
+  return createPortal(
+    <>
+      {slide.eyebrow && <div className="eyebrow">{slide.eyebrow}</div>}
+      <div className="slide-title">{slide.title}</div>
+      <div className="timer-row">
+        <span className="timer">{formatMmSs(elapsedSec)}</span>
+        <span className={`badge ${badgeClass}`}>{badgeLabel}</span>
+        <span className="target">target {formatMmSs(target)}</span>
+      </div>
+      <h2>Speaker notes</h2>
+      <ul>
+        {slide.speakerNotes.map((n, i) => (
+          <li key={i}>{n}</li>
+        ))}
+      </ul>
+      <div className="footer">
+        <span>SPIRE · Presenter notes (separate window)</span>
+        <span>Audience screen does not see this.</span>
+      </div>
+    </>,
+    containerEl,
   );
 }
 
@@ -484,7 +752,7 @@ function PitchFooter({ slideNumber, slideCount, onPrev, onNext, onJump }: Footer
 
       <div className="flex items-center gap-3">
         <span className="hidden font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] md:inline">
-          ← / → / space · P presenter
+          ← / → / space · Shift+P presenter
         </span>
         <Button
           variant="ghost"

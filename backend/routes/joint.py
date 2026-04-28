@@ -25,14 +25,14 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import session_role
-from ..scoping import allowed_units, require_clearance
-from ..state import get_dataset, last_day_snapshots
+from ..scoping import JOINT_RELEASE_ROLES, require_clearance, require_role
+from ..state import CanonicalDataset, get_dataset, last_day_snapshots
 
 router = APIRouter()
 
@@ -64,6 +64,50 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _snapshot_published_iso(ds: CanonicalDataset, last: list) -> str:
+    """Return the canonical 'published-at' timestamp for the joint payload.
+
+    Sourced from the underlying dataset snapshot, NOT wall-clock time, so two
+    back-to-back exports return identical `publishedAtUtc` when nothing in
+    the dataset has changed. The JLTC topbar's "Published" pill consumes
+    this value and must reflect actual dataset freshness.
+
+    Anchor is the latest `snapshot_date` (a date — pinned to end-of-day UTC
+    so the field is a full RFC3339 datetime). Falls back to the dataset's
+    own `generated_at` if the snapshot list is empty.
+    """
+    last_day: Optional[date] = None
+    if last:
+        last_day = last[0].snapshot_date
+    elif ds.snapshots:
+        last_day = ds.snapshots[-1].snapshot_date
+    if last_day is None:
+        return ds.generated_at or _now_iso()
+    return datetime.combine(last_day, time(23, 59, 59), tzinfo=timezone.utc).isoformat(timespec="seconds")
+
+
+# Canonical alert severity vocabulary. Joint partners parse `severity` as an
+# enum so the export keeps incident pass-through values (`LOW`, `CRITICAL`)
+# and synthesized readiness values (`HIGH`, `MODERATE`) under a single,
+# documented set. Anything outside this set is coerced to MODERATE so a
+# garbled severity never ships to a partner.
+ALERT_SEVERITY_ENUM: tuple[str, ...] = ("LOW", "MODERATE", "HIGH", "CRITICAL")
+
+
+def _norm_severity(value: Any) -> str:
+    s = str(value or "").strip().upper()
+    if s in ALERT_SEVERITY_ENUM:
+        return s
+    # Common synonyms that show up in upstream data.
+    if s in ("MED", "MEDIUM", "WARN", "WARNING"):
+        return "MODERATE"
+    if s in ("FATAL", "SEVERE", "P0"):
+        return "CRITICAL"
+    if s in ("INFO", "NOTICE", "MINOR"):
+        return "LOW"
+    return "MODERATE"
+
+
 def _stable_track_id(prefix: str, key: str) -> str:
     """Deterministic short hex id for a track number. Same key -> same
     track id across calls; lets the partner view diff stably between
@@ -85,6 +129,30 @@ def _link16_track_number(unit_name: str) -> str:
     return s
 
 
+def _operator_envelope(user: Optional[dict[str, Any]], role: Optional[str]) -> dict[str, Any]:
+    """Stamp the calling operator's identity into the export envelope so the
+    partner can audit who released the bundle. The pull itself is gated on
+    role + clearance (topic-style subscription); this is a transparency
+    record, not the gate."""
+    if not user:
+        return {
+            "name": "unknown",
+            "rank": "",
+            "billet": "",
+            "role": role or "unknown",
+            "unit": "",
+            "dodid": "",
+        }
+    return {
+        "name": user.get("name", "unknown"),
+        "rank": user.get("rank", ""),
+        "billet": user.get("billet", ""),
+        "role": role or user.get("role", "unknown"),
+        "unit": user.get("unit", ""),
+        "dodid": user.get("dodid", ""),
+    }
+
+
 def _readiness_status(mc_rate: float) -> dict[str, str]:
     """Map SPIRE MC rate → joint operational readiness words (C-rating
     style: C1 fully mission capable .. C4 not mission capable)."""
@@ -98,28 +166,46 @@ def _readiness_status(mc_rate: float) -> dict[str, str]:
 
 
 def _sym2525(unit_name: str) -> str:
-    """Approximate a 2525C-style SIDC for each unit. Friendly / present /
-    ground unit / unit. The 4th-position function-id digit varies by
-    nominal mission (combat service support, infantry, aviation support,
-    air defense, engineer, ...). Joint partners read SIDC, not USMC
-    nicknames."""
+    """Approximate a MIL-STD-2525C/D SIDC for each unit. Friendly / present /
+    ground unit / unit. The 4th-position function-id field varies by nominal
+    mission (combat service support, infantry, aviation support, air defense,
+    engineer, ...). Joint partners read SIDC, not USMC nicknames.
+
+    A conformant 2525C SIDC is exactly 15 characters: 4-char prefix
+    (CodingScheme + StandardIdentity + BattleDimension + Status) followed
+    by an 11-char function-id field. The function code is right-padded with
+    `-` to fill positions 5-15. Anything shorter trips a SME's eye on the
+    very first curl.
+    """
     n = unit_name.upper()
     if "CLB" in n or "ESB" in n:
-        function = "UCFSS-----"   # combat service support / sustainment
+        function = "UCFSS"   # combat service support / sustainment
     elif "MARINES" in n and ("3/6" in n or "2/14" in n):
-        function = "UCI------"    # infantry / artillery
+        function = "UCI"     # infantry / artillery
     elif "LAR" in n:
-        function = "UCRVA-----"   # reconnaissance, light armor
+        function = "UCRVA"   # reconnaissance, light armor
     elif "MAINT" in n:
-        function = "UCFSM-----"   # maintenance
+        function = "UCFSM"   # maintenance
     elif "MALS" in n or "MWSS" in n:
-        function = "UCAA------"   # aviation support
+        function = "UCAA"    # aviation support
     elif "LAAD" in n:
-        function = "UCDA------"   # air defense
+        function = "UCDA"    # air defense
     else:
-        function = "UC-------"
+        function = "UC"
+    # Pad function code to 11 chars so 4 (prefix) + 11 (function) = 15.
+    function = function.ljust(11, "-")
     # Standard Identity F (friend), Battle dim G (ground), Status P (present)
-    return f"SFGP{function}"
+    sidc = f"SFGP{function}"
+    assert len(sidc) == 15, f"SIDC must be 15 chars, got {len(sidc)}: {sidc!r}"
+    return sidc
+
+
+def _link16_surface_track_number(unit_name: str) -> str:
+    """Distinct J3.3 surface-track TN for a unit that also reports a J3.5
+    land point. Real Link 16 networks emit each message family under its own
+    track number, then use J7.2 Track Correlation to tell receivers the two
+    TNs refer to the same entity. Same name -> same TN across calls."""
+    return _link16_track_number(f"{unit_name}::J33_SURFACE")
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +213,7 @@ def _sym2525(unit_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 @router.get("/oms-uci/export")
-async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[str, Any]:
+async def oms_uci_export(request: Request) -> dict[str, Any]:
     """Render current SPIRE state as an OMS/UCI-flavored JSON envelope.
 
     Reference: USAF OMS reference architecture (v2.x) + UCI message catalog.
@@ -142,13 +228,30 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
         action="joint:oms_uci_export",
         audit_actor=session_role(request),
     )
+    # Role gate. The OMS/UCI feed is a topic-style subscription consumed by
+    # a partner J4 console; the partner's view of MAGTF readiness must NOT
+    # depend on which Marine happens to be at the SPIRE console. Per-operator
+    # RBAC scoping (e.g. maintenance_chief → CLB-6 only) would silently
+    # truncate the partner's tracks the moment a lower-scope operator pulled,
+    # which fails the CDAO sanity test ("does my view evaporate if Kowalski
+    # signs in mid-engagement?"). Restrict emission to release-authority roles
+    # so the partner sees the full MAGTF every time.
+    actor_role = session_role(request)
+    require_role(actor_role, JOINT_RELEASE_ROLES, action="joint:oms_uci_export")
 
     ds = get_dataset()
     last = last_day_snapshots(ds)
     if not last:
         raise HTTPException(status_code=503, detail="dataset empty")
 
-    allowed = allowed_units(ds, role)
+    # Single freshness anchor for the whole envelope. Sourced from the
+    # snapshot date, NOT wall-clock, so back-to-back exports are byte-stable
+    # when the dataset hasn't changed (P0-3 in the joint-cop critique). The
+    # per-operator unit filter that used to live here was removed in Task #80
+    # — joint exports are a topic subscription (full MAGTF) and the role gate
+    # at the top of the handler is the access control surface.
+    published_iso = _snapshot_published_iso(ds, last)
+
     by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     equip_by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     for s in last:
@@ -159,8 +262,6 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
     tracks: list[dict] = []
     logistics: list[dict] = []
     for u in ds.units:
-        if allowed is not None and u.name not in allowed:
-            continue
         c = by_unit[u.name]
         total = sum(c.values())
         mc = c.get("MC", 0)
@@ -195,7 +296,7 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
             },
             "OperationalStatus": ready["text"],
             "ReadinessRating": ready["code"],
-            "asOfTime": _now_iso(),
+            "asOfTime": published_iso,
         })
 
         tracks.append({
@@ -215,7 +316,7 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 "speedMetersPerSecond": 0.0,
                 "stationary": True,
             },
-            "asOfTime": _now_iso(),
+            "asOfTime": published_iso,
         })
 
         # LogisticsStatus mirrors UCI's LogisticsStatusMessage shape (sustained
@@ -236,7 +337,7 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 for eqp in sorted(equip_by_unit[u.name])
             ],
             "missionCapableRate": round(mc_rate, 4),
-            "asOfTime": _now_iso(),
+            "asOfTime": published_iso,
         })
 
     # AlertNotification messages mirror SPIRE alerts (readiness + cannib +
@@ -244,8 +345,6 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
     # firehose, they want what's hot now.
     alerts_out: list[dict] = []
     for u in ds.units:
-        if allowed is not None and u.name not in allowed:
-            continue
         c = by_unit[u.name]
         total = sum(c.values())
         if not total:
@@ -256,10 +355,10 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 "messageType": "AlertNotification",
                 "uciMessageId": _stable_track_id("UCI-ALT-", f"rd:{u.uic}"),
                 "alertCategory": "OPERATIONAL_READINESS",
-                "severity": "HIGH" if mc_rate < 0.60 else "MODERATE",
+                "severity": _norm_severity("HIGH" if mc_rate < 0.60 else "MODERATE"),
                 "EntityIdentifierRef": _stable_track_id("UCI-ENT-", u.uic),
                 "summary": f"{u.name} mission-capable rate {mc_rate*100:.1f}% — below joint threshold",
-                "asOfTime": _now_iso(),
+                "asOfTime": published_iso,
             })
 
     incident_count = 0
@@ -273,16 +372,14 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 break
         if unit_for_inc is None:
             continue
-        if allowed is not None and unit_for_inc.name not in allowed:
-            continue
         alerts_out.append({
             "messageType": "AlertNotification",
             "uciMessageId": _stable_track_id("UCI-ALT-", f"inc:{inc.incident_number}"),
             "alertCategory": "INCIDENT",
-            "severity": inc.severity,
+            "severity": _norm_severity(inc.severity),
             "EntityIdentifierRef": _stable_track_id("UCI-ENT-", unit_for_inc.uic),
             "summary": f"{inc.type.replace('_', ' ').title()} · {unit_for_inc.name} · FPCON {inc.fpcon_at_time}",
-            "asOfTime": inc.date_time.isoformat(timespec="seconds") if hasattr(inc.date_time, "isoformat") else _now_iso(),
+            "asOfTime": inc.date_time.isoformat(timespec="seconds") if hasattr(inc.date_time, "isoformat") else published_iso,
         })
         incident_count += 1
         if incident_count >= 10:
@@ -293,11 +390,12 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
             "specification": "OMS/UCI",
             "specificationVersion": "OMS 2.4 / UCI 5.0",
             "messageStandard": "UCI Open Mission Systems",
+            "subscriptionModel": "TOPIC_FULL_MAGTF",
             "sourceSystem": "SPIRE",
             "sourceSystemVersion": "0.1.0-SBIR",
             "sourceService": "USMC",
             "sourceUnit": "II MEF / 3d MLR",
-            "publishedAtUtc": _now_iso(),
+            "publishedAtUtc": published_iso,
             "classification": {
                 "marking": "SECRET",
                 "releasability": "REL TO USA, FVEY",
@@ -305,6 +403,11 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 "dissemination": "REL TO USA, FVEY",
                 "originatorCountry": "USA",
             },
+            # Audit footer — partner can see who released the bundle so the
+            # provenance is auditable on the receiving side. The pull is
+            # role-gated, not unit-scoped, but the partner still gets to
+            # know the human at the SPIRE console.
+            "operator": _operator_envelope(user, actor_role),
             "messageCounts": {
                 "EntityState": len(entities),
                 "TrackData": len(tracks),
@@ -333,7 +436,7 @@ _J_ENV_CODES = {
 
 
 @router.get("/link16/export")
-async def link16_export(request: Request, role: Optional[str] = None) -> dict[str, Any]:
+async def link16_export(request: Request) -> dict[str, Any]:
     """Render current SPIRE state as MIL-STD-6016 J-series messages.
 
     Subset implemented (read-only export only):
@@ -355,13 +458,23 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
         action="joint:link16_export",
         audit_actor=session_role(request),
     )
+    # Same release-authority gate as OMS/UCI — see comment there. Link 16
+    # is even more obviously a topic feed (J-series messages on a TADIL
+    # net), so per-operator unit truncation makes no sense in this domain.
+    actor_role = session_role(request)
+    require_role(actor_role, JOINT_RELEASE_ROLES, action="joint:link16_export")
 
     ds = get_dataset()
     last = last_day_snapshots(ds)
     if not last:
         raise HTTPException(status_code=503, detail="dataset empty")
 
-    allowed = allowed_units(ds, role)
+    # Snapshot-derived freshness anchor for the Link 16 header. Same rule as
+    # the OMS/UCI envelope: deterministic across calls when the dataset
+    # hasn't changed. Per-operator unit scoping was removed in Task #80; the
+    # role gate above is the access control surface.
+    published_iso = _snapshot_published_iso(ds, last)
+
     by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     for s in last:
         by_unit[s.unit_name][s.readiness_code] += 1
@@ -376,19 +489,17 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
     # Tracked / wheeled units also get a J3.3 surface track so partners
     # see the same entity in two appropriate message families.
     for u in ds.units:
-        if allowed is not None and u.name not in allowed:
-            continue
         c = by_unit[u.name]
         total = sum(c.values())
         mc_rate = (c.get("MC", 0) / total) if total else 0.0
         ready = _readiness_status(mc_rate)
         lat, lon = UNIT_COORDS.get(u.name, (34.658, -77.398))
-        track_no = _link16_track_number(u.name)
+        land_tn = _link16_track_number(u.name)
 
         j35_messages.append({
             "messageNumber": "J3.5",
             "label": "LAND_POINT_TRACK",
-            "trackNumber": track_no,
+            "trackNumber": land_tn,
             "exerciseIndicator": "LIVE",
             "trackQuality": min(15, 8 + int(mc_rate * 7)),
             "identity": "FRIEND",
@@ -403,14 +514,20 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
             "readinessC": ready["code"],
             "callsign": u.name,
             "uic": u.uic,
-            "tn": track_no,
+            "tn": land_tn,
         })
 
+        # J3.3 surface tracks ride a *separate* TN from the J3.5 land point
+        # so the J7.2 correlation below can pair two distinct TNs — that's
+        # the whole point of correlation in Link 16. A single-TN
+        # "correlation" against itself is the giveaway tell P0-2 calls out.
+        surface_tn: Optional[str] = None
         if "LAR" in u.name or "Marines" in u.name or "ESB" in u.name or "Maint" in u.name:
+            surface_tn = _link16_surface_track_number(u.name)
             j33_messages.append({
                 "messageNumber": "J3.3",
                 "label": "SURFACE_TRACK",
-                "trackNumber": track_no,
+                "trackNumber": surface_tn,
                 "exerciseIndicator": "LIVE",
                 "identity": "FRIEND",
                 "platform": "GROUND_VEHICLE",
@@ -419,32 +536,33 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
                 "latitudeDegrees": lat,
                 "longitudeDegrees": lon,
                 "trackQuality": min(15, 8 + int(mc_rate * 7)),
-                "tn": track_no,
+                "tn": surface_tn,
             })
 
         j70_messages.append({
             "messageNumber": "J7.0",
             "label": "TRACK_MANAGEMENT",
-            "trackNumber": track_no,
+            "trackNumber": land_tn,
             "managementAction": "NEW_OR_UPDATE",
             "originatorJU": "01234",       # Source JU placeholder for SPIRE
             "linkStatus": "PARTICIPATING",
-            "tn": track_no,
+            "tn": land_tn,
         })
 
-        # J7.2 correlation — pair the J3.5 land point with the J3.3 surface
-        # track when both are present. Real Link 16 networks emit J7.2 to
-        # tell receivers "these two TNs refer to the same entity." We just
-        # echo the trackNumber against itself for the units with single
-        # representations; for dual-rep entities we emit a real correlation.
-        j72_messages.append({
-            "messageNumber": "J7.2",
-            "label": "TRACK_CORRELATION",
-            "primaryTN": track_no,
-            "secondaryTN": track_no,  # same entity, multiple message families
-            "correlationType": "POSITIVE",
-            "originatorJU": "01234",
-        })
+        # J7.2 correlation — emit ONLY when the entity has both a J3.5 land
+        # point AND a J3.3 surface track, and pair the two distinct TNs.
+        # Real Link 16 networks emit J7.2 to tell receivers "these two TNs
+        # refer to the same entity"; pairing a TN against itself is
+        # malformed and is the P0-2 tell from the joint-cop critique.
+        if surface_tn is not None and surface_tn != land_tn:
+            j72_messages.append({
+                "messageNumber": "J7.2",
+                "label": "TRACK_CORRELATION",
+                "primaryTN": land_tn,
+                "secondaryTN": surface_tn,
+                "correlationType": "POSITIVE",
+                "originatorJU": "01234",
+            })
 
         # J28.2 logistics status — one per unit. Real J28.2 is a request
         # message; we coopt the field shape for status broadcast since
@@ -453,13 +571,13 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
         j282_messages.append({
             "messageNumber": "J28.2",
             "label": "LOGISTICS_STATUS_BROADCAST",
-            "trackNumber": track_no,
+            "trackNumber": land_tn,
             "supplyClass": "VII",
             "missionCapableRate": round(mc_rate, 4),
             "missionCapablePlatforms": c.get("MC", 0),
             "totalPlatforms": total,
             "readinessC": ready["code"],
-            "tn": track_no,
+            "tn": land_tn,
         })
 
     payload = {
@@ -468,15 +586,18 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
             "specificationVersion": "MIL-STD-6016G (Change 1)",
             "messageFamily": "Link 16 J-series",
             "operatingMode": "EXPORT_ONLY",
+            "subscriptionModel": "TOPIC_FULL_MAGTF",
             "sourceSystem": "SPIRE",
             "sourceJU": "01234",
             "originatorService": "USMC",
-            "publishedAtUtc": _now_iso(),
+            "publishedAtUtc": published_iso,
             "classification": {
                 "marking": "SECRET",
                 "releasability": "REL TO USA, FVEY",
                 "originatorCountry": "USA",
             },
+            # Operator audit footer — see OMS/UCI envelope for rationale.
+            "operator": _operator_envelope(user, actor_role),
             "messageCounts": {
                 "J3.5":  len(j35_messages),
                 "J3.3":  len(j33_messages),
@@ -560,7 +681,33 @@ async def conformance() -> dict[str, Any]:
                 "stamped in the OMS/UCI envelope and the Link 16 header; "
                 "the partner view re-asserts it on render."
             ),
-            "gate": "backend require_clearance(user, 'SECRET') on every export",
+            "gate": (
+                "backend require_clearance(user, 'SECRET') AND "
+                "require_role(user, JOINT_RELEASE_ROLES) on every export"
+            ),
+        },
+        "releaseAuthority": {
+            "subscriptionModel": "TOPIC_FULL_MAGTF",
+            "summary": (
+                "OMS/UCI and Link 16 exports are topic-style subscriptions: "
+                "the partner J4 console always sees the full MAGTF, never a "
+                "per-operator slice. Per-operator unit scoping (e.g. a "
+                "maintenance chief's CLB-6-only view) is intentionally NOT "
+                "applied to these feeds — a partner's tactical picture must "
+                "not depend on which Marine happened to pull last."
+            ),
+            "allowedRoles": sorted(JOINT_RELEASE_ROLES),
+            "deniedRolesExample": [
+                "g4 (per-unit operator scope, would truncate the feed)",
+                "maintenance_chief (single-unit scope, would truncate the feed)",
+                "data_custodian (custodian, not a release authority)",
+            ],
+            "auditFooter": (
+                "The calling operator's name, rank, billet, role, and DODID "
+                "are stamped into the export envelope (envelope.operator / "
+                "header.operator) so the partner can audit who released the "
+                "bundle. The pull is gated; the footer is provenance."
+            ),
         },
         "directionPolicy": {
             "egress": "SUPPORTED",
@@ -569,7 +716,10 @@ async def conformance() -> dict[str, Any]:
                 "Wave 1 lane is read-only export. Bidirectional ingest "
                 "would require a TADIL/UCI gateway, COMSEC/TRANSEC, and "
                 "an inbound classification gate which is a separate lane. "
-                "The line is intentionally bright."
+                "The line is intentionally bright. Egress itself is "
+                "release-authority-gated (see Release authority block) so "
+                "only a security manager / MEF commander class role can "
+                "push to a partner."
             ),
         },
         "sisterServiceDemonstration": {

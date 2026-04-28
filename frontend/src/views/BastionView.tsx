@@ -6,15 +6,27 @@ import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
 import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
+import { RefreshAge } from "../components/RefreshAge";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
+import { UseCaseStrip } from "../components/UseCaseStrip";
 import {
   Button,
   IconButton,
+  Pressable,
   ErrorState,
   LoadingState,
   fireIdempotent,
   pushUndoToast,
 } from "../components/ui";
+
+// Walkthrough audit (#37 from the in-app feedback drawer): "The map needs
+// to be given a bit more space, it is very crowded." At 1440×731 the map
+// column was sandwiched between a 288px alerts aside (left) and the
+// response drawer (right, when an alert is selected) — leaving the
+// schematic with as little as ~840px wide. Map Focus Mode collapses the
+// alerts aside to a 48px rail and suppresses the right drawer so the map
+// owns the full width. Persisted across reloads via localStorage.
+const FOCUS_MODE_STORAGE_KEY = "spire.bastion.mapFocus";
 
 const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: "#ef4444",
@@ -88,6 +100,13 @@ export function BastionView() {
   // Acknowledged group is collapsed by default — operators want active rows
   // up top and acked rows tucked away at the bottom unless they ask.
   const [showAcked, setShowAcked] = useState(false);
+  // Wall-clock timestamp of the last successful /alerts response. Drives
+  // the "Stream last refreshed Nm Ns ago" indicator on the alert sidebar
+  // header (findings F6/F9 in `.local/critiques/bastion-cop.md`). The
+  // poll backs off to 60s when the alert fingerprint is unchanged, so
+  // without this stamp the operator can't tell if the silent stream is
+  // current truth or a degraded link sitting on stale data.
+  const [alertsLastRefreshedAt, setAlertsLastRefreshedAt] = useState<number | null>(null);
   // Counters bumped by intent — MapCanvas listens for changes and acts.
   // simResolveSignal: restore the cached pre-sim viewport (cordon overlays
   // already drop because `simActive` flips false). resetViewSignal: refit
@@ -102,6 +121,21 @@ export function BastionView() {
   // "Waking up — one moment" copy on Safari cold-start when Fly's machine
   // is spinning up and 5xx'ing the first request.
   const [waking, setWaking] = useState(false);
+
+  // Walkthrough audit (#37): Map Focus Mode. When ON the alerts aside
+  // collapses to a 48px rail and the right response drawer is suppressed,
+  // giving the map the full canvas width. State is hydrated from
+  // localStorage so an operator who prefers the focused layout doesn't
+  // have to re-toggle on every reload. The selected alert is preserved
+  // internally so exiting Focus Mode restores the same drawer state.
+  const [mapFocusMode, setMapFocusMode] = useState<boolean>(() => {
+    try { return localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(FOCUS_MODE_STORAGE_KEY, mapFocusMode ? "1" : "0"); }
+    catch { /* tolerant — quota / disabled storage shouldn't crash the view */ }
+  }, [mapFocusMode]);
 
   const pushToast = useSpireStore((s) => s.pushToast);
 
@@ -161,6 +195,33 @@ export function BastionView() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Walkthrough audit (#37): 'F' toggles Map Focus Mode. Same input-skip
+  // guard as the '/' shortcut so it's safe to type 'f' inside the search
+  // input or SPIRO. Hotkey is documented in the toggle button's title
+  // attribute so an operator who hovers the affordance discovers it.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "f" && e.key !== "F") return;
+      // Code review: App.tsx 'g f' chord opens the feedback drawer and the
+      // chord handler now calls e.preventDefault() once it consumes the F.
+      // If we see a defaultPrevented F here, the chord already fired — do
+      // NOT also toggle Focus Mode (a single keypress would do both).
+      if (e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        (t && t.isContentEditable)
+      ) return;
+      // Don't fight modifier-key combos (Ctrl+F find, Cmd+F find).
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      setMapFocusMode((v) => !v);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Apply backend response to local + global state in one place. Both the
   // initial fetch and the poll converge on this so the TopBar badge,
   // severity tooltip, and any future cross-view consumer always see the
@@ -174,6 +235,10 @@ export function BastionView() {
       const total = typeof r.total === "number" ? r.total : r.alerts.length;
       setAlertCount(total);
       setAlertSeverityCounts(r.severity_counts ?? {});
+      // Stamp success time for the sidebar's "last refreshed" indicator.
+      // Only successful responses bump the stamp; failed polls leave the
+      // age ticking up so amber/red tones surface honestly.
+      setAlertsLastRefreshedAt(Date.now());
     },
     [setAlertCount, setAlertSeverityCounts],
   );
@@ -353,6 +418,54 @@ export function BastionView() {
     return () => window.removeEventListener("spire:simulate-thermalhawk", handler);
   }, [triggerThermalHawk]);
 
+  // F13 — Sim auto-expiry mirror.
+  //
+  // Server-side, an active sim is dropped from `_ACTIVE_SIMS` after
+  // `SIM_TTL` (30 min) and stops appearing in `/alerts`. Locally, `sim`
+  // was previously only cleared via the explicit Resolve button — so
+  // an operator who triggered ThermalHawk and walked away would come
+  // back to a "Sim Active" chip and a Resolve button the server had
+  // already forgotten. Acting on that chip projects confidence in
+  // state that no longer exists.
+  //
+  // Strategy:
+  //   1. Track whether the active sim's alert id has ever been seen
+  //      in a poll response. The trigger response includes the alert
+  //      directly, but the very next /alerts poll race could fire
+  //      before the server-side prepend lands; we only clear AFTER
+  //      we've observed it once and then watch it disappear.
+  //   2. When the alert id was previously present in the alerts
+  //      stream and the latest poll no longer contains it, clear
+  //      `sim` and notify the operator.
+  const simSeenInPollRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sim) {
+      simSeenInPollRef.current = null;
+      return;
+    }
+    const simId = sim.alert.id;
+    const presentInStream = alerts.some((a) => a.id === simId);
+    if (presentInStream) {
+      simSeenInPollRef.current = simId;
+      return;
+    }
+    // Only clear once we've previously seen this sim id in the stream
+    // — otherwise a poll that races the trigger response would clear
+    // a freshly-armed sim before the server-side prepend lands.
+    if (simSeenInPollRef.current === simId) {
+      setSim(null);
+      setSelectedAlert((cur) => (cur && cur.id === simId ? null : cur));
+      setSelectedUnit(null);
+      setSelectedUnitIdGlobal(null);
+      simSeenInPollRef.current = null;
+      pushToast({
+        tone: "warn",
+        text: "Sim auto-cleared · server expired the ThermalHawk incident · FPCON returning to BRAVO",
+        ttlMs: 4500,
+      });
+    }
+  }, [alerts, sim, pushToast, setSelectedUnitIdGlobal]);
+
   // Drop FPCON back to BRAVO whenever the simulation clears. Reviewer flagged
   // that the prior 30s setTimeout could revert FPCON while the sim was still
   // visibly active (rendered cordon rings, target reticle, response panel).
@@ -490,9 +603,54 @@ export function BastionView() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left sidebar: alert stream */}
-      <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
+    // MDM 2026 stage-pivot — wrap the original sidebar+map+panel row
+    // in a flex-column so the UseCaseStrip can sit above it without
+    // disturbing the existing 3-pane layout. Strip is render-noop in
+    // operator mode so this wrapper has no visual impact off-stage.
+    <div className="flex h-full flex-col overflow-hidden">
+      <UseCaseStrip number="15" title="BASTION" subtitle="INSTALLATION COP AGGREGATOR · gates · utilities · emergency · weather · sensors" accent="var(--color-danger)" />
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/* Left sidebar: alert stream — collapses to a 48px rail in Map
+       * Focus Mode (#37). The rail still surfaces the active count + a
+       * severity-tinted top edge so the operator hasn't lost situational
+       * awareness; click the rail to expand back. */}
+      <aside
+        className={clsx(
+          "flex shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]",
+          mapFocusMode ? "w-12" : "w-72",
+        )}
+      >
+      {mapFocusMode ? (
+        <FocusModeAlertRail
+          activeCount={activeAlerts.length}
+          ackedCount={ackedAlerts.length}
+          severityCounts={(() => {
+            const c: Record<string, number> = { CRITICAL: 0, HIGH: 0, MODERATE: 0, LOW: 0, INFO: 0 };
+            for (const a of alerts) {
+              if (a._state?.status === "acknowledged") continue;
+              c[a.severity] = (c[a.severity] ?? 0) + 1;
+            }
+            return c;
+          })()}
+          onExpand={() => setMapFocusMode(false)}
+        />
+      ) : (
+        <>
+        {/* Focus Mode toggle row — sits above the alert stream header
+         * so the affordance is the first thing an operator sees on the
+         * column. Title carries the F hotkey for keyboard discovery. */}
+        <div className="flex justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1">
+          <Pressable
+            onClick={() => setMapFocusMode(true)}
+            block={false}
+            aria-label="Focus map (F) — collapse alerts column and response drawer"
+            title="Focus map (F) — give the schematic the full canvas. Click again to restore."
+            className="!min-h-0 flex h-6 items-center gap-1 rounded-sm border border-transparent px-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+          >
+            <span aria-hidden>↤</span>
+            <span>Focus map</span>
+          </Pressable>
+        </div>
         <AlertStreamHeader
           activeCount={activeAlerts.length}
           ackedCount={ackedAlerts.length}
@@ -500,6 +658,7 @@ export function BastionView() {
           onSevFilter={setSevFilter}
           searchQuery={searchQuery}
           onSearchQuery={setSearchQuery}
+          lastRefreshedAt={alertsLastRefreshedAt}
           // Walkthrough audit: prior code passed alertSeverityCounts
           // (raw API counts including acked rows). After an ACK the
           // 'ALL N' chip stayed at 30 while the stream rendered 29.
@@ -584,6 +743,8 @@ export function BastionView() {
          *   await fetch('/api/bastion/simulate/thermalhawk-detection',
          *     {method:'POST', body:'{}', headers:{'Content-Type':'application/json'}})
          */}
+        </>
+      )}
       </aside>
 
       {/* Center: schematic */}
@@ -603,7 +764,7 @@ export function BastionView() {
           simActive={!!sim}
           simTargetBuilding={simTargetBuilding}
           simCordons={sim?.cordon_zones}
-          drawerOpen={!!selectedAlert}
+          drawerOpen={!!selectedAlert && !mapFocusMode}
           simResolveSignal={simResolveSignal}
         />
 
@@ -671,7 +832,7 @@ export function BastionView() {
          * (left-3) and Mission Clock (right-3) overlapping. The button
          * is also disabled during an active sim, so hiding the whole
          * pill removes the overlap and the dead control simultaneously. */}
-        {(role === "mef_commander" || role === "security_manager" || role === "g4") && !sim && (
+        {(role === "mef_commander" || role === "security_manager" || role === "g4" || useSpireStore.getState().stageMode) && !sim && (
           <div
             className="pointer-events-auto absolute left-3 top-3 z-[7] flex items-center gap-1.5"
             role="region"
@@ -736,8 +897,11 @@ export function BastionView() {
         {/* Track-G1 — G-4 command summary card. Three columns of "what
          * matters in the next 30 seconds": MC% per scoped unit, top alerts,
          * top fused threats. Renders only for the G-4 role and only when no
-         * alert is selected (so it doesn't fight with the response panel). */}
-        {role === "g4" && !selectedAlert && (
+         * alert is selected (so it doesn't fight with the response panel).
+         * Also hidden in Map Focus Mode (#37) — the whole point of focus
+         * is to give the map breathing room, and this card spans the
+         * top-center of the schematic. */}
+        {role === "g4" && !selectedAlert && !mapFocusMode && (
           <G4CommandSummary alerts={alerts} onAlertClick={(a) => setSelectedAlert(a)} />
         )}
 
@@ -748,8 +912,11 @@ export function BastionView() {
          * from app shell and handles all natural-language operator input. */}
       </div>
 
-      {/* Right sidebar: response panel */}
-      {selectedAlert && (
+      {/* Right sidebar: response panel — suppressed in Map Focus Mode
+       * (#37). selectedAlert is preserved internally so exiting Focus
+       * Mode restores the same drawer; the operator doesn't have to
+       * re-click the alert. */}
+      {selectedAlert && !mapFocusMode && (
         <ResponsePanel
           alert={selectedAlert}
           sim={sim}
@@ -772,6 +939,7 @@ export function BastionView() {
           }}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -1022,6 +1190,7 @@ function AlertStreamHeader({
   searchQuery,
   onSearchQuery,
   severityCounts,
+  lastRefreshedAt,
 }: {
   activeCount: number;
   ackedCount: number;
@@ -1030,10 +1199,15 @@ function AlertStreamHeader({
   onSevFilter: (s: SeverityFilter) => void;
   searchQuery: string;
   onSearchQuery: (s: string) => void;
+  /** Wall-clock ms timestamp of the last successful /alerts response;
+   * null while the very first response is in flight. Drives the
+   * "Stream last refreshed Nm Ns ago" indicator that goes amber after
+   * 30s and red after 90s — see findings F6/F9. */
+  lastRefreshedAt: number | null;
 }) {
   return (
     <div className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex items-center justify-between p-3 pb-2">
+      <div className="flex items-center justify-between p-3 pb-1">
         <h3 className="font-mono text-xs font-semibold uppercase text-[var(--color-text)] tracking-widest">
           Alert Stream
         </h3>
@@ -1047,6 +1221,14 @@ function AlertStreamHeader({
         >
           {activeCount}
         </span>
+      </div>
+      {/* Recency indicator — ticks every second so motion = freshness on
+       * the alert stream the same way it did on the Mission Clock.
+       * Without this stamp the operator can't tell whether a quiet
+       * sidebar means "nothing is happening" or "the link went yellow
+       * a minute ago and we're sitting on stale data". */}
+      <div className="px-3 pb-2">
+        <RefreshAge ts={lastRefreshedAt} />
       </div>
       <div className="flex items-center gap-1 px-2 pb-1.5">
         {SEV_FILTER_OPTIONS.map((opt) => {
@@ -1115,29 +1297,122 @@ function AlertStreamHeader({
   );
 }
 
+// Walkthrough audit (#37): collapsed-rail rendering of the alert column
+// for Map Focus Mode. The rail surfaces (a) the active alert count so
+// the operator hasn't lost situational awareness, (b) a top edge
+// tinted by the highest-severity bucket so a CRITICAL doesn't become
+// invisible just because the panel is narrow, and (c) a clickable
+// chevron at the bottom that expands the column back to full width.
+// Whole rail is a click target — no precision-aiming a tiny chevron
+// during a live incident.
+function FocusModeAlertRail({
+  activeCount,
+  ackedCount,
+  severityCounts,
+  onExpand,
+}: {
+  activeCount: number;
+  ackedCount: number;
+  severityCounts: Record<string, number>;
+  onExpand: () => void;
+}) {
+  // Highest-severity bucket with at least one alert. CRITICAL > HIGH >
+  // MODERATE > LOW > INFO. Drives the rail's top edge tint so a single
+  // CRITICAL still reads at a glance with the column at 48px.
+  const topSeverity = (
+    (severityCounts.CRITICAL ?? 0) > 0 ? "CRITICAL" :
+    (severityCounts.HIGH ?? 0) > 0     ? "HIGH" :
+    (severityCounts.MODERATE ?? 0) > 0 ? "MODERATE" :
+    (severityCounts.LOW ?? 0) > 0      ? "LOW" :
+    (severityCounts.INFO ?? 0) > 0     ? "INFO" :
+                                          null
+  ) as keyof typeof SEVERITY_COLOR | null;
+  const tint = topSeverity ? SEVERITY_COLOR[topSeverity] : "var(--color-border)";
+  return (
+    <Pressable
+      onClick={onExpand}
+      block={false}
+      aria-label={`Expand alerts column (F) — ${activeCount} active${ackedCount ? `, ${ackedCount} acknowledged` : ""}`}
+      title={`Expand alerts (F) — ${activeCount} active${topSeverity ? `, top severity ${topSeverity}` : ""}`}
+      className="!min-h-0 group flex h-full w-full flex-col items-center gap-2 px-1.5 pt-2 pb-2 hover:bg-[color-mix(in_oklab,var(--color-text)_4%,transparent)]"
+    >
+      {/* Top tint bar — shouts the highest severity bucket. */}
+      <span
+        className="h-1 w-full rounded-sm"
+        style={{ background: tint, opacity: topSeverity ? 0.85 : 0.3 }}
+        aria-hidden
+      />
+      {/* Vertical "ALERTS" label — stays legible at 48px wide. */}
+      <span
+        className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]"
+        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+      >
+        Alerts
+      </span>
+      {/* Active count — large + tabular so it reads at a glance. */}
+      <span
+        className="font-mono text-base font-semibold tabular-nums leading-none"
+        style={{ color: topSeverity ? tint : "var(--color-text-secondary)" }}
+      >
+        {activeCount}
+      </span>
+      {/* Severity stack — only buckets with > 0 are rendered to keep
+       * the rail uncluttered. Tooltip on each shows the count. */}
+      <div className="mt-1 flex flex-col items-center gap-1">
+        {(["CRITICAL", "HIGH", "MODERATE", "LOW", "INFO"] as const).map((sev) => {
+          const n = severityCounts[sev] ?? 0;
+          if (n === 0) return null;
+          return (
+            <span
+              key={sev}
+              className="flex items-center gap-0.5 font-mono text-[10px] tabular-nums"
+              style={{ color: SEVERITY_COLOR[sev] }}
+              title={`${sev} · ${n}`}
+            >
+              <span aria-hidden style={{ fontSize: "9px", lineHeight: 1 }}>{SEVERITY_GLYPH[sev]}</span>
+              <span>{n}</span>
+            </span>
+          );
+        })}
+      </div>
+      {/* Spacer + expand chevron at the bottom — mirrors the rail's
+       * "click anywhere to expand" affordance with a literal cue. */}
+      <span className="mt-auto font-mono text-base text-[var(--color-text-muted)] group-hover:text-[var(--color-text)]" aria-hidden>
+        ↦
+      </span>
+    </Pressable>
+  );
+}
+
 function MissionHUD() {
+  // Findings F6/F9: a 1-Hz seconds tick on the Mission Clock dominated
+  // the page and broadcast "everything is current" while the alert
+  // stream and fused-threats card had no comparable motion. Operators
+  // read motion as freshness; on a yellow SATCOM link they were
+  // trusting the clock while reading minute-old alerts.
+  //
+  // The seconds counter is demoted (the visible DTG only resolves to
+  // the minute, so we tick once per 5s — enough to roll over within a
+  // minute boundary on time, never enough to dominate). The data-
+  // recency indicators on the alert sidebar / fused-threats card now
+  // own the per-second tick across the page.
   const [now, setNow] = useState(new Date());
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 1000);
+    const id = window.setInterval(() => setNow(new Date()), 5000);
     return () => window.clearInterval(id);
   }, []);
 
   const z = (n: number, w = 2) => String(n).padStart(w, "0");
-  // Walkthrough audit (round 2): the prior layout was 'DDHHMMZ' on the
-  // top line and 'MMM YY · NNs' on the bottom. At 270034Z (e.g. 12:34am
-  // on the 27th UTC), the bottom line still showed 'APR 26 · 23s' —
-  // operators could misread that as 'April 26th' (the wrong day) when
-  // it's actually the year-suffix '26' (i.e. 2026). Show the full
-  // 'DD MMM YYYY · NNs' on line 2 so the day is unambiguous and the
-  // year is the full four digits.
+  // DTG resolves to HHMM only — the seconds suffix on the secondary
+  // line was deliberately dropped so motion = freshness lives on the
+  // data-recency stamps, not the clock face.
   const dtg = `${z(now.getUTCDate())}${z(now.getUTCHours())}${z(now.getUTCMinutes())}Z`;
-  const seconds = z(now.getUTCSeconds());
   const dd = z(now.getUTCDate());
   const month = now
     .toLocaleString("en-US", { month: "short", timeZone: "UTC" })
     .toUpperCase();
   const yyyy = String(now.getUTCFullYear());
-  const datestamp = `${dd} ${month} ${yyyy} · ${seconds}s`;
+  const datestamp = `${dd} ${month} ${yyyy}`;
 
   return (
     <div
@@ -1149,7 +1424,7 @@ function MissionHUD() {
         Mission Clock
       </div>
       <div
-        className="mt-0.5 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)] tracking-wide"
+        className="mt-0.5 font-mono text-base font-semibold tabular-nums text-[var(--color-text)] tracking-wide"
         style={{ lineHeight: 1 }}
       >
         {dtg}
@@ -1325,17 +1600,29 @@ function ResponsePanel({
               )}
             </div>
             <div className="font-mono text-[var(--color-text)]">{alert.model_info.model}</div>
-            <div className="text-[var(--color-text-secondary)]">
-              {alert.model_info.parameters.toLocaleString("en-US")} parameters · {alert.model_info.architecture}
-              {alert.model_info.validation_map_50_95 != null && (
-                <span className="ml-1 text-[var(--color-text-muted)]">
-                  · val mAP {(alert.model_info.validation_map_50_95 * 100).toFixed(1)}%
-                </span>
-              )}
-            </div>
-            <div className="mt-1 break-words text-xs text-[var(--color-text-muted)]">
-              {alert.model_info.training} · target: {alert.model_info.deployment_target}
-            </div>
+            {(alert.model_info.parameters != null || alert.model_info.architecture || alert.model_info.validation_map_50_95 != null) && (
+              <div className="text-[var(--color-text-secondary)]">
+                {alert.model_info.parameters != null && (
+                  <>{alert.model_info.parameters.toLocaleString("en-US")} parameters</>
+                )}
+                {alert.model_info.parameters != null && alert.model_info.architecture && " · "}
+                {alert.model_info.architecture}
+                {alert.model_info.validation_map_50_95 != null && (
+                  <span className="ml-1 text-[var(--color-text-muted)]">
+                    · val mAP {(alert.model_info.validation_map_50_95 * 100).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+            )}
+            {(alert.model_info.training || alert.model_info.deployment_target || alert.model_info.capability) && (
+              <div className="mt-1 break-words text-xs text-[var(--color-text-muted)]">
+                {alert.model_info.capability && <>{alert.model_info.capability}</>}
+                {alert.model_info.capability && (alert.model_info.training || alert.model_info.deployment_target) && " · "}
+                {alert.model_info.training}
+                {alert.model_info.training && alert.model_info.deployment_target && " · "}
+                {alert.model_info.deployment_target && <>target: {alert.model_info.deployment_target}</>}
+              </div>
+            )}
             {alert.model_info.weights_size_mb != null && (
               <div className="mt-1 font-mono text-xs text-[var(--color-text-secondary)]">
                 Weights on disk: {alert.model_info.weights_size_mb} MB

@@ -1,12 +1,13 @@
 import { useEffect } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
 import { TopBar } from "./components/TopBar";
 import { StatusFooter } from "./components/StatusFooter";
 import { StatusStrip } from "./components/StatusStrip";
-import { ClassificationBand } from "./components/ClassificationBand";
+import { ClassificationBannerStrip } from "./components/ClassificationBannerStrip";
 import { ToastLane } from "./components/ToastLane";
 import { NarrationOverlay } from "./components/NarrationOverlay";
 import { ScenarioPlayerHost } from "./components/ScenarioPlayerHost";
+import { ScenarioSyncBanner } from "./components/ScenarioSyncBanner";
 import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
@@ -14,6 +15,7 @@ import { Onboarding } from "./components/Onboarding";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FailsafePlayer } from "./components/FailsafePlayer";
 import { useFailsafe } from "./state/failsafe";
+import { useScenarioPlayer } from "./state/scenarioPlayer";
 import { ROLE_DEFAULT_VIEW, useSpireStore, VIEW_SCOPE } from "./state/store";
 
 // Vimium-style two-key chord routing. `g s` → SENTRY, `g p` → PULSE,
@@ -71,11 +73,21 @@ function useGoToShortcuts() {
         return;
       }
       if (armed) {
+        // Code review (#36/#37 deconfliction): once a chord consumes a key,
+        // call preventDefault() so downstream window listeners (BastionView
+        // 'F' Focus Mode, MapCanvas 'P' pitch toggle, ScenarioPlayerHost
+        // 'P' play/pause) can bail on e.defaultPrevented. Without this a
+        // single 'g f' keypress would both open the feedback drawer AND
+        // toggle Bastion focus mode — a stage footgun.
+        let consumed = true;
         switch (e.key.toLowerCase()) {
           case "s": go("/sentry"); break;
           case "p": go("/pulse"); break;
           case "b": go("/bastion"); break;
           case "a": go("/admin"); break;
+          // MDM 2026 stage-pivot — `g d` jumps to the DHA RESCUE
+          // hero surface. Always allowed (the route has no scope guard).
+          case "d": nav("/dha-rescue"); break;
           // 'g f' opens the feedback drawer. Dispatched as a window event
           // so FeedbackDrawer can listen without duplicating the chord
           // window state. Walkthrough audit: prior shortcut was Shift+F
@@ -83,31 +95,69 @@ function useGoToShortcuts() {
           case "f":
             window.dispatchEvent(new CustomEvent("spire:open-feedback"));
             break;
+          default:
+            consumed = false;
         }
+        if (consumed) e.preventDefault();
         armed = false;
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Code review: register in CAPTURE phase so the chord handler always
+    // fires before view-level bubble-phase listeners (BastionView 'F',
+    // MapCanvas 'P'). Without this the [nav, role] dep can re-run on
+    // route/role change and re-attach behind the view listeners, breaking
+    // the e.defaultPrevented contract those listeners rely on.
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [nav, role]);
 }
 
 // W2 Task #39 — F9 hotkey to summon the live-demo failsafe recording.
-// Confined to /demo and /pitch so an operator on BASTION never trips it.
+//
+// Task #48 (F-01): the prior gate keyed off `loc.pathname === "/demo" ||
+// "/pitch"`, which meant the moment the presenter pressed Play and the
+// scenario player navigated them out to /bastion (or /sentry, /pulse,
+// etc.) the F9 hotkey was no longer attached. That's exactly the window
+// where the failsafe is most needed — mid-run, on a module surface, with
+// the live demo hung.
+//
+// New gate: the hotkey is armed whenever a scenario is *loaded* in the
+// scenario player (`scenarioId !== null`), regardless of route. That
+// covers every state from "on /demo with the cockpit open and a scenario
+// picked" through "deep into the third beat on /pulse". An operator who
+// never opens /demo (working on BASTION normally) still won't have F9
+// bound, so it can't be tripped accidentally during day-to-day use.
+//
 // We always confirm before activating (the failsafe overrides the live
 // surface and judges should never see it unless the live demo died).
 function useFailsafeHotkey() {
-  const loc = useLocation();
+  // We intentionally subscribe to `scenarioId` (not `status`) so the
+  // hotkey stays armed across the full lifecycle — ready / playing /
+  // paused / complete — without the effect tearing down between
+  // beat-status transitions.
+  const scenarioLoaded = useScenarioPlayer((s) => s.scenarioId !== null);
   const openFullscreen = useFailsafe((s) => s.openFullscreen);
   const mode = useFailsafe((s) => s.mode);
+  // MDM 2026 stage-pivot — when the operator session is in stage mode
+  // (the on-stage demo cockpit) the F9 failsafe must be reachable from
+  // any route, not just /demo and /pitch. The surrounding stage flow
+  // navigates SENTRY/PULSE/BASTION/DHA RESCUE, and the presenter still
+  // needs the recorded backup as a single keystroke escape hatch.
+  const stageMode = useSpireStore((s) => s.stageMode);
 
   useEffect(() => {
+    // Failsafe hotkey is armed whenever a presenter context is active:
+    // a scenario is loaded, the operator session is in MDM 2026 stage
+    // mode, or the route is one of the dedicated presenter surfaces
+    // (/demo, /pitch). Any of these means F9 should reach the recorded
+    // backup with one keystroke.
+    const path = window.location.pathname;
     const presenterRoute =
-      loc.pathname === "/demo" ||
-      loc.pathname === "/pitch" ||
-      loc.pathname.startsWith("/demo/") ||
-      loc.pathname.startsWith("/pitch/");
-    if (!presenterRoute) return;
+      path === "/demo" ||
+      path === "/pitch" ||
+      path.startsWith("/demo/") ||
+      path.startsWith("/pitch/");
+    if (!scenarioLoaded && !stageMode && !presenterRoute) return;
 
     function inField(target: EventTarget | null): boolean {
       return (
@@ -135,7 +185,7 @@ function useFailsafeHotkey() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [loc.pathname, mode, openFullscreen]);
+  }, [scenarioLoaded, stageMode, mode, openFullscreen]);
 }
 
 export default function App() {
@@ -161,8 +211,12 @@ export default function App() {
       <a href="#main" className="sr-only sr-only-focusable">
         Skip to main content
       </a>
+      {/* W2 Task #28 — DoDM 5200.01-V2 page-level marking. Top strip
+       * carries the FPCON badge (session state); bottom strip is the
+       * plain marking band so a screenshot escaping its chrome still
+       * shows the disclaimer top + bottom. */}
+      <ClassificationBannerStrip position="top" showFpcon />
       <TopBar />
-      <ClassificationBand />
       <StatusStrip />
       <main
         id="main"
@@ -181,12 +235,16 @@ export default function App() {
         </ErrorBoundary>
       </main>
       <StatusFooter />
+      {/* W2 Task #28 — bottom marking band. Plain (no FPCON) so it
+       * stays legible under any density / marquee scroll. */}
+      <ClassificationBannerStrip position="bottom" />
       <ToastLane />
       {/* W2 Task #37 — scripted scenario player. Host is render-less
        * (timer + nav + hotkeys); the overlay is the operator-facing
        * narration strip pinned to the bottom of the viewport. Both
        * mounted at the shell so they survive route changes. */}
       <ScenarioPlayerHost />
+      <ScenarioSyncBanner />
       <NarrationOverlay />
       <FeedbackDrawer />
       <HelpOverlay />

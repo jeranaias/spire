@@ -2,18 +2,37 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role, type User } from "../state/store";
-import { api, type AuthUser } from "../api";
+import { useScenarioPlayer } from "../state/scenarioPlayer";
+import { useFailsafe } from "../state/failsafe";
+import { api, type AuthUser, type PulseDraft } from "../api";
 import { formatApiError } from "../api-retry";
 import { NodeStatus } from "./NodeStatus";
 import { MissionClock } from "./MissionClock";
 import { CommsControl } from "./CommsControl";
 import { Button, DangerButton, Pressable, useIdempotentAction } from "./ui";
 
-const tabs = [
-  { to: "/sentry",  label: "SENTRY", restrict: null as Role | null },
-  { to: "/pulse",   label: "PULSE",   restrict: null as Role | null },
-  { to: "/bastion", label: "BASTION", restrict: null as Role | null },
+type Tab = { to: string; label: string; restrict: Role | null };
+
+// Operator chrome — the historical nav. ADMIN is privileged-only and
+// stays gated to security_manager.
+const OPERATOR_TABS: Tab[] = [
+  { to: "/sentry",  label: "SENTRY",  restrict: null },
+  { to: "/pulse",   label: "PULSE",   restrict: null },
+  { to: "/bastion", label: "BASTION", restrict: null },
   { to: "/admin",   label: "ADMIN",   restrict: "security_manager" as Role },
+];
+
+// MDM 2026 stage-pivot — when `stageMode` is on, the primary nav spine
+// is the four hero use-cases (SENTRY/PULSE/BASTION/DHA RESCUE), no
+// ADMIN. The AUDIT pill on the right of the bar still routes the
+// presenter to /admin/audit for the closing beat, but the privileged
+// ADMIN landing surface is intentionally not exposed as a tab on stage
+// so the audience sees the four-module spine and nothing else.
+const STAGE_TABS: Tab[] = [
+  { to: "/sentry",     label: "SENTRY",     restrict: null },
+  { to: "/pulse",      label: "PULSE",      restrict: null },
+  { to: "/bastion",    label: "BASTION",    restrict: null },
+  { to: "/dha-rescue", label: "DHA RESCUE", restrict: null },
 ];
 
 // Friendly per-tab list of authorized roles for the out-of-scope tooltip.
@@ -24,10 +43,20 @@ function authorizedRolesFor(path: string, role: Role): { allowed: boolean; allow
 }
 
 export function TopBar() {
-  const { role, operatingMode, alertCount, currentUser } = useSpireStore();
+  const { role, operatingMode, alertCount, currentUser, stageMode } = useSpireStore();
 
   return (
-    <header className="relative h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+    // Walkthrough audit (#36 from the in-app feedback drawer): the
+    // MissionClock dropdown was being clipped by view content because
+    // the centered MissionClock wrapper one level down uses
+    // `-translate-x-1/2 -translate-y-1/2` which creates a CSS stacking
+    // context. The dropdown's z-[8500] is therefore scoped to that
+    // transformed wrapper, not the document — so StatusStrip + view
+    // content (which paint later in DOM order) covered it. Lifting the
+    // whole TopBar to z-[60] keeps it above StatusStrip / view content
+    // while staying well below toasts (z-[8900-9100]), modals
+    // (z-[8800]), and banner strips so those still cover the bar.
+    <header className="relative z-[60] h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
       {/* Thin horizon accent below the top bar */}
       <div
         className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
@@ -66,11 +95,13 @@ export function TopBar() {
             </div>
           </div>
           <nav className="flex shrink-0 items-center gap-0">
-            {tabs
+            {(stageMode ? STAGE_TABS : OPERATOR_TABS)
               // ADMIN remains hidden when the role isn't security_manager
               // (it's a privileged surface, not a teaser). Other tabs render
               // even out of scope so operators can see what exists, but they
               // get the disabled treatment + tooltip.
+              // Stage mode swaps ADMIN for DHA RESCUE so the four-module
+              // spine matches the Decision Bridge tile order.
               .filter((t) => t.restrict == null || t.restrict === role)
               .map((tab, idx) => {
                 const { allowed, allowedRoles } = authorizedRolesFor(tab.to, role);
@@ -156,15 +187,39 @@ export function TopBar() {
          * label, and would just add visual noise next to the role
          * selector. */}
         <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
-          <span className="hidden xl:contents"><NodeStatus /></span>
-          <span className="hidden xl:contents"><GcssMcSyncPill /></span>
+          {/* MDM 2026 stage-pivot — operator chrome (NodeStatus, GCSS-MC
+           * sync, AirGapToggle, DensityToggle, PushToJoint, ModeBadge)
+           * is suppressed in stage mode so the four hero use-case tabs
+           * carry the visual weight on stage. CommsControl, IdentityPill,
+           * ResetDemo, and AlertBadge stay because they're presenter
+           * controls. AUDIT pill is added so the host can drop into
+           * `/admin/audit` from any surface in two clicks.
+           *
+           * Outside stage mode, GcssMcSyncPill stays visible at every
+           * breakpoint — it is the only chrome-level "this connection
+           * is mocked" signal, and hiding it under 1280px would let the
+           * rest of the app keep reading "GCSS-MC" data sources without
+           * the operator ever seeing the REF disclosure. See
+           * .local/critiques/integrations-gcss-mc.md (P0-3). */}
+          {!stageMode && <span className="hidden xl:contents"><NodeStatus /></span>}
+          {!stageMode && <GcssMcSyncPill />}
           <CommsControl />
-          <span className="hidden xl:contents"><AirGapToggle /></span>
-          <span className="hidden xl:contents"><DensityToggle /></span>
+          {!stageMode && <span className="hidden xl:contents"><AirGapToggle /></span>}
+          {!stageMode && <span className="hidden xl:contents"><DensityToggle /></span>}
+          {stageMode && <AuditPill />}
+          <FailsafePill />
           <ResetDemoButton />
-          <PushToJointButton role={role} />
+          {!stageMode && <PushToJointButton role={role} />}
+          {!stageMode && <DraftsBadge role={role} />}
+          {/* MDM 2026 stage-pivot — multi-presenter handoff (WP-8). The
+           * 4-up chip strip sits inline with the right group only in
+           * stage mode and offers one-click identity swaps so the next
+           * presenter can take the mic without re-PINning. The detailed
+           * dropdown on IdentityPill remains available for off-roster
+           * actions (sign out, presenter routes). */}
+          {stageMode && <IdentityChips currentDodid={currentUser?.dodid ?? null} />}
           <IdentityPill user={currentUser} role={role} />
-          <span className="hidden xl:contents"><ModeBadge mode={operatingMode} /></span>
+          {!stageMode && <span className="hidden xl:contents"><ModeBadge mode={operatingMode} /></span>}
           <AlertBadge count={alertCount} />
         </div>
       </div>
@@ -236,9 +291,153 @@ function SpireMark() {
 // pill renders a placeholder; this branch is unreachable during normal use
 // (RequireAuth gates every authenticated route) but keeps the component
 // resilient during sign-out animations.
+// MDM 2026 stage-pivot — single-purpose AUDIT chip rendered in the
+// TopBar right group only when the store is in `stageMode`. The host
+// uses this to drop into `/admin/audit` after the BASTION beat, so the
+// audience sees the hash-chained record was being written the whole
+// time. The actual scope check on AuditView is bypassed in stage mode
+// (any role can land on the page) — see AuditView.
+function AuditPill() {
+  const nav = useNavigate();
+  return (
+    <Pressable
+      onClick={() => nav("/admin/audit")}
+      block={false}
+      aria-label="Open audit chain"
+      title="Audit · SOC view (hash-chained, append-only)"
+      className="!min-h-0 hidden h-9 shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-text)] sm:inline-flex"
+    >
+      <span
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{ background: "var(--color-success)", boxShadow: "0 0 6px var(--color-success)" }}
+        aria-hidden
+      />
+      AUDIT
+    </Pressable>
+  );
+}
+
+// MDM 2026 stage-pivot — IdentityChips: a four-up strip of the mock CAC
+// roster, rendered in stage mode immediately to the LEFT of the
+// IdentityPill. Each chip is a single-click identity swap that prefers
+// the additive `quick-switch` endpoint and falls back to the any-PIN
+// login path on 404 (matches IdentityPill.switchIdentity). The active
+// identity is highlighted with a primary outline so the audience can see
+// who's "driving" the demo. Below `xl` the strip collapses to initials
+// only to preserve TopBar real estate; the IdentityPill dropdown still
+// shows the long form. Outside stage mode the component is a render
+// no-op so the operator chrome is byte-identical to before.
+function IdentityChips({ currentDodid }: { currentDodid: string | null }) {
+  const [users, setUsers] = useState<AuthUser[] | null>(null);
+  const [busyDodid, setBusyDodid] = useState<string | null>(null);
+  const nav = useNavigate();
+  const signIn = useSpireStore((s) => s.signIn);
+  const pushToast = useSpireStore((s) => s.pushToast);
+
+  // Fetch the cert directory once on mount. Quiet-fail (just hide the
+  // strip) if it errors — IdentityPill is still available for swaps.
+  // Use `directory()` not `users()` — the strip needs `role` for the
+  // tooltip + label and the trimmed PublicAuthUser shape doesn't have it.
+  useEffect(() => {
+    let cancelled = false;
+    api.auth.directory()
+      .then((r) => { if (!cancelled) setUsers(r.users); })
+      .catch(() => { if (!cancelled) setUsers([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!users || users.length === 0) return null;
+
+  async function swap(target: AuthUser) {
+    if (busyDodid) return;
+    if (target.dodid === currentDodid) return;
+    setBusyDodid(target.dodid);
+    try {
+      let u;
+      try {
+        const qr = await api.auth.quickSwitch(target.dodid);
+        u = qr.user;
+      } catch {
+        const r = await api.auth.login(target.dodid, "000000");
+        u = r.user;
+      }
+      signIn({
+        dodid: u.dodid, name: u.name, first_name: u.first_name, last_name: u.last_name,
+        rank: u.rank, rank_long: u.rank_long, billet: u.billet, unit: u.unit,
+        parent_command: u.parent_command, branch: u.branch, clearance: u.clearance,
+        role: u.role, initials: u.initials, cert_issuer: u.cert_issuer,
+        cert_serial: u.cert_serial, cert_expires: u.cert_expires,
+      });
+      pushToast({
+        tone: "ok",
+        text: `Signed in as ${u.rank} ${u.last_name} · ${ROLE_LABELS[u.role as Role]}`,
+        ttlMs: 3500,
+      });
+      // Always land on Decision Bridge so the new role's permissions
+      // resolve cleanly (matches IdentityPill behaviour).
+      nav("/", { replace: true });
+    } catch (e) {
+      pushToast({ tone: "error", text: `Identity switch failed: ${formatApiError(e)}` });
+    } finally {
+      setBusyDodid(null);
+    }
+  }
+
+  return (
+    <div
+      className="hidden lg:inline-flex shrink-0 items-center gap-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1 py-0.5"
+      role="group"
+      aria-label="Stage presenter handoff"
+    >
+      {users.map((u) => {
+        const active = u.dodid === currentDodid;
+        const busy = busyDodid === u.dodid;
+        return (
+          <Pressable
+            key={u.dodid}
+            onClick={() => swap(u)}
+            block={false}
+            disabled={active || !!busyDodid}
+            aria-label={`Switch to ${u.rank} ${u.last_name} · ${ROLE_LABELS[u.role as Role] ?? u.role}`}
+            aria-pressed={active}
+            title={`${u.rank} ${u.last_name} · ${ROLE_LABELS[u.role as Role] ?? u.role}${active ? " (active)" : ""}`}
+            className={
+              "!min-h-0 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-sm px-2 font-mono text-[10px] uppercase tracking-widest transition-colors " +
+              (active
+                ? "border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_20%,var(--color-surface))] text-[var(--color-text)]"
+                : "border border-transparent text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]")
+            }
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{
+                background: active ? "var(--color-primary)" : "var(--color-text-muted)",
+                boxShadow: active ? "0 0 6px var(--color-primary)" : undefined,
+              }}
+              aria-hidden
+            />
+            <span className="font-mono tabular-nums">{u.initials}</span>
+            <span className="hidden xl:inline truncate max-w-[6rem]">{u.last_name}</span>
+            {busy && (
+              <span className="ml-1 font-mono text-[9px] text-[var(--color-text-muted)]">…</span>
+            )}
+          </Pressable>
+        );
+      })}
+    </div>
+  );
+}
+
 function IdentityPill({ user, role }: { user: User | null; role: Role }) {
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  // MDM 2026 stage-pivot — when the session is in stage mode the
+  // identity-swap menu prefers the additive `quick-switch` endpoint
+  // over the PIN login path. quick-switch re-issues the cookie without
+  // requiring a 6-digit PIN, so the on-stage swap is one click. If the
+  // backend doesn't have the env var enabled the call 404s and we fall
+  // back to the existing login(target.dodid, "000000") path.
+  const stageMode = useSpireStore((s) => s.stageMode);
   // Stage-day affordance: presenters need to swap CAC identity mid-demo
   // (Hayes for the commander walk, Park for the SENTRY sanitization beat)
   // without the 4-step sign-out → cert-pick → PIN → sign-in dance under
@@ -269,7 +468,12 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
     if (!open) return;
     if (allCertUsers !== null && !certFetchFailed) return;
     let cancelled = false;
-    api.auth.users()
+    // Use the authenticated `directory()` variant — the unauthenticated
+    // `users()` endpoint strips role/billet/last_name (Task #27 / F1)
+    // and the swap menu needs those to render the role label and the
+    // post-swap toast. The session cookie is present here, so the
+    // backend returns the full `AuthUser` records.
+    api.auth.directory()
       .then((r) => {
         if (cancelled) return;
         setAllCertUsers(r.users);
@@ -292,11 +496,24 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
     if (switchingTo) return;
     setSwitchingTo(target.dodid);
     try {
-      // Mock auth: any 6-digit PIN clears. We use 000000 for the in-app
-      // swap so the presenter doesn't have to retype on stage. The real
-      // sign-in flow (cert + PIN entry) remains the only path from /auth.
-      const r = await api.auth.login(target.dodid, "000000");
-      const u = r.user;
+      // Stage mode → try the no-PIN quick-switch first. If the backend
+      // 404s (env var off, or older deploy), fall through to the
+      // any-6-digit-PIN login path so the presenter still gets a swap.
+      // Operator (non-stage) sessions go straight to login() — they
+      // shouldn't even know quick-switch exists.
+      let u;
+      if (stageMode) {
+        try {
+          const qr = await api.auth.quickSwitch(target.dodid);
+          u = qr.user;
+        } catch {
+          const r = await api.auth.login(target.dodid, "000000");
+          u = r.user;
+        }
+      } else {
+        const r = await api.auth.login(target.dodid, "000000");
+        u = r.user;
+      }
       signIn({
         dodid: u.dodid,
         name: u.name,
@@ -557,8 +774,13 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
            * caught in walkthrough Run C: a bare /pitch (no hash) loads
            * the SPA index and falls through to the Decision Bridge. The
            * index.html safety-net script catches that case in the URL
-           * bar; these menu items are the in-app, one-click entry. */}
-          <div className="border-b border-[var(--color-border)] py-1">
+           * bar; these menu items are the in-app, one-click entry.
+           *
+           * MDM 2026 stage-pivot — suppressed in stage mode. The four
+           * hero use-case tabs are the only nav surface during the 8-min
+           * stage demo; /pitch and /demo are operator/dev affordances
+           * that would muddy the on-stage choice surface. */}
+          {!stageMode && <div className="border-b border-[var(--color-border)] py-1">
             <div className="px-4 pt-2 pb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
               Presenter
             </div>
@@ -580,7 +802,7 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
               <span>Open demo cockpit</span>
               <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">/#/demo</span>
             </Pressable>
-          </div>
+          </div>}
 
           <Pressable
             role="menuitem"
@@ -643,6 +865,246 @@ function ModeBadge({ mode }: { mode: "full" | "lite" }) {
       </span>
     </div>
   );
+}
+
+// PULSE Risk Board "Draft Action" surface in the chrome.
+//
+// Backstory: the Draft Action modal used to fire a green toast and write
+// nothing — clicking the headline CTA proved the page was theatre. Now
+// every Draft this click POSTs to /pulse/draft-action which writes both
+// a pulse_drafts row AND an audit_log entry. This badge is the operator-
+// facing receipt: the count goes up immediately (store nonce bump), the
+// popover lists every held draft with the asset, kind, MC delta, and
+// creation time, and a Dismiss button archives the draft (writing a
+// second audit row). Click on a draft row navigates to the Risk Board
+// pre-selected on that asset so the operator can drill from "I drafted
+// X" back to "X is the asset I drafted on."
+//
+// Visible for the PULSE roles (maintenance_chief, g4, mef_commander). For
+// data_custodian / security_manager the surface they care about is the
+// SOC audit view, which already shows draft rows under the
+// pulse_draft_action / pulse_draft_dismiss kinds.
+function DraftsBadge({ role }: { role: Role }) {
+  const allowed = role === "maintenance_chief" || role === "g4" || role === "mef_commander";
+  const refreshTick = useSpireStore((s) => s.draftsRefreshTick);
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const setSelectedAssetId = useSpireStore((s) => s.setSelectedAssetId);
+  const bumpDrafts = useSpireStore((s) => s.bumpDraftsRefresh);
+  const nav = useNavigate();
+  const [drafts, setDrafts] = useState<PulseDraft[]>([]);
+  const [unreachable, setUnreachable] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [dismissing, setDismissing] = useState<string | null>(null);
+  const wrap = useRef<HTMLDivElement | null>(null);
+
+  // Poll every 15s while the role is allowed; also re-fetch when the
+  // store nonce bumps (operator just hit Draft this).
+  useEffect(() => {
+    if (!allowed) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    async function tick() {
+      try {
+        const r = await api.pulse.drafts("held");
+        if (cancelled) return;
+        setDrafts(r.drafts);
+        setUnreachable(false);
+      } catch {
+        if (cancelled) return;
+        setUnreachable(true);
+      } finally {
+        if (!cancelled) timer = setTimeout(tick, 15_000);
+      }
+    }
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [allowed, refreshTick]);
+
+  // Click-outside + Escape close the popover.
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (!wrap.current) return;
+      if (!wrap.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!allowed) return null;
+
+  const count = drafts.length;
+  const tone = unreachable ? "var(--color-warning)"
+    : count === 0 ? "var(--color-text-muted)"
+    : "var(--color-primary)";
+
+  async function dismiss(draftId: string) {
+    if (dismissing) return;
+    setDismissing(draftId);
+    try {
+      await api.pulse.dismissDraft(draftId);
+      // Optimistic local strip — the next poll round-trips the source of
+      // truth back in.
+      setDrafts((prev) => prev.filter((d) => d.draft_id !== draftId));
+      bumpDrafts();
+      pushToast({ tone: "ok", text: `Draft ${draftId} dismissed`, ttlMs: 3000 });
+    } catch (e) {
+      pushToast({ tone: "error", text: `Dismiss failed: ${formatApiError(e)}` });
+    } finally {
+      setDismissing(null);
+    }
+  }
+
+  function openOnAsset(d: PulseDraft) {
+    setSelectedAssetId(d.asset_id);
+    setOpen(false);
+    nav("/pulse/risk");
+  }
+
+  return (
+    <div ref={wrap} className="relative shrink-0">
+      <Pressable
+        onClick={() => setOpen((v) => !v)}
+        block={false}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`${count} draft action${count === 1 ? "" : "s"} held`}
+        title={unreachable
+          ? "Drafts queue unreachable — backend may be offline"
+          : count === 0
+            ? "No drafts held — Risk Board Draft Action lands here"
+            : `${count} draft action${count === 1 ? "" : "s"} held · click to review`}
+        className="!min-h-0 flex h-11 shrink-0 items-center gap-1.5 rounded-sm border bg-[var(--color-bg)] px-2 font-mono text-xs uppercase tracking-wider"
+        style={{
+          borderColor: count > 0
+            ? "color-mix(in oklab, var(--color-primary) 45%, var(--color-border))"
+            : "var(--color-border)",
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: tone }} aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M9 13h6" />
+          <path d="M9 17h4" />
+        </svg>
+        <span style={{ color: tone }}>DRAFTS</span>
+        <span className="tabular-nums" style={{ color: tone }}>
+          {String(count).padStart(2, "0")}
+        </span>
+      </Pressable>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Held drafts"
+          className="absolute right-0 top-[calc(100%+6px)] z-[8500] w-[28rem] max-w-[92vw] rounded-md border border-[var(--color-border-active)] bg-[var(--color-surface)] shadow-2xl"
+        >
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2.5">
+            <div>
+              <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
+                Risk Board · Held Drafts
+              </div>
+              <div className="mt-0.5 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
+                Persisted with audit row · no auto-approval workflow
+              </div>
+            </div>
+            <span
+              className="rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[10px] tabular-nums tracking-widest text-[var(--color-text-secondary)]"
+              title="Held drafts in this view"
+            >
+              {count}
+            </span>
+          </div>
+          {unreachable && (
+            <div className="border-b border-[var(--color-border)] px-4 py-2 font-mono text-[11px] text-[var(--color-warning)] tracking-wide">
+              Drafts service unreachable — list may be stale.
+            </div>
+          )}
+          {count === 0 && !unreachable && (
+            <div className="px-4 py-6 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+              No drafts held. Use the Draft Action button on the PULSE Risk Board to queue one.
+            </div>
+          )}
+          {count > 0 && (
+            <ul className="max-h-[60vh] divide-y divide-[var(--color-border)] overflow-y-auto">
+              {drafts.map((d) => (
+                <li key={d.draft_id} className="p-3">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-widest">
+                        <span className="font-semibold text-[var(--color-primary)]">
+                          {d.kind?.toUpperCase()}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openOnAsset(d)}
+                          className="font-semibold text-[var(--color-text)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-primary)]"
+                          title="Open this asset on the Risk Board"
+                        >
+                          {d.asset_id}
+                        </button>
+                        {d.unit_name && (
+                          <span className="text-[var(--color-text-muted)]">· {d.unit_name}</span>
+                        )}
+                      </div>
+                      <div className="mt-1 font-mono text-xs text-[var(--color-text)] tracking-wide">
+                        {d.title}
+                      </div>
+                      <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                        {d.draft_id} · by {d.actor} · {formatDraftAge(d.created_at)}
+                        {d.mc_delta_pct != null && (
+                          <> · MC +{(d.mc_delta_pct * 100).toFixed(0)}</>
+                        )}
+                        {d.cost_usd != null && (
+                          <> · ${d.cost_usd.toLocaleString("en-US")}</>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => dismiss(d.draft_id)}
+                      pending={dismissing === d.draft_id}
+                      disabled={!!dismissing}
+                      title="Archive this draft (writes an audit row)"
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatDraftAge(iso: string): string {
+  try {
+    const t = new Date(iso).getTime();
+    if (!isFinite(t)) return iso;
+    const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (sec < 60) return `${sec}s ago`;
+    const m = Math.floor(sec / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return `${d}d ago`;
+  } catch {
+    return iso;
+  }
 }
 
 function AlertBadge({ count }: { count: number }) {
@@ -804,6 +1266,7 @@ function AirGapToggle() {
 function GcssMcSyncPill() {
   const nav = useNavigate();
   const [age, setAge] = useState<number | null>(null);
+  const [environment, setEnvironment] = useState<string | null>(null);
   const [unreachable, setUnreachable] = useState(false);
 
   useEffect(() => {
@@ -815,6 +1278,7 @@ function GcssMcSyncPill() {
         const r = await api.system.gcssMcLastSync();
         if (cancelled) return;
         setAge(r.age_seconds);
+        setEnvironment(r.environment);
         setUnreachable(false);
       } catch {
         if (cancelled) return;
@@ -836,8 +1300,21 @@ function GcssMcSyncPill() {
       ? "GCSS-MC · syncing…"
       : `GCSS-MC · ${formatAge(age)}`;
 
-  const tone = unreachable ? "var(--color-warning)" : "var(--color-text-secondary)";
-  const dot = unreachable ? "var(--color-warning)" : "var(--color-success)";
+  // Honesty rules for the dot (see .local/critiques/integrations-gcss-mc.md
+  // P0-2). Green is reserved for a real, healthy upstream link. While the
+  // backend reports REFERENCE_IMPLEMENTATION the dot is amber to match the
+  // REF chip — the SPIRE backend being reachable does NOT mean GCSS-MC is
+  // connected. Red is reserved for the SPIRE backend itself being
+  // unreachable, where we cannot vouch for sync freshness at all.
+  const isReference = environment === "REFERENCE_IMPLEMENTATION";
+  const dot = unreachable
+    ? "var(--color-danger)"
+    : isReference
+      ? "var(--color-warning)"
+      : "var(--color-success)";
+  const tone = unreachable
+    ? "var(--color-danger)"
+    : "var(--color-text-secondary)";
 
   return (
     <Pressable
@@ -968,8 +1445,66 @@ function PushToJointButton({ role }: { role: Role }) {
 // already deterministic under seed 42 from boot, never mutated at
 // runtime, so the next pass is bit-identical without re-running the
 // 30–60 s synthetic generator).
+// FailsafePill — Task #48 (F-01).
+//
+// The Failsafe affordance used to live only inside the /demo cockpit
+// header. The moment the presenter pressed Play, the player navigated
+// them out to /bastion / /sentry / /pulse and the on-screen Failsafe
+// button disappeared, leaving F9 as the only escape — and F9 itself was
+// route-gated to /demo + /pitch (see App.tsx, fixed in this same task).
+//
+// This pill mounts in the TopBar so it follows the presenter onto every
+// view they touch during a scripted run. It only renders when a scenario
+// is loaded so it doesn't add chrome for operators who never opened the
+// demo cockpit. The click path mirrors the cockpit button: window.confirm
+// gate (the failsafe replaces the live demo on stage — never silent),
+// then `openFullscreen()`. We deliberately don't show it while the
+// failsafe is already up — the FailsafePlayer owns its own close
+// affordance and a second trigger from the chrome would be confusing.
+function FailsafePill() {
+  const scenarioLoaded = useScenarioPlayer((s) => s.scenarioId !== null);
+  const failsafeMode = useFailsafe((s) => s.mode);
+  const openFullscreen = useFailsafe((s) => s.openFullscreen);
+
+  if (!scenarioLoaded) return null;
+  if (failsafeMode !== "off") return null;
+
+  function activate() {
+    const ok = window.confirm(
+      "Activate failsafe? The recorded backup will replace the live demo. Press OK only if the live demo has failed.",
+    );
+    if (ok) openFullscreen();
+  }
+
+  return (
+    <Pressable
+      onClick={activate}
+      block={false}
+      aria-label="Activate failsafe — replace live demo with recorded backup (F9)"
+      title="Failsafe — replace the live demo with the recorded backup (F9)"
+      className="!min-h-0 flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_12%,var(--color-surface))] px-2.5 font-mono text-[11px] font-semibold uppercase tracking-widest text-[var(--color-warning)] hover:bg-[color-mix(in_oklab,var(--color-warning)_22%,var(--color-surface))]"
+    >
+      <span aria-hidden>◉</span>
+      <span>Failsafe</span>
+      <kbd
+        aria-hidden
+        className="ml-0.5 hidden rounded-sm border border-[var(--color-warning)] bg-[var(--color-bg)] px-1 py-px text-[9px] tracking-wider lg:inline"
+      >
+        F9
+      </kbd>
+    </Pressable>
+  );
+}
+
 function ResetDemoButton() {
   const role = useSpireStore((s) => s.role);
+  // MDM 2026 stage-pivot — RESET DEMO must be reachable from any role
+  // when the session is on stage. The presenter often quick-switches
+  // to Hayes (security_manager) for the SENTRY beat and then needs to
+  // reset the scenario before the BASTION cold-open without first
+  // swapping back to Reyes (g4). Outside stage mode the affordance
+  // remains operator-only.
+  const stageMode = useSpireStore((s) => s.stageMode);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAirGap = useSpireStore((s) => s.setAirGap);
   const setQueueDepth = useSpireStore((s) => s.setQueueDepth);
@@ -1022,8 +1557,9 @@ function ResetDemoButton() {
     { lockoutMs: 750 },
   );
 
-  // Operator role only. Other roles never see the affordance.
-  if (role !== "g4") return null;
+  // Operator role only outside stage mode. In stage mode any role can
+  // reset the scenario between vignettes.
+  if (role !== "g4" && !stageMode) return null;
 
   return (
     <DangerButton

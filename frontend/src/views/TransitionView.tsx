@@ -131,7 +131,7 @@ const PATHWAY_MILESTONES: Array<{
     window: "Months 12–18",
     vehicle: "Fielding decision (MTA‑RP → Program of Record / OTA bridge)",
     what:
-      "Convert successful prototype into an enduring capability. Default path: PEO MS or LCES sponsors a Program of Record line; bridge OTA available as a fallback if PoR slot is contested in the FY budget cycle.",
+      "Convert successful prototype into an enduring capability. Default path: PEO LS (Land Systems) sponsors a Program of Record line through the LCES portfolio; bridge OTA available as a fallback if PoR slot is contested in the FY budget cycle.",
     exit:
       "Production decision (Milestone C equivalent) or OTA production-option exercise.",
   },
@@ -223,22 +223,29 @@ function IpRights() {
         </p>
 
         <p className="mt-2 spire-body-muted text-sm">
-          Justification: SPIRE was developed substantially with non-Government
-          (SBIR) funds, so DFARS reserves at least GPR. We are not requesting
-          Limited Rights — operational sustainment requires the Government to
-          have the latitude to recompete, retrain, or rehost without SPIRE in
-          the loop. Commercial dependencies (PyTorch, FastAPI, PostgreSQL,
-          HuggingFace base weights) remain under their respective licenses and
-          are itemized in the SBOM linked from
+          Justification: as an SBIR-funded effort, SPIRE could assert SBIR Data
+          Rights under DFARS 252.227-7018 — a protective posture that runs for
+          the SBIR Data Protection Period (currently ~20 years from award) and
+          is more restrictive than GPR. We are <strong className="text-[var(--color-text)]">expressly waiving</strong>
+          {" "}that SBIR Data Rights posture for the fielded baseline and
+          delivering at Government Purpose Rights under DFARS 252.227-7013 /
+          -7014 instead. We are not asserting Limited Rights either —
+          operational sustainment requires the Government to have the latitude
+          to recompete, retrain, or rehost without SPIRE in the loop.
+          Commercial dependencies (PyTorch, FastAPI, PostgreSQL, HuggingFace
+          base weights) remain under their respective licenses and are
+          itemized in the SBOM linked from
           {" "}<Link to="/pulse/cards" className="text-[var(--color-primary)] hover:underline">
             PULSE → Model Card
           </Link>.
         </p>
 
         <FootCite>
-          Authority: DFARS Subpart 227.72 (Computer Software) and 227.71
-          (Technical Data), as implemented by the SBIR/STTR Policy Directive
-          §8(b). GPR period and assertion table delivered with each CDRL.
+          Authority: DFARS Subpart 227.72 (Computer Software, incl. 252.227-7014)
+          and 227.71 (Technical Data, incl. 252.227-7013), read with DFARS
+          252.227-7018 (SBIR Data Rights) and the SBIR/STTR Policy Directive
+          §8(b). The SBIR Data Rights waiver and the GPR assertion table are
+          delivered together with each CDRL.
         </FootCite>
       </Panel>
     </Section>
@@ -333,7 +340,7 @@ function Sustainment() {
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
           <Stat label="Year 1 total" value={`$${totals.y1}K`} foot="≈ standup year — carries reaccredit + onboarding" />
           <Stat label="Year 3 total" value={`$${totals.y3}K`} foot="steady-state operations" />
-          <Stat label="5-yr lifecycle" value={`$${totals.y1 + totals.y3 + totals.y5}K`} foot="rough sum across Y1+Y3+Y5 sample years" />
+          <Stat label="Y1+Y3+Y5 sample" value={`$${totals.y1 + totals.y3 + totals.y5}K`} foot="sum of the three sample years above (not a 5-year roll-up)" />
         </div>
 
         <FootCite>
@@ -363,11 +370,18 @@ const ENGAGEMENTS: Array<{
       "Transition memo drafted; courtesy intro made through PdM Ground Sensors. Formal engagement letter ready to send post-Phase II close.",
   },
   {
+    org: "Marine Corps Warfighting Lab (MCWL)",
+    role: "Operational evaluator · referral channel",
+    status: "In discussion",
+    note:
+      "MCWL stood up 3d MLR in concert with HQMC and retains operational evaluation responsibility. Engagement drafted through the MCWL evaluator channel for honest red-teaming and operator referrals; not yet signed.",
+  },
+  {
     org: "3d Marine Littoral Regiment (3d MLR) S3 / S6",
     role: "End user · CTAP host",
     status: "In discussion",
     note:
-      "Two informal demos to S3 (Maj. Holcomb) and S6 (CWO3 Vega). Operational need statement (ONS) draft circulated; awaiting unit endorsement.",
+      "Two informal demos to the S3 and S6 shops (officers held back by billet only — not named on a public-facing page). Operational need statement (ONS) draft circulated; awaiting unit endorsement.",
   },
   {
     org: "MARFORPAC G‑6 / G‑2",
@@ -377,11 +391,11 @@ const ENGAGEMENTS: Array<{
       "Briefed at the Pacific OPS-Intel sync (Mar 2026). Indicated interest in coalition export pathway; no funded line yet.",
   },
   {
-    org: "DIU / AFWERX bridge OTA",
+    org: "DIU bridge OTA (Commercial Solutions Opening)",
     role: "Fallback contracting vehicle",
     status: "Drafted",
     note:
-      "DIU Commercial Solutions Opening abstract drafted as a parallel path; held in reserve in case MTA‑RP slot slips.",
+      "DIU Commercial Solutions Opening abstract drafted as a parallel path; held in reserve in case MTA‑RP slot slips. AFWERX is tracked separately as an Air Force-issued alternative if a joint sponsor materializes.",
   },
 ];
 
@@ -449,7 +463,7 @@ type GanttRow = {
 
 const GANTT_ROWS: GanttRow[] = [
   { label: "M0  · MTA-RP award + kickoff",        startMonth: 0,  endMonth: 1,  marker: "M0" },
-  { label: "M3  · ATO IL-5 entry (RMF Step 4)",   startMonth: 0,  endMonth: 3,  marker: "M3" },
+  { label: "M3  · ATO IL-5 entry (RMF Step 5)",   startMonth: 0,  endMonth: 3,  marker: "M3" },
   { label: "Engineering hardening + integration", startMonth: 1,  endMonth: 6 },
   { label: "M6  · User-trial start at 3d MLR",    startMonth: 3,  endMonth: 6,  marker: "M6" },
   { label: "Operational user trial (instrumented)", startMonth: 6, endMonth: 9 },
@@ -599,7 +613,7 @@ const RISKS: Array<{
     risk: "ATO IL-5 reaccredit slips beyond M3",
     likelihood: "Med",
     impact: "High",
-    owner: "SPIRE Security Manager · Reyes",
+    owner: "SPIRE Security Lead · TBD — named in pilot LOI",
     mitigation:
       "Pre-stage RMF artifacts under cATO sponsor at LCES. Run a parallel mock assessor cycle in M1. Trigger DDIL-only fallback if M3 slips so user-trial start (M6) is unaffected.",
   },
@@ -608,16 +622,16 @@ const RISKS: Array<{
     risk: "MTA-RP slot contested in FY26 acquisition cycle",
     likelihood: "Med",
     impact: "High",
-    owner: "MCSC LCES PMO liaison · TBD",
+    owner: "MCSC LCES PMO liaison · TBD — named in pilot LOI",
     mitigation:
-      "Hold DIU Commercial Solutions Opening abstract as a contingency contracting vehicle. Pre-brief PEO MS to keep an OTA bridge option warm.",
+      "Hold DIU Commercial Solutions Opening abstract as a contingency contracting vehicle. Pre-brief PEO LS to keep an OTA bridge option warm.",
   },
   {
     id: "R3",
     risk: "Model performance regresses on 3d MLR mission data (distribution shift)",
     likelihood: "Med",
     impact: "Med",
-    owner: "SPIRE Model Steward · Tan",
+    owner: "SPIRE Model Steward · TBD — named in pilot LOI",
     mitigation:
       "Quarterly retrain cadence is funded in §3. Ship the in-app drift dashboard before user-trial start; tie a hard rollback in PULSE to a published baseline (already wired).",
   },
@@ -626,7 +640,7 @@ const RISKS: Array<{
     risk: "Sustainment FTE attrition leaves a single point of failure",
     likelihood: "Low",
     impact: "Med",
-    owner: "SPIRE Engineering Lead · Park",
+    owner: "SPIRE Engineering Lead · TBD — named in pilot LOI",
     mitigation:
       "1.5-FTE line in §3 covers a primary plus part-time SRE. Cross-train the LCES PMO contractor on the deploy + accreditation evidence pipelines so we are not the only ones who can ship.",
   },
@@ -635,7 +649,7 @@ const RISKS: Array<{
     risk: "Coalition export breaks against MIL-STD-6016 / OMS-UCI conformance updates",
     likelihood: "Low",
     impact: "Med",
-    owner: "SPIRE Interop Lead · Holloway",
+    owner: "SPIRE Interop Lead · TBD — named in pilot LOI",
     mitigation:
       "Lock conformance test corpus to a quarterly cadence; subscribe to the JICD update list. Failed conformance gates in CI block release rather than degrade silently downstream.",
   },
@@ -643,7 +657,7 @@ const RISKS: Array<{
 
 function Risks() {
   return (
-    <Section id="risks" title="6 · Risks + mitigations" subtitle="Top-5 register, named owners">
+    <Section id="risks" title="6 · Risks + mitigations" subtitle="Top-5 register · owners filled at pilot LOI signature">
       <Panel>
         <div className="overflow-x-auto rounded-sm border border-[var(--color-border)]">
           <table className="w-full border-collapse font-mono text-sm">
