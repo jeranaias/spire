@@ -189,6 +189,7 @@ def require_clearance(
     *,
     audit_actor: Optional[str] = None,
     audit_subject: Optional[str] = None,
+    audit_extra: Optional[dict] = None,
 ) -> str:
     """Backend export-gate truth source.
 
@@ -196,6 +197,12 @@ def require_clearance(
     operator's clearance rank is below the artifact's classification rank.
     Returns the normalized classification string on success so callers can
     persist it on the artifact / bundle metadata.
+
+    `audit_extra` lets a caller stamp protocol-specific fields (e.g. the
+    Joint COP `operator` block per Task #329) into the deny row's payload
+    so a denied attempt carries the same structured operator identity as
+    the corresponding successful release. Caller-supplied keys win over
+    the gate's own defaults; keep that in mind if shadowing `decision`.
     """
     canonical = _normalize_classification(required)
     if user is None:
@@ -215,19 +222,22 @@ def require_clearance(
         # scoping.py shouldn't trigger DB init).
         try:
             from .persistence import log as audit_log  # noqa: WPS433
+            payload = {
+                "action": action,
+                "user_dodid": user.get("dodid"),
+                "user_role": user.get("role"),
+                "user_clearance": user_clearance,
+                "required_classification": canonical,
+                "decision": "blocked",
+                "surface": "backend",
+            }
+            if audit_extra:
+                payload.update(audit_extra)
             audit_log(
                 "spillage_prevented",
                 actor=audit_actor or user.get("role") or "unknown",
                 subject_id=audit_subject or action,
-                payload={
-                    "action": action,
-                    "user_dodid": user.get("dodid"),
-                    "user_role": user.get("role"),
-                    "user_clearance": user_clearance,
-                    "required_classification": canonical,
-                    "decision": "blocked",
-                    "surface": "backend",
-                },
+                payload=payload,
             )
         except Exception:
             # Never let an audit-write failure mask the 403 — we still
@@ -305,6 +315,7 @@ def require_role(
     audit_actor: Optional[str] = None,
     audit_subject: Optional[str] = None,
     user_dodid: Optional[str] = None,
+    audit_extra: Optional[dict] = None,
 ) -> str:
     """Raise 403 + emit a `role_denied` audit row unless `role` is in `allowed`.
 
@@ -312,22 +323,31 @@ def require_role(
     payload so an investigator can correlate the deny with the request.
     Audit emission mirrors the `spillage_prevented` pattern in
     `require_clearance`: every blocked request leaves a row in the chain.
+
+    `audit_extra` lets a caller stamp protocol-specific fields (e.g. the
+    Joint COP `operator` block per Task #329) into the deny row's payload
+    so a denied attempt carries the same structured operator identity as
+    the corresponding successful release. Caller-supplied keys overwrite
+    the default payload entries when they collide.
     """
     if not role or role not in allowed:
         try:
             from .persistence import log as audit_log  # noqa: WPS433
+            payload = {
+                "action": action,
+                "user_role": role or "unknown",
+                "user_dodid": user_dodid,
+                "roles_allowed": sorted(allowed),
+                "decision": "blocked",
+                "surface": "backend",
+            }
+            if audit_extra:
+                payload.update(audit_extra)
             audit_log(
                 "role_denied",
                 actor=audit_actor or role or "unknown",
                 subject_id=audit_subject or action,
-                payload={
-                    "action": action,
-                    "user_role": role or "unknown",
-                    "user_dodid": user_dodid,
-                    "roles_allowed": sorted(allowed),
-                    "decision": "blocked",
-                    "surface": "backend",
-                },
+                payload=payload,
             )
         except Exception:
             # Never let an audit-write failure mask the 403 — block first,

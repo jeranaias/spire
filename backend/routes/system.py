@@ -828,8 +828,29 @@ async def admin_audit(
 
     # Enrich each row with the identity lookup. The persistence layer is
     # auth-agnostic; identity hydration belongs in the route layer.
+    #
+    # When the row's payload carries an inline `operator` block (Joint
+    # COP releases stamp one per Task #329; SENTRY decisions stamp one
+    # via Task #25; etc.), prefer it over the role-based fallback so the
+    # SOC view's Identity column reflects the actual signed-in Marine
+    # who pulled the export — not the canonical-Marine-for-this-role
+    # placeholder that `_enrich_actor_identity` returns when the row's
+    # `actor` field is just a role string. Future-proofs the column
+    # against the day a single role has more than one CAC bound to it.
     for row in result["rows"]:
         row["identity"] = _enrich_actor_identity(row["actor"])
+        payload_obj = row.get("payload")
+        if isinstance(payload_obj, dict):
+            op = payload_obj.get("operator")
+            if isinstance(op, dict) and op.get("dodid"):
+                base = row["identity"]
+                row["identity"] = {
+                    "dodid": str(op.get("dodid") or ""),
+                    "name":  str(op.get("name")  or base.get("name", "")),
+                    "rank":  str(op.get("rank")  or base.get("rank", "")),
+                    "role":  str(op.get("role")  or base.get("role", "")),
+                    "unit":  str(op.get("unit")  or base.get("unit", "")),
+                }
 
     # ------------------------------------------------------------------
     # Server-side bundle classification (Task #88).

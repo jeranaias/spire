@@ -180,7 +180,15 @@ def _log_joint_release(
         "classification": JOINT_EXPORT_CLASSIFICATION,
         "message_counts": dict(message_counts),
         "total_messages": sum(int(v) for v in message_counts.values()),
-        "operator": _operator_envelope(user, role),
+        # Structured operator block per Task #329 — carries name + DODID +
+        # cert serial + role + billet so a SOC analyst staring at a row
+        # three weeks later can pivot from "joint:oms_uci_export released"
+        # straight to the human at the SPIRE console, not just the role
+        # the session cookie happened to carry. Distinct from the partner-
+        # facing footer (`_operator_envelope`) which intentionally omits
+        # the cert serial because that field is non-repudiation telemetry
+        # for our SOC, not provenance the joint partner needs.
+        "operator": _operator_audit_block(user, role),
         "user_role": actor,
         "user_dodid": (user or {}).get("dodid", ""),
         "user_name": (user or {}).get("name", ""),
@@ -221,7 +229,12 @@ def _operator_envelope(user: Optional[dict[str, Any]], role: Optional[str]) -> d
     """Stamp the calling operator's identity into the export envelope so the
     partner can audit who released the bundle. The pull itself is gated on
     role + clearance (topic-style subscription); this is a transparency
-    record, not the gate."""
+    record, not the gate.
+
+    Distinct from `_operator_audit_block`: the partner footer intentionally
+    omits the CAC cert serial — that's an internal non-repudiation tag
+    we keep on our side of the wire (in the audit chain), not provenance
+    the joint partner needs to render."""
     if not user:
         return {
             "name": "unknown",
@@ -238,6 +251,45 @@ def _operator_envelope(user: Optional[dict[str, Any]], role: Optional[str]) -> d
         "role": role or user.get("role", "unknown"),
         "unit": user.get("unit", ""),
         "dodid": user.get("dodid", ""),
+    }
+
+
+def _operator_audit_block(user: Optional[dict[str, Any]], role: Optional[str]) -> dict[str, Any]:
+    """Structured `operator` block stamped into the SPIRE audit chain row
+    for every joint export attempt — successful release, role deny, AND
+    classification deny. Per Task #329.
+
+    Mandatory keys (load-bearing — exercised by
+    `test_joint_release_authority.py`):
+
+      * ``name``        — full name string ("CWO3 James Park")
+      * ``dodid``       — 10-digit DODID
+      * ``cert_serial`` — CAC cert serial; the non-repudiation key the
+                          SOC analyst pivots on when "operator role X
+                          denied" three weeks later needs to land back
+                          on the actual Marine at the SPIRE console
+      * ``role``        — session role at the moment of the attempt
+      * ``billet``      — current billet ("Security Manager")
+
+    Falls back to safe empty strings (never `None`, never KeyError) when
+    the request hit an unauthenticated edge so the column the SOC view
+    renders never blanks. The same shape on success and on deny is the
+    contract; downstream tooling pivots on it.
+    """
+    if not user:
+        return {
+            "name": "unknown",
+            "dodid": "",
+            "cert_serial": "",
+            "role": role or "unknown",
+            "billet": "",
+        }
+    return {
+        "name": user.get("name", "unknown"),
+        "dodid": user.get("dodid", ""),
+        "cert_serial": user.get("cert_serial", ""),
+        "role": role or user.get("role", "unknown"),
+        "billet": user.get("billet", ""),
     }
 
 
@@ -310,11 +362,24 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
     batch.
     """
     user = getattr(request.state, "user", None)
+    actor_role = session_role(request)
+    # Operator audit block stamped into BOTH gate-deny rows and the
+    # eventual `joint_export_released` row so a SOC analyst sees the
+    # same `{name, dodid, cert_serial, role, billet}` shape regardless
+    # of whether the attempt succeeded or got blocked at the gate.
+    # Built once before the gate fires so the deny-path payload carries
+    # the actual session operator, not a re-derived best-effort guess
+    # after the HTTPException unwinds the handler. (Task #329.)
+    audit_op = {
+        "operator": _operator_audit_block(user, actor_role),
+        "protocol": "OMS/UCI",
+    }
     require_clearance(
         user,
         "SECRET",
         action="joint:oms_uci_export",
-        audit_actor=session_role(request),
+        audit_actor=actor_role,
+        audit_extra=audit_op,
     )
     # Role gate. The OMS/UCI feed is a topic-style subscription consumed by
     # a partner J4 console; the partner's view of MAGTF readiness must NOT
@@ -324,8 +389,13 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
     # which fails the CDAO sanity test ("does my view evaporate if Kowalski
     # signs in mid-engagement?"). Restrict emission to release-authority roles
     # so the partner sees the full MAGTF every time.
-    actor_role = session_role(request)
-    require_role(actor_role, JOINT_RELEASE_ROLES, action="joint:oms_uci_export")
+    require_role(
+        actor_role,
+        JOINT_RELEASE_ROLES,
+        action="joint:oms_uci_export",
+        user_dodid=(user or {}).get("dodid"),
+        audit_extra=audit_op,
+    )
 
     ds = get_dataset()
     last = last_day_snapshots(ds)
@@ -575,17 +645,32 @@ async def link16_export(request: Request) -> dict[str, Any]:
     16 radio behind it and no TADIL gateway.
     """
     user = getattr(request.state, "user", None)
+    actor_role = session_role(request)
+    # Operator audit block — see the OMS/UCI handler for the full rationale.
+    # Built before either gate fires so the structured `operator` block
+    # ends up on every audit row this attempt produces (release, role
+    # deny, or clearance deny).
+    audit_op = {
+        "operator": _operator_audit_block(user, actor_role),
+        "protocol": "Link 16",
+    }
     require_clearance(
         user,
         "SECRET",
         action="joint:link16_export",
-        audit_actor=session_role(request),
+        audit_actor=actor_role,
+        audit_extra=audit_op,
     )
     # Same release-authority gate as OMS/UCI — see comment there. Link 16
     # is even more obviously a topic feed (J-series messages on a TADIL
     # net), so per-operator unit truncation makes no sense in this domain.
-    actor_role = session_role(request)
-    require_role(actor_role, JOINT_RELEASE_ROLES, action="joint:link16_export")
+    require_role(
+        actor_role,
+        JOINT_RELEASE_ROLES,
+        action="joint:link16_export",
+        user_dodid=(user or {}).get("dodid"),
+        audit_extra=audit_op,
+    )
 
     ds = get_dataset()
     last = last_day_snapshots(ds)
