@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role, type User } from "../state/store";
 import { api, type AuthUser } from "../api";
@@ -80,7 +80,12 @@ export function TopBar() {
           <MissionClock />
         </div>
         <div className="flex min-w-0 items-center gap-4">
-          <div className="flex min-w-0 shrink items-center gap-2.5">
+          <Link
+            to="/"
+            aria-label="Return to Decision Bridge home"
+            title="Decision Bridge"
+            className="flex min-w-0 shrink items-center gap-2.5 rounded-sm outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+          >
             <SpireMark />
             <div className="flex min-w-0 flex-col leading-none">
               <span
@@ -99,7 +104,7 @@ export function TopBar() {
                 Contested Logistics
               </span>
             </div>
-          </div>
+          </Link>
           <nav className="flex shrink-0 items-center gap-0">
             {(stageMode ? STAGE_TABS : OPERATOR_TABS)
               // ADMIN remains hidden when the role isn't security_manager

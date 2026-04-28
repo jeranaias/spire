@@ -153,13 +153,14 @@ export function AuthView() {
       }}
     >
       <ClassificationBannerStrip position="top" />
-      <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-10">
+      <div className="flex flex-1 items-center justify-center overflow-x-hidden overflow-y-auto px-3 py-6 sm:px-6 sm:py-10">
         <div className="mx-auto w-full max-w-5xl">
           {/* Banner row — DoD framing chip kept; the page-level marking
-           * is now carried by the strips at top + bottom. */}
-          <div className="mb-6 flex items-center justify-between gap-4">
+           * is now carried by the strips at top + bottom. Wraps on narrow
+           * viewports so the chip and tagline never collide. */}
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
             <div
-              className="rounded-sm border px-3 py-1 font-mono text-xs uppercase tracking-widest"
+              className="rounded-sm border px-3 py-1 font-mono text-[10px] uppercase tracking-widest sm:text-xs"
               style={{
                 borderColor: "color-mix(in oklab, var(--color-primary) 50%, transparent)",
                 background: "color-mix(in oklab, var(--color-primary) 12%, transparent)",
@@ -173,17 +174,17 @@ export function AuthView() {
             </div>
           </div>
 
-        {/* Brand block */}
-        <div className="mb-8 flex items-center gap-4">
+        {/* Brand block — fluid type so the wordmark fits 320px and up. */}
+        <div className="mb-6 flex items-center gap-3 sm:mb-8 sm:gap-4">
           <SpireObelisk />
-          <div>
+          <div className="min-w-0">
             <div
-              className="font-mono text-3xl font-semibold tracking-[0.18em] text-[var(--color-text)]"
-              style={{ fontFeatureSettings: "'ss01'" }}
+              className="font-mono font-semibold tracking-[0.18em] text-[var(--color-text)]"
+              style={{ fontFeatureSettings: "'ss01'", fontSize: "clamp(1.25rem, 5vw, 1.875rem)" }}
             >
               SPIRE
             </div>
-            <div className="mt-1 font-mono text-xs uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+            <div className="mt-1 truncate font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)] sm:text-xs sm:tracking-[0.22em]">
               Sanitization · Prediction · Intelligence · Readiness
             </div>
           </div>
@@ -243,9 +244,10 @@ export function AuthView() {
           </div>
         )}
 
-        {/* PIN row — appears when a cert is picked */}
+        {/* PIN row — appears when a cert is picked. Stacks below sm so the
+         * Sign-in button never gets squeezed into a sliver next to the input. */}
         <div
-          className="mt-6 rounded-md border p-5"
+          className="mt-6 rounded-md border p-4 sm:p-5"
           style={{
             borderColor: selectedDodid
               ? "color-mix(in oklab, var(--color-primary) 60%, var(--color-border))"
@@ -253,7 +255,7 @@ export function AuthView() {
             background: "color-mix(in oklab, var(--color-surface) 90%, transparent)",
           }}
         >
-          <div className="flex items-end justify-between gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
             <div className="min-w-0 flex-1">
               <label
                 htmlFor="cac-pin"
@@ -290,7 +292,7 @@ export function AuthView() {
               disabled={!selectedDodid || pin.length !== 6}
               pending={submitting}
               onClick={submit}
-              className="shrink-0"
+              className="w-full shrink-0 sm:w-auto"
             >
               {submitting ? "Verifying…" : "Sign in"}
             </Button>
@@ -349,7 +351,7 @@ function CertCard({
       style={{ transform: selected ? "translateY(-1px)" : undefined }}
     >
       <div
-        className="relative flex h-full items-stretch gap-4 rounded-md border p-4"
+        className="relative flex h-full items-stretch gap-3 rounded-md border p-3 sm:gap-4 sm:p-4"
         style={{
           borderColor: selected
             ? "var(--color-primary)"
@@ -362,9 +364,10 @@ function CertCard({
             : undefined,
         }}
       >
-        {/* Branch / avatar block */}
+        {/* Branch / avatar block — smaller on mobile so the cert text gets
+         * room to breathe at <sm widths. */}
         <div
-          className="flex h-16 w-16 shrink-0 items-center justify-center rounded-sm font-mono text-xl font-semibold uppercase tracking-wider"
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-sm font-mono text-base font-semibold uppercase tracking-wider sm:h-16 sm:w-16 sm:text-xl"
           style={{
             background: "color-mix(in oklab, var(--color-primary) 18%, var(--color-bg))",
             color: "var(--color-primary)",
@@ -376,7 +379,7 @@ function CertCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
-            <div className="truncate font-sans text-base font-semibold text-[var(--color-text)]">
+            <div className="truncate font-sans text-sm font-semibold text-[var(--color-text)] sm:text-base">
               {user.name}
             </div>
             <div className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -386,7 +389,9 @@ function CertCard({
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] tracking-wider text-[var(--color-text-muted)]">
             <span>DODID {maskDodid(user.dodid)}</span>
           </div>
-          <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--color-border)] pt-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+          {/* Cert-issuer / SN / EXP row stacks at <sm so the three values
+           * don't all truncate to ellipsis at the same time. */}
+          <div className="mt-3 flex flex-col gap-1 border-t border-[var(--color-border)] pt-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] sm:flex-row sm:items-center sm:justify-between sm:gap-2">
             <span className="truncate">{user.cert_issuer ?? "DOD ID CA"}</span>
             <span className="truncate">SN {user.cert_serial ?? "—"}</span>
             <span className="truncate">EXP {user.cert_expires ?? "—"}</span>
