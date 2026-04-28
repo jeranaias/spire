@@ -6,6 +6,7 @@ import { RiskBoardTab } from "./pulse/RiskBoardTab";
 import { CannibalizationTab } from "./pulse/CannibalizationTab";
 import { ForecastTab } from "./pulse/ForecastTab";
 import { ModelTab } from "./pulse/ModelTab";
+import { UseCaseStrip } from "../components/UseCaseStrip";
 
 // Walkthrough #28 — numbered prefix on each tab + ARIA tablist + arrow
 // keyboard navigation. Active tab gets a thicker underline + bg tint.
@@ -21,6 +22,7 @@ export function PulseView() {
   return (
     <div className="flex h-full flex-col">
       <h1 className="sr-only">PULSE · Readiness &amp; Forecast</h1>
+      <UseCaseStrip number="13" title="PULSE" subtitle="PARTS DEMAND FORECASTING — CONTESTED LOG · Class IX MAGTF" accent="var(--color-warning)" />
       <PulseSubnav />
       <div className="flex-1 overflow-hidden">
         <Routes>

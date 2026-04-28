@@ -125,7 +125,7 @@ function DemoRunning() {
       <circle cx="100" cy="120" r="44" fill="none" stroke={ACCENT} strokeWidth="1" opacity="0.25" />
       <circle cx="100" cy="120" r="6" fill={ACCENT} />
       <text x="100" y="180" textAnchor="middle" fontFamily="ui-monospace, monospace"
-        fontSize="9" fill={MUTED}>/demo · ~3:15</text>
+        fontSize="9" fill={MUTED}>/demo · ~2:45</text>
     </Frame>
   );
 }
@@ -142,9 +142,11 @@ function ModelCard() {
         fontWeight="700" fill={FG}>PULSE-Risk v0.3</text>
       <line x1="40" y1="80" x2="160" y2="80" stroke={STROKE} strokeWidth="1" />
       {[
-        ["holdout MAE", "0.142"],
-        ["baseline diff", "-21%"],
+        // Reproducibility-first model card — no accuracy claim is rendered
+        // until a published holdout is defined (see slides.ts slide 05).
         ["features", "14"],
+        ["seed", "0xC0FFEE"],
+        ["status", "pre-holdout"],
         ["signed by", "sec-mgr"],
       ].map(([k, v], i) => (
         <g key={i}>

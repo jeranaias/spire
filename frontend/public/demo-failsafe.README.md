@@ -1,23 +1,32 @@
 # `demo-failsafe.{mp4,webm}` — live-demo failsafe recording
 
-Wired by W2 Task #39. The files `demo-failsafe.mp4` (H.264, the canonical
-take that ships to stage) and `demo-failsafe.webm` (VP9, fallback for
-browsers without proprietary codecs — Playwright/CI Chromium, Firefox
-on Linux without the H.264 add-on) next to this README are the recording
-that the **Failsafe** affordance on `/demo` and `/pitch` plays when the
-live demo dies on stage. They are also what the **Rehearsal** toggle plays
-in a side-by-side PIP for drift checks.
+Wired by W2 Task #39, hardened by Task #48. The files `demo-failsafe.mp4`
+(H.264, the canonical take that ships to stage) and `demo-failsafe.webm`
+(VP9, fallback for browsers without proprietary codecs — Playwright/CI
+Chromium, Firefox on Linux without the H.264 add-on) next to this README
+are the recording that the **Failsafe** affordance plays when the live
+demo dies on stage. The Failsafe pill is now mounted in the TopBar so it
+follows the presenter onto every view during a scripted run; F9 is wired
+globally whenever a scenario is loaded; and the live narration overlay
+short-circuits while the failsafe is up so the recording owns the screen.
 
-## What ships in the repo today
+The same files back the **Rehearsal** toggle (side-by-side PIP for drift
+checks during prep — never intended for stage).
 
-A short black-frame **placeholder** with the text
-"SPIRE · FAILSAFE PLACEHOLDER — Re-record /demo before stage". The
-placeholder exists so the player UX (loading, controls, error, close)
-is exercisable in dev and CI before the real recording lands.
+## STATUS — placeholder, not the real take
+
+What ships in the repo today is a **placeholder**. The MP4 is ~683 KB of
+black-frame "SPIRE · FAILSAFE PLACEHOLDER — Re-record /demo before stage"
+content. The placeholder exists so the player UX (loading, controls,
+error, close) is exercisable in dev and CI before the real recording
+lands.
 
 If a presenter activates the failsafe with the placeholder still in
 place, they will see the placeholder on screen — that is intentional and
-loud, not silent.
+loud, not silent. **This MUST be re-recorded on demo hardware before
+MDM 2026.** The recording itself cannot be produced in CI / agent
+environments — it requires running the real `/demo` end-to-end with a
+screen recorder attached. See "Recording the real take" below.
 
 ## Recording the real take
 

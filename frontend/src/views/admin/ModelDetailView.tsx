@@ -8,18 +8,17 @@
  * Restricted to security_manager. Inline guard mirrors the backend
  * MODEL_REGISTRY_ROLES gate.
  */
-import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   api,
   type ModelImplementation,
-  type ModelRegistryDetailResponse,
 } from "../../api";
-import { withRetry, formatApiError } from "../../api-retry";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
+import { useRegistryFetch } from "./useRegistryFetch";
+import { DdilFreshnessBanner, FreshnessHeader } from "./RegistryFreshness";
 
 export function ModelDetailView() {
   const role = useSpireStore((s) => s.role);
@@ -35,34 +34,13 @@ export function ModelDetailView() {
     );
   }
 
-  const [data, setData] = useState<ModelRegistryDetailResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [waking, setWaking] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    setError(null);
-    (async () => {
-      try {
-        const resp = await withRetry(() => api.system.adminModelDetail(modelId), {
-          onAttempt: (attempt) => {
-            if (!cancelled) setWaking(attempt > 1);
-          },
-        });
-        if (cancelled) return;
-        setData(resp);
-        setWaking(false);
-      } catch (e) {
-        if (cancelled) return;
-        setError(formatApiError(e));
-        setWaking(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [modelId]);
+  // W1 #83 — same lifecycle as the registry index. Keying on `modelId`
+  // resets `data`/`loadedAt` cleanly when the operator navigates between
+  // model cards, so a stale "loaded HH:MM" never bleeds across cards.
+  const { data, error, waking, loadedAt, refreshing, refresh } = useRegistryFetch(
+    () => api.system.adminModelDetail(modelId),
+    `model:${modelId}`,
+  );
 
   if (error && !data) {
     return (
@@ -70,7 +48,8 @@ export function ModelDetailView() {
         title="Model Card Unavailable"
         description={`Could not load model card for ${modelId}.`}
         detail={error}
-        onRetry={() => window.location.reload()}
+        onRetry={refresh}
+        retrying={refreshing}
       />
     );
   }
@@ -94,8 +73,8 @@ export function ModelDetailView() {
           ← Model supply chain
         </Link>
       </div>
-      <div className="mb-4 flex items-baseline justify-between gap-4">
-        <div>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest">
             {m.name}
           </h1>
@@ -105,10 +84,13 @@ export function ModelDetailView() {
             registry version {data.registry_version ?? "unknown"}
           </div>
         </div>
-        <div className="shrink-0">
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <ClassificationBadge classification="UNCLASSIFIED" />
+          <FreshnessHeader loadedAt={loadedAt} refreshing={refreshing} onRefresh={refresh} />
         </div>
       </div>
+
+      <DdilFreshnessBanner loadedAt={loadedAt} />
 
       {m.in_app_surfaces && m.in_app_surfaces.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
@@ -203,6 +185,30 @@ function ImplementationCard({ impl, headline }: { impl: ModelImplementation; hea
                 : "ok"
             }
           />
+          {/*
+            Task #82 — call out that "Target IL" is a hosting *target*,
+            not an active *authorization*. The Authorization section
+            below carries the AO / package / expiration so the auditor
+            can't confuse a target-IL with a held ATO.
+          */}
+          <div className="mt-1 font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">
+            Target is the hosting boundary SPIRE deploys against; the active
+            ATO lives in the Authorization block below.
+          </div>
+        </Section>
+
+        <Section title="Authorization (ATO)">
+          {/*
+            Task #82 — distinct from hosting target. SPIRE is in
+            pre-fielding posture so most rows surface "TBD — placeholder"
+            honestly rather than implying an ATO that doesn't exist.
+          */}
+          <Row label="Authorizing official" value={impl.authorization?.ao ?? "TBD — placeholder"} />
+          <Row label="Package ID" value={impl.authorization?.package_id ?? "TBD — placeholder"} />
+          <Row label="Expiration" value={impl.authorization?.expiration ?? "TBD — placeholder"} />
+          {impl.authorization?.note && (
+            <Row label="Note" value={impl.authorization.note} />
+          )}
         </Section>
 
         <Section title="FedRAMP status">
@@ -221,10 +227,20 @@ function ImplementationCard({ impl, headline }: { impl: ModelImplementation; hea
         </Section>
         <Section title="Vendor risk">
           <Row label="Vendor" value={vendor.name} />
+          {/*
+            Task #82 — when the canonical jurisdictions array is present,
+            render the joined list and only paint green if every entry
+            is US-aligned. This stops a multi-jurisdiction publisher
+            (Alphabet US + DeepMind UK) reading as pure US.
+          */}
           <Row
             label="Jurisdiction"
-            value={vendor.jurisdiction}
-            tone={isUS(vendor.jurisdiction) ? "ok" : "warn"}
+            value={
+              vendor.jurisdictions && vendor.jurisdictions.length > 0
+                ? vendor.jurisdictions.join(" + ")
+                : vendor.jurisdiction
+            }
+            tone={isAllUS(vendor.jurisdictions, vendor.jurisdiction) ? "ok" : "warn"}
           />
           <Row label="Ownership" value={vendor.ownership ?? "—"} />
           <Row
@@ -349,7 +365,25 @@ function Row({
 function isUS(j?: string | null): boolean {
   if (!j) return false;
   const v = j.trim().toLowerCase();
-  return v === "united states" || v === "us" || v === "u.s." || v === "usa";
+  return (
+    v === "united states" ||
+    v === "us" ||
+    v === "u.s." ||
+    v === "usa" ||
+    v === "u.s.a." ||
+    v === "united states of america"
+  );
+}
+
+/**
+ * Task #82 — green only if every canonical jurisdiction in the vendor's
+ * list is US-aligned. Falls back to the single string when the canonical
+ * list isn't published.
+ */
+function isAllUS(list?: string[] | null, fallback?: string | null): boolean {
+  const candidates = list && list.length > 0 ? list : (fallback ? [fallback] : []);
+  if (candidates.length === 0) return false;
+  return candidates.every((j) => isUS(j));
 }
 
 function formatDollars(v: number): string {

@@ -71,6 +71,46 @@ export function JointIntegrationsView() {
           </p>
         </Section>
 
+        {d.releaseAuthority && (
+          <Section title="Release authority · subscription model" id="release-authority">
+            <Field label="Subscription model" value={d.releaseAuthority.subscriptionModel} mono />
+            <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              {d.releaseAuthority.summary}
+            </p>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div>
+                <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                  Roles allowed to release
+                </div>
+                <ul className="space-y-1 text-sm text-[var(--color-text)]">
+                  {d.releaseAuthority.allowedRoles.map((r) => (
+                    <li key={r} className="flex items-start gap-2">
+                      <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]" aria-hidden />
+                      <span className="font-mono text-[12px]">{r}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                  Roles denied (operator scope, not release authority)
+                </div>
+                <ul className="space-y-1 text-sm text-[var(--color-text-secondary)]">
+                  {d.releaseAuthority.deniedRolesExample.map((r) => (
+                    <li key={r} className="flex items-start gap-2">
+                      <span className="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]" aria-hidden />
+                      <span className="font-mono text-[12px]">{r}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              {d.releaseAuthority.auditFooter}
+            </p>
+          </Section>
+        )}
+
         <Section title="Direction policy" id="direction">
           <div className="grid grid-cols-2 gap-4">
             <DirectionCard label="Egress (SPIRE → joint)" status={d.directionPolicy.egress} />

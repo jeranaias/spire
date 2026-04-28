@@ -5,7 +5,7 @@
  * you NOT optimizing?" question. Pulled from `/pulse/model-card` which
  * computes everything deterministically against the synthetic dataset.
  *
- * The canonical detail page lives under /admin/models/pulse-risk (lane
+ * The canonical detail page lives under /admin/models/pulse-risk-scorer (lane
  * C3); this surface is the in-PULSE summary so an operator never has
  * to leave the workflow to inspect model behavior.
  */
@@ -202,7 +202,7 @@ function Header({ card }: { card: ModelCard }) {
             href={card.canonical_model_card_url}
             className="text-[var(--color-primary)] hover:underline"
           >
-            /admin/models/pulse-risk
+            /admin/models/pulse-risk-scorer
           </a>
           .
         </div>
@@ -659,7 +659,7 @@ function LastValidation({ card }: { card: ModelCard }) {
           href={v.methodology_link}
           className="mt-1 inline-block text-[var(--color-primary)] hover:underline"
         >
-          → full methodology · /admin/models/pulse-risk
+          → full methodology · /admin/models/pulse-risk-scorer
         </a>
       </div>
     </div>

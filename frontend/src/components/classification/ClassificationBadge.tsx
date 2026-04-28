@@ -13,7 +13,13 @@ import {
 
 interface Props {
   classification: Classification | string;
-  size?: "sm" | "md";
+  /**
+   * `sm`/`md` are the default operator-density sizes used across export
+   * buttons + file rows. `lg` is for presenter / projector surfaces
+   * (Task #50 demo cockpit + narration overlay) where the audience must
+   * read the stamp from the back row of the room.
+   */
+  size?: "sm" | "md" | "lg";
   caveats?: string[];
   title?: string;
   className?: string;
@@ -31,8 +37,9 @@ export function ClassificationBadge({
   const caveatStr = caveats && caveats.length ? ` // ${caveats.join(" // ")}` : "";
   const fullLabel = `${label}${caveatStr}`;
 
-  const padding = size === "md" ? "4px 10px" : "2px 6px";
-  const fontSize = size === "md" ? 11 : 9.5;
+  const padding =
+    size === "lg" ? "5px 12px" : size === "md" ? "4px 10px" : "2px 6px";
+  const fontSize = size === "lg" ? 14 : size === "md" ? 11 : 9.5;
 
   return (
     <span

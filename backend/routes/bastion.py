@@ -13,10 +13,18 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import session_role
-from ..scoping import allowed_units
+from ..scoping import (
+    BASTION_SIMULATE_ROLES,
+    allowed_sectors,
+    allowed_units,
+    filter_buildings,
+    filter_perimeter,
+    require_role,
+)
 from ..state import get_dataset, last_day_snapshots
 from .streams import all_streams
 from ..fusion import fuse_alerts
+from ..persistence import log as audit_log
 
 router = APIRouter()
 
@@ -156,6 +164,17 @@ async def cop(role: Optional[str] = None):
             "data_integrity_flags": dq_count,
         })
 
+    # F2 — installation map scoping. Buildings filtered by occupant-unit
+    # affiliation (or shared-infra sector association); ECPs and rally
+    # points filtered by sector. Sensitive types (ammunition, ARMS, fuel,
+    # hazmat, comms nodes, TOC) and CI/hazmat-flagged buildings are
+    # stripped from any non-INSTALLATION_FULL_VIEW_ROLES payload so a
+    # battalion-scope CAC isn't handed the OSINT installation product.
+    scoped_buildings = filter_buildings(inst["buildings"], ds, role)
+    sectors = allowed_sectors(ds, role, inst["buildings"])
+    scoped_ecps = filter_perimeter(inst["ecps"], sectors)
+    scoped_rps = filter_perimeter(inst.get("rally_points", []), sectors)
+
     return {
         "installation": inst["installation"],
         "center": {
@@ -163,10 +182,10 @@ async def cop(role: Optional[str] = None):
             "lon": inst["installation"]["center_lon"],
         },
         "units": units_out,
-        "buildings": inst["buildings"],
-        "buildings_count": len(inst["buildings"]),
-        "ecps": inst["ecps"],
-        "rally_points": inst.get("rally_points", []),
+        "buildings": scoped_buildings,
+        "buildings_count": len(scoped_buildings),
+        "ecps": scoped_ecps,
+        "rally_points": scoped_rps,
         "response_forces_count": len(inst["response_forces"]),
         "as_of": last_day.isoformat(),
     }
@@ -176,12 +195,20 @@ async def cop(role: Optional[str] = None):
 # Alert feed: unified stream from SENTRY + PULSE + BASTION + ThermalHawk
 # ---------------------------------------------------------------------------
 
-@router.get("/alerts")
-async def alerts(limit: int = 30, role: Optional[str] = None):
-    ds = get_dataset()
-    allowed = allowed_units(ds, role)
-    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
+def _compose_raw_alerts(ds) -> list[dict]:
+    """Compose the unscoped, sorted, sim-prepended raw alert list /alerts
+    serves before role-scoping and before fusion.
+
+    Centralizing the composition lets `alert_action` (task #54) feed the
+    EXACT same list to `fuse_alerts` so fused IDs visible in the feed
+    can be matched on mutation — otherwise an operator who sees a
+    `FUS-MGATE-*` row in /alerts would 404 on ack because the universe
+    builder fed fusion a different input order. Also has the side-effect
+    of expiring sims older than SIM_TTL — kept inside the composer so
+    /alerts and the universe builder agree on which sims still exist.
+    """
     out: list[dict] = []
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
 
     # Readiness alerts
     last = last_day_snapshots(ds)
@@ -275,17 +302,24 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
         out.insert(0, sim["alert"])
     for sid in expired:
         del _ACTIVE_SIMS[sid]
+    return out
 
-    # Apply role scoping AFTER sim prepend so incident alerts honour the
-    # operator's authorization (Maintenance Chief only sees sims for their
-    # unit; Data Custodian sees none).
-    if allowed is not None:
-        filtered: list[dict] = []
-        for a in out:
-            unit = a.get("unit")
-            if unit is None or unit in allowed:
-                filtered.append(a)
-        out = filtered
+
+def _scope_alerts(out: list[dict], allowed: Optional[set[str]]) -> list[dict]:
+    """Apply role scoping the same way /alerts does: unit=None alerts
+    (base-wide streams) stay visible, unit-bearing alerts only if in
+    scope. `allowed=None` means unrestricted (no filter)."""
+    if allowed is None:
+        return out
+    return [a for a in out if a.get("unit") is None or a.get("unit") in allowed]
+
+
+@router.get("/alerts")
+async def alerts(limit: int = 30, role: Optional[str] = None):
+    ds = get_dataset()
+    allowed = allowed_units(ds, role)
+    out = _compose_raw_alerts(ds)
+    out = _scope_alerts(out, allowed)
 
     # GC-4: run sensor fusion on the post-scoped alert window. Fused threats
     # are prepended above the raw alerts so an operator sees "the chain"
@@ -354,13 +388,140 @@ def _is_snoozed(state: dict) -> bool:
         return False
 
 
+def _collect_alert_universe(ds, allowed: Optional[set[str]] = None) -> dict[str, dict]:
+    """Build the id → alert dict for every alert this operator could
+    legitimately have seen in /alerts. Used by `alert_action` to:
+      (a) reject unknown ids with 404 instead of silently growing
+          _ALERT_STATE (closes critique F3), and
+      (b) look up the owning unit so the cross-tenant scope check can
+          decide between 403 OutOfScope and a successful mutation.
+
+    Raw alerts are always indexed unscoped — that way a restricted
+    operator's URL-hack against another battalion's id falls into the
+    explicit 403 OutOfScope branch (with audit row) rather than 404,
+    which makes the spoof attempt visible in the chain.
+
+    Fused threats, however, are computed by /alerts on the SCOPED list
+    (so `FUS-MGATE-...` ids depend on which alerts the operator could
+    see). We therefore re-run fusion on the same scoped+composed list
+    /alerts feeds it — `_compose_raw_alerts` followed by `_scope_alerts`
+    with the operator's allowed_units. Without this the universe builder
+    fed fusion a different input order and an operator could see a
+    fused row in /alerts but 404 on ack.
+    """
+    universe: dict[str, dict] = {}
+
+    # Raw alerts — full unscoped index so cross-tenant probes land in
+    # the 403 OutOfScope branch with an audit row, not in 404.
+    composed_unscoped = _compose_raw_alerts(ds)
+    for a in composed_unscoped:
+        aid = a.get("id")
+        if not aid:
+            continue
+        universe[aid] = {"id": aid, "unit": a.get("unit"), "source": a.get("source")}
+
+    # Fused threats — must mirror /alerts exactly so feed-visible fused
+    # IDs are actionable. /alerts fuses AFTER scoping; do the same here.
+    try:
+        scoped = _scope_alerts(composed_unscoped, allowed)
+        for t in fuse_alerts(scoped, window_minutes=60):
+            d = t.to_alert_dict()
+            universe[d["id"]] = {"id": d["id"], "unit": d.get("unit"), "source": "FUSION"}
+    except Exception:
+        # Fusion is best-effort; an exception here must never make a
+        # legitimate raw-alert mutation 404 because a fusion bug threw.
+        pass
+
+    return universe
+
+
+def _audit_blocked_alert_action(
+    *, actor_role: Optional[str], user: Optional[dict],
+    alert_id: str, alert_unit: Optional[str], action: str,
+    allowed_set: Optional[set[str]],
+) -> None:
+    """Append a `bastion_alert_action_blocked` row so cross-tenant
+    write attempts surface in the audit chain. Best-effort — never let
+    audit failures mask the 403."""
+    try:
+        audit_log(
+            "bastion_alert_action_blocked",
+            actor=actor_role or "unknown",
+            subject_id=alert_id,
+            payload={
+                "action": f"bastion.alert.{action}",
+                "alert_id": alert_id,
+                "alert_unit": alert_unit,
+                "user_dodid": (user or {}).get("dodid"),
+                "user_role": (user or {}).get("role"),
+                "user_unit": (user or {}).get("unit"),
+                "allowed_units": sorted(allowed_set) if allowed_set else None,
+                "decision": "blocked",
+                "reason": "out_of_scope",
+                "surface": "backend",
+            },
+        )
+    except Exception:
+        pass
+
+
 @router.post("/alerts/{alert_id}/{action}")
-async def alert_action(alert_id: str, action: str):
+async def alert_action(alert_id: str, action: str, request: Request):
     """ack / snooze / resolve / unack a single alert.
 
-    The handler is intentionally tolerant of unknown ids — synthetic alerts
-    regenerate their ids on every poll for some sources, so we accept any
-    id and keep state keyed by it. Unknown actions return 400."""
+    Authorization (task #54 / critique F1):
+      * Unknown alert ids return 404 instead of growing _ALERT_STATE
+        without bound (also closes the unbounded-memory finding F3).
+      * The operator's role-scoped `allowed_units` must cover the alert's
+        owning unit. Restricted roles (maintenance_chief, g4) cannot
+        silently resolve another battalion's readiness alert. Unrestricted
+        roles (mef_commander, security_manager, data_custodian) pass.
+      * Base-wide alerts (unit=None — gate / utility / weather streams)
+        are actionable only by unrestricted roles for the same reason —
+        a single battalion's chief shouldn't be silencing installation
+        utility advisories.
+      * Cross-tenant denials are appended to the audit chain so an
+        investigator can see who probed.
+    """
+    if action not in ("ack", "snooze", "resolve", "unack"):
+        raise HTTPException(status_code=400, detail=f"unknown action: {action}")
+
+    user = getattr(request.state, "user", None) or {}
+    actor_role = session_role(request) or user.get("role")
+    ds = get_dataset()
+    allowed = allowed_units(ds, actor_role)
+
+    # Universe is built with the operator's scope so fused threat ids
+    # match the ones /alerts surfaced to them. Raw-alert ids are still
+    # full-universe so cross-tenant probes 403 with an audit row instead
+    # of 404 silently.
+    universe = _collect_alert_universe(ds, allowed=allowed)
+    alert = universe.get(alert_id)
+    if alert is None:
+        # Unknown id — refuse to grow _ALERT_STATE. Mention the id in
+        # the body so a developer can correlate; nothing sensitive in it.
+        raise HTTPException(status_code=404, detail=f"unknown alert id: {alert_id}")
+    alert_unit = alert.get("unit")
+    if allowed is not None:
+        # Restricted role: alert must have a unit AND that unit must be
+        # in scope. Base-wide (unit=None) alerts deny for restricted roles.
+        if alert_unit is None or alert_unit not in allowed:
+            _audit_blocked_alert_action(
+                actor_role=actor_role, user=user, alert_id=alert_id,
+                alert_unit=alert_unit, action=action, allowed_set=allowed,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "OutOfScope",
+                    "action": f"bastion.alert.{action}",
+                    "alert_id": alert_id,
+                    "alert_unit": alert_unit,
+                    "user_role": actor_role,
+                    "allowed_units": sorted(allowed),
+                },
+            )
+
     now = datetime.utcnow()
     if action == "ack":
         _ALERT_STATE[alert_id] = {
@@ -381,8 +542,6 @@ async def alert_action(alert_id: str, action: str):
         }
     elif action == "unack":
         _ALERT_STATE.pop(alert_id, None)
-    else:
-        raise HTTPException(status_code=400, detail=f"unknown action: {action}")
     return {"ok": True, "alert_id": alert_id, "state": _ALERT_STATE.get(alert_id)}
 
 
@@ -557,12 +716,21 @@ def _build_thermalhawk_model_info() -> dict:
       - weights_present   — proprietary weights deployed; inference
                             disabled in this public build
       - rule_based_sim    — no weights; scripted alert path
+
+    Finding F5 split: the operator response panel only renders `note`
+    (operator-facing copy). Vendor licensing / contact strings are now
+    namespaced under `admin_note` + the existing `license` / `contact`
+    keys so the admin model registry can surface them, but the Marine
+    in the response panel sees plain operator copy — no vendor email,
+    no license clause, no "available under separate license".
     """
     from ..model_hooks import STATE as MS
     base = {
         "model": "ThermalHawk (Thornveil)",
         "capability": "thermal infrared drone detection",
         "deployment_target": "edge accelerator",
+        # license + contact are admin-registry fields — surfaced by
+        # /admin model surfaces, suppressed by the operator panel.
         "license": "Thornveil proprietary — see LICENSE.md §2",
         "contact": "jesse@thornveil.ai",
     }
@@ -570,13 +738,23 @@ def _build_thermalhawk_model_info() -> dict:
         base["load_state"] = "live"
     elif MS.thermalhawk_path:
         base["load_state"] = "weights_present"
-        base["note"] = (
+        # Operator copy on the response panel.
+        base["note"] = "Live thermal inference disabled in this build."
+        # Admin-only context for the model registry.
+        base["admin_note"] = (
             "Thornveil-licensed weights deployed; "
             "live inference disabled in this public build."
         )
     else:
         base["load_state"] = "rule_based_sim"
+        # Operator copy: short, plain, actionable (no vendor email,
+        # no separate-license language).
         base["note"] = (
+            "Scripted incident profile — live thermal inference "
+            "model not deployed in this build."
+        )
+        # Admin-only context for the model registry / licensing review.
+        base["admin_note"] = (
             "Scripted sim — Thornveil ThermalHawk inference is "
             "available under separate license (jesse@thornveil.ai)."
         )
@@ -584,15 +762,80 @@ def _build_thermalhawk_model_info() -> dict:
 
 
 @router.post("/simulate/thermalhawk-detection")
-async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
-    """Kicks off the scripted demo beat: drone detected over CLB-6 motor pool
-    with ThermalHawk-Nano; auto-correlates with PULSE's CLB-6 readiness
-    state; escalates to CRITICAL; emits response checklist."""
+async def simulate_thermalhawk_detection(
+    request: Request, payload: Optional[dict] = None
+):
+    """Kicks off the scripted demo beat: drone detected over the operator's
+    motor pool with ThermalHawk-Nano; auto-correlates with PULSE's readiness
+    state; escalates to CRITICAL; emits response checklist.
+
+    Authorization (task #54 / critique F1):
+      * Role-gated to `mef_commander`, `security_manager`, `g4` — the
+        same set the FE Sim Controls pill is shown to (BastionView.tsx
+        L674). Maintenance Chief and Data Custodian get 403.
+      * `target_unit` is derived from the operator's authenticated
+        identity, NOT the request body. Prior behaviour trusted
+        `payload.unit` and let any session escalate FPCON CHARLIE on any
+        unit's motor pool. We still accept the field on the wire for
+        backward-compat with the FE button (which doesn't send one), but
+        we ignore it for routing and emit an audit row if it disagrees
+        with the derived unit so cross-tenant probes are observable.
+
+    Round-4 hardening also writes a `bastion.thermalhawk_simulate`
+    audit row keyed on sim_id so the SOC AUDIT pill reflects every
+    invocation alongside the SENTRY/PULSE/DHA per-module rows.
+    """
     payload = payload or {}
-    target_unit = payload.get("unit", "CLB-6")
+    user = getattr(request.state, "user", None) or {}
+    actor_role = session_role(request) or user.get("role")
+    require_role(actor_role, BASTION_SIMULATE_ROLES, "bastion.simulate_thermalhawk")
 
     ds = get_dataset()
     inst = _load_installation()
+
+    ds_unit_names = {u.name for u in ds.units}
+    allowed = allowed_units(ds, actor_role)
+    user_unit = user.get("unit")
+    # Derive target unit from operator identity. Order:
+    #   1. User's home unit if it's a leaf BASTION unit AND in scope.
+    #   2. "CLB-6" (canonical demo target) if in scope. Catches identities
+    #      whose home unit is a parent command or a non-dataset unit
+    #      (e.g. Reyes/Kowalski "CLB-Det", Hayes "III MEF").
+    #   3. Lowest-name unit in scope (deterministic) if CLB-6 is filtered out.
+    #   4. "CLB-6" as a final fallback when no scope is computed.
+    if user_unit in ds_unit_names and (allowed is None or user_unit in allowed):
+        target_unit = user_unit
+    elif allowed is None or "CLB-6" in allowed:
+        target_unit = "CLB-6"
+    elif allowed:
+        target_unit = sorted(allowed)[0]
+    else:
+        target_unit = "CLB-6"
+
+    # If the caller tried to spoof a different unit on the wire, surface
+    # it in the audit chain. Not a 403 (the role gate already passed and
+    # the derived unit is authoritative); the audit row is the forensic
+    # breadcrumb that says "they asked for X, we routed to Y".
+    requested_unit = payload.get("unit")
+    if requested_unit and requested_unit != target_unit:
+        try:
+            audit_log(
+                "bastion_simulate_unit_override",
+                actor=actor_role or "unknown",
+                subject_id=target_unit,
+                payload={
+                    "action": "bastion.simulate_thermalhawk",
+                    "requested_unit": requested_unit,
+                    "routed_to_unit": target_unit,
+                    "user_dodid": user.get("dodid"),
+                    "user_role": actor_role,
+                    "decision": "override",
+                    "reason": "wire_supplied_unit_ignored",
+                    "surface": "backend",
+                },
+            )
+        except Exception:
+            pass
 
     # Find the target motor pool building. Walkthrough audit: prior fallback
     # was inst['buildings'][3] (positional, brittle). If buildings get
@@ -694,7 +937,7 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
     # outcome via load_state="live". Public builds always run the
     # scripted alert path — no mechanism disclosure.
 
-    return {
+    response = {
         "sim_id": sim_id,
         "alert": alert,
         "checklist": _response_checklist_for("UAS_INCURSION", "CRITICAL", location=motor_pool["name"]),
@@ -705,6 +948,27 @@ async def simulate_thermalhawk_detection(payload: Optional[dict] = None):
         ],
         "response_forces_dispatched": ["WATCHDOG-3", "RAIDER-1", "IRONHORSE-2 (standby)"],
     }
+
+    # Hash-chain the BASTION simulate event so the AUDIT closing beat can
+    # show a `bastion.thermalhawk_simulate` entry alongside SENTRY,
+    # PULSE, and DHA writes. Anchored to the sim_id as the subject so
+    # subsequent /simulate/clear/{sim_id} requests refer to the same
+    # subject in the chain.
+    audit_log(
+        "bastion.thermalhawk_simulate",
+        actor=session_role(request) or "unknown",
+        subject_id=sim_id,
+        payload={
+            "unit": target_unit,
+            "incident_type": "UAS_INCURSION",
+            "severity": "CRITICAL",
+            "location": motor_pool.get("name"),
+            "cordon_zones_m": [c["radius_m"] for c in response["cordon_zones"]],
+            "readiness_note": readiness_note,
+        },
+    )
+
+    return response
 
 
 @router.post("/simulate/clear/{sim_id}")

@@ -16,25 +16,14 @@ const RELEASE_AUTHS = [
 
 type Auth = typeof RELEASE_AUTHS[number]["value"];
 
-// Walkthrough #5 — Distribution Statement (A-F) and REL TO caveat are
-// independent fields. Helper text below the result panel renders both as
-// separate columns per DoDI 5230.24.
-const DISTRIBUTION_AUTHORITY: Record<Auth, { dist: string; relTo: string; note: string }> = {
-  US_ONLY: {
-    dist:  "Distribution C",
-    relTo: "(no foreign release)",
-    note:  "Authorized to U.S. Government agencies and their contractors. Further distribution only as directed by the originator.",
-  },
-  FVEY: {
-    dist:  "Distribution C",
-    relTo: "REL TO USA, AUS, CAN, GBR, NZL",
-    note:  "Distribution authorized to U.S. Government agencies and their contractors. REL TO authorizes the foreign release.",
-  },
-  NATO: {
-    dist:  "Distribution C",
-    relTo: "REL TO NATO",
-    note:  "Distribution authorized to U.S. Government agencies and their contractors. REL TO NATO authorizes the foreign release.",
-  },
+// Walkthrough #5 / Task-61 — Distribution Statement (A-F) and REL TO caveat
+// are independent fields, both now driven by the backend engine instead of a
+// hardcoded "Distribution C" lookup. The fallback below only fires when the
+// engine response hasn't arrived yet.
+const REL_TO_FALLBACK: Record<Auth, string> = {
+  US_ONLY: "",
+  FVEY:    "REL TO USA, AUS, CAN, GBR, NZL",
+  NATO:    "REL TO NATO",
 };
 
 const SAMPLES = [
@@ -193,12 +182,10 @@ export function MarkTab() {
               <ReleaseCompatibilityBanner compat={result.release_compatibility} />
             )}
 
-            {/* Walkthrough #5 — Distribution Statement + REL TO caveat as
-                independent fields side-by-side. */}
-            <DistributionAuthorityPanel
-              release={release}
-              caveats={result.caveats_recommended}
-            />
+            {/* Walkthrough #5 / Task-61 — Distribution Statement + REL TO
+                caveat side-by-side, both selected by the engine from
+                content + release authority. */}
+            <DistributionAuthorityPanel result={result} release={release} />
 
             <div className="mb-4 flex items-center gap-3">
               <div className="font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
@@ -297,7 +284,14 @@ export function MarkTab() {
                 Audit trail
               </h4>
               <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm text-[var(--color-text-secondary)]">
-                <div>Engine: {result.audit.engine}</div>
+                <div>
+                  Engine: {result.audit.engine}
+                  {result.audit.engine_version && (
+                    <span className="ml-1 text-[var(--color-text-muted)]">
+                      ({result.audit.engine_version})
+                    </span>
+                  )}
+                </div>
                 <div title={result.audit.timestamp}>
                   Timestamp:{" "}
                   <span className="font-mono">
@@ -315,8 +309,41 @@ export function MarkTab() {
                     })()}
                   </span>
                 </div>
+                {/* Chain index returned by the backend audit table. Same
+                 * row id an investigator pulls in the audit-log viewer —
+                 * proves the marking actually wrote to the chain instead
+                 * of just being claimed in the UI. */}
+                {typeof result.audit.chain_index === "number" && (
+                  <div>
+                    Chain entry:{" "}
+                    <span className="font-mono text-[var(--color-text)]">
+                      #{result.audit.chain_index}
+                    </span>
+                    {result.audit.input_hash && (
+                      <span
+                        className="ml-2 font-mono text-xs text-[var(--color-text-muted)]"
+                        title={`SHA-256 ${result.audit.input_hash}`}
+                      >
+                        sha256 {result.audit.input_hash.slice(0, 8)}…
+                      </span>
+                    )}
+                  </div>
+                )}
+                {result.audit.actor_name && (
+                  <div>
+                    Actor:{" "}
+                    <span className="text-[var(--color-text)]">
+                      {result.audit.actor_name}
+                    </span>
+                    {result.audit.actor_role && (
+                      <span className="ml-1 text-[var(--color-text-muted)]">
+                        ({result.audit.actor_role})
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="mt-1 italic">
-                  Every marking is logged to the hash-chained audit trail per LICENSE §Security Architecture.
+                  Marking written to the hash-chained audit trail per LICENSE §Security Architecture.
                 </div>
               </div>
             </section>
@@ -415,16 +442,21 @@ function ReleaseCompatibilityBanner({
   );
 }
 
-// Walkthrough #5 — Distribution Statement + REL TO caveat side-by-side.
+// Walkthrough #5 / Task-61 — Distribution Statement + REL TO caveat side-by-side.
+// Both fields are now driven by the backend engine so the Distribution letter
+// (A-F) actually changes across the three sample chips per DoDI 5230.24.
 function DistributionAuthorityPanel({
+  result,
   release,
-  caveats,
 }: {
+  result: MarkResult;
   release: Auth;
-  caveats: string[];
 }) {
-  const auth = DISTRIBUTION_AUTHORITY[release];
-  const relTo = caveats.find((c) => c.startsWith("REL TO")) ?? auth.relTo;
+  const dist = result.distribution_statement;
+  const distLabel = dist?.label ?? "Distribution —";
+  const distNote =
+    dist?.description ?? "Controls who can access (U.S. Government, contractors, etc.).";
+  const relTo = result.rel_to_caveat ?? REL_TO_FALLBACK[release] ?? "";
   return (
     <div className="mb-4 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
       <div
@@ -438,10 +470,10 @@ function DistributionAuthorityPanel({
             Distribution Statement
           </div>
           <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-text)]">
-            {auth.dist}
+            {distLabel}
           </div>
           <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
-            Controls who can access (U.S. Government, contractors, etc.).
+            {distNote}
           </div>
         </div>
         <div>
@@ -455,9 +487,6 @@ function DistributionAuthorityPanel({
             Controls which foreign nationals may receive.
           </div>
         </div>
-      </div>
-      <div className="mt-2 text-xs text-[var(--color-text-muted)]">
-        {auth.note}
       </div>
     </div>
   );

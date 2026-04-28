@@ -281,15 +281,43 @@ async def dataset_info():
     }
 
 
+def _stage_demo_open(request: Request) -> bool:
+    """MDM 2026 stage-pivot — return True when the audit-read role gate
+    should be bypassed for the AUDIT-pill closing beat.
+
+    Two things must be true:
+      • `SPIRE_DEMO_QUICK_SWITCH=1` is set in the environment (the same
+        env signal that turns the additive quick-switch endpoint on).
+        This is the host's deliberate "I am running the stage demo"
+        toggle and is OFF in production by default.
+      • The caller has a valid signed session (any presenter identity).
+        The session middleware populates `request.state.user`; an
+        anonymous request still 401s before reaching this handler.
+
+    The bypass is intentionally narrow: it only applies to the audit
+    READ endpoints, never to mutating routes, and it requires both
+    signals so an accidental env flag in prod doesn't open the chain
+    to anonymous traffic.
+    """
+    if os.environ.get("SPIRE_DEMO_QUICK_SWITCH", "0") != "1":
+        return False
+    return getattr(request.state, "user", None) is not None
+
+
 @router.get("/audit")
-async def audit(limit: int = 50, role: str | None = None):
+async def audit(request: Request, limit: int = 50, role: str | None = None):
     """Append-only hash-chained audit log backed by SQLite. Each entry is
     SHA-256 chained to the previous; any mutation breaks the chain and
     verify_chain() reports the first offending id.
 
     Audit chain mining can reconstruct cross-role decision history, so
-    read access is gated to security_manager only."""
-    require_role(role, AUDIT_READ_ROLES, "audit.read")
+    read access is gated to security_manager only — UNLESS the demo
+    stage env toggle is on AND the caller is signed in (see
+    `_stage_demo_open`). The stage bypass exists so any presenter
+    identity can drop into the chain for the closing beat without
+    re-PINning into Park (security_manager)."""
+    if not _stage_demo_open(request):
+        require_role(role, AUDIT_READ_ROLES, "audit.read")
     chain = verify_chain()
     entries = recent_entries(limit=limit)
     return {
@@ -493,6 +521,42 @@ async def _secure_wipe(request: Request, payload: dict = Body(default={})):
 # GC-7 Air-gap deployment mode — comms-state + queue-on-disconnect
 # ---------------------------------------------------------------------------
 
+@router.post("/dha-rescue/audit")
+async def dha_rescue_audit(request: Request, payload: dict = Body(default={})):
+    """MDM 2026 stage-pivot — append a hash-chained audit row for a DHA
+    RESCUE (Class VIII / blood) operator action.
+
+    The DhaRescueView calls this when the presenter clicks "Advance to
+    H+72" or approves a market-sourcing recommendation. The chain
+    contract is the same one SENTRY/PULSE/BASTION write to (see
+    persistence.log) so the closing-beat AUDIT reveal shows entries
+    interleaved with the other use cases.
+
+    The endpoint trusts the authenticated session for actor identity;
+    payload fields are descriptive only (action label, recommendation
+    id, advanced-to hour). Anonymous calls are rejected by the auth
+    middleware before they reach this handler.
+    """
+    user = getattr(request.state, "user", None) or {}
+    action = str(payload.get("action") or "dha.unknown")
+    audit_log(
+        f"dha.{action}",
+        actor=user.get("dodid") or user.get("role") or "unknown",
+        subject_id=str(payload.get("subject_id") or "dha-rescue"),
+        payload={
+            "action": action,
+            "advance_to_hour": payload.get("advance_to_hour"),
+            "recommendation_id": payload.get("recommendation_id"),
+            "user_dodid": user.get("dodid"),
+            "user_role": user.get("role"),
+            "user_name": user.get("name"),
+            "surface": "dha-rescue",
+            "source_ip": _client_ip(request),
+        },
+    )
+    return {"ok": True, "logged": True, "action": action}
+
+
 @router.post("/audit/spillage")
 async def audit_spillage(request: Request, payload: dict = Body(default={})):
     """Frontend-side spillage record.
@@ -570,6 +634,7 @@ def _enrich_actor_identity(actor: str) -> dict:
 
 @router.get("/admin/audit")
 async def admin_audit(
+    request: Request,
     role: str | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -596,8 +661,13 @@ async def admin_audit(
 
     Returns enriched rows with parsed payload, identity lookup, anomaly
     tagging, and chain-walk metadata.
+
+    MDM 2026 stage-pivot — same stage-demo bypass as `/audit` so the
+    AUDIT-pill closing beat works for any signed-in presenter when
+    `SPIRE_DEMO_QUICK_SWITCH=1`.
     """
-    require_role(role, AUDIT_READ_ROLES, "audit.soc_view")
+    if not _stage_demo_open(request):
+        require_role(role, AUDIT_READ_ROLES, "audit.soc_view")
 
     actor_list = [a for a in (actors or "").split(",") if a]
     kind_list = [k for k in (kinds or "").split(",") if k]
@@ -1264,10 +1334,17 @@ def record_outcome(*, decision_kind: str, decision_id: str, decided_by: str,
 
 
 @router.post("/admin/outcome")
-async def admin_record_outcome(payload: dict = Body(default={})):
+async def admin_record_outcome(request: Request, payload: dict = Body(default={})):
     """Manual outcome submission from the AdminTab. Body:
     {decision_kind, decision_id, decided_by, was_correct, notes?,
-     scoring_engine?}."""
+     scoring_engine?}.
+
+    Gated server-side to security_manager — outcome records flow into the
+    same telemetry surface as `/admin/telemetry` (gated identically) and
+    feed the retraining-recommended flag, so unauthenticated injection
+    here would let any signed-in role poison that signal."""
+    role = session_role(request)
+    require_role(role, ADMIN_TELEMETRY_ROLES, "admin.outcome.write")
     required = ["decision_kind", "decision_id", "decided_by"]
     for k in required:
         if k not in payload:
@@ -1431,11 +1508,19 @@ def _active_impl(model: dict) -> dict | None:
 def _model_summary(model: dict) -> dict:
     """Compact summary used by the index list view. Includes the headline
     fields a security judge wants at a glance: hosting actual, FedRAMP
-    status, vendor jurisdiction, last validated date, active impl kind."""
+    status, vendor jurisdiction(s), last validated date, active impl kind.
+
+    Task #82 — distinguishes the IL-5 hosting *target* from an IL-5
+    *authorization* (the latter is a separate `authorization` block;
+    placeholder values when no ATO exists). Vendor jurisdiction is
+    surfaced as both the canonical list and the human-readable label so
+    multi-jurisdiction vendors (e.g. Alphabet/DeepMind) don't read as
+    pure-US on the row."""
     impl = _active_impl(model) or {}
     hosting = impl.get("hosting") or {}
     vendor = impl.get("vendor") or {}
     validation = impl.get("validation") or {}
+    auth = impl.get("authorization") or {}
     return {
         "id": model.get("id"),
         "name": model.get("name"),
@@ -1448,9 +1533,18 @@ def _model_summary(model: dict) -> dict:
             hosting.get("gap")
             and "none" not in str(hosting.get("gap", "")).lower()
         ),
+        "authorization": {
+            "ao": auth.get("ao"),
+            "package_id": auth.get("package_id"),
+            "expiration": auth.get("expiration"),
+            "note": auth.get("note"),
+        } if auth else None,
         "fedramp_status": impl.get("fedramp_status"),
         "vendor_name": vendor.get("name"),
         "vendor_jurisdiction": vendor.get("jurisdiction"),
+        "vendor_jurisdictions": vendor.get("jurisdictions") or (
+            [vendor.get("jurisdiction")] if vendor.get("jurisdiction") else []
+        ),
         "vendor_foreign_pivot_risk": vendor.get("foreign_pivot_risk"),
         "last_validated_at": validation.get("last_validated_at"),
         "holdout_accuracy": validation.get("holdout_accuracy"),
@@ -1463,33 +1557,54 @@ def _supply_chain_at_a_glance(models: list[dict]) -> dict:
 
     - total_models: every entry in the registry counts once (active impl).
     - at_risk_jurisdictions: unique non-US vendor jurisdictions across
-      active impls. 'low' foreign_pivot_risk doesn't dampen this — the
-      jurisdiction itself is the risk surface.
-    - models_without_fedramp_coverage: active impls whose fedramp_status
-      is anything other than 'moderate' or 'high'. 'not_applicable' counts
-      because the auditor still wants to see the count of un-covered
-      models even if the rationale is sound (no SaaS dependency).
+      active impls. Pulls from `vendor.jurisdictions` (canonical list)
+      when present so multi-jurisdiction vendors (e.g. Alphabet US +
+      DeepMind UK) surface the foreign component honestly. Falls back to
+      the single `vendor.jurisdiction` string otherwise.
+    - FedRAMP buckets — Task #82 split the old "without FedRAMP M/H"
+      single number (which read as a self-finding from the projector)
+      into three honest buckets so the auditor still sees the un-covered
+      count without the page advertising "all five lack FedRAMP":
+        • models_fedramp_covered: active impls at 'moderate' or 'high'.
+        • models_fedramp_not_applicable: active impls explicitly marked
+          'not_applicable' — first-party / in-process / no SaaS to assess.
+        • models_fedramp_pending: anything else (TBD, in-process, blank).
+      `models_without_fedramp_coverage` is retained for back-compat;
+      equals not_applicable + pending.
     - models_with_hosting_gap: active impls whose hosting.gap is set and
       doesn't read 'none'.
     - models_with_placeholder_provenance: active impls flagged 'TBD —
       placeholder' anywhere in the provenance block. Keeps the page
       honest about what's documented vs aspirational.
     """
-    us_aliases = {"united states", "us", "u.s.", "usa"}
-    fedramp_covered = {"moderate", "high"}
+    us_aliases = {"united states", "us", "u.s.", "usa", "u.s.a.", "united states of america"}
+    fedramp_covered_set = {"moderate", "high"}
     at_risk_jurs: set[str] = set()
-    no_fedramp = 0
+    fr_covered = 0
+    fr_not_applicable = 0
+    fr_pending = 0
     hosting_gap = 0
     placeholder = 0
     for m in models:
         impl = _active_impl(m) or {}
         vendor = impl.get("vendor") or {}
-        jur = (vendor.get("jurisdiction") or "").strip().lower()
-        if jur and jur not in us_aliases:
-            at_risk_jurs.add(vendor.get("jurisdiction"))
+        # Canonical list takes precedence; fall back to the single string.
+        jur_list = vendor.get("jurisdictions")
+        if not jur_list:
+            single = vendor.get("jurisdiction")
+            jur_list = [single] if single else []
+        for j in jur_list:
+            if not isinstance(j, str):
+                continue
+            if j.strip().lower() not in us_aliases:
+                at_risk_jurs.add(j.strip())
         fr = (impl.get("fedramp_status") or "").strip().lower()
-        if fr not in fedramp_covered:
-            no_fedramp += 1
+        if fr in fedramp_covered_set:
+            fr_covered += 1
+        elif fr == "not_applicable":
+            fr_not_applicable += 1
+        else:
+            fr_pending += 1
         hosting = impl.get("hosting") or {}
         gap = (hosting.get("gap") or "").strip().lower()
         if gap and "none" not in gap:
@@ -1504,10 +1619,21 @@ def _supply_chain_at_a_glance(models: list[dict]) -> dict:
         "total_models": len(models),
         "at_risk_jurisdictions": sorted(at_risk_jurs),
         "at_risk_jurisdictions_count": len(at_risk_jurs),
-        "models_without_fedramp_coverage": no_fedramp,
+        "models_fedramp_covered": fr_covered,
+        "models_fedramp_not_applicable": fr_not_applicable,
+        "models_fedramp_pending": fr_pending,
+        # Back-compat: NA + pending == old "without FedRAMP M/H" number.
+        "models_without_fedramp_coverage": fr_not_applicable + fr_pending,
         "models_with_hosting_gap": hosting_gap,
         "models_with_placeholder_provenance": placeholder,
-        "fedramp_coverage_definition": "Counts active implementations whose fedramp_status is not 'moderate' or 'high'. 'not_applicable' is included so the auditor sees the un-covered count even when the rationale is sound (in-process / no SaaS).",
+        "fedramp_coverage_definition": (
+            "Active implementations bucketed three ways: 'covered' (FedRAMP "
+            "Moderate or High), 'N/A — in-process' (first-party code, no "
+            "SaaS to assess), 'pending' (TBD / authorization paperwork "
+            "outstanding). Color is reserved for the pending bucket so "
+            "the auditor sees the unresolved count without reading "
+            "non-applicable as a finding."
+        ),
     }
 
 

@@ -15,14 +15,14 @@
  * SENTRY Review Queue cross-link into the relevant model detail page
  * (D1 owns the in-PULSE summary, this lane owns the canonical detail).
  */
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type ModelRegistryListResponse, type ModelRegistrySummary, type SupplyChainAtAGlance } from "../../api";
-import { withRetry, formatApiError } from "../../api-retry";
+import { api, type ModelRegistrySummary, type SupplyChainAtAGlance } from "../../api";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { ErrorState, LoadingState } from "../../components/ui";
 import { ClassificationBadge } from "../../components/classification";
+import { useRegistryFetch } from "./useRegistryFetch";
+import { DdilFreshnessBanner, FreshnessHeader, RegistryLoadErrorTile } from "./RegistryFreshness";
 
 export function ModelRegistryView() {
   const role = useSpireStore((s) => s.role);
@@ -36,32 +36,13 @@ export function ModelRegistryView() {
     );
   }
 
-  const [data, setData] = useState<ModelRegistryListResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [waking, setWaking] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const resp = await withRetry(() => api.system.adminModels(), {
-          onAttempt: (attempt) => {
-            if (!cancelled) setWaking(attempt > 1);
-          },
-        });
-        if (cancelled) return;
-        setData(resp);
-        setWaking(false);
-      } catch (e) {
-        if (cancelled) return;
-        setError(formatApiError(e));
-        setWaking(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // W1 #83 — fetch lifecycle (loadedAt + manual refresh + auto-refresh on
+  // DDIL reconnect) lives in the shared hook so the same affordances are
+  // wired identically here and on the detail page.
+  const { data, error, waking, loadedAt, refreshing, refresh } = useRegistryFetch(
+    () => api.system.adminModels(),
+    "registry-list",
+  );
 
   if (error && !data) {
     return (
@@ -69,7 +50,8 @@ export function ModelRegistryView() {
         title="Model Registry Offline"
         description="Could not load the model supply-chain registry. The backend may be cycling."
         detail={error}
-        onRetry={() => window.location.reload()}
+        onRetry={refresh}
+        retrying={refreshing}
       />
     );
   }
@@ -79,8 +61,8 @@ export function ModelRegistryView() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">
-      <div className="mb-4 flex items-baseline justify-between gap-4">
-        <div>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest">
             Admin · Model Supply Chain
           </h1>
@@ -92,26 +74,38 @@ export function ModelRegistryView() {
             Registry version {data.registry_version ?? "unknown"} · maintained by {data.owner ?? "SPIRE Engineering"}
           </div>
         </div>
-        <div className="shrink-0">
+        <div className="flex shrink-0 flex-col items-end gap-2">
           <ClassificationBadge classification="UNCLASSIFIED" />
+          <FreshnessHeader loadedAt={loadedAt} refreshing={refreshing} onRefresh={refresh} />
         </div>
       </div>
 
-      <SupplyChainHeader g={data.supply_chain_at_a_glance} />
+      <DdilFreshnessBanner loadedAt={loadedAt} />
 
-      <div className="mt-4 mb-2 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
-        Models registered ({data.models.length})
-      </div>
-      <div className="flex flex-col gap-2">
-        {data.models.map((m) => (
-          <ModelRow key={m.id} model={m} />
-        ))}
-        {data.models.length === 0 && (
-          <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
-            REGISTRY EMPTY — dataset/data/model_registry.json missing or unreadable
+      {/* W1 #83 — surface the backend's `load_error` field explicitly. A
+       * malformed model_registry.json used to render as the empty-state
+       * tile, indistinguishable from "no models registered". */}
+      {data.load_error ? (
+        <RegistryLoadErrorTile message={data.load_error} />
+      ) : (
+        <>
+          <SupplyChainHeader g={data.supply_chain_at_a_glance} />
+
+          <div className="mt-4 mb-2 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
+            Models registered ({data.models.length})
           </div>
-        )}
-      </div>
+          <div className="flex flex-col gap-2">
+            {data.models.map((m) => (
+              <ModelRow key={m.id} model={m} />
+            ))}
+            {data.models.length === 0 && (
+              <div className="rounded-sm border border-dashed border-[var(--color-border)] p-8 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
+                REGISTRY EMPTY — dataset/data/model_registry.json missing or unreadable
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       <div className="mt-6 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
         Honesty over hand-waving — placeholder fields are labelled "TBD — placeholder" rather than fabricated.
@@ -123,14 +117,17 @@ export function ModelRegistryView() {
 
 function SupplyChainHeader({ g }: { g: SupplyChainAtAGlance }) {
   const at_risk = g.at_risk_jurisdictions_count;
-  const fedrampUncovered = g.models_without_fedramp_coverage;
   const hostingGap = g.models_with_hosting_gap;
+  // Task #82 — split the FedRAMP cell into covered / N/A in-process /
+  // pending so the projector eye doesn't lock onto a yellow "5". Color
+  // is reserved for the pending bucket; the other two are neutral so a
+  // legitimately-N/A model doesn't read as a finding.
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
       <div className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
         Supply chain at a glance
       </div>
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Stat label="Models registered" value={g.total_models.toString()} />
         <Stat
           label="At-risk vendor jurisdictions"
@@ -141,12 +138,6 @@ function SupplyChainHeader({ g }: { g: SupplyChainAtAGlance }) {
               ? "All vendors US-jurisdictioned"
               : g.at_risk_jurisdictions.join(", ")
           }
-        />
-        <Stat
-          label="Without FedRAMP M/H"
-          value={fedrampUncovered.toString()}
-          tone={fedrampUncovered === 0 ? "ok" : "warn"}
-          subtitle="Includes 'not_applicable' (auditor sees the count)"
         />
         <Stat
           label="Hosting gap present"
@@ -161,8 +152,94 @@ function SupplyChainHeader({ g }: { g: SupplyChainAtAGlance }) {
           subtitle="Models with un-trained / un-attested lanes"
         />
       </div>
+      <FedrampSplitStat g={g} />
       <div className="mt-3 font-mono text-[11px] text-[var(--color-text-muted)] tracking-wide">
         FedRAMP coverage definition · {g.fedramp_coverage_definition}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Task #82 — three-up FedRAMP cell. Renders the same data the back-compat
+ * `models_without_fedramp_coverage` carries, but split so a Marine glancing
+ * at the projector reads "1 pending, 4 in-process N/A" instead of "5
+ * without FedRAMP". Color reserved for the pending bucket.
+ */
+function FedrampSplitStat({ g }: { g: SupplyChainAtAGlance }) {
+  const pending = g.models_fedramp_pending;
+  const covered = g.models_fedramp_covered;
+  const naInProcess = g.models_fedramp_not_applicable;
+  return (
+    <div className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+      <div className="mb-2 flex items-baseline justify-between gap-3">
+        <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
+          FedRAMP posture · active implementations
+        </div>
+        <div className="font-mono text-[11px] uppercase text-[var(--color-text-muted)] tracking-widest">
+          {g.total_models} models
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {/*
+         * Color is reserved for the Pending bucket only. Covered and
+         * N/A render neutral so the operator's eye lands on the
+         * actual finding (pending paperwork) instead of treating
+         * "N/A — first-party code" as a green/red signal.
+         */}
+        <FedrampBucket
+          label="Covered (M / H)"
+          value={covered}
+          subtitle="FedRAMP Moderate or High in force"
+          tone="neutral"
+        />
+        <FedrampBucket
+          label="N/A · in-process"
+          value={naInProcess}
+          subtitle="First-party code, no SaaS to assess"
+          tone="neutral"
+        />
+        <FedrampBucket
+          label="Pending"
+          value={pending}
+          subtitle="Authorization paperwork outstanding"
+          tone={pending === 0 ? "neutral" : "warn"}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FedrampBucket({
+  label,
+  value,
+  subtitle,
+  tone,
+}: {
+  label: string;
+  value: number;
+  subtitle: string;
+  tone: "ok" | "warn" | "neutral";
+}) {
+  const color =
+    tone === "warn"
+      ? "var(--color-warning)"
+      : tone === "ok"
+        ? "var(--color-success)"
+        : "var(--color-text)";
+  return (
+    <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+      <div className="font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
+        {label}
+      </div>
+      <div
+        className="mt-1 font-mono text-2xl font-semibold tabular-nums"
+        style={{ color }}
+      >
+        {value}
+      </div>
+      <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">
+        {subtitle}
       </div>
     </div>
   );
@@ -202,7 +279,12 @@ function ModelRow({ model }: { model: ModelRegistrySummary }) {
         <Field
           label="Vendor"
           value={`${model.vendor_name ?? "—"} · ${model.vendor_jurisdiction ?? "—"}`}
-          tone={isUS(model.vendor_jurisdiction) ? "ok" : "warn"}
+          // Task #82 — when the canonical jurisdictions array is present
+          // (e.g. Alphabet US + DeepMind UK) every entry must be US for
+          // the row to read green. A single non-US partner downgrades to
+          // warn so the page doesn't paint a foreign-co-publisher vendor
+          // as US-only.
+          tone={isAllUS(model.vendor_jurisdictions, model.vendor_jurisdiction) ? "ok" : "warn"}
         />
         <Field
           label="Last validated"
@@ -291,5 +373,23 @@ function Field({
 function isUS(j?: string | null): boolean {
   if (!j) return false;
   const v = j.trim().toLowerCase();
-  return v === "united states" || v === "us" || v === "u.s." || v === "usa";
+  return (
+    v === "united states" ||
+    v === "us" ||
+    v === "u.s." ||
+    v === "usa" ||
+    v === "u.s.a." ||
+    v === "united states of america"
+  );
+}
+
+/**
+ * Task #82 — green only if every canonical jurisdiction in the vendor's
+ * list is US-aligned. Falls back to the single string when the canonical
+ * list isn't published.
+ */
+function isAllUS(list?: string[] | null, fallback?: string | null): boolean {
+  const candidates = list && list.length > 0 ? list : (fallback ? [fallback] : []);
+  if (candidates.length === 0) return false;
+  return candidates.every((j) => isUS(j));
 }

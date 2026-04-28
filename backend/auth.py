@@ -9,7 +9,9 @@ hydrates `request.state.user` on every call and rejects unauthenticated
 
 The four mocked Marines exist in `MOCK_USERS` and represent the role
 spectrum SPIRE currently scopes against: operator (G-4), maintenance chief,
-security manager, MEF commander. Identity payload is the contract every
+security manager, MEF commander. All four are assigned to the pilot
+customer named by slide 2 / AboutTeamView / TransitionView (3d MLR ·
+CLB-Det · III MEF · MARFORPAC). Identity payload is the contract every
 downstream lane reads — additions only, no renames.
 """
 from __future__ import annotations
@@ -110,10 +112,14 @@ def verify_session(token: str) -> Optional[dict[str, Any]]:
 
 # ---------------------------------------------------------------------------
 # Mock identities — the four cert "smartcards" the operator picks from.
+# Field shape is the load-bearing contract for downstream lanes; additions
+# are safe, renames break the world. Keep this in sync with
+# `frontend/src/state/store.ts` `User`.
 #
-# Field shape is the load-bearing contract for downstream lanes. Once shipped
-# every Wave 1 lane reads from this; additions are safe, renames break the
-# world. Keep this in sync with `frontend/src/state/store.ts` `User`.
+# Unit / parent_command values are constrained to the pilot-customer chain
+# (CLB-Det → 3d MLR → 3d MarDiv → III MEF → MARFORPAC) that slide 2 names.
+# `tests/test_identity_persona_alignment.py` enforces the chain; update
+# both ends together when changing the customer.
 # ---------------------------------------------------------------------------
 
 MOCK_USERS: list[dict[str, Any]] = [
@@ -125,14 +131,16 @@ MOCK_USERS: list[dict[str, Any]] = [
         "rank": "GySgt",
         "rank_long": "Gunnery Sergeant",
         "billet": "Logistics Operator",
-        "unit": "CLB-6",
-        "parent_command": "2d MLG",
+        "unit": "CLB-Det",
+        "parent_command": "3d MLR",
         "branch": "USMC",
         "clearance": "SECRET",
         "role": "g4",
         "initials": "MR",
         "cert_issuer": "DOD ID CA-59",
-        "cert_serial": "0x4A7F12C8",
+        # Cert serials reshaped to ~16-hex-digit, mixed case, no `0x` prefix —
+        # the shape DEERS actually issues. Task #27 (auth-cac-splash F7).
+        "cert_serial": "4A7f12C8e03B91a2",
         "cert_expires": "2027-08-14",
     },
     {
@@ -143,14 +151,14 @@ MOCK_USERS: list[dict[str, Any]] = [
         "rank": "MSgt",
         "rank_long": "Master Sergeant",
         "billet": "Maintenance Chief",
-        "unit": "CLB-6",
-        "parent_command": "2d MLG",
+        "unit": "CLB-Det",
+        "parent_command": "3d MLR",
         "branch": "USMC",
         "clearance": "SECRET",
         "role": "maintenance_chief",
         "initials": "DK",
         "cert_issuer": "DOD ID CA-59",
-        "cert_serial": "0x6B19E04A",
+        "cert_serial": "6b19E04a8C7d2531",
         "cert_expires": "2026-11-02",
     },
     {
@@ -161,14 +169,14 @@ MOCK_USERS: list[dict[str, Any]] = [
         "rank": "CWO3",
         "rank_long": "Chief Warrant Officer 3",
         "billet": "Security Manager",
-        "unit": "2d MLG",
-        "parent_command": "II MEF",
+        "unit": "3d MLR",
+        "parent_command": "3d MarDiv",
         "branch": "USMC",
         "clearance": "TS//SCI",
         "role": "security_manager",
         "initials": "JP",
         "cert_issuer": "DOD ID SW-CA-66",
-        "cert_serial": "0x8F02D971",
+        "cert_serial": "8F02d971B4E6c0A8",
         "cert_expires": "2027-03-29",
     },
     {
@@ -179,17 +187,41 @@ MOCK_USERS: list[dict[str, Any]] = [
         "rank": "MajGen",
         "rank_long": "Major General",
         "billet": "Commanding General",
-        "unit": "II MEF",
-        "parent_command": "MARFORCOM",
+        "unit": "III MEF",
+        "parent_command": "MARFORPAC",
         "branch": "USMC",
         "clearance": "TS//SCI",
         "role": "mef_commander",
         "initials": "RH",
         "cert_issuer": "DOD ID CA-59",
-        "cert_serial": "0xC4A8B335",
+        "cert_serial": "C4a8B335E97f1D60",
         "cert_expires": "2028-01-17",
     },
 ]
+
+# Fields a real CAC reader surfaces on the cert-selection screen — name,
+# rank, branch, cert metadata, masked DODID, initials. Clearance, role,
+# billet, unit, and parent_command are deliberately withheld from the
+# unauthenticated `/api/auth/users` response so a passer-by glancing at
+# the laptop (or an unauth API caller) cannot enumerate who holds TS//SCI
+# vs SECRET, who's the security manager, etc. Those fields stay on the
+# authenticated payloads (`/api/auth/me`, `/api/auth/login`, and the
+# authenticated re-fetch of `/api/auth/users` the in-app identity
+# switcher uses). Task #27 / auth-cac-splash F1.
+_PUBLIC_USER_FIELDS = (
+    "dodid",
+    "name",
+    "rank",
+    "branch",
+    "initials",
+    "cert_issuer",
+    "cert_serial",
+    "cert_expires",
+)
+
+
+def _public_user(u: dict[str, Any]) -> dict[str, Any]:
+    return {k: u[k] for k in _PUBLIC_USER_FIELDS if k in u}
 
 MOCK_USERS_BY_DODID: dict[str, dict[str, Any]] = {u["dodid"]: u for u in MOCK_USERS}
 
@@ -207,9 +239,22 @@ router = APIRouter()
 
 
 @router.get("/users")
-def list_users() -> dict[str, Any]:
-    """Cert-selection screen reads this to populate the four smartcards."""
-    return {"users": MOCK_USERS}
+def list_users(request: Request) -> dict[str, Any]:
+    """Cert-selection screen reads this to populate the four smartcards.
+
+    OPSEC: when the caller is unauthenticated (the normal case at the
+    splash) we return only the fields a real CAC reader surfaces — name,
+    rank, branch, masked DODID, initials, cert metadata. Clearance,
+    role, billet, unit, and parent_command are stripped so a passer-by
+    glancing at the laptop or an unauth API caller cannot infer who
+    holds which clearance / billet. Authenticated callers (the in-app
+    identity switcher in the topbar) get the full directory because
+    they've already cleared the auth gate. See task #27 / F1.
+    """
+    user = getattr(request.state, "user", None)
+    if user is not None:
+        return {"users": MOCK_USERS}
+    return {"users": [_public_user(u) for u in MOCK_USERS]}
 
 
 @router.post("/login")
@@ -258,6 +303,68 @@ def me(request: Request) -> dict[str, Any]:
     if not user:
         raise HTTPException(status_code=401, detail="unauthenticated")
     return {"user": user}
+
+
+# ---------------------------------------------------------------------------
+# MDM 2026 stage-pivot — additive quick-switch endpoint.
+#
+# Re-issues a session cookie for a different mock identity WITHOUT
+# requiring a PIN re-entry. Used only by the on-stage IdentityPill in
+# `stageMode` so the presenter can swap CAC identity in one click.
+#
+# Hardening:
+#   • Gated by env var `SPIRE_DEMO_QUICK_SWITCH=1`. Disabled (404) by
+#     default, so production / non-stage deploys never expose the path.
+#   • DODID must already exist in MOCK_USERS (no on-the-fly user
+#     creation; the four cert identities are the only valid targets).
+#   • Same cookie attributes as `/login` so a quick-switched session is
+#     indistinguishable on the wire from one that came through PIN entry.
+#   • Middleware is unchanged — this is router-only, additive code.
+# ---------------------------------------------------------------------------
+
+
+class QuickSwitchRequest(BaseModel):
+    dodid: str
+
+
+def _quick_switch_enabled() -> bool:
+    return os.environ.get("SPIRE_DEMO_QUICK_SWITCH", "0") == "1"
+
+
+@router.post("/quick-switch")
+def quick_switch(req: QuickSwitchRequest, request: Request, response: Response) -> dict[str, Any]:
+    if not _quick_switch_enabled():
+        raise HTTPException(status_code=404, detail="quick_switch_disabled")
+    # SECURITY: require an EXISTING authenticated session before re-issuing
+    # a cookie for any other identity. Without this gate, an unauthenticated
+    # caller could mint a valid session for any mock user just by knowing
+    # the env var was on. The session middleware already populates
+    # `request.state.user` from the signed cookie; if it is None the
+    # caller is not currently signed in and we refuse the swap.
+    current = getattr(request.state, "user", None)
+    if not current:
+        raise HTTPException(status_code=401, detail="quick_switch_requires_session")
+    user = MOCK_USERS_BY_DODID.get(req.dodid)
+    if not user:
+        raise HTTPException(status_code=404, detail="cert_not_found")
+    issued = int(time())
+    payload = {
+        "dodid": user["dodid"],
+        "iat": issued,
+        "exp": issued + SESSION_TTL_SECONDS,
+        "jti": secrets.token_hex(8),
+    }
+    token = sign_session(payload)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=SESSION_TTL_SECONDS,
+        path="/",
+        secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
+    )
+    return {"ok": True, "user": user, "expires_at": payload["exp"]}
 
 
 # ---------------------------------------------------------------------------

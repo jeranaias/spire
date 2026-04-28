@@ -29,11 +29,15 @@ import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, ErrorState, LoadingState, EmptyState, IconButton } from "../../components/ui";
 import { ClassifiedExport } from "../../components/classification/ClassifiedExport";
+import { useClearance } from "../../components/classification/useClearance";
 import { AdminTabs } from "../AdminView";
 import {
   CLASS_ORDER,
+  CLASS_RANK,
   classificationColors,
   classificationLabel,
+  normalizeClassification,
+  type Classification,
 } from "../../components/classification/levels";
 
 type TimeWindow = "any" | "15m" | "1h" | "24h" | "7d" | "custom";
@@ -76,9 +80,75 @@ function fmtUtc(iso: string): string {
   return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
 }
 
+/**
+ * Compute the bundle classification (= max row classification) plus a
+ * one-line provenance note: "stamped SECRET because 4 of 24 rows are SECRET".
+ *
+ * Rows with no classification field collapse to UNCLASSIFIED (matches
+ * `normalizeClassification`'s permissive fallback). The result drives both
+ * the visible export-stamp and the spillage gate; we deliberately reject
+ * the operator's filter chip as an input — the stamp must reflect the
+ * *contents* of the bundle, not the operator's intent (Task #37).
+ *
+ * Manual verification (curl walk-through, Security Manager session):
+ *
+ *   # 1. Confirm the chain contains a TOP_SECRET row in the export window.
+ *   curl -s "$API/system/admin/audit?limit=500" \
+ *     | jq '[.rows[] | .classification] | group_by(.) | map({(.[0]): length}) | add'
+ *   # → { "TOP_SECRET": 3, "SECRET": 41, "CUI": 12, "UNCLASSIFIED": 444 }
+ *
+ *   # 2. With *no* Classification chip selected, click "Export filtered set".
+ *   #    Old behaviour: file named `spire_audit_UNCLASSIFIED_*.json` and
+ *   #    `bundle_classification` field absent → spillage hatch.
+ *   #    New behaviour: file named `spire_audit_TOP_SECRET_*.json`,
+ *   #    JSON includes
+ *   #      "bundle_classification": "TOP_SECRET",
+ *   #      "bundle_classification_provenance":
+ *   #          "stamped TOP SECRET because 3 of 500 rows are TOP SECRET",
+ *   #    and if the operator's clearance < TOP_SECRET the download is
+ *   #    blocked and a `spillage_prevented` row is appended to the chain.
+ *
+ *   # 3. Pagination edge case. Page 6 (offset 500) shows only UNCLAS rows.
+ *   #    Old (page-derived) preview gate would have flipped the badge to
+ *   #    UNCLASSIFIED; the export-window-derived gate (this file) stays
+ *   #    pinned to TOP_SECRET because the 500-row export window is the
+ *   #    same regardless of which page the operator is viewing.
+ */
+function computeBundleClassification(rows: AuditEntry[]): {
+  level: Classification;
+  counts: Partial<Record<Classification, number>>;
+  provenance: string;
+} {
+  const counts: Partial<Record<Classification, number>> = {};
+  let maxRank = 0;
+  let maxLevel: Classification = "UNCLASSIFIED";
+  for (const r of rows) {
+    const lvl = normalizeClassification(r.classification);
+    counts[lvl] = (counts[lvl] ?? 0) + 1;
+    const rk = CLASS_RANK[lvl];
+    if (rk > maxRank) {
+      maxRank = rk;
+      maxLevel = lvl;
+    }
+  }
+  const total = rows.length;
+  const atLevel = counts[maxLevel] ?? 0;
+  const provenance =
+    total === 0
+      ? `stamped ${classificationLabel(maxLevel)} (empty bundle — defaulted to UNCLASSIFIED)`
+      : `stamped ${classificationLabel(maxLevel)} because ${atLevel} of ${total} row${total === 1 ? "" : "s"} ${atLevel === 1 ? "is" : "are"} ${classificationLabel(maxLevel)}`;
+  return { level: maxLevel, counts, provenance };
+}
+
 export function AuditView() {
   const role = useSpireStore((s) => s.role);
-  if (role !== "security_manager") {
+  // MDM 2026 stage-pivot — bypass the security_manager scope check
+  // when the session is in stage mode. The on-stage flow lets the
+  // host close the BASTION beat by jumping into the audit chain to
+  // show the hash-chained record, regardless of which mock identity
+  // is currently signed in. Outside stage mode the wall is unchanged.
+  const stageMode = useSpireStore((s) => s.stageMode);
+  if (role !== "security_manager" && !stageMode) {
     return (
       <InsufficientPrivilege
         feature="Audit · SOC View"
@@ -92,10 +162,29 @@ export function AuditView() {
   const [kinds, setKinds]         = useState<string[]>([]);
   const [resource, setResource]   = useState<string[]>([]);
   const [classification, setClassification] = useState<string>("");
-  const [tw, setTw]               = useState<TimeWindow>("any");
+  // MDM 2026 stage-pivot — when the host opens AUDIT from the stage
+  // pill it should land on the closing-beat reveal: every operator
+  // decision across the four use cases in the last 15 minutes,
+  // chronological, hash-chained. Outside stage mode the SOC analyst
+  // gets the previous default ("any") so a deep-link to a 6-hour-old
+  // event still works.
+  const [tw, setTw]               = useState<TimeWindow>(stageMode ? "15m" : "any");
   const [customAfter, setCustomAfter]   = useState<string>("");
   const [customBefore, setCustomBefore] = useState<string>("");
   const [q, setQ]                 = useState<string>("");
+  // Task #39 (F4) — debounced free-text search. Wiring `onChange` straight
+  // into `queryParams` fired one /system/admin/audit round-trip per
+  // keystroke; on a SATCOM-Yellow link a 17-character SR number raced 17
+  // in-flight queries home and the *last* response (not the one matching
+  // the final string) won. We coalesce keystrokes into a single trailing
+  // query 220ms after typing settles, and abort any in-flight audit query
+  // when a newer one supersedes it (see fetch effect below). Mirrors the
+  // pattern in InferenceEconomicsTab.tsx (Defend-the-cost slider).
+  const [debouncedQ, setDebouncedQ] = useState<string>("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 220);
+    return () => clearTimeout(t);
+  }, [q]);
   const [onlyAnoms, setOnlyAnoms] = useState<boolean>(false);
   const [page, setPage]           = useState<number>(0);
   const [data, setData]           = useState<AuditQueryResult | null>(null);
@@ -103,11 +192,20 @@ export function AuditView() {
   const [waking, setWaking]       = useState<boolean>(false);
   const [openRow, setOpenRow]     = useState<AuditEntry | null>(null);
 
-  // Reset to page 0 whenever a filter changes — otherwise a narrowed result
-  // set leaves the operator on an empty trailing page.
-  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, q, onlyAnoms]);
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const { clearance, can } = useClearance();
 
-  const queryParams = useMemo<AuditQueryParams>(() => {
+  // Reset to page 0 whenever a filter changes — otherwise a narrowed result
+  // set leaves the operator on an empty trailing page. Use the *debounced*
+  // search value so the page doesn't reset on every keystroke.
+  useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms]);
+
+  // Filter signature *without* pagination — drives both the page query
+  // (joined with limit/offset) and the export-set fetch (limit 500).
+  // Splitting it out lets the export-bundle gate stay stable across paging
+  // so navigating to page 6 of a mixed-classification result does not flip
+  // the gate to whatever happens to be on the current page.
+  const filterParams = useMemo<AuditQueryParams>(() => {
     const range = tw === "custom"
       ? { after: customAfter || undefined, before: customBefore || undefined }
       : windowToRange(tw);
@@ -118,55 +216,152 @@ export function AuditView() {
       classification: classification || undefined,
       after:          range.after,
       before:         range.before,
-      q:              q.trim() || undefined,
+      q:              debouncedQ.trim() || undefined,
       only_anomalies: onlyAnoms || undefined,
-      limit:          PAGE_SIZE,
-      offset:         page * PAGE_SIZE,
     };
-  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, q, onlyAnoms, page]);
+  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms]);
+
+  const queryParams = useMemo<AuditQueryParams>(() => ({
+    ...filterParams,
+    limit:  PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+  }), [filterParams, page]);
+
+  const exportSetParams = useMemo<AuditQueryParams>(() => ({
+    ...filterParams,
+    limit:  500,
+    offset: 0,
+  }), [filterParams]);
 
   useEffect(() => {
     let cancelled = false;
-    const run = async (firstLoad: boolean) => {
+    const controller = new AbortController();
+    const run = async () => {
       try {
-        const fetcher = firstLoad
-          ? () => withRetry(() => api.system.auditQuery(queryParams), {
-              onAttempt: (attempt) => { if (!cancelled) setWaking(attempt > 1); },
-            })
-          : () => api.system.auditQuery(queryParams);
-        const r = await fetcher();
+        // Each filter-change cycle goes through withRetry — `withRetry` only
+        // re-issues on transient 5xx / network errors, so on a healthy link
+        // it costs nothing extra; on a Fly cold-start it gives the operator
+        // the "Waking…" affordance instead of a hard error. The same
+        // AbortSignal is threaded into every attempt so a newer queryParams
+        // (debounced search, filter chip, page nav) cancels in-flight work
+        // including any pending backoff retry.
+        const r = await withRetry(
+          () => api.system.auditQuery(queryParams, { signal: controller.signal }),
+          { onAttempt: (attempt) => { if (!cancelled) setWaking(attempt > 1); } },
+        );
         if (cancelled) return;
         setData(r);
         setError(null);
         setWaking(false);
       } catch (e) {
         if (cancelled) return;
-        if (firstLoad) {
-          setError(formatApiError(e));
-          setWaking(false);
-        } else {
-          console.warn("Audit query poll failed:", e);
-        }
+        // AbortError is the expected outcome of a faster keystroke landing
+        // a newer query — don't surface it as a UI error or a console warn.
+        const name = (e as { name?: string } | null)?.name;
+        if (controller.signal.aborted || name === "AbortError") return;
+        setError(formatApiError(e));
+        setWaking(false);
       }
     };
-    run(true);
-    return () => { cancelled = true; };
+    run();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [queryParams]);
 
   // Polled refresh (12s) — separate effect so filter re-fetches don't fight
-  // the timer.
+  // the timer. Gated on `document.visibilityState === "visible"` so a
+  // backgrounded tab does not keep DoSing the operator's own backend on a
+  // degraded link (Task #39 / F4). Re-runs immediately on visibility-change
+  // back to "visible" so the analyst sees fresh data when they refocus.
+  // The poll's in-flight request is abortable too, so a queryParams change
+  // (or unmount) doesn't leak a stale poll response on top of the fresh
+  // filter-driven response.
   useEffect(() => {
-    const id = setInterval(() => {
-      api.system.auditQuery(queryParams).then(setData).catch(() => {});
-    }, 12_000);
-    return () => clearInterval(id);
+    const controller = new AbortController();
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      api.system
+        .auditQuery(queryParams, { signal: controller.signal })
+        .then((r) => { if (!controller.signal.aborted) setData(r); })
+        .catch(() => { /* AbortError + transient errors: poll silently retries on next tick */ });
+    };
+    const id = setInterval(tick, 12_000);
+    const onVis = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") tick();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVis);
+    }
+    return () => {
+      clearInterval(id);
+      controller.abort();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVis);
+      }
+    };
   }, [queryParams]);
+
+  // Bundle classification computed from the *export window* (the same
+  // 500-row fetch that `onExport` will download), NOT from the currently
+  // visible page. Driving the gate from the page would let pagination
+  // change what's classified: with PAGE_SIZE=100 the operator on page 6+
+  // is past the 500-row export window entirely, and a page-derived gate
+  // could flip from TS_SCI → UNCLASSIFIED based on which slice they
+  // happened to scroll to. Refreshing whenever the filter changes keeps
+  // the gate in lock-step with what `onExport` will actually fetch.
+  const [exportBundle, setExportBundle] = useState<ReturnType<typeof computeBundleClassification> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setExportBundle(null);
+    api.system.auditQuery(exportSetParams)
+      .then((r) => { if (!cancelled) setExportBundle(computeBundleClassification(r.rows)); })
+      .catch(() => { /* gate stays disabled until the next filter change retries */ });
+    return () => { cancelled = true; };
+  }, [exportSetParams]);
 
   const onExport = useCallback(async () => {
     if (!data) return;
     // Pull *all* rows matching the current filter (cap 500) so the exported
     // bundle reflects the operator's filter intent, not just the current page.
-    const wide = await api.system.auditQuery({ ...queryParams, limit: 500, offset: 0 });
+    // Re-fetched here (rather than reused from `exportBundle`) so the chain
+    // can grow between the gate-render and the click without the operator
+    // smuggling out a new TOP_SECRET row that landed in the last few
+    // seconds.
+    const wide = await api.system.auditQuery(exportSetParams);
+
+    // Stamp the bundle by the highest classification actually present in
+    // the rows — NOT by the operator's Classification chip. A blank chip
+    // used to mis-stamp mixed bundles UNCLASSIFIED, which was the one-click
+    // spillage hatch fixed under Task #37.
+    const bundle = computeBundleClassification(wide.rows);
+
+    // Authoritative second gate: even if the visible-page badge said
+    // UNCLASSIFIED, the wider fetch may surface a SECRET row. Re-check the
+    // operator's clearance against the *true* bundle level here, write a
+    // spillage_prevented audit entry, and abort the download.
+    if (!can(bundle.level)) {
+      pushToast({
+        tone: "error",
+        text: `Spillage prevented · bundle is ${classificationLabel(bundle.level)} (${bundle.provenance}); your clearance is ${clearance || "UNCLASSIFIED"}`,
+        ttlMs: 8000,
+      });
+      try {
+        await api.system.spillagePrevented({
+          action: "audit.export.json",
+          required_classification: bundle.level,
+          user_clearance: clearance,
+          surface: "frontend",
+        });
+      } catch {
+        // Toast already informed the operator; the next gated call will
+        // re-fire its own audit entry server-side.
+      }
+      return;
+    }
+
     const blob = new Blob(
       [JSON.stringify({
         exported_at: new Date().toISOString(),
@@ -174,6 +369,9 @@ export function AuditView() {
         head_hash: wide.head_hash,
         broken_at_id: wide.broken_at_id,
         anomaly_count: wide.anomaly_count,
+        bundle_classification: bundle.level,
+        bundle_classification_provenance: bundle.provenance,
+        bundle_classification_counts: bundle.counts,
         rows: wide.rows,
       }, null, 2)],
       { type: "application/json" },
@@ -181,12 +379,19 @@ export function AuditView() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `spire_audit_${classificationLabel(classification || "UNCLASSIFIED")}_${new Date().toISOString().replace(/[-:]/g, "").slice(0,15)}.json`;
+    // Filename carries the *bundle* classification — not the filter chip —
+    // so that a file mailed to the wrong network is at least labelled
+    // honestly per the marking on the file itself.
+    const stamp = classificationLabel(bundle.level).replace(/\s+/g, "_").replace(/\/+/g, "_");
+    a.download = `spire_audit_${stamp}_${new Date().toISOString().replace(/[-:]/g, "").slice(0,15)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [data, queryParams, classification]);
+    // Refresh the visible gate to match what we just exported (the wide
+    // fetch may have grown since the last filter-change effect fired).
+    setExportBundle(bundle);
+  }, [data, queryParams, exportSetParams, can, clearance, pushToast]);
 
   if (error && !data) {
     return (
@@ -243,12 +448,22 @@ export function AuditView() {
               {data.anomaly_count} anomal{data.anomaly_count === 1 ? "y" : "ies"} in view
             </span>
             <ClassifiedExport
-              classification={classification || "UNCLASSIFIED"}
+              classification={exportBundle?.level ?? "UNCLASSIFIED"}
               action="audit.export.json"
               label="Export filtered set"
               pendingLabel="Exporting…"
               onExport={onExport}
-              hint={`Up to 500 rows · stamped ${classification || "UNCLASSIFIED"}`}
+              disabled={exportBundle === null}
+              disabledReason={
+                exportBundle === null
+                  ? "Computing bundle classification from export window…"
+                  : undefined
+              }
+              hint={
+                exportBundle
+                  ? `Up to 500 rows · ${exportBundle.provenance} (recomputed at click)`
+                  : "Computing bundle classification from the 500-row export window…"
+              }
             />
           </div>
         </div>
@@ -516,12 +731,7 @@ function AuditRow({
         {fmtUtc(row.ts)}
       </td>
       <td className="px-2 py-1.5">
-        <div className="text-[var(--color-text)]">
-          {row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name}
-        </div>
-        <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
-          {row.identity.dodid ? `DODID ${row.identity.dodid} · ` : ""}{row.identity.role || row.actor}
-        </div>
+        <IdentityCell row={row} />
       </td>
       <td className="px-2 py-1.5 text-[var(--color-text)]">
         <div className="flex items-center gap-1.5">
@@ -584,6 +794,121 @@ function AuditRow({
         </span>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Classify an audit row's identity as one of:
+ *   - "person":      DODID is bound to a real Marine in MOCK_USERS.
+ *   - "system":      actor is a non-person process (e.g. `system_boot`,
+ *                    backfill jobs).
+ *   - "role_only":   actor is a role string (`data_custodian`, etc.) that
+ *                    does not currently map to any seeded Marine, so the
+ *                    backend fallback returned an identity-shaped stub
+ *                    with no DODID/rank/name.
+ *
+ * Both non-person classes get an explicit badge so a CDAO judge can tell
+ * "we logged a role-bound action without a person" apart from "we logged
+ * a real Marine" — preserving the demo claim that every action with a
+ * DODID is CAC-anchored.
+ */
+type IdentityKind = "person" | "system" | "role_only";
+
+// Known non-person actor labels emitted by backend automations
+// (`backend/persistence.py`, `backend/network_monitor.py`,
+// `backend/scenario_blood.py`, scheduled jobs). Anything that starts
+// with `system`, `scheduler`, `cron`, `monitor`, `scenario.`, or `batch.`
+// is treated as a system process so it doesn't get tagged as a missing
+// identity. Match is lowercase + prefix to stay defensive against new
+// automation actor names that follow the same shape.
+const SYSTEM_ACTOR_PREFIXES = [
+  "system",
+  "scheduler",
+  "cron",
+  "network_monitor",
+  "scenario.",
+  "batch.",
+] as const;
+
+function classifyIdentity(row: AuditEntry): IdentityKind {
+  if (row.identity.dodid) return "person";
+  const a = (row.actor || "").trim().toLowerCase();
+  const r = (row.identity.role || "").trim().toLowerCase();
+  if (!a) return "system";
+  for (const p of SYSTEM_ACTOR_PREFIXES) {
+    if (a === p || a.startsWith(p)) return "system";
+    if (r === p || r.startsWith(p)) return "system";
+  }
+  return "role_only";
+}
+
+function IdentityCell({ row }: { row: AuditEntry }) {
+  const kind = classifyIdentity(row);
+  if (kind === "person") {
+    return (
+      <>
+        <div className="text-[var(--color-text)]">
+          {row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name}
+        </div>
+        <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
+          DODID {row.identity.dodid} · {row.identity.role || row.actor}
+        </div>
+      </>
+    );
+  }
+  if (kind === "system") {
+    return (
+      <>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[var(--color-text-secondary)]">System process</span>
+          <IdentityBadge tone="muted" label="NON-PERSON" title="Logged by an automated process — no human DODID is bound to this row." />
+        </div>
+        <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
+          {row.actor || "system"}
+        </div>
+      </>
+    );
+  }
+  // role_only
+  return (
+    <>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[var(--color-text-secondary)]">{row.identity.role || row.actor}</span>
+        <IdentityBadge
+          tone="warn"
+          label="ROLE-ONLY · NO DODID"
+          title="Action recorded against a role (no Marine in the seeded roster currently holds this role) — no DODID was bound to this row."
+        />
+      </div>
+      <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
+        no person bound to this action
+      </div>
+    </>
+  );
+}
+
+function IdentityBadge({
+  tone,
+  label,
+  title,
+}: {
+  tone: "warn" | "muted";
+  label: string;
+  title: string;
+}) {
+  const color = tone === "warn" ? "var(--color-warning)" : "var(--color-text-muted)";
+  return (
+    <span
+      title={title}
+      className="rounded-sm border px-1 py-[1px] font-mono text-[9px] uppercase tracking-wider"
+      style={{
+        color,
+        borderColor: "color-mix(in oklab, currentColor 50%, transparent)",
+        background: "color-mix(in oklab, currentColor 12%, transparent)",
+      }}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -668,10 +993,7 @@ function RowDrawer({
         <div className="flex-1 overflow-y-auto p-4">
           {/* Identity + outcome card */}
           <Section label="Identity">
-            <KV k="Name"  v={row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name} />
-            <KV k="DODID" v={row.identity.dodid || "(not captured)"} />
-            <KV k="Role"  v={row.identity.role || row.actor} />
-            <KV k="Unit"  v={row.identity.unit || "—"} />
+            <DrawerIdentity row={row} />
           </Section>
 
           <Section label="Action">
@@ -743,6 +1065,59 @@ function RowDrawer({
           )}
         </div>
       </aside>
+    </>
+  );
+}
+
+function DrawerIdentity({ row }: { row: AuditEntry }) {
+  const kind = classifyIdentity(row);
+  if (kind === "person") {
+    return (
+      <>
+        <KV k="Name"  v={row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name} />
+        <KV k="DODID" v={row.identity.dodid} />
+        <KV k="Role"  v={row.identity.role || row.actor} />
+        <KV k="Unit"  v={row.identity.unit || "—"} />
+      </>
+    );
+  }
+  if (kind === "system") {
+    return (
+      <>
+        <KV
+          k="Name"
+          v={
+            <span className="flex items-center gap-1.5">
+              <span>System process</span>
+              <IdentityBadge tone="muted" label="NON-PERSON" title="Logged by an automated process — no human DODID is bound to this row." />
+            </span>
+          }
+        />
+        <KV k="DODID" v={<span className="text-[var(--color-text-muted)]">— (no person)</span>} />
+        <KV k="Role"  v={row.actor || "system"} />
+        <KV k="Unit"  v="—" />
+      </>
+    );
+  }
+  // role_only
+  return (
+    <>
+      <KV
+        k="Name"
+        v={
+          <span className="flex items-center gap-1.5">
+            <span className="text-[var(--color-text-secondary)]">{row.identity.role || row.actor}</span>
+            <IdentityBadge
+              tone="warn"
+              label="ROLE-ONLY · NO DODID"
+              title="Action recorded against a role (no Marine in the seeded roster currently holds this role) — no DODID was bound to this row."
+            />
+          </span>
+        }
+      />
+      <KV k="DODID" v={<span className="text-[var(--color-warning)]">— (no DODID captured)</span>} />
+      <KV k="Role"  v={row.identity.role || row.actor} />
+      <KV k="Unit"  v={row.identity.unit || "—"} />
     </>
   );
 }

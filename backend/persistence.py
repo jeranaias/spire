@@ -126,11 +126,15 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts    ON audit_log(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor);
 
 CREATE TABLE IF NOT EXISTS sentry_decisions (
-    sr_number   TEXT PRIMARY KEY,
-    action      TEXT NOT NULL,            -- approve | reject | modify
-    actor_role  TEXT NOT NULL,
-    note        TEXT,
-    ts          TEXT NOT NULL
+    sr_number          TEXT PRIMARY KEY,
+    action             TEXT NOT NULL,            -- approve | reject | modify
+    actor_role         TEXT NOT NULL,
+    actor_dodid        TEXT NOT NULL DEFAULT '',
+    actor_name         TEXT NOT NULL DEFAULT '',
+    actor_unit         TEXT NOT NULL DEFAULT '',
+    actor_cert_serial  TEXT NOT NULL DEFAULT '',
+    note               TEXT,
+    ts                 TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pulse_feedback (
@@ -159,6 +163,21 @@ CREATE TABLE IF NOT EXISTS uploaded_batches (
     raw_bytes   BLOB
 );
 
+-- Task #67: persist the in-memory `_BATCHES` dict so a uvicorn restart
+-- mid-demo doesn't strand the operator on a 404 between Upload and
+-- Processing. Stores the full batch payload (records + jobs + results)
+-- as a JSON blob keyed by batch_id. Hydrated on demand by the SENTRY
+-- routes; small enough (<1MB per 500-record batch) that JSON-in-SQLite
+-- beats threading another schema migration through.
+CREATE TABLE IF NOT EXISTS sentry_batches (
+    batch_id    TEXT PRIMARY KEY,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    payload     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentry_batches_updated ON sentry_batches(updated_at);
+
 CREATE TABLE IF NOT EXISTS user_prefs (
     dodid       TEXT NOT NULL,
     pref_key    TEXT NOT NULL,
@@ -166,12 +185,54 @@ CREATE TABLE IF NOT EXISTS user_prefs (
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (dodid, pref_key)
 );
+
+-- Risk Board "Draft Action" submissions. Persisting these turned the
+-- Draft button from a toast-only no-op into a real artifact a judge
+-- can drill into ("where did that go?" → here, plus an audit_log row).
+-- status is held|dismissed; the demo doesn't ship a full approval
+-- workflow, so the badge surfaces every held draft until an operator
+-- dismisses it.
+CREATE TABLE IF NOT EXISTS pulse_drafts (
+    draft_id    TEXT PRIMARY KEY,
+    asset_id    TEXT NOT NULL,
+    unit_name   TEXT,
+    kind        TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    description TEXT,
+    cost_usd    REAL,
+    mc_delta_pct REAL,
+    time_to_effect_hours REAL,
+    artifact_json TEXT,
+    actor       TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'held',
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pulse_drafts_status ON pulse_drafts(status);
+CREATE INDEX IF NOT EXISTS idx_pulse_drafts_created ON pulse_drafts(created_at);
 """
 
 
 def init_db() -> None:
     with conn() as c:
         c.executescript(SCHEMA)
+        # In-place migration: add operator-identity columns to existing
+        # sentry_decisions tables that predate task #25. SQLite's ALTER
+        # TABLE ADD COLUMN is cheap and idempotent-by-try; we swallow
+        # the duplicate-column error on subsequent boots.
+        for col in (
+            "actor_dodid",
+            "actor_name",
+            "actor_unit",
+            "actor_cert_serial",
+        ):
+            try:
+                c.execute(
+                    f"ALTER TABLE sentry_decisions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                )
+            except sqlite3.OperationalError:
+                # Column already exists — first install or already migrated.
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -203,12 +264,16 @@ def log(kind: str, *, actor: str = "system", subject_id: Optional[str] = None, p
             "prev_hash": prev_hash,
         }
         self_hash = hashlib.sha256((prev_hash + _canonical(entry)).encode()).hexdigest()
-        c.execute(
+        cur = c.execute(
             "INSERT INTO audit_log(ts, actor, kind, subject_id, payload, prev_hash, self_hash) VALUES (?,?,?,?,?,?,?)",
             (ts, actor, kind, subject_id or "", entry["payload"], prev_hash, self_hash),
         )
+        # `id` is the chain index — the position of this entry in the
+        # append-only audit table. Surfaces in returned dicts so callers can
+        # show "chain entry #N" to operators without a follow-up query.
         return {
-            "ts": ts, "actor": actor, "kind": kind, "subject_id": subject_id or "",
+            "id": cur.lastrowid, "ts": ts, "actor": actor, "kind": kind,
+            "subject_id": subject_id or "",
             "prev_hash": prev_hash, "self_hash": self_hash,
         }
 
@@ -234,13 +299,39 @@ def verify_chain() -> dict:
     return {"ok": True, "entries": len(rows), "head_hash": prev}
 
 
-def recent_entries(limit: int = 50) -> list[dict]:
+def recent_entries(limit: int = 50, *, include_payload: bool = False) -> list[dict]:
+    """Return the N most recent audit entries.
+
+    When ``include_payload=True``, each row also carries the original
+    ``payload`` dict (parsed from the canonical JSON stored at write time)
+    so a downstream verifier can reconstruct what each row meant — not just
+    that the chain hash lines up. Defaults to ``False`` to preserve the
+    light-weight summary used by status panels and tests.
+    """
+    cols = "id, ts, actor, kind, subject_id, self_hash"
+    if include_payload:
+        cols += ", payload"
     with conn() as c:
         rows = c.execute(
-            "SELECT id, ts, actor, kind, subject_id, self_hash FROM audit_log ORDER BY id DESC LIMIT ?",
+            f"SELECT {cols} FROM audit_log ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        if include_payload:
+            raw = d.get("payload")
+            if isinstance(raw, str) and raw:
+                try:
+                    d["payload"] = json.loads(raw)
+                except (ValueError, TypeError):
+                    # Keep the raw string if it isn't valid JSON — the chain
+                    # is still verifiable; we just couldn't parse the body.
+                    d["payload"] = {"_raw": raw}
+            else:
+                d["payload"] = {}
+        out.append(d)
+    return out
 
 
 def query_audit(
@@ -478,14 +569,97 @@ def entries_for_subject(subject_id: str, limit: int = 50) -> list[dict]:
 # Domain writes
 # ---------------------------------------------------------------------------
 
-def record_sentry_decision(sr_number: str, action: str, *, actor_role: str, note: str = "") -> None:
+def record_sentry_decision(
+    sr_number: str,
+    action: str,
+    *,
+    actor_role: str,
+    actor_dodid: str = "",
+    actor_name: str = "",
+    actor_unit: str = "",
+    actor_cert_serial: str = "",
+    note: str = "",
+) -> None:
+    """Persist a SENTRY review decision and emit the matching audit-chain row.
+
+    The actor_* fields anchor the decision to a specific Marine (DODID +
+    name + unit + CAC cert serial) so the hash-chained audit trail can
+    answer "who" — not just "which role" — for any held SR. This is the
+    backbone the inspector's audit-chain modal surfaces in the UI.
+    """
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
-            "INSERT OR REPLACE INTO sentry_decisions(sr_number, action, actor_role, note, ts) VALUES (?,?,?,?,?)",
-            (sr_number, action, actor_role, note, ts),
+            "INSERT OR REPLACE INTO sentry_decisions("
+            "sr_number, action, actor_role, actor_dodid, actor_name, "
+            "actor_unit, actor_cert_serial, note, ts) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                sr_number,
+                action,
+                actor_role,
+                actor_dodid,
+                actor_name,
+                actor_unit,
+                actor_cert_serial,
+                note,
+                ts,
+            ),
         )
-    log("sentry_review", actor=actor_role, subject_id=sr_number, payload={"action": action, "note": note})
+    log(
+        "sentry_review",
+        actor=actor_role,
+        subject_id=sr_number,
+        payload={
+            "action": action,
+            "note": note,
+            "actor_role": actor_role,
+            "actor_dodid": actor_dodid,
+            "actor_name": actor_name,
+            "actor_unit": actor_unit,
+            "actor_cert_serial": actor_cert_serial,
+        },
+    )
+
+
+def record_sentry_bulk_decision(
+    sr_numbers: list[str],
+    action: str,
+    *,
+    actor_role: str,
+    column: str = "",
+    note: str = "",
+) -> dict:
+    """Persist N review decisions and write **one** chained audit entry.
+
+    The previous flow looped `record_sentry_decision` per SR which produced
+    N independent audit rows for a single operator click — making "Approve
+    all 357" indistinguishable from 357 deliberate one-by-one approvals
+    in the chain. This helper writes one `sentry_bulk_review` entry that
+    names every SR it touched, so a judge or IG can audit the bulk action
+    as a single intent.
+    """
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    if not sr_numbers:
+        return {"count": 0}
+    with conn() as c:
+        c.executemany(
+            "INSERT OR REPLACE INTO sentry_decisions(sr_number, action, actor_role, note, ts) VALUES (?,?,?,?,?)",
+            [(sr, action, actor_role, note, ts) for sr in sr_numbers],
+        )
+    entry = log(
+        "sentry_bulk_review",
+        actor=actor_role,
+        subject_id=f"bulk:{action}:{len(sr_numbers)}",
+        payload={
+            "action": action,
+            "column": column,
+            "count": len(sr_numbers),
+            "sr_numbers": list(sr_numbers),
+            "note": note,
+        },
+    )
+    return {"count": len(sr_numbers), "entry": entry}
 
 
 def record_pulse_feedback(asset_id: str, correct: bool, note: str = "") -> None:
@@ -514,7 +688,9 @@ def decisions_for_batch(sr_numbers: list[str]) -> dict[str, dict]:
     placeholders = ",".join("?" for _ in sr_numbers)
     with conn() as c:
         rows = c.execute(
-            f"SELECT sr_number, action, actor_role, note, ts FROM sentry_decisions WHERE sr_number IN ({placeholders})",
+            "SELECT sr_number, action, actor_role, actor_dodid, actor_name, "
+            "actor_unit, actor_cert_serial, note, ts "
+            f"FROM sentry_decisions WHERE sr_number IN ({placeholders})",
             tuple(sr_numbers),
         ).fetchall()
     return {r["sr_number"]: dict(r) for r in rows}
@@ -525,6 +701,183 @@ def feedback_summary() -> dict:
         total = c.execute("SELECT COUNT(*) AS n FROM pulse_feedback").fetchone()["n"]
         correct = c.execute("SELECT COUNT(*) AS n FROM pulse_feedback WHERE correct = 1").fetchone()["n"]
     return {"total": total, "correct": correct, "correct_rate": (correct / total) if total else 0.0}
+
+
+def store_sentry_batch(batch_id: str, batch: dict) -> None:
+    """Task #67 — persist (or upsert) a SENTRY batch's full state.
+
+    The blob includes the records list, schema, jobs map, and any per-job
+    results. Re-stored on every state-mutating endpoint (start_processing
+    completion, etc.) so a uvicorn restart recovers the same batch the
+    operator was in the middle of.
+    """
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    try:
+        payload = json.dumps(batch, default=str)
+    except Exception:
+        # Defence in depth — if anything in the batch is non-serializable
+        # we should still surface a useful failure rather than crash the
+        # processing endpoint. Caller logs the noise.
+        raise
+    with conn() as c:
+        c.execute(
+            "INSERT INTO sentry_batches(batch_id, created_at, updated_at, payload) "
+            "VALUES (?,?,?,?) "
+            "ON CONFLICT(batch_id) DO UPDATE SET "
+            "updated_at = excluded.updated_at, payload = excluded.payload",
+            (batch_id, ts, ts, payload),
+        )
+
+
+def load_sentry_batch(batch_id: str) -> Optional[dict]:
+    """Task #67 — hydrate a previously-persisted batch by id, or None."""
+    with conn() as c:
+        row = c.execute(
+            "SELECT payload FROM sentry_batches WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["payload"])
+    except Exception:
+        return None
+
+
+def find_sentry_batch_id_for_job(job_id: str) -> Optional[str]:
+    """Task #67 — locate the batch that owns a given job_id by scanning the
+    50 most-recently-updated persisted batches. Used after a uvicorn
+    restart when /sentry/jobs/{job_id} comes in cold and the in-memory
+    `_BATCHES` dict has been wiped.
+    """
+    with conn() as c:
+        rows = c.execute(
+            "SELECT batch_id, payload FROM sentry_batches "
+            "ORDER BY updated_at DESC LIMIT 50"
+        ).fetchall()
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"])
+        except Exception:
+            continue
+        if isinstance(payload, dict) and job_id in (payload.get("jobs") or {}):
+            return r["batch_id"]
+    return None
+
+
+def record_pulse_draft(
+    *,
+    asset_id: str,
+    kind: str,
+    title: str,
+    actor: str,
+    unit_name: Optional[str] = None,
+    description: Optional[str] = None,
+    cost_usd: Optional[float] = None,
+    mc_delta_pct: Optional[float] = None,
+    time_to_effect_hours: Optional[float] = None,
+    artifact: Optional[dict] = None,
+) -> dict:
+    """Persist a Risk Board "Draft Action" so it survives a refresh and
+    shows up in the TopBar drafts badge. Also writes an audit_log row so
+    the chain has the artifact (subject_id is the draft_id, payload
+    captures the action specifics)."""
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    # draft_id pattern matches PROP-/expedite-style ids elsewhere in PULSE.
+    rand_hex = hashlib.sha256(f"{asset_id}{kind}{ts}{actor}".encode()).hexdigest()[:6].upper()
+    draft_id = f"DRAFT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{rand_hex}"
+    artifact_json = json.dumps(artifact or {}, sort_keys=True, default=str)
+    with conn() as c:
+        c.execute(
+            "INSERT INTO pulse_drafts(draft_id, asset_id, unit_name, kind, title, "
+            "description, cost_usd, mc_delta_pct, time_to_effect_hours, artifact_json, "
+            "actor, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                draft_id, asset_id, unit_name or "", kind, title,
+                description or "", cost_usd, mc_delta_pct, time_to_effect_hours,
+                artifact_json, actor, "held", ts,
+            ),
+        )
+    log(
+        "pulse_draft_action",
+        actor=actor,
+        subject_id=draft_id,
+        payload={
+            "asset_id": asset_id,
+            "unit_name": unit_name or "",
+            "kind": kind,
+            "title": title,
+            "description": description or "",
+            "cost_usd": cost_usd,
+            "mc_delta_pct": mc_delta_pct,
+            "time_to_effect_hours": time_to_effect_hours,
+            "artifact": artifact or {},
+            "status": "held",
+        },
+    )
+    return {
+        "draft_id": draft_id,
+        "asset_id": asset_id,
+        "unit_name": unit_name or "",
+        "kind": kind,
+        "title": title,
+        "description": description or "",
+        "cost_usd": cost_usd,
+        "mc_delta_pct": mc_delta_pct,
+        "time_to_effect_hours": time_to_effect_hours,
+        "artifact": artifact or {},
+        "actor": actor,
+        "status": "held",
+        "created_at": ts,
+    }
+
+
+def list_pulse_drafts(*, status: str = "held", limit: int = 50) -> list[dict]:
+    """Return drafts ordered newest-first. Default scope is held drafts so
+    the TopBar badge only counts the active queue."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT draft_id, asset_id, unit_name, kind, title, description, "
+            "cost_usd, mc_delta_pct, time_to_effect_hours, artifact_json, "
+            "actor, status, created_at FROM pulse_drafts "
+            "WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["artifact"] = json.loads(d.pop("artifact_json") or "{}")
+        except Exception:  # noqa: BLE001
+            d["artifact"] = {}
+        out.append(d)
+    return out
+
+
+def dismiss_pulse_draft(draft_id: str, *, actor: str) -> Optional[dict]:
+    """Mark a draft as dismissed and audit-log the dismissal. Returns the
+    updated row or None if the draft wasn't found / already dismissed."""
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    with conn() as c:
+        row = c.execute(
+            "SELECT draft_id, asset_id, kind, status FROM pulse_drafts WHERE draft_id = ?",
+            (draft_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["status"] != "held":
+            return dict(row)
+        c.execute(
+            "UPDATE pulse_drafts SET status = 'dismissed' WHERE draft_id = ?",
+            (draft_id,),
+        )
+    log(
+        "pulse_draft_dismiss",
+        actor=actor,
+        subject_id=draft_id,
+        payload={"asset_id": row["asset_id"], "kind": row["kind"], "ts": ts},
+    )
+    return {**dict(row), "status": "dismissed"}
 
 
 def store_uploaded_batch(batch_id: str, source: str, record_count: int, schema: dict, raw: bytes) -> None:

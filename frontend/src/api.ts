@@ -239,7 +239,16 @@ export async function replayQueuedWrite(write: {
 export const api = {
   auth: {
     // List the four mocked CAC identities for the cert-selection screen.
-    users: () => jsonFetch<{ users: AuthUser[] }>("/auth/users", undefined, false),
+    // Unauthenticated callers see the trimmed `PublicAuthUser` shape
+    // (no clearance / role / billet / unit / parent_command) — see
+    // `backend/auth.list_users`. The in-app identity switcher uses the
+    // authenticated `directory()` variant below to recover the full
+    // payload it needs to render role labels.
+    users: () => jsonFetch<{ users: PublicAuthUser[] }>("/auth/users", undefined, false),
+    // Same `/auth/users` endpoint, but typed for the post-login
+    // identity switcher: when the session cookie is present the backend
+    // returns the full `AuthUser` records (role / billet / etc).
+    directory: () => jsonFetch<{ users: AuthUser[] }>("/auth/users", undefined, false),
     // PIN: any 6-digit numeric (UI illusion only).
     login: (dodid: string, pin: string) =>
       jsonFetch<{ ok: boolean; user: AuthUser; expires_at: number }>(
@@ -249,6 +258,22 @@ export const api = {
       ),
     logout: () => jsonFetch<{ ok: boolean }>("/auth/logout", { method: "POST" }, false),
     me: () => jsonFetch<{ user: AuthUser }>("/auth/me", undefined, false),
+    /**
+     * MDM 2026 stage-pivot — re-issue a session cookie for a different
+     * MOCK identity without requiring a PIN re-entry. Backend route is
+     * additive (`POST /api/auth/quick-switch`) and gated by the
+     * `SPIRE_DEMO_QUICK_SWITCH=1` env var. Returns 404 if disabled or
+     * 404 on unknown DODID.
+     *
+     * The IdentityPill prefers this when the store is in `stageMode` so
+     * the presenter can swap CAC identity on stage with one click.
+     */
+    quickSwitch: (dodid: string) =>
+      jsonFetch<{ ok: boolean; user: AuthUser; expires_at: number }>(
+        "/auth/quick-switch",
+        { method: "POST", body: JSON.stringify({ dodid }) },
+        false,
+      ),
   },
   system: {
     status: () => jsonFetch<SystemStatus>("/system/status"),
@@ -268,6 +293,22 @@ export const api = {
         method: "POST",
         body: JSON.stringify(detail),
       }),
+    /**
+     * MDM 2026 stage-pivot — append an audit chain entry for a DHA
+     * RESCUE operator action (Advance to H+72, approve market
+     * sourcing, etc.). Backend at `POST /api/system/dha-rescue/audit`
+     * stamps the entry with the session DODID + role.
+     */
+    dhaRescueAudit: (detail: {
+      action: string;
+      advance_to_hour?: number;
+      recommendation_id?: string;
+      subject_id?: string;
+    }) =>
+      jsonFetch<{ ok: boolean; logged: boolean; action: string }>(
+        "/system/dha-rescue/audit",
+        { method: "POST", body: JSON.stringify(detail) },
+      ),
     datasetInfo: () => jsonFetch<DatasetInfo>("/system/dataset-info"),
     commsState: () => jsonFetch<CommsStateResponse>("/system/comms/state"),
     setAirGap: (enable: boolean, reason?: string) =>
@@ -305,6 +346,24 @@ export const api = {
     // dispatch — the player just steers the FE through the beats.
     scenarioBloodVignette: () =>
       jsonFetch<BloodScenarioMeta>("/system/scenario/blood-h72", undefined, false),
+    // Round-4 — pull the injected events buffer for the DHA RESCUE
+    // surface so the operator can see scripted alerts/forecasts/
+    // requisitions/toasts that fired this run. Backed by
+    // /api/system/scenario/blood-h72/feed.
+    scenarioBloodFeed: (sinceOffsetMin?: number, kinds?: string[], limit = 100) => {
+      const sp = new URLSearchParams();
+      if (typeof sinceOffsetMin === "number" && Number.isFinite(sinceOffsetMin)) {
+        sp.set("since_offset_min", String(sinceOffsetMin));
+      }
+      if (kinds && kinds.length > 0) sp.set("kind", kinds.join(","));
+      sp.set("limit", String(limit));
+      const qs = sp.toString();
+      return jsonFetch<BloodScenarioFeed>(
+        `/system/scenario/blood-h72/feed${qs ? `?${qs}` : ""}`,
+        undefined,
+        false,
+      );
+    },
     adminTelemetry: () => jsonFetch<AdminTelemetry>("/system/admin/telemetry"),
     adminOutcomes: (limit = 50, kind?: string) => {
       const sp = new URLSearchParams();
@@ -318,7 +377,7 @@ export const api = {
      * comma-joined where the backend accepts a list (actors / kinds /
      * resource); empty strings are skipped so the URL stays compact.
      */
-    auditQuery: (params: AuditQueryParams = {}) => {
+    auditQuery: (params: AuditQueryParams = {}, opts?: { signal?: AbortSignal }) => {
       const sp = new URLSearchParams();
       if (params.actors?.length)  sp.set("actors",  params.actors.join(","));
       if (params.kinds?.length)   sp.set("kinds",   params.kinds.join(","));
@@ -330,7 +389,10 @@ export const api = {
       if (params.only_anomalies)  sp.set("only_anomalies", "true");
       sp.set("limit",  String(params.limit  ?? 100));
       sp.set("offset", String(params.offset ?? 0));
-      return jsonFetch<AuditQueryResult>(`/system/admin/audit?${sp.toString()}`);
+      return jsonFetch<AuditQueryResult>(
+        `/system/admin/audit?${sp.toString()}`,
+        opts?.signal ? { signal: opts.signal } : undefined,
+      );
     },
     // W1 #30 — model registry / supply-chain page. Restricted server-side
     // to security_manager via MODEL_REGISTRY_ROLES.
@@ -381,6 +443,16 @@ export const api = {
     // pill; intentionally mock + deterministic across polls.
     gcssMcLastSync: () =>
       jsonFetch<GcssMcLastSync>("/integrations/gcss-mc/last-sync", undefined, false),
+    // Task #76 — system-of-record sample slice. Goes through jsonFetch so
+    // the DDIL interceptor applies (the integrations page is the one
+    // place that documents failure modes — it must respect the SATCOM
+    // denial drill, not silently bypass it).
+    gcssMcSample: (limit = 3) =>
+      jsonFetch<GcssMcSamplePayload>(
+        `/integrations/gcss-mc/sample?limit=${limit}`,
+        undefined,
+        false,
+      ),
     // Task #25 — return SPIRE to a clean t=0 demo state. Gated server-side
     // to the demo operator (g4); the topbar reset button is hidden for
     // every other role so this client method is never reachable from the
@@ -393,6 +465,33 @@ export const api = {
     riskBoard: (top = 20) => jsonFetch<RiskBoard>(`/pulse/risk-board?top=${top}`),
     assetDeepDive: (assetId: string) => jsonFetch<AssetDeepDive>(`/pulse/assets/${encodeURIComponent(assetId)}`),
     cannibalization: () => jsonFetch<Cannibalization>("/pulse/cannibalization"),
+    // Task-42 — route the propose POST through jsonFetch so the DDIL
+    // interceptor applies (DISCONNECTED → queue for replay,
+    // INTERMITTENT → may drop with a warn, LIMITED → latency
+    // dramatization). Previously CannibalizationTab + RecommendPanel
+    // each issued raw fetch("/api/pulse/cannibalization/propose", …),
+    // bypassing the interceptor and silently exiting the "we work
+    // when comms are yellow" demo on this page.
+    cannibalizationPropose: (
+      input: {
+        recipient_sr: string;
+        donor_asset_id: string;
+        // Task #41 — backend accepts donor_sr as a legacy alias alongside
+        // donor_asset_id; pass it when the donor row exposes one so the
+        // server can cross-check both identifiers in the self-cannib guard.
+        donor_sr?: string;
+        nsn: string;
+      },
+      opts?: { signal?: AbortSignal },
+    ) =>
+      jsonFetch<{ ok: boolean; event_id?: string; impact?: string }>(
+        "/pulse/cannibalization/propose",
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          signal: opts?.signal,
+        },
+      ),
     forecast: (unit?: string, window = 14) =>
       jsonFetch<Forecast>(`/pulse/forecast?window=${window}${unit ? `&unit=${encodeURIComponent(unit)}` : ""}`),
     feedback: (assetId: string, correct: boolean, note = "") =>
@@ -416,18 +515,66 @@ export const api = {
       return jsonFetch<PredictFailuresResponse>(`/pulse/predict-failures?${sp}`);
     },
     modelCard: () => jsonFetch<ModelCard>("/pulse/model-card"),
+    // Draft Action persistence — Risk Board CTA writes through here so the
+    // click survives a refresh and shows up in the TopBar drafts badge.
+    draftAction: (body: {
+      asset_id: string;
+      kind: string;
+      title: string;
+      unit_name?: string;
+      description?: string;
+      cost_usd?: number | null;
+      mc_delta_pct?: number | null;
+      time_to_effect_hours?: number | null;
+      artifact?: Record<string, unknown> | null;
+    }) =>
+      jsonFetch<{ ok: boolean; draft: PulseDraft }>("/pulse/draft-action", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    drafts: (status: "held" | "dismissed" = "held") =>
+      jsonFetch<{ drafts: PulseDraft[]; count: number; status: string }>(
+        `/pulse/drafts?status=${status}`,
+      ),
+    dismissDraft: (draftId: string) =>
+      jsonFetch<{ ok: boolean; draft_id: string; status: string }>(
+        `/pulse/drafts/${encodeURIComponent(draftId)}/dismiss`,
+        { method: "POST" },
+      ),
   },
   sentry: {
     demoBatch: (limit = 500) => jsonFetch<SentryBatch>(`/sentry/demo-batch?limit=${limit}`),
     process: (batchId: string) =>
       jsonFetch<{ job_id: string; batch_id: string }>(`/sentry/process/${batchId}`, { method: "POST" }),
-    jobStatus: (jobId: string) => jsonFetch<SentryJob>(`/sentry/jobs/${jobId}`),
-    reviewQueue: (batchId: string) => jsonFetch<SentryReviewQueue>(`/sentry/review-queue/${batchId}`),
+    jobStatus: (jobId: string, role?: string) =>
+      jsonFetch<SentryJob>(
+        `/sentry/jobs/${jobId}${role ? `?role=${encodeURIComponent(role)}` : ""}`,
+      ),
+    reviewQueue: (batchId: string, role?: string) =>
+      jsonFetch<SentryReviewQueue>(
+        `/sentry/review-queue/${batchId}${role ? `?role=${encodeURIComponent(role)}` : ""}`,
+      ),
     review: (sr: string, action: "approve" | "reject" | "modify", note = "") =>
       jsonFetch<{ ok: boolean }>(`/sentry/review/${sr}/${action}`, {
         method: "POST",
         body: JSON.stringify({ note, role: "data_custodian" }),
       }),
+    // Bulk review — N records, one chained audit entry. Replaces the
+    // earlier client-side fan-out that emitted N independent review POSTs
+    // (and N independent audit rows) for a single operator click.
+    reviewBulk: (
+      action: "approve" | "reject",
+      srNumbers: string[],
+      column = "",
+      note = "",
+    ) =>
+      jsonFetch<{ ok: boolean; count: number; sr_numbers: string[]; audit_kind: string }>(
+        "/sentry/review/bulk",
+        {
+          method: "POST",
+          body: JSON.stringify({ action, sr_numbers: srNumbers, column, note }),
+        },
+      ),
     mark: (text: string, release_authority = "US_ONLY") =>
       jsonFetch<MarkResult>("/sentry/mark", {
         method: "POST",
@@ -514,7 +661,10 @@ export const api = {
 // ---- Types (trimmed to what views consume) --------------------------------
 
 // CAC/PIV identity payload — mirrors `backend/auth.MOCK_USERS`. Kept in
-// sync with `frontend/src/state/store.ts` `User`.
+// sync with `frontend/src/state/store.ts` `User`. This is the *full*
+// post-login payload returned by `/api/auth/login`, `/api/auth/me`, and
+// the authenticated re-fetch of `/api/auth/users` from the in-app
+// identity switcher.
 export interface AuthUser {
   dodid: string;
   name: string;
@@ -528,6 +678,27 @@ export interface AuthUser {
   branch: string;
   clearance: string;
   role: "maintenance_chief" | "g4" | "mef_commander" | "data_custodian" | "security_manager";
+  initials: string;
+  cert_issuer?: string;
+  cert_serial?: string;
+  cert_expires?: string;
+}
+
+/**
+ * Trimmed cert-directory shape returned by `/api/auth/users` to
+ * unauthenticated callers (i.e. the cert-selection splash). A real CAC
+ * reader surfaces name/rank/branch/cert metadata + masked DODID; it does
+ * NOT broadcast clearance, role, billet, unit, or parent_command before
+ * sign-in. Stripping those fields server-side means a judge or passer-by
+ * looking at the splash — or scraping the open endpoint — cannot
+ * enumerate who holds TS//SCI vs SECRET, who's the security manager,
+ * etc. Task #27 / auth-cac-splash F1.
+ */
+export interface PublicAuthUser {
+  dodid: string;
+  name: string;
+  rank: string;
+  branch: string;
   initials: string;
   cert_issuer?: string;
   cert_serial?: string;
@@ -600,6 +771,27 @@ export interface DatasetInfo {
   as_of: string | null;
   generated_at: string;
   seed: number;
+}
+
+// Task #76 — sample-endpoint payload for the GCSS-MC reference adapter.
+// Shape mirrors `backend/integrations.py::sample_gcss_mc_slice`. Lives in
+// api.ts so the IntegrationsView and any future curl-fixture builder share
+// one type.
+export interface GcssMcSamplePayload {
+  _mock: {
+    label: string;
+    warning: string;
+    shape_version: string;
+    spec_sources: string[];
+    filters_applied: { limit: number; uic: string | null };
+    as_of_dataset_day: string | null;
+  };
+  field_mapping_reference: Record<string, Record<string, string>>;
+  EQUIPMENT_MASTER: Record<string, unknown>[];
+  MIMMS_DAILY_READINESS: Record<string, unknown>[];
+  EQUIPMENT_REPAIR_ORDER: Record<string, unknown>[];
+  SUPPLY_DOC: Record<string, unknown>[];
+  totals_in_canonical_dataset: Record<string, number>;
 }
 
 // Wave-1 lane #27 — GCSS-MC reference adapter freshness.
@@ -677,6 +869,7 @@ export interface RiskBoardAsset {
 
 export interface RiskBoard {
   assets: RiskBoardAsset[];
+  as_of: string;
 }
 
 export interface AssetDeepDive {
@@ -687,10 +880,28 @@ export interface AssetDeepDive {
   readiness_trajectory: any[];
 }
 
+export interface StrippableDonor {
+  asset_id: string;
+  unit: string;
+  equipment_type: string;
+  current_status: string;
+  days_in_status: number;
+  donor_fault_classes: string[];
+  strip_reason: string;
+  priority: number;
+  unit_mc_rate: number;
+  unit_mc_count: number;
+  unit_total: number;
+}
+
 export interface Cannibalization {
   open_needs: any[];
   completed_matches: any[];
   total_events: number;
+  // Task #40 -- per-recipient SR strippable donor pool keyed by sr_number.
+  // Replaces the broken "other open NMCS needs on the same NSN" derivation
+  // (those donors did not actually have the part -- they were waiting for it).
+  strippable_donors?: Record<string, StrippableDonor[]>;
 }
 
 export interface SyncStateResponse {
@@ -851,6 +1062,13 @@ export interface ModelInAppSurface {
   route: string;
 }
 
+export interface ModelAuthorization {
+  ao?: string | null;
+  package_id?: string | null;
+  expiration?: string | null;
+  note?: string | null;
+}
+
 export interface ModelRegistrySummary {
   id: string;
   name: string;
@@ -860,9 +1078,11 @@ export interface ModelRegistrySummary {
   hosting_target?: string | null;
   hosting_actual?: string | null;
   hosting_gap_present: boolean;
+  authorization?: ModelAuthorization | null;
   fedramp_status?: string | null;
   vendor_name?: string | null;
   vendor_jurisdiction?: string | null;
+  vendor_jurisdictions?: string[];
   vendor_foreign_pivot_risk?: string | null;
   last_validated_at?: string | null;
   holdout_accuracy?: number | null;
@@ -873,6 +1093,14 @@ export interface SupplyChainAtAGlance {
   total_models: number;
   at_risk_jurisdictions: string[];
   at_risk_jurisdictions_count: number;
+  // Task #82 — split FedRAMP into honest buckets so the projector doesn't
+  // read "all five lack FedRAMP" as the headline. Color is reserved for
+  // `models_fedramp_pending` only.
+  models_fedramp_covered: number;
+  models_fedramp_not_applicable: number;
+  models_fedramp_pending: number;
+  // Back-compat: equals not_applicable + pending. Kept for any old callers
+  // — the new UI splits the bucket explicitly.
   models_without_fedramp_coverage: number;
   models_with_hosting_gap: number;
   models_with_placeholder_provenance: number;
@@ -904,11 +1132,17 @@ export interface ModelImplementation {
     actual: string;
     gap?: string;
   };
+  // Task #82 — IL-5 *authorization* is distinct from IL-5 *hosting target*.
+  // Optional so older registry entries without the block keep rendering.
+  authorization?: ModelAuthorization;
   fedramp_status: string;
   fedramp_note?: string;
   vendor: {
     name: string;
     jurisdiction: string;
+    // Canonical multi-jurisdiction list — populated for vendors that span
+    // more than one country (e.g. Alphabet US + DeepMind UK).
+    jurisdictions?: string[];
     ownership?: string;
     known_acquisitions?: string[];
     foreign_pivot_risk?: string;
@@ -1113,6 +1347,10 @@ export interface CoalitionView {
   partners: string[];
   distribution_statement: string;
   authorized_classifications: string[];
+  /** Rank-derived ceiling label (e.g. "UNCLASSIFIED", "CUI") backed by
+   *  `classification_rank()`, so callers don't have to assume the
+   *  `authorized_classifications` array is sorted ascending. */
+  classification_ceiling?: string;
   caveats_applied: string[];
   embargo_days_after_event: number;
   scope: {
@@ -1121,6 +1359,10 @@ export interface CoalitionView {
     sample_srs_allowed: number;
     sample_srs_blocked: number;
     sample_srs_total_inspected: number;
+    /** Count (within the inspected sample) of records whose source
+     * classification exceeds the profile's authorized ceiling. Drives
+     * the red-tint signal on the Generate Release button (F1). */
+    sample_srs_over_ceiling?: number;
   };
   allowed_units: { unit: string; parent: string; uic: string; location: string }[];
   sample_records: {
@@ -1153,6 +1395,15 @@ export interface CoalitionReleaseResult {
   caveats_applied: string[];
   audit_logged: boolean;
   created_at: string;
+  /** SHA-256 over the sorted in-scope SR ID set + the profile's
+   * redaction policy + the profile key. Stored in the audit row so an
+   * investigator can later prove what shipped, not just that something
+   * did. (F13.) */
+  manifest_sha256: string;
+  /** Number of in-scope SR records covered by the manifest hash. */
+  record_count: number;
+  /** Inherited classification ceiling stamped onto the audit row. */
+  classification?: string;
 }
 
 export interface FailurePrediction {
@@ -1210,6 +1461,22 @@ export interface RecommendActionsAsset {
 export interface RecommendActionsResponse {
   assets: RecommendActionsAsset[];
   as_of: string;
+}
+
+export interface PulseDraft {
+  draft_id: string;
+  asset_id: string;
+  unit_name: string;
+  kind: string;
+  title: string;
+  description: string;
+  cost_usd: number | null;
+  mc_delta_pct: number | null;
+  time_to_effect_hours: number | null;
+  artifact: Record<string, unknown>;
+  actor: string;
+  status: "held" | "dismissed";
+  created_at: string;
 }
 
 export interface ModelCardBaseline {
@@ -1313,6 +1580,12 @@ export interface Forecast {
   threshold: number;
   threshold_cross_date: string | null;
   cross_probabilities: { date: string; p: number }[];
+  as_of?: string;
+  data_window_days?: number;
+  coverage_p10_p90?: number | null;
+  coverage_n?: number;
+  coverage_target?: number;
+  model_card_url?: string;
 }
 
 export interface SentryBatch {
@@ -1337,6 +1610,18 @@ export interface SentryBatch {
   jobs: string[];
 }
 
+// Task #67 — `scope` is the role-scoping descriptor SENTRY routes return
+// so the FE can render an honest "Showing N of M (CLB-6 only)" footer.
+// `unrestricted=true` means the caller's role sees the entire batch.
+export interface SentryScope {
+  role: string;
+  unrestricted: boolean;
+  allowed_units: string[];
+  total_records: number;
+  scoped_records: number;
+  label: string;
+}
+
 export interface SentryJob {
   job_id: string;
   batch_id: string;
@@ -1348,7 +1633,15 @@ export interface SentryJob {
   classification_counts: Record<string, number>;
   mismatches: number;
   aggregation_risks: any[];
+  // Task #65: backend wall-time for the synchronous classification pass
+  // and which engines were actually invoked. tier2_handled is "would-route"
+  // when engine_used === "rule_based_only" (the LLM tier is offline).
+  engine_seconds?: number;
+  engine_used?: "rule_based_only" | "rule_based_plus_model";
+  sentry_model_loaded?: boolean;
+  pulse_model_loaded?: boolean;
   done: boolean;
+  scope?: SentryScope;
 }
 
 export interface SentryReviewQueue {
@@ -1358,6 +1651,7 @@ export interface SentryReviewQueue {
   held: any[];
   counts: { auto_cleared: number; flagged: number; held: number };
   aggregation_risks: any[];
+  scope?: SentryScope;
 }
 
 export interface MarkResult {
@@ -1372,7 +1666,36 @@ export interface MarkResult {
     status: "ok" | "warn" | "block";
     issues: string[];
   };
-  audit: { engine: string; timestamp: string };
+  // Task-61 — engine-derived distribution + single REL TO so the panel
+  // stops rendering a hardcoded "Distribution C" for every sample.
+  distribution_statement?: {
+    letter: string;
+    label: string;
+    description: string;
+  };
+  rel_to_caveat?: string;
+  // Caveats the engine auto-added (and the evidence that triggered them),
+  // surfaced so the operator can see what was self-introduced.
+  auto_caveats?: {
+    caveat: string;
+    evidence: string;
+    rule: string;
+    reason: string;
+  }[];
+  audit: {
+    engine: string;
+    engine_version?: string;
+    timestamp: string;
+    // Chain index returned by the backend's append-only audit table.
+    // Lets the right-pane "Audit trail" panel render the same row id
+    // an investigator sees in the audit-log viewer.
+    chain_index?: number;
+    chain_subject?: string;
+    input_hash?: string;
+    actor_dodid?: string;
+    actor_name?: string;
+    actor_role?: string;
+  };
 }
 
 export interface ExportResult {
@@ -1400,6 +1723,15 @@ export interface ExportResult {
   // read this; the backend re-checks on /download.
   classification?: string;
   classification_banner?: string;
+  // Task-69 — release-compatibility validator output. `status="warn"` carries
+  // a populated `release_warnings` array the FE renders as a yellow banner;
+  // `status="block"` cases raise 403 (release_blocked) and never reach here.
+  release_compatibility?: {
+    status: "ok" | "warn" | "block";
+    issues: string[];
+    caveats: string[];
+  };
+  release_warnings?: string[];
 }
 
 export interface BastionCOPUnit {
@@ -1601,16 +1933,27 @@ export interface JointClassification {
   originatorCountry?: string;
 }
 
+export interface JointOperatorFooter {
+  name: string;
+  rank: string;
+  billet: string;
+  role: string;
+  unit: string;
+  dodid: string;
+}
+
 export interface JointOmsUciEnvelope {
   specification: string;
   specificationVersion: string;
   messageStandard: string;
+  subscriptionModel?: string;
   sourceSystem: string;
   sourceSystemVersion: string;
   sourceService: string;
   sourceUnit: string;
   publishedAtUtc: string;
   classification: JointClassification;
+  operator?: JointOperatorFooter;
   messageCounts: Record<string, number>;
 }
 
@@ -1629,11 +1972,13 @@ export interface JointLink16Header {
   specificationVersion: string;
   messageFamily: string;
   operatingMode: string;
+  subscriptionModel?: string;
   sourceSystem: string;
   sourceJU: string;
   originatorService: string;
   publishedAtUtc: string;
   classification: JointClassification;
+  operator?: JointOperatorFooter;
   messageCounts: Record<string, number>;
 }
 
@@ -1658,6 +2003,14 @@ export interface JointStandardEntry {
   notWired: string[];
 }
 
+export interface JointReleaseAuthority {
+  subscriptionModel: string;
+  summary: string;
+  allowedRoles: string[];
+  deniedRolesExample: string[];
+  auditFooter: string;
+}
+
 export interface JointConformance {
   standardsAdopted: JointStandardEntry[];
   classificationPosture: {
@@ -1666,6 +2019,7 @@ export interface JointConformance {
     rationale: string;
     gate: string;
   };
+  releaseAuthority?: JointReleaseAuthority;
   directionPolicy: {
     egress: string;
     ingress: string;
@@ -1770,6 +2124,10 @@ export interface BloodScenarioBeatMeta {
   expected_duration_seconds_at_1x: number;
   inject_kinds: string[];
   sources: string[];
+  /** Per-beat classification (Task #50) — stamped on the cockpit
+   * timeline row + narration overlay so a single screenshot of the
+   * presenter surface self-marks. Defaults to "CUI" when absent. */
+  classification?: string;
 }
 
 export interface BloodScenarioMeta {
@@ -1786,4 +2144,24 @@ export interface BloodScenarioMeta {
     rehearsal_dwell_seconds_per_beat?: number;
   };
   global_sources?: string[];
+}
+
+// Round-4 — events buffer served by /api/system/scenario/blood-h72/feed.
+// One row per scripted injection (alert / forecast / requisition / toast).
+// The consumer only treats `kind`, `offset_min`, `beat_id`, `payload` as
+// authoritative; unknown keys are tolerated.
+export interface BloodScenarioFeedEvent {
+  kind: string;
+  offset_min: number;
+  beat_id?: string;
+  event_id?: string;
+  phase?: string;
+  payload?: Record<string, unknown>;
+  [k: string]: unknown;
+}
+
+export interface BloodScenarioFeed {
+  scenario_id: string;
+  events: BloodScenarioFeedEvent[];
+  as_of: string;
 }
