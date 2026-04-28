@@ -341,9 +341,14 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
               <StatLabel>Download</StatLabel>
               <a
                 href={result.download_url}
+                /* Task-70 — pin the saved filename to the bundle name the
+                 * backend chose (spire_<CLASS>_sanitized_<EXP>.zip) so the
+                 * operator doesn't get a URL-derived gibberish filename when
+                 * the browser saves the file. */
+                download={result.filename ?? ""}
                 className="font-mono text-base text-[var(--color-primary)] hover:underline"
               >
-                {result.download_url}
+                {result.filename ?? result.download_url}
               </a>
               {result.bytes != null && (
                 <span className="ml-2 font-mono text-xs text-[var(--color-text-muted)]">
@@ -566,14 +571,16 @@ function StatLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Walkthrough #5 — Distribution Statements (A-F) and REL TO caveats are
-// independent. Earlier blurbs conflated them and were doctrinally wrong
+// Task-70 / Walkthrough #5 — Distribution Statements (A-F) and REL TO caveats
+// are independent. Earlier blurbs conflated them and were doctrinally wrong
 // ("Distribution A · public release" for U.S.-only is the OPPOSITE meaning;
-// Distribution E means DoD components only, not partner). Two-column posture
-// per DoDI 5230.24 v1.
+// Distribution E means DoD components only, not partner). Pre-export the
+// final letter depends on the source classification (UNCLASSIFIED→A, CUI→B,
+// SECRET+→C), so the blurb hints at the range rather than overpromising. The
+// Export Prepared panel below shows the actual derived letter post-build.
 const DISTRIBUTION_BLURB: Record<Authority, string> = {
-  US_ONLY:  "Distribution C · authorized to U.S. Government agencies and their contractors. (No foreign release.)",
-  FVEY:     "Distribution C · authorized to U.S. Government agencies and their contractors · REL TO USA, AUS, CAN, GBR, NZL.",
-  NATO:     "Distribution C · authorized to U.S. Government agencies and their contractors · REL TO NATO.",
-  SPECIFIC: "Distribution C · authorized to U.S. Government agencies and their contractors · specific partner release, originator-controlled.",
+  US_ONLY:  "U.S.-only release · Distribution Statement derived per DoDI 5230.24 (UNCLASSIFIED → A; CUI → B; SECRET+ → C). No foreign release.",
+  FVEY:     "Five-Eyes release · Distribution C · REL TO USA, AUS, CAN, GBR, NZL.",
+  NATO:     "NATO release · Distribution C · REL TO NATO. Further distribution requires originator approval.",
+  SPECIFIC: "Specific partner release · Distribution C · originator-controlled per coalition agreement.",
 };

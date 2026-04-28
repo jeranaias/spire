@@ -284,13 +284,39 @@ def verify_chain() -> dict:
     return {"ok": True, "entries": len(rows), "head_hash": prev}
 
 
-def recent_entries(limit: int = 50) -> list[dict]:
+def recent_entries(limit: int = 50, *, include_payload: bool = False) -> list[dict]:
+    """Return the N most recent audit entries.
+
+    When ``include_payload=True``, each row also carries the original
+    ``payload`` dict (parsed from the canonical JSON stored at write time)
+    so a downstream verifier can reconstruct what each row meant — not just
+    that the chain hash lines up. Defaults to ``False`` to preserve the
+    light-weight summary used by status panels and tests.
+    """
+    cols = "id, ts, actor, kind, subject_id, self_hash"
+    if include_payload:
+        cols += ", payload"
     with conn() as c:
         rows = c.execute(
-            "SELECT id, ts, actor, kind, subject_id, self_hash FROM audit_log ORDER BY id DESC LIMIT ?",
+            f"SELECT {cols} FROM audit_log ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        if include_payload:
+            raw = d.get("payload")
+            if isinstance(raw, str) and raw:
+                try:
+                    d["payload"] = json.loads(raw)
+                except (ValueError, TypeError):
+                    # Keep the raw string if it isn't valid JSON — the chain
+                    # is still verifiable; we just couldn't parse the body.
+                    d["payload"] = {"_raw": raw}
+            else:
+                d["payload"] = {}
+        out.append(d)
+    return out
 
 
 def query_audit(

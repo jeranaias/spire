@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import hashlib
 import io
 import json
@@ -146,19 +147,71 @@ def tier1_classify(text: str) -> dict:
 # may receive it. Two independent fields — never collapse into one.
 # ---------------------------------------------------------------------------
 
-DISTRIBUTION_STATEMENT: dict[str, str] = {
-    "US_ONLY":  "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. Further distribution only as directed by the originator.",
-    "FVEY":     "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. REL TO USA, AUS, CAN, GBR, NZL.",
-    "NATO":     "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. REL TO NATO. Further distribution requires originator approval.",
-    "SPECIFIC": "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. Specific partner release; further dissemination only as directed by originator.",
-}
+# Task-70 — Distribution Statement is derived from (release_authority,
+# classification) per DoDI 5230.24, not hardcoded to "C". Earlier code
+# stamped Distribution C on every export, which is the wrong letter for
+# UNCLASSIFIED public-affairs releases (should be A or B) and overclaims
+# coverage on internal-only artifacts (should be E or F).
+#
+# Reference letters (DoDI 5230.24 v1):
+#   A — Approved for public release; distribution unlimited.
+#   B — U.S. Government agencies only.
+#   C — U.S. Government agencies and their contractors.
+#   D — DoD and U.S. DoD contractors only.
+#   E — DoD components only.
+#   F — Further dissemination only as directed by the originating office.
 
-DIST_AUTHORITY: dict[str, str] = {
-    "US_ONLY":  "Distribution C",
-    "FVEY":     "Distribution C",
-    "NATO":     "Distribution C",
-    "SPECIFIC": "Distribution C",
-}
+def derive_distribution(release: str, classification: str) -> tuple[str, str]:
+    """Returns (authority_label, full_statement) for the bundle.
+
+    The authority label is the doctrinal letter prefix
+    ('Distribution A'..'Distribution F'). The full statement is the
+    sentence printed on the artifact and the MANIFEST.
+    """
+    cls = (classification or "UNCLASSIFIED").upper()
+    rel = (release or "US_ONLY").upper()
+
+    if rel == "US_ONLY":
+        if cls == "UNCLASSIFIED":
+            return (
+                "Distribution A",
+                "DISTRIBUTION A: Approved for public release; distribution unlimited.",
+            )
+        if cls in ("CUI", "FOUO", "CONTROLLED"):
+            return (
+                "Distribution B",
+                "DISTRIBUTION B: Distribution authorized to U.S. Government agencies only. "
+                "Other requests for this document shall be referred to the originating office.",
+            )
+        # SECRET, TOP SECRET, TS//SCI — DoD components + cleared contractors.
+        return (
+            "Distribution C",
+            "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors. "
+            "Further distribution only as directed by the originator.",
+        )
+    if rel == "FVEY":
+        return (
+            "Distribution C",
+            "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors; "
+            "release to FVEY partners (USA, AUS, CAN, GBR, NZL) authorized.",
+        )
+    if rel == "NATO":
+        return (
+            "Distribution C",
+            "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors; "
+            "release to NATO authorized. Further distribution requires originator approval.",
+        )
+    if rel == "SPECIFIC":
+        return (
+            "Distribution C",
+            "DISTRIBUTION C: Distribution authorized to U.S. Government agencies and their contractors; "
+            "specific partner release per coalition agreement, originator-controlled.",
+        )
+    # Unknown authority — default to F (most restrictive).
+    return (
+        "Distribution F",
+        "DISTRIBUTION F: Further dissemination only as directed by the originating office.",
+    )
 
 REL_TO_CAVEAT: dict[str, str] = {
     "US_ONLY":  "",
@@ -1124,22 +1177,34 @@ async def export_sanitized(request: Request, payload: dict):
     if bundle_class == "TS_SCI":
         cls_banner_text = "TOP SECRET // SCI"
 
-    # Build the sanitized dataset XLSX in memory
-    from openpyxl import Workbook
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Sanitized Dataset"
-    # Row 1: visible classification banner spanning the column width.
-    ws.append([f"// CLASSIFICATION: {cls_banner_text} //"])
-    ws.append([f"// Handle per DoDM 5200.01 — Distribution: {release} //"])
-    ws.append([])  # spacer row
+    # Task-70 — Walkthrough #5 — Distribution Statements (A-F, who-can-access)
+    # and REL TO caveats (which-foreigns) are independent. Derive the letter
+    # from (release_authority, bundle_class) per DoDI 5230.24 instead of the
+    # earlier hardcoded "Distribution C" which mis-marked UNCLASSIFIED public-
+    # affairs releases (should be A or B).
+    dist_authority, distribution = derive_distribution(release, bundle_class)
+
+    # Task-70 — produce the dataset and redaction-report files in the format
+    # the operator actually asked for. Earlier the segmented control was UI
+    # theater: backend always wrote sanitized_dataset.xlsx regardless of the
+    # selected format. A coalition partner who asked for CSV got XLSX they
+    # couldn't parse. Now CSV and JSON are real outputs.
+    fmt = (format_ or "xlsx").lower()
+    if fmt not in ("xlsx", "csv", "json"):
+        fmt = "xlsx"
+    format_ = fmt  # write back so the manifest echoes the actual format used
+
     headers = [
         "SR Number", "Open Date", "Unit", "Equipment", "TAMCN", "NSN", "Serial",
         "Job Status", "Condition", "Component", "TM Ref", "Maint Level",
         "Detected Classification", "Sensitive Flags", "Decision",
     ]
-    ws.append(headers)
-    redactions: list[list] = [["SR", "Category", "Action", "Original", "Replacement"]]
+    # Walk approved records once, accumulating the rows used by every output
+    # format so we never disagree across XLSX/CSV/JSON.
+    dataset_rows: list[list] = []
+    dataset_records: list[dict] = []
+    redaction_rows: list[list] = []
+    redaction_records: list[dict] = []
     applied = 0
     for r in records:
         decision = decisions.get(r.get("sr_number", ""), {})
@@ -1151,10 +1216,18 @@ async def export_sanitized(request: Request, payload: dict):
         if generalize and unit:
             unit = f"[{unit.split()[0]} AOR]"  # e.g. "CLB-6" -> "[CLB-6 AOR]"
         flags = r.get("sensitive_flags_oracle") or []
+        sr_num = r.get("sr_number", "")
         for f in flags:
-            redactions.append([r.get("sr_number", ""), f, "REDACTED", "[detected]", f"[{f.upper()} REDACTED]"])
-        ws.append([
-            r.get("sr_number", ""),
+            redaction_rows.append([sr_num, f, "REDACTED", "[detected]", f"[{f.upper()} REDACTED]"])
+            redaction_records.append({
+                "sr_number": sr_num,
+                "category": f,
+                "action": "REDACTED",
+                "original": "[detected]",
+                "replacement": f"[{f.upper()} REDACTED]",
+            })
+        row = [
+            sr_num,
             r.get("open_date", ""),
             unit,
             r.get("equipment_type", ""),
@@ -1169,41 +1242,123 @@ async def export_sanitized(request: Request, payload: dict):
             r.get("detected_classification_oracle", "UNCLASSIFIED"),
             ", ".join(flags),
             action,
-        ])
-    dataset_bytes = io.BytesIO()
-    wb.save(dataset_bytes)
-    dataset_bytes.seek(0)
+        ]
+        dataset_rows.append(row)
+        dataset_records.append(dict(zip(headers, row)))
 
-    # Redaction report
-    redaction_wb = Workbook()
-    rw = redaction_wb.active
-    rw.title = "Redaction Report"
-    rw.append([f"// CLASSIFICATION: {cls_banner_text} //"])
-    rw.append([])
-    for row in redactions:
-        rw.append(row)
-    redaction_bytes = io.BytesIO()
-    redaction_wb.save(redaction_bytes)
-    redaction_bytes.seek(0)
+    redaction_header = ["SR", "Category", "Action", "Original", "Replacement"]
+    banner_line = f"// CLASSIFICATION: {cls_banner_text} //"
+    handling_line = f"// Handle per DoDM 5200.01 — Distribution: {dist_authority} ({release}) //"
+
+    if fmt == "xlsx":
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sanitized Dataset"
+        ws.append([banner_line])
+        ws.append([handling_line])
+        ws.append([])  # spacer row
+        ws.append(headers)
+        for row in dataset_rows:
+            ws.append(row)
+        dataset_buf = io.BytesIO()
+        wb.save(dataset_buf)
+        dataset_bytes_value = dataset_buf.getvalue()
+
+        redaction_wb = Workbook()
+        rw = redaction_wb.active
+        rw.title = "Redaction Report"
+        rw.append([banner_line])
+        rw.append([])
+        rw.append(redaction_header)
+        for row in redaction_rows:
+            rw.append(row)
+        redaction_buf = io.BytesIO()
+        redaction_wb.save(redaction_buf)
+        redaction_bytes_value = redaction_buf.getvalue()
+
+        dataset_filename = "sanitized_dataset.xlsx"
+        redaction_filename = "redaction_report.xlsx"
+    elif fmt == "csv":
+        # CSV doesn't carry a comment syntax, so emit the banner as a single-
+        # column row up top — downstream readers will see it as the first
+        # cell of the first row, which is the same posture XLSX takes.
+        ds_buf = io.StringIO()
+        w = csv.writer(ds_buf)
+        w.writerow([banner_line])
+        w.writerow([handling_line])
+        w.writerow([])
+        w.writerow(headers)
+        for row in dataset_rows:
+            w.writerow(row)
+        dataset_bytes_value = ds_buf.getvalue().encode("utf-8")
+
+        rd_buf = io.StringIO()
+        w = csv.writer(rd_buf)
+        w.writerow([banner_line])
+        w.writerow([])
+        w.writerow(redaction_header)
+        for row in redaction_rows:
+            w.writerow(row)
+        redaction_bytes_value = rd_buf.getvalue().encode("utf-8")
+
+        dataset_filename = "sanitized_dataset.csv"
+        redaction_filename = "redaction_report.csv"
+    else:  # json
+        # Wrap the record array with the classification banner so a JSON
+        # reader sees the marking without having to open the README/MANIFEST
+        # separately. The `records` array is the canonical "object array"
+        # downstream tooling iterates over.
+        dataset_obj = {
+            "classification": bundle_class,
+            "classification_banner": banner_line,
+            "handling": handling_line,
+            "records": dataset_records,
+        }
+        dataset_bytes_value = json.dumps(dataset_obj, indent=2, default=str).encode("utf-8")
+
+        redaction_obj = {
+            "classification": bundle_class,
+            "classification_banner": banner_line,
+            "records": redaction_records,
+        }
+        redaction_bytes_value = json.dumps(redaction_obj, indent=2, default=str).encode("utf-8")
+
+        dataset_filename = "sanitized_dataset.json"
+        redaction_filename = "redaction_report.json"
 
     # Audit log snapshot (JSON) — stamped at the top with the bundle's
     # classification so downstream parsers can route by sensitivity
     # without re-reading the manifest.
+    #
+    # Task-70 — include each entry's original payload (parsed from the
+    # canonical JSON we hashed) so a downstream verifier can reconstruct
+    # what each row meant, not just that the chain is intact. Strip
+    # source_ip from every payload as a per-OPSEC redaction; the chain
+    # hash was computed over the full body, so verifiers can detect that
+    # this snapshot was post-processed by re-hashing if they need
+    # bit-exact reconstruction (which they shouldn't for a public-affairs
+    # release).
     from ..persistence import recent_entries, verify_chain
+    raw_entries = recent_entries(limit=500, include_payload=True)
+    redacted_entries: list[dict] = []
+    for entry in raw_entries:
+        e = dict(entry)
+        payload = e.get("payload")
+        if isinstance(payload, dict) and "source_ip" in payload:
+            payload = {**payload, "source_ip": "[REDACTED:OPSEC]"}
+            e["payload"] = payload
+        redacted_entries.append(e)
     audit_snapshot = {
         "classification": bundle_class,
-        "classification_banner": f"// CLASSIFICATION: {cls_banner_text} //",
+        "classification_banner": banner_line,
         "chain": verify_chain(),
-        "recent_entries": recent_entries(limit=500),
+        "recent_entries": redacted_entries,
+        "payload_post_processing": "source_ip fields redacted per OPSEC; "
+                                   "re-hash will not match chain self_hash if any payload was redacted.",
         "captured_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
-    audit_bytes = json.dumps(audit_snapshot, indent=2).encode("utf-8")
-
-    # Walkthrough #5 — Distribution Statements (A-F, who-can-access) and
-    # REL TO caveats (which-foreigns) are independent. Earlier text conflated
-    # them and was doctrinally wrong (e.g. "Distribution A · public release"
-    # for U.S.-only; Distribution E means DoD components only, not partner).
-    distribution = DISTRIBUTION_STATEMENT[release]
+    audit_bytes = json.dumps(audit_snapshot, indent=2, default=str).encode("utf-8")
 
     # Walkthrough #6 — record-count clarity. Was: a 500-record batch's
     # export reported 2,251 because we silently fell through to the full
@@ -1222,11 +1377,13 @@ async def export_sanitized(request: Request, payload: dict):
         "records_exported": applied,
         "records_rejected": len(records) - applied,
         "decisions_applied": len(decisions),
-        "redactions_applied": len(redactions) - 1,
+        "redactions_applied": len(redaction_rows),
         "distribution_statement": distribution,
         # Walkthrough #5 — surface independent fields separately.
         "rel_to_caveat": REL_TO_CAVEAT.get(release, ""),
-        "distribution_authority": DIST_AUTHORITY.get(release, ""),
+        # Task-70 — derived per (release, classification) per DoDI 5230.24,
+        # not hardcoded "Distribution C".
+        "distribution_authority": dist_authority,
         "generalized_unit_markings": generalize,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
@@ -1304,8 +1461,9 @@ async def export_sanitized(request: Request, payload: dict):
     export_id = f"EXP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("sanitized_dataset.xlsx", dataset_bytes.getvalue())
-        zf.writestr("redaction_report.xlsx", redaction_bytes.getvalue())
+        # Task-70 — write the format the operator actually selected.
+        zf.writestr(dataset_filename, dataset_bytes_value)
+        zf.writestr(redaction_filename, redaction_bytes_value)
         if include_audit:
             zf.writestr("audit_log.json", audit_bytes)
         zf.writestr("MANIFEST.json", json.dumps(manifest, indent=2))
@@ -1313,14 +1471,16 @@ async def export_sanitized(request: Request, payload: dict):
             f"// CLASSIFICATION: {cls_banner_text} //\n"
             f"// Handle per DoDM 5200.01 //\n\n"
             "SPIRE sanitized export bundle.\n\n"
-            f"Classification: {cls_banner_text}\n"
+            f"Classification:    {cls_banner_text}\n"
             f"Release authority: {release}\n"
-            f"Distribution: {distribution}\n\n"
+            f"Format:            {fmt.upper()}\n"
+            f"Distribution:      {dist_authority}\n"
+            f"  {distribution}\n\n"
             "Files:\n"
-            "  sanitized_dataset.xlsx  -- approved records with SENTRY redactions applied\n"
-            "  redaction_report.xlsx   -- per-record change log (original -> replacement + category)\n"
-            "  audit_log.json          -- hash-chained audit trail snapshot at export time\n"
-            "  MANIFEST.json           -- structured metadata for automated ingestion\n\n"
+            f"  {dataset_filename:<24s} -- approved records with SENTRY redactions applied\n"
+            f"  {redaction_filename:<24s} -- per-record change log (original -> replacement + category)\n"
+            f"  {'audit_log.json':<24s} -- hash-chained audit trail snapshot (with parsed payload, source_ip redacted)\n"
+            f"  {'MANIFEST.json':<24s} -- structured metadata for automated ingestion\n\n"
             f"// CLASSIFICATION: {cls_banner_text} //\n"
         ).encode("utf-8"))
     buf.seek(0)
