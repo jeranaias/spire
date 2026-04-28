@@ -1264,10 +1264,17 @@ def record_outcome(*, decision_kind: str, decision_id: str, decided_by: str,
 
 
 @router.post("/admin/outcome")
-async def admin_record_outcome(payload: dict = Body(default={})):
+async def admin_record_outcome(request: Request, payload: dict = Body(default={})):
     """Manual outcome submission from the AdminTab. Body:
     {decision_kind, decision_id, decided_by, was_correct, notes?,
-     scoring_engine?}."""
+     scoring_engine?}.
+
+    Gated server-side to security_manager — outcome records flow into the
+    same telemetry surface as `/admin/telemetry` (gated identically) and
+    feed the retraining-recommended flag, so unauthenticated injection
+    here would let any signed-in role poison that signal."""
+    role = session_role(request)
+    require_role(role, ADMIN_TELEMETRY_ROLES, "admin.outcome.write")
     required = ["decision_kind", "decision_id", "decided_by"]
     for k in required:
         if k not in payload:

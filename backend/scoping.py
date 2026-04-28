@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from .state import CanonicalDataset
 
@@ -55,6 +55,35 @@ SCENARIO_CONTROL_ROLES   = frozenset({"security_manager", "mef_commander", "g4"}
 # but exposing 'who runs what model where' to lower roles invites
 # adversary mining of the SPIRE supply chain — gate it to security_manager.
 MODEL_REGISTRY_ROLES     = frozenset({"security_manager"})
+
+
+# ---------------------------------------------------------------------------
+# View-level role gates — backend mirror of `VIEW_SCOPE` in
+# `frontend/src/state/store.ts`.
+#
+# The React ScopeGuard hides whole tabs (PULSE / BASTION / Admin / SENTRY)
+# from roles that aren't supposed to see them. Without a matching backend
+# gate, anyone with a valid session cookie can hand-roll
+# `GET /api/pulse/fleet-overview` (or any sibling) past the FE shell and
+# get the full payload — the PULSE Fleet Overview critique (F-2) caught
+# `security_manager` doing exactly that. These constants are the truth
+# source the router-level dependency `require_view_scope` enforces.
+#
+# Keep these in lockstep with the frontend table; the regression test in
+# `backend/tests/test_role_gates.py` walks every (CAC × view) combo and
+# asserts FE allow/deny == BE allow/deny so drift is caught at CI time.
+# ---------------------------------------------------------------------------
+PULSE_VIEW_ROLES   = frozenset({"maintenance_chief", "g4", "mef_commander"})
+BASTION_VIEW_ROLES = frozenset({"mef_commander", "g4", "security_manager", "maintenance_chief"})
+ADMIN_VIEW_ROLES   = frozenset({"security_manager"})
+SENTRY_VIEW_ROLES  = frozenset({"data_custodian", "security_manager"})
+
+VIEW_ROLES: dict[str, frozenset[str]] = {
+    "/pulse":   PULSE_VIEW_ROLES,
+    "/bastion": BASTION_VIEW_ROLES,
+    "/admin":   ADMIN_VIEW_ROLES,
+    "/sentry":  SENTRY_VIEW_ROLES,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -234,14 +263,42 @@ def require_no_downgrade(
     return new_canonical
 
 
-def require_role(role: Optional[str], allowed: frozenset[str], action: str) -> str:
-    """Raise 403 unless `role` is in `allowed`. Returns the role on success.
+def require_role(
+    role: Optional[str],
+    allowed: frozenset[str],
+    action: str,
+    *,
+    audit_actor: Optional[str] = None,
+    audit_subject: Optional[str] = None,
+    user_dodid: Optional[str] = None,
+) -> str:
+    """Raise 403 + emit a `role_denied` audit row unless `role` is in `allowed`.
 
-    `action` is a short label included in the error body so the operator
-    sees which gate denied them. Audit-log entries elsewhere reference the
-    same string so an investigator can correlate.
+    `action` is a short label included in the error body and the audit
+    payload so an investigator can correlate the deny with the request.
+    Audit emission mirrors the `spillage_prevented` pattern in
+    `require_clearance`: every blocked request leaves a row in the chain.
     """
     if not role or role not in allowed:
+        try:
+            from .persistence import log as audit_log  # noqa: WPS433
+            audit_log(
+                "role_denied",
+                actor=audit_actor or role or "unknown",
+                subject_id=audit_subject or action,
+                payload={
+                    "action": action,
+                    "user_role": role or "unknown",
+                    "user_dodid": user_dodid,
+                    "roles_allowed": sorted(allowed),
+                    "decision": "blocked",
+                    "surface": "backend",
+                },
+            )
+        except Exception:
+            # Never let an audit-write failure mask the 403 — block first,
+            # log second; the chain just temporarily lost a row.
+            pass
         raise HTTPException(
             status_code=403,
             detail={
@@ -254,12 +311,96 @@ def require_role(role: Optional[str], allowed: frozenset[str], action: str) -> s
     return role
 
 
+# ---------------------------------------------------------------------------
+# Router-level view-scope dependency.
+#
+# Mounted on the router include in `backend/main.py` for entire view groups
+# (PULSE, BASTION) so EVERY route under that prefix is gated without
+# touching individual handlers. Reads `request.state.user` populated by
+# `session_middleware`; never re-parses the cookie itself (the auth
+# middleware contract is preserved).
+#
+# Emits a `view_scope_denied` audit row on deny, structurally identical to
+# `spillage_prevented` so the same downstream tooling can ingest both.
+# ---------------------------------------------------------------------------
+
+def require_view_scope(view: str, allowed: frozenset[str]):
+    """Build a FastAPI dependency that gates a router by view-level role.
+
+    Use as ``Depends(require_view_scope("/pulse", PULSE_VIEW_ROLES))`` in
+    the ``dependencies=[...]`` kwarg on ``include_router``. The factory
+    runs once at app boot; the returned coroutine runs per request after
+    auth middleware has set ``request.state.user``.
+    """
+    allowed_sorted = sorted(allowed)
+
+    async def _dep(request: Request) -> str:
+        user = getattr(request.state, "user", None)
+        if user is None:
+            # Defensive: session_middleware should have already 401'd any
+            # unauthenticated /api/* request. If this branch ever fires it
+            # means a route slipped past the open-prefix list.
+            raise HTTPException(
+                status_code=401,
+                detail={"error": "Unauthenticated", "view": view},
+            )
+        role = user.get("role")
+        if role in allowed:
+            return role
+        try:
+            from .persistence import log as audit_log  # noqa: WPS433
+            audit_log(
+                "view_scope_denied",
+                actor=role or "unknown",
+                subject_id=request.url.path,
+                payload={
+                    "view": view,
+                    "path": request.url.path,
+                    "method": request.method,
+                    "user_dodid": user.get("dodid"),
+                    "user_role": role,
+                    "roles_allowed": allowed_sorted,
+                    "decision": "blocked",
+                    "surface": "backend",
+                },
+            )
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "OutOfScope",
+                "view": view,
+                "user_role": role,
+                "roles_allowed": allowed_sorted,
+                "remediation": (
+                    f"This view is restricted to {', '.join(allowed_sorted)}. "
+                    "Sign in with a CAC bearing one of those roles."
+                ),
+            },
+        )
+
+    return _dep
+
+
 ROLE_TO_UNITS_FILTER: dict[str, dict] = {
     "maintenance_chief": {"units": {"CLB-6"}, "parents": set()},
     "g4":                {"units": set(), "parents": {"2d MLG"}},
     "mef_commander":     {"units": set(), "parents": set()},   # no filter
-    "data_custodian":    {"units": set(), "parents": set()},   # no filter
-    "security_manager":  {"units": set(), "parents": set()},   # no filter
+    # data_custodian — no PULSE/BASTION unit filter is applied here because
+    # the role's primary surface is SENTRY (the upload + classify + release
+    # pipeline), where data scoping is governed by classification + release-
+    # authority gates, not unit allowlists. The view-scope gate
+    # `SENTRY_VIEW_ROLES` keeps this role out of PULSE/BASTION entirely, so
+    # the no-filter row never resolves on those endpoints in practice.
+    "data_custodian":    {"units": set(), "parents": set()},
+    # security_manager — needs cross-MEF visibility to inspect the audit
+    # chain and chase spillage events that may originate from any unit, so
+    # there is no unit allowlist. Read access on PULSE is denied by
+    # `PULSE_VIEW_ROLES`; read access on BASTION (where SOC oversight
+    # legitimately requires a fleet-wide view) is allowed and unfiltered
+    # by design.
+    "security_manager":  {"units": set(), "parents": set()},
 }
 
 
