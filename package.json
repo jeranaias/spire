@@ -1,7 +1,7 @@
 {
   "name": "workspace",
   "version": "1.0.0",
-  "description": "**Contested Logistics Operating System** — Marine Made. Sanitization, Prediction, Intelligence, Readiness Engine. Local Intelligence · No Cloud · IL5-Fit",
+  "description": "**Contested Logistics Operating System** — Marine Made. Sustainment, Prediction, Intelligence, Readiness Engine. Local Intelligence · No Cloud · IL5-Fit",
   "main": "index.js",
   "directories": {
     "doc": "docs"

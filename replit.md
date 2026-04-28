@@ -2,7 +2,7 @@
 
 ## Overview
 
-SPIRE (Sanitization, Prediction, Intelligence, Readiness Engine) is a contested-logistics operating system designed to provide sanitization, prediction, intelligence, and readiness capabilities. Originally built for USMC pilots, its primary purpose is to offer a robust operating system for contested logistics environments.
+SPIRE (Sustainment, Prediction, Intelligence, Readiness Engine) is a contested-logistics operating system designed to provide sustainment, prediction, intelligence, and readiness capabilities, originally built for USMC pilots. The project aims to offer a robust operating system for contested logistics environments. (The "S" was reframed from "Sanitization" to "Sustainment" in Task #94 so the splash tagline leads with logistics framing rather than reading as hygiene/decon to a Marine audience; the SENTRY data-sanitization feature is unchanged.)
 
 Key capabilities include:
 - Generating synthetic canonical datasets.

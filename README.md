@@ -1,7 +1,7 @@
 # SPIRE
 
 **Contested Logistics Operating System** — Marine Made.
-Sanitization, Prediction, Intelligence, Readiness Engine.
+Sustainment, Prediction, Intelligence, Readiness Engine.
 Local Intelligence · No Cloud · IL5-Fit
 
 > **Marine Made.** SPIRE itself — every surface, every workflow, every

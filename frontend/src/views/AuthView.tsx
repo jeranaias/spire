@@ -184,7 +184,7 @@ export function AuthView() {
               SPIRE
             </div>
             <div className="mt-1 font-mono text-xs uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
-              Sanitization · Prediction · Intelligence · Readiness
+              Sustainment · Prediction · Intelligence · Readiness
             </div>
           </div>
         </div>
