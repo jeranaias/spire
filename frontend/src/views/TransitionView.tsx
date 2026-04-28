@@ -363,11 +363,18 @@ const ENGAGEMENTS: Array<{
       "Transition memo drafted; courtesy intro made through PdM Ground Sensors. Formal engagement letter ready to send post-Phase II close.",
   },
   {
+    org: "Marine Corps Warfighting Lab (MCWL)",
+    role: "Operational evaluator · referral channel",
+    status: "In discussion",
+    note:
+      "MCWL stood up 3d MLR in concert with HQMC and retains operational evaluation responsibility. Engagement drafted through the MCWL evaluator channel for honest red-teaming and operator referrals; not yet signed.",
+  },
+  {
     org: "3d Marine Littoral Regiment (3d MLR) S3 / S6",
     role: "End user · CTAP host",
     status: "In discussion",
     note:
-      "Two informal demos to S3 (Maj. Holcomb) and S6 (CWO3 Vega). Operational need statement (ONS) draft circulated; awaiting unit endorsement.",
+      "Two informal demos to the S3 and S6 shops (officers held back by billet only — not named on a public-facing page). Operational need statement (ONS) draft circulated; awaiting unit endorsement.",
   },
   {
     org: "MARFORPAC G‑6 / G‑2",
@@ -599,7 +606,7 @@ const RISKS: Array<{
     risk: "ATO IL-5 reaccredit slips beyond M3",
     likelihood: "Med",
     impact: "High",
-    owner: "SPIRE Security Manager · Reyes",
+    owner: "SPIRE Security Lead · TBD — named in pilot LOI",
     mitigation:
       "Pre-stage RMF artifacts under cATO sponsor at LCES. Run a parallel mock assessor cycle in M1. Trigger DDIL-only fallback if M3 slips so user-trial start (M6) is unaffected.",
   },
@@ -608,7 +615,7 @@ const RISKS: Array<{
     risk: "MTA-RP slot contested in FY26 acquisition cycle",
     likelihood: "Med",
     impact: "High",
-    owner: "MCSC LCES PMO liaison · TBD",
+    owner: "MCSC LCES PMO liaison · TBD — named in pilot LOI",
     mitigation:
       "Hold DIU Commercial Solutions Opening abstract as a contingency contracting vehicle. Pre-brief PEO MS to keep an OTA bridge option warm.",
   },
@@ -617,7 +624,7 @@ const RISKS: Array<{
     risk: "Model performance regresses on 3d MLR mission data (distribution shift)",
     likelihood: "Med",
     impact: "Med",
-    owner: "SPIRE Model Steward · Tan",
+    owner: "SPIRE Model Steward · TBD — named in pilot LOI",
     mitigation:
       "Quarterly retrain cadence is funded in §3. Ship the in-app drift dashboard before user-trial start; tie a hard rollback in PULSE to a published baseline (already wired).",
   },
@@ -626,7 +633,7 @@ const RISKS: Array<{
     risk: "Sustainment FTE attrition leaves a single point of failure",
     likelihood: "Low",
     impact: "Med",
-    owner: "SPIRE Engineering Lead · Park",
+    owner: "SPIRE Engineering Lead · TBD — named in pilot LOI",
     mitigation:
       "1.5-FTE line in §3 covers a primary plus part-time SRE. Cross-train the LCES PMO contractor on the deploy + accreditation evidence pipelines so we are not the only ones who can ship.",
   },
@@ -635,7 +642,7 @@ const RISKS: Array<{
     risk: "Coalition export breaks against MIL-STD-6016 / OMS-UCI conformance updates",
     likelihood: "Low",
     impact: "Med",
-    owner: "SPIRE Interop Lead · Holloway",
+    owner: "SPIRE Interop Lead · TBD — named in pilot LOI",
     mitigation:
       "Lock conformance test corpus to a quarterly cadence; subscribe to the JICD update list. Failed conformance gates in CI block release rather than degrade silently downstream.",
   },
@@ -643,7 +650,7 @@ const RISKS: Array<{
 
 function Risks() {
   return (
-    <Section id="risks" title="6 · Risks + mitigations" subtitle="Top-5 register, named owners">
+    <Section id="risks" title="6 · Risks + mitigations" subtitle="Top-5 register · owners filled at pilot LOI signature">
       <Panel>
         <div className="overflow-x-auto rounded-sm border border-[var(--color-border)]">
           <table className="w-full border-collapse font-mono text-sm">
