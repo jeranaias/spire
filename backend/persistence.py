@@ -45,6 +45,28 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "spire.db"
 DB_ENCRYPTED_PATH = DATA_DIR / "spire.db.enc"
 
+# Task-110 — SENTRY export bundles live on disk so a uvicorn restart
+# between "Export Sanitized Bundle" and the operator hitting the download
+# link doesn't strand them on a 404. Each bundle gets its own subdir
+# under EXPORTS_DIR keyed by export_id, with the zip and a metadata
+# sidecar (so the download endpoint can validate classification without
+# re-reading the zip).
+EXPORTS_DIR = DATA_DIR / "sentry_exports"
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Retention threshold; configurable so demo runs can crank it down. Default
+# 24h is plenty for a stage demo while keeping the disk from growing
+# unboundedly across rehearsal cycles.
+def _export_retention_seconds() -> int:
+    raw = os.environ.get("SPIRE_EXPORT_RETENTION_SECONDS")
+    if not raw:
+        return 24 * 3600
+    try:
+        v = int(raw)
+        return v if v > 0 else 24 * 3600
+    except (TypeError, ValueError):
+        return 24 * 3600
+
 _LOCK = threading.RLock()
 _DB_PASSPHRASE = os.environ.get("SPIRE_DB_PASSPHRASE")  # None == plain mode for local dev
 
@@ -1367,6 +1389,170 @@ def secure_wipe(actor: str = "security_manager") -> dict:
     # First entry in the new chain is the wipe itself
     log("secure_wipe", actor=actor, payload={"note": "operator-initiated secure wipe"})
     return {"ok": True, "wiped_at": datetime.utcnow().isoformat(timespec="seconds") + "Z"}
+
+
+# ---------------------------------------------------------------------------
+# Task-110 — SENTRY export bundles persisted to disk
+# ---------------------------------------------------------------------------
+#
+# Bundles are kept on disk under EXPORTS_DIR/<export_id>/ so they survive a
+# uvicorn restart between the moment the operator builds the bundle and
+# the moment they (or a coalition partner) hit the download link. Each
+# bundle directory carries:
+#
+#   bundle.zip   -- the artifact that gets streamed back to the browser
+#   meta.json    -- {classification, filename, manifest, created_at}
+#                   so the download endpoint can validate clearance
+#                   *without* opening the zip every time.
+#
+# The metadata sidecar is the durable equivalent of the old in-memory
+# `_EXPORTS[export_id]` entry: writing the zip alone would force the
+# download path to crack a (potentially TS//SCI) zip just to read its
+# classification field, which is wasteful and a worse audit story.
+
+_EXPORT_META_FILENAME = "meta.json"
+_EXPORT_BUNDLE_FILENAME = "bundle.zip"
+
+
+def _export_dir(export_id: str) -> Path:
+    return EXPORTS_DIR / export_id
+
+
+def store_sentry_export(
+    export_id: str,
+    bundle_bytes: bytes,
+    *,
+    classification: str,
+    filename: str,
+    manifest: dict,
+    created_at: str,
+) -> Path:
+    """Write a SENTRY export bundle (zip + metadata) to disk under
+    EXPORTS_DIR/<export_id>/. Returns the directory path.
+
+    Writes use a temp-name + os.replace dance so a crash mid-write never
+    leaves a half-written zip that the download endpoint would happily
+    stream as a corrupted artifact.
+    """
+    target = _export_dir(export_id)
+    target.mkdir(parents=True, exist_ok=True)
+    bundle_path = target / _EXPORT_BUNDLE_FILENAME
+    meta_path = target / _EXPORT_META_FILENAME
+
+    tmp_bundle = bundle_path.with_suffix(bundle_path.suffix + ".tmp")
+    tmp_bundle.write_bytes(bundle_bytes)
+    os.replace(tmp_bundle, bundle_path)
+
+    meta = {
+        "export_id": export_id,
+        "classification": classification,
+        "filename": filename,
+        "manifest": manifest,
+        "created_at": created_at,
+        "bytes": len(bundle_bytes),
+    }
+    tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
+    tmp_meta.write_text(json.dumps(meta, default=str))
+    os.replace(tmp_meta, meta_path)
+    return target
+
+
+def load_sentry_export_meta(export_id: str) -> Optional[dict]:
+    """Read just the metadata sidecar; returns None if the bundle
+    doesn't exist or the sidecar is unreadable."""
+    if not export_id or "/" in export_id or ".." in export_id:
+        return None
+    meta_path = _export_dir(export_id) / _EXPORT_META_FILENAME
+    if not meta_path.exists():
+        return None
+    try:
+        return json.loads(meta_path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def load_sentry_export_bytes(export_id: str) -> Optional[bytes]:
+    """Read the bundle bytes from disk. Returns None if the bundle
+    is missing — paired with `load_sentry_export_meta` so a
+    half-cleaned-up bundle (meta gone, zip lingering) doesn't get
+    streamed without its classification check.
+
+    Prefer `sentry_export_bundle_path` for the download endpoint —
+    `FileResponse` chunks the file off disk without slurping the whole
+    zip into a process buffer first.
+    """
+    if not export_id or "/" in export_id or ".." in export_id:
+        return None
+    bundle_path = _export_dir(export_id) / _EXPORT_BUNDLE_FILENAME
+    if not bundle_path.exists():
+        return None
+    try:
+        return bundle_path.read_bytes()
+    except OSError:
+        return None
+
+
+def sentry_export_bundle_path(export_id: str) -> Optional[Path]:
+    """Return the on-disk path to a SENTRY export bundle, or None if
+    the export_id is invalid or the bundle was reaped. Used by the
+    download endpoint with `FileResponse` so multi-MB bundles stream
+    chunked off disk instead of being buffered in process memory."""
+    if not export_id or "/" in export_id or ".." in export_id:
+        return None
+    bundle_path = _export_dir(export_id) / _EXPORT_BUNDLE_FILENAME
+    if not bundle_path.exists():
+        return None
+    return bundle_path
+
+
+def prune_sentry_exports(max_age_seconds: Optional[int] = None) -> int:
+    """Purge bundle directories whose meta.json mtime is older than
+    `max_age_seconds`. Returns the count removed.
+
+    Defaults to the SPIRE_EXPORT_RETENTION_SECONDS env var (24h fallback).
+    Any directory without a readable meta.json is also removed — those
+    are the half-written or orphaned bundles. Bundles without a meta but
+    with a fresh mtime are left alone in case they're mid-write.
+    """
+    if max_age_seconds is None:
+        max_age_seconds = _export_retention_seconds()
+    if max_age_seconds <= 0:
+        return 0
+    if not EXPORTS_DIR.exists():
+        return 0
+    cutoff = datetime.utcnow().timestamp() - max_age_seconds
+    removed = 0
+    for child in EXPORTS_DIR.iterdir():
+        if not child.is_dir():
+            continue
+        meta_path = child / _EXPORT_META_FILENAME
+        try:
+            if meta_path.exists():
+                mtime = meta_path.stat().st_mtime
+            else:
+                # No sidecar — probably orphaned. Use the directory's mtime
+                # so a fresh-but-still-being-written bundle gets a grace
+                # period (two minutes) before we yank it.
+                mtime = child.stat().st_mtime
+                if mtime > datetime.utcnow().timestamp() - 120:
+                    continue
+        except OSError:
+            continue
+        if mtime >= cutoff:
+            continue
+        try:
+            for f in child.iterdir():
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+            child.rmdir()
+            removed += 1
+        except OSError:
+            # Best-effort cleanup; a stuck directory will get retried on
+            # the next /export call.
+            continue
+    return removed
 
 
 # ---------------------------------------------------------------------------

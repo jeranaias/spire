@@ -17,7 +17,7 @@ from typing import Optional
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from ..auth import session_role
 from ..integrations.sentry_gcss_adapter import (
@@ -31,10 +31,14 @@ from ..persistence import (
     entries_for_subject,
     find_sentry_batch_id_for_job,
     load_sentry_batch,
+    load_sentry_export_meta,
     log as audit_log,
+    prune_sentry_exports,
     record_sentry_bulk_decision,
     record_sentry_decision,
+    sentry_export_bundle_path,
     store_sentry_batch,
+    store_sentry_export,
     store_uploaded_batch,
 )
 from ..scoping import (
@@ -1726,7 +1730,37 @@ async def review_bulk(request: Request, payload: dict):
     }
 
 
-_EXPORTS: dict = {}  # export_id -> zip bytes + metadata
+# Task-110 — export bundles now persist to disk under runtime/sentry_exports/.
+# `_EXPORTS` survives as a thin metadata-only LRU in front of the disk
+# (so the download endpoint doesn't restat the meta sidecar on every hit
+# when the operator pastes the URL into curl a few times in a row). The
+# zip bytes themselves are read from disk on demand — caching multi-MB
+# bundles in process memory was the bug we just fixed, not something to
+# replicate in the cache.
+from collections import OrderedDict as _OrderedDict
+_EXPORTS_META_CACHE_MAX = 32
+_EXPORTS: "OrderedDict[str, dict]" = _OrderedDict()  # export_id -> meta dict
+
+
+def _cache_export_meta(export_id: str, meta: dict) -> None:
+    """Insert into the LRU, evicting the oldest entry if we're full."""
+    if export_id in _EXPORTS:
+        _EXPORTS.move_to_end(export_id)
+    _EXPORTS[export_id] = meta
+    while len(_EXPORTS) > _EXPORTS_META_CACHE_MAX:
+        _EXPORTS.popitem(last=False)
+
+
+def _lookup_export_meta(export_id: str) -> Optional[dict]:
+    """Cache-then-disk lookup for export metadata."""
+    if export_id in _EXPORTS:
+        _EXPORTS.move_to_end(export_id)
+        return _EXPORTS[export_id]
+    meta = load_sentry_export_meta(export_id)
+    if meta is None:
+        return None
+    _cache_export_meta(export_id, meta)
+    return meta
 
 
 @router.post("/export")
@@ -2201,13 +2235,61 @@ async def export_sanitized(request: Request, payload: dict):
     # Filename inherits the bundle classification so a glance at the
     # download path tells the operator what they're handling.
     safe_cls = bundle_class.replace("/", "_")
-    _EXPORTS[export_id] = {
-        "bytes": buf.getvalue(),
-        "filename": f"spire_{safe_cls}_sanitized_{export_id}.zip",
+    bundle_filename = f"spire_{safe_cls}_sanitized_{export_id}.zip"
+    bundle_bytes = buf.getvalue()
+
+    # Task-110 — persist the bundle to disk so it survives a uvicorn
+    # restart. Writes are atomic (tmp + os.replace inside the persistence
+    # helper) so a crash between zip-write and meta-write never leaves a
+    # bundle the download endpoint can stream without a classification
+    # check. The thin in-memory LRU keeps hot metadata around so repeat
+    # download hits don't re-stat the sidecar.
+    try:
+        store_sentry_export(
+            export_id,
+            bundle_bytes,
+            classification=bundle_class,
+            filename=bundle_filename,
+            manifest=manifest,
+            created_at=manifest["created_at"],
+        )
+    except OSError as exc:
+        # Disk failure during a classified export is the kind of thing the
+        # operator absolutely needs to know about — don't silently fall
+        # back to in-memory only and let the next restart eat the bundle.
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "export_persist_failed", "reason": str(exc)},
+        )
+
+    _cache_export_meta(export_id, {
+        "export_id": export_id,
+        "filename": bundle_filename,
         "classification": bundle_class,
         "manifest": manifest,
         "created_at": manifest["created_at"],
-    }
+        "bytes": len(bundle_bytes),
+    })
+
+    # Best-effort retention sweep so demo runs don't accumulate bundles
+    # forever. Failure here doesn't abort the export — the operator still
+    # gets their download_url. We log the result (success count or the
+    # failure mode) so a SOC analyst auditing storage growth has an
+    # operational trail without needing to instrument the loop.
+    try:
+        purged = prune_sentry_exports()
+        if purged:
+            audit_log(
+                "sentry_export_pruned",
+                actor="system",
+                payload={"removed": purged, "trigger": "post_export"},
+            )
+    except Exception as exc:  # noqa: BLE001
+        audit_log(
+            "sentry_export_prune_error",
+            actor="system",
+            payload={"reason": str(exc), "trigger": "post_export"},
+        )
 
     audit_log(
         "sentry_export",
@@ -2224,8 +2306,8 @@ async def export_sanitized(request: Request, payload: dict):
     return {
         "ok": True,
         "export_id": export_id,
-        "filename": _EXPORTS[export_id]["filename"],
-        "bytes": len(_EXPORTS[export_id]["bytes"]),
+        "filename": bundle_filename,
+        "bytes": len(bundle_bytes),
         # Echo classification on the response so the FE badge can render
         # the actual bundle marking (not just the operator-supplied default).
         "classification": bundle_class,
@@ -2639,7 +2721,11 @@ async def download_export(export_id: str, request: Request):
         action="sentry.download",
         audit_subject=export_id,
     )
-    entry = _EXPORTS.get(export_id)
+    # Task-110 — metadata first (cache → disk), bytes second. We re-check
+    # clearance against the persisted classification *before* loading the
+    # potentially-large zip into memory so a downgrade attempt can't even
+    # cause an unnecessary disk read.
+    entry = _lookup_export_meta(export_id)
     if not entry:
         raise HTTPException(status_code=404, detail="export not found or expired")
     # Clearance re-check on download. Even though the operator was cleared
@@ -2651,12 +2737,23 @@ async def download_export(export_id: str, request: Request):
         action="sentry.download",
         audit_subject=export_id,
     )
+    bundle_path = sentry_export_bundle_path(export_id)
+    if bundle_path is None:
+        # Bundle directory was reaped (retention cleanup) between the
+        # metadata cache hit and the path lookup, or the disk lost the
+        # zip while the meta sidecar lingered. Treat as expired so the
+        # operator gets a useful 404 rather than a 500.
+        _EXPORTS.pop(export_id, None)
+        raise HTTPException(status_code=404, detail="export not found or expired")
     cls_header = entry.get("classification", "UNCLASSIFIED")
-    return StreamingResponse(
-        io.BytesIO(entry["bytes"]),
+    # `FileResponse` chunks the bundle off disk instead of slurping the
+    # whole zip into a process buffer first — same memory profile no
+    # matter whether the bundle is 50KB or 50MB.
+    return FileResponse(
+        path=str(bundle_path),
         media_type="application/zip",
+        filename=entry["filename"],
         headers={
-            "Content-Disposition": f'attachment; filename="{entry["filename"]}"',
             # Visible classification on the wire — surfaces in CLI/curl
             # output so even non-UI consumers see the marking.
             "X-Classification": cls_header,
