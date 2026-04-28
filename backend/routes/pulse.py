@@ -1254,7 +1254,7 @@ async def forecast(
 # This endpoint is the in-PULSE summary of the canonical model card. It
 # computes everything deterministically from the synthetic dataset and
 # caches the result for the lifetime of the process. Lane C3 owns the
-# canonical detail page at `/admin/models/pulse-risk`; this endpoint is
+# canonical detail page at `/admin/models/pulse-risk-scorer`; this endpoint is
 # the operator-facing summary inside PULSE itself.
 
 _MODEL_CARD_CACHE: Optional[dict] = None
@@ -1563,7 +1563,7 @@ def _compute_model_card() -> dict:
                 "Test split is the trailing 15% of dates; no row in the test split appears in train or val. "
                 "Per-asset history is shared across splits because the readiness signal is auto-correlated — "
                 "we document this as a known limitation. The next iteration will use leave-one-asset-out "
-                "cross-validation; tracked in /admin/models/pulse-risk #LIM-3."
+                "cross-validation; tracked in /admin/models/pulse-risk-scorer #LIM-3."
             ),
         },
         "confusion_matrix": {
@@ -1583,9 +1583,9 @@ def _compute_model_card() -> dict:
                 "Time-split holdout against future-30-day NMC labels. Predictions evaluated at the val/test "
                 "boundary using snapshot-time features only (no time leakage)."
             ),
-            "methodology_link": "/#/admin/models/pulse-risk",
+            "methodology_link": "/#/admin/models/pulse-risk-scorer",
         },
-        "canonical_model_card_url": "/#/admin/models/pulse-risk",
+        "canonical_model_card_url": "/#/admin/models/pulse-risk-scorer",
         "as_of": last_day.isoformat(),
     }
 
@@ -1594,7 +1594,7 @@ def _compute_model_card() -> dict:
 async def model_card(refresh: bool = Query(False)):
     """In-PULSE summary of the PULSE risk scorer's model card.
 
-    Cross-links to the canonical detail at `/admin/models/pulse-risk`
+    Cross-links to the canonical detail at `/admin/models/pulse-risk-scorer`
     (lane C3). Computes baselines + confusion matrix + drift series
     deterministically from the synthetic dataset and caches the result
     for the lifetime of the process.
