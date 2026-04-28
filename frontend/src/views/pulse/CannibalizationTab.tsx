@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Cannibalization, type StrippableDonor } from "../../api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, ApiError, type Cannibalization, type StrippableDonor } from "../../api";
+import { formatApiError } from "../../api-retry";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
-import { Button, Pressable, fireIdempotent } from "../../components/ui";
+import { Button, ErrorState, Pressable, fireIdempotent } from "../../components/ui";
 
 type NeedRow = {
   sr_number: string;
@@ -36,6 +37,14 @@ type MatchRow = {
     installed_by: string;
     disposition: string;
   };
+  // Task-42 — local-row lifecycle. `committed` = optimistic write that
+  // succeeded live (or no DDIL routing was triggered). `queued` =
+  // DDIL DISCONNECTED routed it to the local replay queue; once the
+  // queue drains the badge flips to "Replayed". `localId` correlates
+  // a queued row with its DdilQueuedWrite entry so we can detect the
+  // drain reactively.
+  localStatus?: "committed" | "queued";
+  localId?: string;
 };
 
 // Task #40 -- DonorRow is a strippable asset record (not another open need).
@@ -48,7 +57,16 @@ type SortMode = "days_open" | "impact" | "unit";
 export function CannibalizationTab() {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
+  // Task-42 — subscribe to the DDIL queue so we can flip a queued
+  // local match's badge from "Queued" → "Replayed" the moment the
+  // CommsControl drain removes its id from the store.
+  const ddilQueue = useSpireStore((s) => s.ddilQueue);
+  const queuedIds = useMemo(() => new Set(ddilQueue.map((q) => q.id)), [ddilQueue]);
   const [data, setData] = useState<Cannibalization | null>(null);
+  // Task-42 — distinguish "200 with empty list" from "5xx / network
+  // failure / DDIL no-cache". Prior code .catch'd silently and left
+  // the LoadingOverlay spinning forever with no retry path.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedNeed, setSelectedNeed] = useState<NeedRow | null>(null);
   const [proposedLocal, setProposedLocal] = useState<MatchRow[]>([]);
   const [confirmDonor, setConfirmDonor] = useState<{ need: NeedRow; donor: DonorRow } | null>(null);
@@ -61,17 +79,30 @@ export function CannibalizationTab() {
   // Walkthrough #45 — same-fault-class only mode
   const [crossUnitOnly, setSameClassOnly] = useState(false);
 
+  const loadCannibalization = useCallback(() => {
+    setLoadError(null);
+    api.pulse.cannibalization()
+      .then((payload) => setData(payload))
+      .catch((err) => {
+        // Task-42 — surface the failure instead of swallowing it.
+        // ApiError preserves DDIL discriminators ({ ddil: "disconnected" })
+        // so we can render a tailored message rather than a raw 500.
+        const ddilTag = err instanceof ApiError ? (err.body as any)?.ddil : null;
+        if (ddilTag === "disconnected") {
+          setLoadError("Comms denied (DDIL DISCONNECTED) and no cached snapshot is available for this view.");
+        } else {
+          setLoadError(formatApiError(err));
+        }
+      });
+  }, []);
+
   useEffect(() => {
     setData(null);
+    setLoadError(null);
     setSelectedNeed(null);
     setProposedLocal([]);
-    // Walkthrough audit: prior code had no .catch — transient 502s
-    // logged 'Uncaught (in promise)' instead of letting the empty
-    // state render naturally.
-    api.pulse.cannibalization()
-      .then(setData)
-      .catch(() => { /* tolerate; empty-state copy explains 'no needs' */ });
-  }, [role]);
+    loadCannibalization();
+  }, [role, loadCannibalization]);
 
   // Task #40 -- Strippable donor pool from the backend. The previous
   // derivation built donors from OTHER OPEN NMCS NEEDS sharing the same
@@ -90,6 +121,19 @@ export function CannibalizationTab() {
       : pool;
   }, [data, selectedNeed, crossUnitOnly]);
 
+  // Task-42 — render an actionable error state instead of an infinite
+  // spinner when the cold-load 5xx'd or comms are denied.
+  if (loadError) {
+    return (
+      <ErrorState
+        title="Cannibalization data unavailable"
+        description="The Pulse cannibalization feed did not return. Backend may be cycling or comms are denied."
+        detail={loadError}
+        onRetry={loadCannibalization}
+        retryLabel="Retry"
+      />
+    );
+  }
   if (!data) return <LoadingOverlay message="Matching needs with donors …" />;
 
   const allNeeds = data.open_needs as NeedRow[];
@@ -121,54 +165,95 @@ export function CannibalizationTab() {
   async function commitInner() {
     if (!confirmDonor) return;
     setCommitting(true);
+    const need = confirmDonor.need;
+    const donor = confirmDonor.donor;
+    const isSelf = need.unit === donor.unit;
+    const optimisticId = `CAN-LOCAL-${Date.now()}`;
+    const optimistic: MatchRow = {
+      event_id: optimisticId,
+      event_date: new Date().toISOString().slice(0, 10),
+      scope: isSelf ? "self" : "cross_unit",
+      recipient: { asset_id: need.asset_id, unit: need.unit },
+      donor: { asset_id: donor.asset_id, unit: donor.unit },
+      nsn: need.needed_part.nsn,
+      nomenclature: need.needed_part.nomenclature,
+      impact: `Proposed by operator · recipient ${need.unit} gains ${need.needed_part.nomenclature} from ${donor.unit}.`,
+      localStatus: "committed",
+    };
+    setProposedLocal((prev) => [optimistic, ...prev]);
+    // Task-42 — route through the DDIL-aware client. The interceptor
+    // applies LIMITED latency, INTERMITTENT drops, and DISCONNECTED
+    // queue-for-replay automatically; we branch on the structured
+    // ApiError it raises so the optimistic row's badge + the toast
+    // copy match the actual transport outcome (rather than always
+    // saying "Match proposed" the way the raw fetch did).
+    //
+    // We still keep a 15s client-side timeout: even the interceptor
+    // won't save us from a Fly cold-start sitting on the wire.
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 15_000);
     try {
-      const isSelf = confirmDonor.need.unit === confirmDonor.donor.unit;
-      const optimistic: MatchRow = {
-        event_id: `CAN-LOCAL-${Date.now()}`,
-        event_date: new Date().toISOString().slice(0, 10),
-        scope: isSelf ? "self" : "cross_unit",
-        recipient: { asset_id: confirmDonor.need.asset_id, unit: confirmDonor.need.unit },
-        donor: { asset_id: confirmDonor.donor.asset_id, unit: confirmDonor.donor.unit },
-        nsn: confirmDonor.need.needed_part.nsn,
-        nomenclature: confirmDonor.need.needed_part.nomenclature,
-        impact: `Proposed by operator · recipient ${confirmDonor.need.unit} gains ${confirmDonor.need.needed_part.nomenclature} from ${confirmDonor.donor.unit}.`,
-      };
-      setProposedLocal((prev) => [optimistic, ...prev]);
-      // Walkthrough audit (CRITICAL): prior code had no client-side timeout
-      // on the POST. When the backend cold-started, the request sat for
-      // ~30s before nginx returned 502, freezing the modal in 'Committing…'
-      // with no operator feedback. 15s AbortController gives a definitive
-      // ceiling — the optimistic row is already on screen so the operator
-      // never blocks on the network.
-      const ctrl = new AbortController();
-      const timer = window.setTimeout(() => ctrl.abort(), 15_000);
-      try {
-        await fetch("/api/pulse/cannibalization/propose", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recipient_sr: confirmDonor.need.sr_number,
-            // Task #40 -- strippable donors are asset-keyed; donor may be MC
-            // and have no SR. Backend accepts donor_asset_id as canonical.
-            donor_asset_id: confirmDonor.donor.asset_id,
-            nsn: confirmDonor.need.needed_part.nsn,
-          }),
-          signal: ctrl.signal,
-        });
-      } catch {
-        /* Backend may not implement this endpoint yet OR cold-start
-         * timeout — keep the optimistic row visible so the operator's
-         * action isn't lost. The next poll resolves ground truth. */
-      } finally {
-        window.clearTimeout(timer);
-      }
+      // Task #40 — donors are strippable hulls (asset-keyed); they may be
+      // MC and have no SR, so the backend accepts donor_asset_id as the
+      // canonical donor reference.
+      await api.pulse.cannibalizationPropose(
+        {
+          recipient_sr: need.sr_number,
+          donor_asset_id: donor.asset_id,
+          nsn: need.needed_part.nsn,
+        },
+        { signal: ctrl.signal },
+      );
       pushToast({
         tone: "ok",
-        text: `Match proposed · ${confirmDonor.need.asset_id} ← ${confirmDonor.donor.asset_id}`,
+        text: `Match proposed · ${need.asset_id} ← ${donor.asset_id}`,
       });
+    } catch (err) {
+      const ddilTag = err instanceof ApiError ? (err.body as any)?.ddil : null;
+      if (ddilTag === "queued") {
+        // DDIL DISCONNECTED — interceptor pushed the write into the
+        // local replay queue. Keep the optimistic row, tag it so the
+        // Completed Matches badge reads "Queued · DDIL" until the
+        // queue drains on reconnect, then auto-flips to "Replayed".
+        const localId = (err.body as any)?.local_id as string | undefined;
+        setProposedLocal((prev) =>
+          prev.map((r) =>
+            r.event_id === optimisticId
+              ? { ...r, localStatus: "queued", localId }
+              : r,
+          ),
+        );
+        pushToast({
+          tone: "warn",
+          text: `Comms denied — proposal queued for replay${localId ? ` (${localId})` : ""}.`,
+          ttlMs: 5000,
+        });
+      } else if (ddilTag === "intermittent") {
+        // INTERMITTENT — wire dropped the request. Pull the optimistic
+        // row so the Completed Matches list doesn't carry a phantom
+        // success; the operator re-issues the proposal to retry, which
+        // is the demo beat the DDIL spec asks for.
+        setProposedLocal((prev) => prev.filter((r) => r.event_id !== optimisticId));
+        pushToast({
+          tone: "warn",
+          text: "Comms intermittent — packet dropped on the wire. Re-issue the proposal.",
+          ttlMs: 5000,
+        });
+      } else {
+        // Real backend error (5xx, 4xx) or transport / abort. Pull the
+        // optimistic row so we don't claim success that never happened,
+        // and surface the underlying detail.
+        setProposedLocal((prev) => prev.filter((r) => r.event_id !== optimisticId));
+        pushToast({
+          tone: "error",
+          text: `Proposal failed — ${formatApiError(err)}`,
+          ttlMs: 5500,
+        });
+      }
+    } finally {
+      window.clearTimeout(timer);
       setConfirmDonor(null);
       setSelectedNeed(null);
-    } finally {
       setCommitting(false);
     }
   }
@@ -435,16 +520,32 @@ export function CannibalizationTab() {
           {matches.map((m) => {
             const isLocal = m.event_id.startsWith("CAN-LOCAL");
             const isSelf = m.scope === "self" || m.recipient.unit === m.donor.unit;
+            // Task-42 — derive the local-row badge state from the live
+            // DDIL queue: if this row was queued and its local id is
+            // still in the store, render "Queued · DDIL"; once the
+            // CommsControl drain removes the id, the badge auto-flips
+            // to "Replayed". A row that committed live keeps "New".
+            const isQueuedLocal = isLocal && m.localStatus === "queued";
+            const stillQueued = isQueuedLocal && m.localId != null && queuedIds.has(m.localId);
+            const wasReplayed = isQueuedLocal && !stillQueued;
+            const localBorder = stillQueued
+              ? "color-mix(in oklab, var(--color-warning) 50%, var(--color-border))"
+              : wasReplayed
+                ? "color-mix(in oklab, var(--color-success) 45%, var(--color-border))"
+                : "color-mix(in oklab, var(--color-primary) 40%, var(--color-border))";
+            const localBackground = stillQueued
+              ? "color-mix(in oklab, var(--color-warning) 8%, var(--color-surface))"
+              : wasReplayed
+                ? "color-mix(in oklab, var(--color-success) 8%, var(--color-surface))"
+                : "color-mix(in oklab, var(--color-primary) 6%, var(--color-surface))";
             return (
               <div
                 key={m.event_id}
                 className="rounded-sm border p-3"
                 style={{
-                  borderColor: isLocal
-                    ? "color-mix(in oklab, var(--color-primary) 40%, var(--color-border))"
-                    : "var(--color-success-muted)",
+                  borderColor: isLocal ? localBorder : "var(--color-success-muted)",
                   background: isLocal
-                    ? "color-mix(in oklab, var(--color-primary) 6%, var(--color-surface))"
+                    ? localBackground
                     : "color-mix(in oklab, var(--color-success-muted) 10%, var(--color-surface))",
                 }}
               >
@@ -460,7 +561,33 @@ export function CannibalizationTab() {
                   </div>
                   <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
                     {m.event_date}
-                    {isLocal && (
+                    {isLocal && stillQueued && (
+                      <span
+                        className="ml-2 rounded-sm border px-1 text-xs uppercase tracking-wider"
+                        style={{
+                          borderColor: "var(--color-warning)",
+                          color: "var(--color-warning)",
+                          background: "color-mix(in oklab, var(--color-warning) 14%, transparent)",
+                        }}
+                        title="DDIL DISCONNECTED · queued for replay on reconnect"
+                      >
+                        Queued · DDIL
+                      </span>
+                    )}
+                    {isLocal && wasReplayed && (
+                      <span
+                        className="ml-2 rounded-sm border px-1 text-xs uppercase tracking-wider"
+                        style={{
+                          borderColor: "var(--color-success)",
+                          color: "var(--color-success)",
+                          background: "color-mix(in oklab, var(--color-success) 14%, transparent)",
+                        }}
+                        title="Queued write replayed on reconnect"
+                      >
+                        Replayed
+                      </span>
+                    )}
+                    {isLocal && !isQueuedLocal && (
                       <span className="ml-2 rounded-sm border border-[var(--color-primary)] px-1 text-xs uppercase text-[var(--color-primary)]">
                         New
                       </span>

@@ -415,6 +415,25 @@ export const api = {
     riskBoard: (top = 20) => jsonFetch<RiskBoard>(`/pulse/risk-board?top=${top}`),
     assetDeepDive: (assetId: string) => jsonFetch<AssetDeepDive>(`/pulse/assets/${encodeURIComponent(assetId)}`),
     cannibalization: () => jsonFetch<Cannibalization>("/pulse/cannibalization"),
+    // Task-42 — route the propose POST through jsonFetch so the DDIL
+    // interceptor applies (DISCONNECTED → queue for replay,
+    // INTERMITTENT → may drop with a warn, LIMITED → latency
+    // dramatization). Previously CannibalizationTab + RecommendPanel
+    // each issued raw fetch("/api/pulse/cannibalization/propose", …),
+    // bypassing the interceptor and silently exiting the "we work
+    // when comms are yellow" demo on this page.
+    cannibalizationPropose: (
+      input: { recipient_sr: string; donor_asset_id: string; nsn: string },
+      opts?: { signal?: AbortSignal },
+    ) =>
+      jsonFetch<{ ok: boolean; event_id?: string; impact?: string }>(
+        "/pulse/cannibalization/propose",
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+          signal: opts?.signal,
+        },
+      ),
     forecast: (unit?: string, window = 14) =>
       jsonFetch<Forecast>(`/pulse/forecast?window=${window}${unit ? `&unit=${encodeURIComponent(unit)}` : ""}`),
     feedback: (assetId: string, correct: boolean, note = "") =>
