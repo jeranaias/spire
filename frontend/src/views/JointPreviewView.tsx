@@ -59,6 +59,13 @@ import {
   type JointLink16J282Message,
   type JointOmsUciExport,
 } from "../api";
+// Task #152 — DoDM 5200.01-V2 page-level marking guardrail. JLTC ships
+// with its own (intentionally-unfamiliar) SECRET // REL banner so the
+// shell reads as a partner viewer, not SPIRE chrome — but a judge has
+// to also see the SPIRE-side "UNCLASSIFIED // DEMO DATA // NOT FOR
+// OPERATIONAL USE" disclaimer or the partner banner can be misread as
+// real classified data. The strips bracket the partner shell on both
+// the top and bottom edges of the viewport.
 import { ClassificationBannerStrip } from "../components/ClassificationBannerStrip";
 import { useSpireStore, type DdilMode } from "../state/store";
 
@@ -321,6 +328,13 @@ export function JointPreviewView() {
   // projector. No FPCON badge: the partner shell has no SPIRE session
   // state to surface.
   return (
+    // Task #152 — flex column so the SPIRE classification strips can
+    // bracket the partner shell at the very top and very bottom of the
+    // viewport. The middle div retains the JLTC chrome (its own banner,
+    // topbar, content, footer) and owns the scroll. JointFooter loses
+    // its previous position:fixed and now flows at the bottom of the
+    // scrollable region — same visual position, but inside the strip
+    // sandwich so the SPIRE bottom marking is never obscured.
     <div
       className="flex h-screen w-full flex-col"
       style={{
@@ -1549,6 +1563,12 @@ function JointFooter({
   // normal flex flow at the end of the scroll pane instead of fixed-
   // overlaying the bottom edge.
   return (
+    // Task #152 — was position:fixed bottom:0 to ride above the
+    // scrolling content. Now flows at the end of the JLTC scroll
+    // region so the SPIRE bottom classification strip can sit beneath
+    // it without being obscured. Visual position is unchanged because
+    // the parent flex column pins the bottom strip + footer to the
+    // viewport bottom.
     <footer
       style={{
         marginTop: "auto",
