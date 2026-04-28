@@ -1433,6 +1433,15 @@ export interface ExportResult {
   // read this; the backend re-checks on /download.
   classification?: string;
   classification_banner?: string;
+  // Task-69 — release-compatibility validator output. `status="warn"` carries
+  // a populated `release_warnings` array the FE renders as a yellow banner;
+  // `status="block"` cases raise 403 (release_blocked) and never reach here.
+  release_compatibility?: {
+    status: "ok" | "warn" | "block";
+    issues: string[];
+    caveats: string[];
+  };
+  release_warnings?: string[];
 }
 
 export interface BastionCOPUnit {

@@ -164,6 +164,80 @@ REL_TO_CAVEAT: dict[str, str] = {
     "SPECIFIC": "Specific partner — see release event",
 }
 
+# Task-69 — single source of truth for valid release authorities. Both /mark
+# and /export validate against this; an unknown value at /export used to KeyError
+# into a 500 against DISTRIBUTION_STATEMENT.
+VALID_RELEASE_AUTHORITIES: set[str] = {"US_ONLY", "FVEY", "NATO", "SPECIFIC"}
+
+
+def evaluate_release_compatibility(
+    classification: str,
+    release_authority: str,
+    caveats: list[str],
+) -> dict:
+    """Doctrinal release-compatibility validator. Shared by `/mark` (text-level
+    recommendation) and `/export` (artifact-level release gate).
+
+    Hard-blocks impossible combos (NOFORN + foreign partner). Soft-warns on
+    SECRET → FVEY/NATO without an explicit downgrade caveat, and on CUI →
+    FVEY without an explicit REL TO FVEY marking.
+
+    Returns ``{"status": "ok"|"warn"|"block", "issues": [...]}``. Caller is
+    responsible for any audit-event emission and HTTP-status mapping.
+    """
+    cls = (classification or "").upper().replace("//", "_").replace(" ", "_")
+    # Map normalized → doctrinal labels used by the rules below.
+    if cls in ("TS_SCI", "TOP_SECRET_SCI", "TS"):
+        cls = "TOP_SECRET"
+    rel = release_authority
+    cav = list(caveats or [])
+
+    issues: list[str] = []
+    status = "ok"
+
+    if cls in ("SECRET", "TOP_SECRET") and "NOFORN" in cav and rel in ("FVEY", "NATO", "SPECIFIC"):
+        status = "block"
+        issues.append(
+            f"{cls}//NOFORN cannot be released to foreign partners. "
+            "NOFORN is mutually exclusive with REL TO."
+        )
+    if cls in ("SECRET", "TOP_SECRET") and rel in ("FVEY", "NATO") and "NOFORN" not in cav:
+        if status == "ok":
+            status = "warn"
+        issues.append(
+            f"{cls} requires explicit downgrade authority before release to {rel}. "
+            "Originator-controlled distribution applies."
+        )
+    if cls == "CUI" and rel == "FVEY":
+        if status == "ok":
+            status = "warn"
+        issues.append(
+            "CUI is US-domestic by default. Confirm REL TO FVEY caveat is "
+            "authorized for this content before release."
+        )
+
+    return {"status": status, "issues": issues}
+
+
+def _aggregate_caveats_from_records(records: list[dict]) -> list[str]:
+    """Derive the bundle-level caveat set from per-record sensitive flags.
+
+    Mirrors the per-record caveat policy in /mark: any classified TM
+    reference contributes NOFORN; comms parameters contribute REL TO FVEY;
+    controlled items contribute FOUO//LES. The doctrinal validator only
+    inspects NOFORN / REL TO FVEY but we surface the rest for honesty.
+    """
+    cav: set[str] = set()
+    for r in records or []:
+        flags = r.get("sensitive_flags_oracle") or []
+        if "classified" in flags:
+            cav.add("NOFORN")
+        if "comms" in flags:
+            cav.add("REL TO FVEY")
+        if "controlled" in flags:
+            cav.add("FOUO//LES")
+    return sorted(cav)
+
 
 # ---------------------------------------------------------------------------
 # Upload + batches (demo mode reads from canonical dataset directly)
@@ -378,31 +452,16 @@ async def mark_text(payload: dict):
     # Walkthrough #4 — release-authority validator. Hard-block doctrinally
     # impossible combos: NOFORN + foreign release; SECRET → FVEY/NATO without
     # explicit downgrade. Soft-warn for CUI + FVEY (US-domestic by default).
+    # Task-69 — rules now live in `evaluate_release_compatibility` so the
+    # /export endpoint applies the same gate against the bundle's aggregated
+    # classification. Auto-attach the REL TO FVEY caveat for CUI→FVEY before
+    # validating, preserving prior /mark behaviour.
     cls = tier1["classification"]
-    issues: list[str] = []
-    status = "ok"
     if cls == "CUI" and release == "FVEY" and "REL TO FVEY" not in caveats:
         caveats.append("REL TO FVEY")
-    if cls in ("SECRET", "TOP_SECRET") and "NOFORN" in caveats and release in ("FVEY", "NATO", "SPECIFIC"):
-        status = "block"
-        issues.append(
-            f"{cls}//NOFORN cannot be released to foreign partners. "
-            "NOFORN is mutually exclusive with REL TO."
-        )
-    if cls in ("SECRET", "TOP_SECRET") and release in ("FVEY", "NATO") and "NOFORN" not in caveats:
-        if status == "ok":
-            status = "warn"
-        issues.append(
-            f"{cls} requires explicit downgrade authority before release to {release}. "
-            "Originator-controlled distribution applies."
-        )
-    if cls == "CUI" and release == "FVEY":
-        if status == "ok":
-            status = "warn"
-        issues.append(
-            "CUI is US-domestic by default. Confirm REL TO FVEY caveat is "
-            "authorized for this content before release."
-        )
+    compat = evaluate_release_compatibility(cls, release, caveats)
+    status = compat["status"]
+    issues = compat["issues"]
 
     # Explanation
     rule_reasons = []
@@ -858,6 +917,29 @@ async def export_sanitized(request: Request, payload: dict):
     include_audit = bool(payload.get("include_audit", True))
     batch_id = payload.get("batch_id")
 
+    # Task-69 — release_authority must be one of the four doctrinal values.
+    # Previously an unknown value (e.g. "EYES_ONLY") fell through to a 500
+    # KeyError on DISTRIBUTION_STATEMENT[release].
+    if release not in VALID_RELEASE_AUTHORITIES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_release_authority",
+                "release_authority": release,
+                "allowed": sorted(VALID_RELEASE_AUTHORITIES),
+            },
+        )
+
+    # Task-69 — a non-empty batch_id that isn't in _BATCHES must 404, not
+    # silently fall through to the full canonical dataset (an operator pasting
+    # a stale ID got a much larger bundle than expected). The legitimate
+    # "no batch supplied" path (None / empty string) keeps working.
+    if batch_id and batch_id not in _BATCHES:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "batch_not_found", "batch_id": batch_id},
+        )
+
     ds = get_dataset()
 
     # Determine which records to export: latest batch if given, else canonical
@@ -903,6 +985,42 @@ async def export_sanitized(request: Request, payload: dict):
         action="sentry.export",
         audit_actor=(user or {}).get("role") if user else session_role(request),
     )
+
+    # Task-69 — doctrinal release-compatibility gate at the actual release
+    # step. The /mark endpoint already encoded these rules for text-level
+    # recommendations; previously the /export step happily built and stamped
+    # bundles whose source classification was incompatible with the requested
+    # release authority (e.g. SECRET // NOFORN to FVEY). Now we re-run the
+    # validator against the bundle's aggregated classification + caveats and
+    # hard-block on `status="block"`.
+    bundle_caveats = _aggregate_caveats_from_records(records)
+    compat = evaluate_release_compatibility(bundle_class, release, bundle_caveats)
+    actor_role = (user or {}).get("role") if user else session_role(request)
+    if compat["status"] == "block":
+        audit_log(
+            "release_blocked",
+            actor=actor_role or "data_custodian",
+            subject_id=batch_id or source_label,
+            payload={
+                "classification": bundle_class,
+                "release_authority": release,
+                "caveats": bundle_caveats,
+                "issues": compat["issues"],
+                "user_dodid": (user or {}).get("dodid"),
+                "surface": "backend",
+            },
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "release_blocked",
+                "classification": bundle_class,
+                "release_authority": release,
+                "caveats": bundle_caveats,
+                "issues": compat["issues"],
+            },
+        )
+    release_warnings = compat["issues"] if compat["status"] == "warn" else []
 
     # Apply release-authority overlay: generalize unit designators for NATO/FVEY
     generalize = release in ("NATO", "FVEY", "SPECIFIC")
@@ -1148,6 +1266,16 @@ async def export_sanitized(request: Request, payload: dict):
         "classification_banner": f"// CLASSIFICATION: {cls_banner_text} //",
         "download_url": f"/api/sentry/download/{export_id}",
         "sample_diffs": sample_diffs,
+        # Task-69 — surface release-compatibility warnings (status="warn")
+        # so the FE can render a yellow banner above the result panel.
+        # `release_blocked` cases never reach this return — they raise 403
+        # before the bundle is built.
+        "release_compatibility": {
+            "status": compat["status"],
+            "issues": compat["issues"],
+            "caveats": bundle_caveats,
+        },
+        "release_warnings": release_warnings,
         **manifest,
     }
 
