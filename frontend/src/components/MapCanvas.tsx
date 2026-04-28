@@ -415,6 +415,82 @@ export function MapCanvas({
   // render that has both the map ref and the placed-units list ready.
   const initialFitDoneRef = useRef(false);
 
+  // Walkthrough audit (#37 — "lack of modifiableness"): 2D ↔ 3D pitch
+  // toggle. Local UI state mirrors what the camera is actually doing so
+  // the button label reads correctly even after the operator right-drags
+  // to tilt or clicks the compass to reset. We sync this back from
+  // MapLibre's `pitchend` event below so the two never drift.
+  const [pitchMode, setPitchMode] = useState<"2d" | "3d">("2d");
+  // First-visit controls discovery hint. SessionStorage so it appears
+  // once per browser session rather than once forever (operators rotate
+  // through stations) — a fresh tab still gets the affordance, but a
+  // mid-session reload doesn't re-show it. Auto-dismisses after 6s or
+  // on first map interaction (whichever lands first).
+  const [showControlsHint, setShowControlsHint] = useState(false);
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("spire.map.controlsHintSeen") === "1") return;
+      setShowControlsHint(true);
+      sessionStorage.setItem("spire.map.controlsHintSeen", "1");
+      const id = window.setTimeout(() => setShowControlsHint(false), 6000);
+      return () => window.clearTimeout(id);
+    } catch { /* tolerant */ }
+  }, []);
+  // Sync pitchMode label with whatever the camera is actually doing.
+  // Right-drag to tilt + compass-click to reset both bypass our
+  // setPitchMode call, and without this the label would lie.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const onPitchEnd = () => {
+      try {
+        const p = map.getPitch?.() ?? 0;
+        setPitchMode(p > 10 ? "3d" : "2d");
+      } catch { /* tolerant */ }
+    };
+    try { map.on?.("pitchend", onPitchEnd); } catch { /* tolerant */ }
+    return () => {
+      try { map.off?.("pitchend", onPitchEnd); } catch { /* tolerant */ }
+    };
+  }, []);
+  // Toggle pitch on a 600ms ease — same duration as the existing
+  // flyToBuilding so the camera language is consistent across controls.
+  const togglePitch = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    setPitchMode((current) => {
+      const next = current === "2d" ? "3d" : "2d";
+      try {
+        map.easeTo({ pitch: next === "3d" ? 50 : 0, duration: 600 });
+      } catch { /* tolerant */ }
+      return next;
+    });
+  }, []);
+  // Hotkey 'P' — same input-skip guard as BastionView's '/' and 'F'.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "p" && e.key !== "P") return;
+      // Code review: ScenarioPlayerHost binds 'p' to play/pause when a
+      // scenario is loaded and calls e.preventDefault(). If that fired
+      // first, do NOT also toggle pitch (one keypress would do both —
+      // pause the scenario AND tilt the camera, which is exactly the
+      // sort of demo-stage footgun we want to avoid). Same for App's
+      // 'g p' chord which routes to /pulse.
+      if (e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        (t && t.isContentEditable)
+      ) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      togglePitch();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [togglePitch]);
+
   // Smart anchor picker — chooses bottom / top / left / right based on where
   // the marker lands in the viewport so left-edge ECPs don't render their
   // popup off-screen. Reviewer caught the bottom-anchored Popup clipping
@@ -1408,7 +1484,15 @@ export function MapCanvas({
           </Popup>
         )}
 
-        <NavigationControl position="top-right" showCompass showZoom />
+        {/* Walkthrough audit (#37 — "lack of modifiableness of the
+         * map"): visualizePitch makes the compass face also indicate
+         * the current camera tilt, so an operator who right-drags into
+         * 3D pitch can see the camera state at a glance and click the
+         * compass to reset both bearing AND pitch back to north-up
+         * 2D in a single action. Without it the compass only conveys
+         * bearing, and pitch state was invisible until the operator
+         * panned the map. */}
+        <NavigationControl position="top-right" showCompass showZoom visualizePitch />
         <ScaleControl position="bottom-right" unit="metric" maxWidth={140} />
       </MapGL>
 
@@ -1466,6 +1550,48 @@ export function MapCanvas({
       >
         ⤢
       </Pressable>
+
+      {/* Walkthrough audit (#37 — "lack of modifiableness of the map"):
+       * a discoverable 2D ↔ 3D pitch toggle. Right-drag to tilt is a
+       * MapLibre default but operators don't know it exists; this
+       * Pressable surfaces the capability and the P hotkey via the
+       * tooltip. Sits 36px below Reset View on the same right rail. */}
+      <Pressable
+        onClick={togglePitch}
+        block={false}
+        className="!min-h-0 absolute right-2 z-[7] flex h-8 w-[29px] items-center justify-center rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_94%,transparent)] font-mono text-[10px] font-semibold uppercase text-[var(--color-text)] shadow hover:bg-[var(--color-surface-hover)] tracking-widest"
+        // 152px = Reset View top (116px) + Reset View height (8) + ~28px
+        // — far enough below to read as a separate control without a
+        // visible gap on the rail.
+        style={{ top: "152px" }}
+        title={
+          pitchMode === "2d"
+            ? "Toggle 3D pitch (P) — tilt camera 0°→50°"
+            : "Toggle 2D pitch (P) — flatten camera 50°→0°"
+        }
+        aria-label={pitchMode === "2d" ? "Switch to 3D pitch" : "Switch to 2D pitch"}
+        aria-pressed={pitchMode === "3d"}
+      >
+        {pitchMode === "2d" ? "3D" : "2D"}
+      </Pressable>
+
+      {/* First-visit controls discovery hint (#37). Sits below the right
+       * control stack so it points at the affordances without covering
+       * them; auto-fades after 6s. Pointer-events-none so it never eats
+       * a click meant for the underlying map. */}
+      {showControlsHint && (
+        <div
+          className="pointer-events-none absolute right-2 z-[7] max-w-[220px] rounded-sm border border-[var(--color-border-active)] bg-[color-mix(in_oklab,var(--color-surface)_96%,transparent)] px-2 py-1.5 font-mono text-[10px] uppercase text-[var(--color-text-secondary)] shadow backdrop-blur tracking-wider transition-opacity duration-300"
+          style={{ top: "192px" }}
+          role="note"
+          aria-label="Map controls hint"
+        >
+          <span className="block text-[var(--color-text-muted)]">Map controls</span>
+          <span className="block">⇧+drag · rotate</span>
+          <span className="block">right-drag · tilt</span>
+          <span className="block">P · 2D/3D · F · focus</span>
+        </div>
+      )}
 
       {/* Active-overlay legend — explains the pink cordon hatching, cyan
        * selection ring, and yellow route line so the operator doesn't

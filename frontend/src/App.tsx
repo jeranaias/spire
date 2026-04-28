@@ -73,6 +73,13 @@ function useGoToShortcuts() {
         return;
       }
       if (armed) {
+        // Code review (#36/#37 deconfliction): once a chord consumes a key,
+        // call preventDefault() so downstream window listeners (BastionView
+        // 'F' Focus Mode, MapCanvas 'P' pitch toggle, ScenarioPlayerHost
+        // 'P' play/pause) can bail on e.defaultPrevented. Without this a
+        // single 'g f' keypress would both open the feedback drawer AND
+        // toggle Bastion focus mode — a stage footgun.
+        let consumed = true;
         switch (e.key.toLowerCase()) {
           case "s": go("/sentry"); break;
           case "p": go("/pulse"); break;
@@ -88,12 +95,20 @@ function useGoToShortcuts() {
           case "f":
             window.dispatchEvent(new CustomEvent("spire:open-feedback"));
             break;
+          default:
+            consumed = false;
         }
+        if (consumed) e.preventDefault();
         armed = false;
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Code review: register in CAPTURE phase so the chord handler always
+    // fires before view-level bubble-phase listeners (BastionView 'F',
+    // MapCanvas 'P'). Without this the [nav, role] dep can re-run on
+    // route/role change and re-attach behind the view listeners, breaking
+    // the e.defaultPrevented contract those listeners rely on.
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [nav, role]);
 }
 

@@ -46,7 +46,17 @@ export function TopBar() {
   const { role, operatingMode, alertCount, currentUser, stageMode } = useSpireStore();
 
   return (
-    <header className="relative h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+    // Walkthrough audit (#36 from the in-app feedback drawer): the
+    // MissionClock dropdown was being clipped by view content because
+    // the centered MissionClock wrapper one level down uses
+    // `-translate-x-1/2 -translate-y-1/2` which creates a CSS stacking
+    // context. The dropdown's z-[8500] is therefore scoped to that
+    // transformed wrapper, not the document — so StatusStrip + view
+    // content (which paint later in DOM order) covered it. Lifting the
+    // whole TopBar to z-[60] keeps it above StatusStrip / view content
+    // while staying well below toasts (z-[8900-9100]), modals
+    // (z-[8800]), and banner strips so those still cover the bar.
+    <header className="relative z-[60] h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
       {/* Thin horizon accent below the top bar */}
       <div
         className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
