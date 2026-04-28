@@ -1,0 +1,630 @@
+
+  ┌─────────────────────┬───────────────┬─────────────────────────────────────┐
+  │        Label        │     Count     │               Action                │
+  ├─────────────────────┼───────────────┼─────────────────────────────────────┤
+  │ type:bug            │ 64            │ fix                                 │
+  ├─────────────────────┼───────────────┼─────────────────────────────────────┤
+  │ type:praise         │ 18            │ close as "thanks, recorded"         │                                                                                                                              ├─────────────────────┼───────────────┼─────────────────────────────────────┤
+  │ type:enhancement    │ 11            │ triage — fix if cheap, defer if big │                                                                                                                              ├─────────────────────┼───────────────┼─────────────────────────────────────┤
+  │ type:question       │ 4             │ answer + close                      │
+  ├─────────────────────┼───────────────┼─────────────────────────────────────┤
+  │ priority            │ 32 (overlaps) │ prioritize fix order                │
+  ├─────────────────────┼───────────────┼─────────────────────────────────────┤
+  │ incident (critical) │ 15 (overlaps) │ fix first                           │
+  └─────────────────────┴───────────────┴─────────────────────────────────────┘
+
+  So ~79 actionable, ~64 real bugs. Big sweep. Plus the SPIRO tooling expansion. Replit Agent territory — here's the mega-prompt that does both phases.
+
+  ---
+  # SPIRO tooling expansion + 97-issue resolution sweep
+
+  ## Who you are
+  You are Replit Agent (Claude Opus 4.7) operating on the SPIRE codebase in this Replit workspace. SPIRE is at `https://spire-mdm.fly.dev`, repo `jeranaias/spire`, master is what's deployed.
+
+  ## Why
+  Two parallel goals — the demo (Apr 30) plus a healthy backlog:
+
+  1. **SPIRO tooling expansion.** Currently 8 tools (`find_asset`, `search_assets`, `find_cannibalization_match`, `recommend_actions`, `predict_failures`, `get_coalition_view`, `status_summary`,
+  `parse_tmr`). After this PR: ~25 tools, brevity-code-aware, with each surface fully voice/text addressable.
+
+  2. **Resolve open issues.** 97 open in the GitHub backlog from a structured QA pass. Most surface bugs — TopBar overlap, blank-render views (Joint, Integrations, Transition, Inference Economics, UI
+  Docs), discoverability gaps, role-handoff broken, console errors, etc. Fix what's fixable, close praise as recorded, triage enhancements.
+
+  ## The judging rubric (defend every change)
+
+  | Weight | Category | What this work serves |
+  |---|---|---|
+  | 30% | Mission Impact | Voice-text-equivalent SPIRO surface for every operator action |
+  | 25% | Technical Innovation | 25-tool agent with brevity-code understanding |
+  | 20% | Usability & Design | Backlog cleanup; reachable views; clean TopBar |
+  | 15% | Security & Sustainability | Audit-chain coverage on every new tool |
+  | 10% | Team Collaboration | Multi-presenter handoff via fixed identity strip |
+
+  ## Hard rules — non-negotiable
+
+  1. **NEVER push to master.** Branch: `spiro-tools-and-backlog-sweep`. ONE PR at the end. Do not auto-merge.
+  2. **NEVER add Claude / Anthropic / AI / "Generated with" / "Co-Authored-By: Claude" attribution.** No emojis.
+  3. **NEVER disclose Thornveil IP.** Scan list:
+     - `HawkStack`, `SGDR`, `WEM-Inverted`, `WEM-Diamond`, `FCOS`, `ConvNeXt`, `Anti-UAV-410`, `1.77 M`, `1.77M params`, `1.88 M`, `0.5795`, `82.95`, `82.12`, `SentryHawk`, `ForgeHawk`, `DepthHawk`,
+  `CellHawk`, `WildHawk`, `ENFORCE pillar`, `five-pillar`, `5-pillar`, `spillage scanner`, `Argus spillage`, `Tribunal cross-check`, `Hallucination probe`, `Action Gate`, `backbone family`
+     - Sanctioned mentions in `LICENSE.md`, `README.md`, `CONTRIBUTING.md`, `PR template`, `marlog/LICENSE.md`, `docs/DEMO_SCRIPT.md` only — name products without disclosing mechanics.
+  4. **NEVER commit `attached_assets/` or `tmp/`.** Both already gitignored — confirm and don't bypass.
+  5. **NEVER touch `backend/auth.py` session middleware logic.** Locked.
+  6. **VERIFY UI claims with Playwright** against the dev preview. Don't claim "the button works" without clicking it.
+  7. **Audit-chain logging** required on every new tool that mutates state (cannib propose, FPCON change, comms set, etc.).
+
+  ## Persistence — plan file
+
+  Create `SPIRO_TOOLS_AND_BACKLOG.md` at repo root with the full task list as checkboxes. Update after every step. Every commit references the WP / issue number.
+
+  ## Branch hygiene
+
+  - `git checkout -b spiro-tools-and-backlog-sweep master`
+  - One commit per logical batch (per WP, per issue cluster).
+  - Style: imperative subject ≤72 chars, sentence case.
+  - After every commit, `git push -u origin spiro-tools-and-backlog-sweep` (first push) then `git push`.
+
+  ## Tech context
+
+  - **SPIRO planner:** `backend/copilot/planner.py`. Tools: `backend/copilot/tools.py`. Routes: `backend/routes/copilot.py`.
+  - **Frontend SPIRO panel:** `frontend/src/components/Spiro.tsx`.
+  - **Per-surface routes:** `backend/routes/{pulse,sentry,bastion,system,decision_bridge,joint,integrations,llm}.py`.
+  - **Scoping:** `backend/scoping.py` (RBAC enforcement).
+  - **Mock CACs:** `backend/auth.py` — Reyes (g4), Kowalski (maintenance_chief), Park (security_manager), Hayes (mef_commander).
+  - **Audit logger:** `backend/persistence.py` — `log(event, actor, subject_id, payload)`.
+
+  ---
+
+  # PHASE 1 — SPIRO Tooling Expansion
+
+  ## WP-A · Brevity-code system prompt (1 hour)
+
+  **File:** `backend/copilot/planner.py`
+
+  Append a new block to `SYSTEM_PROMPT`:
+
+  ```text
+  Marine brevity vocabulary — recognize and route to tools:
+  - "SITREP" / "what's the picture" → status_summary, then list_alerts(severity="HIGH")
+  - "WHO'S RED" / "MC ROLLUP" / "deadlined report" → predict_failures filtered to deadlined
+  - "PUSH QRF TO ECP-X" / "dispatch QRF" → list_alerts then correlate_threats then installation_status
+  - "CANNIB X TO Y FOR <part>" → propose_cannib(donor=X, recipient=Y, part=<...>)
+  - "MORNING BRIEF" / "READINESS UPDATE" → status_summary + forecast_readiness + recommend_actions (top 3)
+  - "BACK-BRIEF" / "INTENT" → status_summary + audit_query(timeframe=last 24h)
+  - "STAND DOWN" → resolve_sim + set_fpcon(level="BRAVO")
+  - "FPCON CHARLIE" / "FPCON DELTA" / "FPCON BRAVO" → set_fpcon(level=<level>)
+  - "MOPP-X" — recognize but defer (not in scope; respond "Acknowledge MOPP-X. SPIRE does not control CBRN posture.")
+  - "WEZ" / "EAB" / "DMO" — recognize as operational context; do not act, but reference in narrative
+  - "PMC" / "NMCS" / "NMCM" / "MC" — readiness-state tokens; map to filters in status_summary
+
+  Tone — match Marine voice exactly:
+  - "Affirm" / "Negative" / "Stand by" / "Roger that" — opening lines for one-line answers
+  - Single-syllable confirmations preferred over "I will execute"
+  - Minute-level specificity ("next 14 minutes", not "soon")
+  - Time hacks in 24-hour military format
+  - Never apologize for asking for clarification — just state what's needed ("State asset id")
+  ```
+
+  **Acceptance:** Send 10 brevity-only prompts via `/api/copilot/plan`; SPIRO returns the right tool plan or appropriate decline for each. Add unit-test harness `backend/tests/test_spiro_brevity.py`.
+
+  **Commit:** `WP-A SPIRO: brevity vocabulary mapping in system prompt`
+
+  ---
+
+  ## WP-B · 25 high-value tools
+
+  **File:** `backend/copilot/tools.py`
+
+  Add the 25 tools below. Each follows the existing pattern: `definition` (OpenAI tool schema) + `runner` (async or sync function in the same file or imported helper). Each mutating tool MUST audit-log
+  via `from ..persistence import log as audit_log`.
+
+  ### B-1 · SENTRY surface (5 tools)
+
+  ```python
+  "classify_text": {
+      # Tier-1 classifier on a text snippet. Returns flags + suggested level + confidence.
+      # Wraps backend/routes/sentry.py:tier1_classify
+  },
+  "redact_for_partner": {
+      # Preview redaction for a coalition profile. Returns the redacted view + diff summary.
+      # Wraps backend/routes/sentry.py partner-redaction logic
+  },
+  "mark_classification": {
+      # Apply a classification mark. Audit-logged. Returns new mark + chain entry.
+  },
+  "aggregation_risk": {
+      # Surface aggregation-risk panel for a query. Returns current risk score + contributing fields.
+  },
+  "release_package": {
+      # Generate a coalition release bundle. Returns export id + audit chain entry.
+  },
+  ```
+
+  ### B-2 · PULSE surface (5 tools)
+
+  ```python
+  "forecast_readiness": {
+      # Monte Carlo forecast for a unit + horizon. Returns the percentile band data.
+      # Wraps the existing /api/pulse/forecast endpoint
+  },
+  "risk_explain": {
+      # Why does asset X have its risk score? Returns weighted-factor breakdown.
+      # New helper that pulls the weighted-factor inputs from PULSE risk scorer
+  },
+  "propose_cannib": {
+      # Create a cannibalization proposal directly. Audit-logged.
+      # Wraps /api/pulse/cannibalization/propose
+  },
+  "approve_action": {
+      # Approve a held draft from the drafts queue. Audit-logged.
+      # New endpoint /api/pulse/drafts/{id}/approve if not present
+  },
+  "donor_for_part": {
+      # Find donor candidates for a specific NSN. Returns ranked donor list.
+      # Wraps existing donor-matching logic
+  },
+  ```
+
+  ### B-3 · BASTION surface (7 tools)
+
+  ```python
+  "simulate_thermalhawk": {
+      # Fire the cold-open by voice. Audit-logged.
+      # Wraps the existing simulate endpoint
+  },
+  "resolve_sim": {
+      # Clear active sim, drop FPCON to BRAVO, clear cordons. Audit-logged.
+  },
+  "list_alerts": {
+      # Pull active alerts, filter by severity. Returns list of alerts.
+  },
+  "acknowledge_alert": {
+      # Mark alert acknowledged. Audit-logged.
+      # New endpoint /api/bastion/alerts/{id}/ack if not present
+  },
+  "correlate_threats": {
+      # Fused-threat correlation lookup over a window.
+  },
+  "installation_status": {
+      # Single structured response: FPCON, ECPs, response forces.
+  },
+  "dispatch_qrf": {
+      # Sim-only QRF dispatch to a target. Audit-logged.
+      # Updates response-force position state for animation
+  },
+  ```
+
+  ### B-4 · DHA RESCUE (3 tools)
+
+  ```python
+  "blood_inventory": {
+      # Current Class VIII state, optional hub filter.
+      # Wraps the blood scenario data
+  },
+  "advance_scenario": {
+      # Advance the scenario clock by hour or to a specific phase.
+      # Wraps mission-clock advance
+  },
+  "market_sourcing": {
+      # Surface contingency sources when below hard-min.
+  },
+  ```
+
+  ### B-5 · System / control (4 tools)
+
+  ```python
+  "mission_clock": {
+      # action: pause | play | reset | jump_to(phase). Audit-logged.
+  },
+  "set_fpcon": {
+      # level: NORMAL | ALPHA | BRAVO | CHARLIE | DELTA. Audit-logged.
+  },
+  "set_comms": {
+      # state: CONNECTED | DEGRADED | DISCONNECTED. Audit-logged.
+  },
+  "reset_demo": {
+      # Reset to clean t=0 state. g4 + security_manager only. Audit-logged.
+  },
+  ```
+
+  ### B-6 · Audit (2 tools)
+
+  ```python
+  "audit_query": {
+      # Query the chain by timeframe + optional actor + optional event filter.
+      # Returns rows + chain-head hash.
+  },
+  "audit_verify": {
+      # Verify chain integrity. Returns INTACT / BROKEN + last-good-hash.
+  },
+  ```
+
+  **For each tool:**
+  - Add OpenAI tool schema in `TOOL_REGISTRY`
+  - Add runner function below the tool's entry
+  - If the tool mutates state, add audit-log entry inside the runner
+  - If the tool needs an endpoint that doesn't exist, ADD a thin route in the appropriate `routes/*.py` file that wraps existing logic. Don't reimplement.
+  - Update `_TOOL_PROSE` mapping for each new tool so plan summaries read cleanly.
+
+  **Acceptance:**
+  - All 25 tools listed in `GET /api/copilot/tools` response
+  - Each invocable via `POST /api/copilot/execute` with sample args
+  - Each mutating tool produces an audit-chain entry
+  - `pytest backend/tests/test_spiro_tools.py` (new) passes — assert that each tool round-trips a sample call
+
+  **Commit:** `WP-B SPIRO: +25 tools across SENTRY/PULSE/BASTION/DHA/System/Audit surfaces`
+
+  ---
+
+  # PHASE 2 — 97-Issue Backlog Sweep
+
+  ## How to triage
+
+  1. List all open issues: `gh issue list --state open --limit 200 --json number,title,labels,body`
+  2. Group by surface (TopBar, BASTION, PULSE, SENTRY, DHA, navigation, role-handoff, etc.)
+  3. For each cluster, batch-fix related items in one commit
+  4. Close praise issues with comment "Recorded — thank you. No action."
+  5. Triage enhancements: cheap (<2h) → fix and close; big (>4h) → label `defer-post-MDM` and close with explanation
+
+  ## Surface-by-surface attack order
+
+  ### Sweep S-1 · Blank-render views (issues #106, #123, #125, #128, #131, #133)
+
+  These are five views that render fully blank:
+  - `/joint` — but `/joint/preview` works (#136). Make `/joint` redirect to `/joint/preview` OR render the same content
+  - `/integrations` — should show GCSS-MC schema mapping. Investigate why blank
+  - `/transition` — should show SBIR pathway content
+  - `/admin/inference-economics` — should show $/call breakdown
+  - `/ui-docs` — UiDocsView component exists, why blank
+
+  For each: open the corresponding view file, check console for the actual render error, fix the missing import / data dep / null-throw. Add an `<ErrorBoundary>` fallback so future blanks surface visibly
+   instead of returning null.
+
+  **Acceptance:** All five URLs render content (or appropriate auth-gate wall, not blank).
+
+  **Commit:** `S-1 fix five blank-render views — Joint, Integrations, Transition, Inference Economics, UI Docs`
+
+  ---
+
+  ### Sweep S-2 · TopBar overlap + chip mash (issues #59, #77, #86, #88, #95, #96, #98, #117, #118, #127, #130)
+
+  The TopBar's right-side chrome (NodeStatus, GCSS-MC, DDIL, density, drafts, account, FAILSAFE) overlaps the BASTION nav tab at <1500px viewport. Multiple chips are non-clickable or click-dead. Mobile
+  breaks completely.
+
+  **File:** `frontend/src/components/TopBar.tsx`, related chips.
+
+  **Scope:**
+
+  1. **Restructure into priority tiers:**
+     - Tier 1 (always visible): SPIRE wordmark, Sentry/Pulse/Bastion nav, Mission Clock, Identity pill, Alert badge
+     - Tier 2 (hidden < 1280px, behind a `⋯ More` overflow menu): NodeStatus, GCSS-MC, DDIL, density toggle, drafts, FAILSAFE F9, RESET DEMO, account
+     - Tier 3 (mobile only < 600px): hamburger to a slide-out menu containing all of Tier 2
+
+  2. **Wire every "click-dead" chip:**
+     - Account menu (#88) — opens dropdown with: identity strip (4-up CACs), sign out, switch role
+     - DDIL switcher (#86) — opens 3-state radio (CONNECTED / DEGRADED / DISCONNECTED) + comms-state toast on change
+     - Density toggle (#96) — visible toast on toggle
+     - Drafts panel (#95) — opens slide-over panel listing held drafts with approve/discard
+
+  3. **Identity strip on account menu:**
+     - Click → 4-up grid of mock CACs
+     - Click any CAC → POST `/api/auth/login` (with new `?dodid=…` shortcut OR new `/api/auth/quick-switch` endpoint gated by `SPIRE_DEMO_QUICK_SWITCH=1` env var)
+     - On success → reload the user via /api/auth/me, update Zustand store, navigate to / — clean handoff
+
+  4. **Sign Out wired to `/api/auth/logout`** which already exists. Clears cookie, lands on /auth.
+
+  5. **Replace the native `window.confirm()` (#98) for Reset Demo** with the existing in-app DangerButton modal pattern.
+
+  **Acceptance:** At 1280×720, 1440×900, 1920×1080, 390×844 the TopBar is legible. Identity swap roundtrip Hayes → Park → Hayes works in the UI. No clipping. No click-dead chips.
+
+  **Commit:** `S-2 TopBar restructure: priority tiers, working identity strip, every chip clickable`
+
+  ---
+
+  ### Sweep S-3 · Discoverability — surface every hidden view (issues #100, #101, #119, #120, #121, #122, #135, #137)
+
+  Currently 7 views aren't reachable from the chrome (DHA RESCUE, Joint, Pitch, Demo, About, Coalition, Integrations) — operator must type URLs. Plus MARLOG isn't wired.
+
+  **Scope:**
+
+  1. **Decision Bridge gets a 5th tile row** for "Other Surfaces":
+     - DHA RESCUE → `/dha-rescue`
+     - Joint COP → `/joint/preview`
+     - About / Team → `/about/team`
+     - Pitch deck → `/pitch`
+     - Demo cockpit → `/demo`
+     - Integrations → `/integrations`
+     - **MARLOG** → external link to MARLOG deploy (env var `VITE_MARLOG_URL`, defaults to `#` until deployed; tile shows "(not yet deployed)" badge until env set)
+     - Use Case 9 badge on the MARLOG tile per Plan A integration
+
+  2. **Stage mode (`?stage=1`) hides the secondary tile row** so the demo's 4-use-case spine stays clean. Q&A unhides via `?stage=0` or a `Show all surfaces` toggle.
+
+  3. **`/auth` route remains accessible** when signed in — show "You are signed in as X. Pick another certificate?" instead of redirecting to `/`.
+
+  4. **Each formerly-blank view** (S-1) gets its own route guard so a future render-fail shows InsufficientPrivilege-style wall, not blank.
+
+  **Acceptance:** Click-only navigation reaches every view. Document the path in `SPIRO_TOOLS_AND_BACKLOG.md`.
+
+  **Commit:** `S-3 Decision Bridge surfaces all hidden views; MARLOG tile gated on VITE_MARLOG_URL; /auth re-entrant`
+
+  ---
+
+  ### Sweep S-4 · Network-egress monitor false positive (issues #46, #71, #99, #107)
+
+  The footer NETWORK chip increments to 70+ "unauthorised" events during a single demo session because every internal `/api/*` call is being counted.
+
+  **File:** `backend/network_monitor.py`
+
+  **Scope:**
+  - Audit what `network_monitor.py` classifies as "unauthorised"
+  - Same-origin (`spire-mdm.fly.dev` or `127.0.0.1`) calls should NOT count
+  - External calls (e.g., google fonts, CDN preloads) should be the only counter
+  - Ideally: chip reads `0 egress` for the entire demo session unless something genuinely external fires
+
+  **Acceptance:** Run a 5-minute demo flow; footer NETWORK chip stays at `0 egress` or low single digits.
+
+  **Commit:** `S-4 network monitor: stop classifying same-origin /api/* as unauthorised egress`
+
+  ---
+
+  ### Sweep S-5 · Mission Clock auto-advance (#47)
+
+  Clicking PULSE tab silently jumps Mission Clock from H+0 to H+72. Tab change shouldn't mutate the global mission clock.
+
+  **File:** `frontend/src/components/MissionClock.tsx`, `frontend/src/state/store.ts`
+
+  **Scope:** Find where the PULSE view sets a "view as-of" date that's bleeding into the clock state. Use a local `viewAsOfDate` state in PULSE; leave global `missionClock` alone.
+
+  **Acceptance:** Navigate Decision Bridge → PULSE → BASTION; clock value never changes from a tab click. Only Mission Clock controls advance it.
+
+  **Commit:** `S-5 Mission Clock: PULSE view-as-of date no longer mutates global clock state`
+
+  ---
+
+  ### Sweep S-6 · F9 failsafe broken (#114)
+
+  F9 keypress doesn't fire the failsafe overlay.
+
+  **File:** `frontend/src/components/FailsafePlayer.tsx`, `frontend/src/App.tsx`
+
+  **Scope:** Verify F9 keybinding is registered on `window`, not on a focused element. Check `e.preventDefault` isn't fighting other handlers. Test that the video overlay actually mounts.
+
+  **Acceptance:** F9 anywhere in the app fires the failsafe overlay with the demo-failsafe.mp4. Esc dismisses.
+
+  **Commit:** `S-6 F9 failsafe: window-level binding, overlay mounts cleanly`
+
+  ---
+
+  ### Sweep S-7 · Pitch deck arrow navigation (#109)
+
+  ArrowLeft/ArrowRight don't navigate slides on /pitch.
+
+  **File:** `frontend/src/views/pitch/PitchView.tsx`
+
+  **Scope:** Wire ArrowLeft/ArrowRight to the existing prev/next handlers. Standard slide-deck.
+
+  **Acceptance:** /pitch → arrow keys navigate slides. Spacebar advances. Esc exits to Decision Bridge.
+
+  **Commit:** `S-7 Pitch deck: keyboard nav (arrows + spacebar)`
+
+  ---
+
+  ### Sweep S-8 · DHA RESCUE scenario pills (#103, #104)
+
+  The H+0 / H+24 / H+48 / H+72 pills look clickable but only the "Advance" button advances. Header static-says H+72 regardless of current state.
+
+  **File:** `frontend/src/views/dha/DHARescueView.tsx` and related
+
+  **Scope:** Make scenario pills clickable (jump to that hour). Header reflects current scenario hour dynamically.
+
+  **Acceptance:** Click any pill → scenario jumps. Header text matches scenario hour.
+
+  **Commit:** `S-8 DHA RESCUE: scenario pills clickable, header tracks current hour`
+
+  ---
+
+  ### Sweep S-9 · PULSE Risk Board polish (#52, #54, #55, #58)
+
+  - 30 Recharts container warnings on mount (#52)
+  - Draft Action modal says "Risk score 0" when row says 48 (#54)
+  - Sparklines have no aria-label (#55)
+  - Heading "Top 30· as of" missing space (#58)
+
+  **File:** `frontend/src/views/pulse/RiskBoardTab.tsx`
+
+  **Scope:**
+  - Wrap ResponsiveContainer with explicit min-width/height (#52)
+  - Pass actual risk score to Draft Action modal context (#54)
+  - Add `<div role="img" aria-label="30-day fault trend: X faults">` around sparkline (#55)
+  - Fix string formatting (#58)
+
+  **Commit:** `S-9 PULSE Risk Board polish: a11y, modal data, sparkline warnings, heading whitespace`
+
+  ---
+
+  ### Sweep S-10 · PULSE Recommend Actions actually persist (#55, deeper than the title)
+
+  The Approve button on a Draft Action modal is theatrical — toast fires, but no backend write. Needs to actually call `/pulse/cannibalization/propose` (or the appropriate kind-specific endpoint).
+
+  **File:** `frontend/src/views/pulse/RiskBoardTab.tsx` (DraftActionModal)
+
+  **Scope:** When operator clicks an action's Approve button, dispatch to the right endpoint based on `act.kind`. Show pending state. On success, refresh the held-drafts counter. On error, surface the
+  error.
+
+  **Acceptance:** Approve a recommended action → audit chain has an entry → DRAFTS counter increments → drafts panel shows the action.
+
+  **Commit:** `S-10 PULSE Draft Action: persist on Approve, audit-log, refresh drafts counter`
+
+  ---
+
+  ### Sweep S-11 · BASTION TopBar overlap critical (#77, #118, #127)
+
+  Subsumed by Sweep S-2 (TopBar restructure). This sweep is reference-only.
+
+  ---
+
+  ### Sweep S-12 · DDIL switcher silent (#86)
+
+  Subsumed by Sweep S-2.
+
+  ---
+
+  ### Sweep S-13 · Footer chip duplicate render + truncation (#42, #111, #129)
+
+  Footer renders the system-telemetry chip set TWICE in sequence. Plus truncation on narrow viewports.
+
+  **File:** `frontend/src/components/StatusFooter.tsx`
+
+  **Scope:** Find the duplicate render (likely a stray `.map()` × 2 or component composed twice). Single render. Add `overflow-hidden` + `title` on each chip so narrow viewports show truncated label with
+   full text on hover.
+
+  **Commit:** `S-13 StatusFooter: drop duplicate chip row, add truncation tooltips`
+
+  ---
+
+  ### Sweep S-14 · SENTRY Mark / Coalition wiring (no specific issue but flagged broadly)
+
+  If touching SENTRY for tools (Phase 1 WP-B B-1), verify:
+  - Mark Draft button actually marks (not theatrical)
+  - Coalition tab role-gating doesn't break for security_manager
+  - Aggregation-risk panel renders prominently
+
+  ---
+
+  ### Sweep S-15 · Cosmetic / tone fixes (#43, #44, #45, #48, #49, #50, #51, #58, #65, #66, #80, #81, #87, #91)
+
+  Batch all cosmetic / minor / wording fixes:
+  - Comms triple-source — pick one authoritative location (#43)
+  - SENTRY tab `01SENTRY🔒` no separator (#44)
+  - MC% delta confusing format (#45)
+  - PULSE tab labels concatenate (#48)
+  - Heatmap glyphs no legend (#49)
+  - Critical Assets KPI not clickable (#50)
+  - Avg Days NMC red-tone when over target (#51)
+  - Cannib donor IDs not visually distinct (#65)
+  - Sort buttons all look like buttons (#66)
+  - SPIRO prose mismatch (#80)
+  - "CAN…" truncated (#81)
+  - DENSE button + DRAFTS aria (#87)
+  - Audit events/min interpretation (#91)
+
+  **Commit:** `S-15 Cosmetic batch: tone, separators, tooltips, button parity`
+
+  ---
+
+  ### Sweep S-16 · Praise issues — close as recorded (18 issues)
+
+  Batch-close all `type:praise` issues with this comment:
+
+  ```
+  Recorded — thank you for the positive feedback. No action required, closing as praise-acknowledged.
+  ```
+
+  ```bash
+  gh issue list --label type:praise --state open --json number -q '.[].number' | while read n; do
+    gh issue close $n --comment "Recorded — thank you for the positive feedback. No action required."
+  done
+  ```
+
+  **Commit:** No commit needed; issue closes only.
+
+  ---
+
+  ### Sweep S-17 · Question issues — answer + close (4 issues)
+
+  For each `type:question` issue:
+  - #75 (Resolve Sim — what does it do?) → answer in comment
+  - #82 ("CAN…" truncated) → already a bug, dedupe
+  - #66 (Auto-propose top matches) → describe behavior
+  - #85 (Speed selector default 16×) → answer + change to 1× default if reasonable
+
+  ---
+
+  ### Sweep S-18 · Enhancement triage (11 issues)
+
+  For each `type:enhancement` issue:
+  - If <2h fix → fix and close
+  - If >4h or out of scope for MDM → close with `defer-post-MDM` label and explanation
+
+  Likely fixable inline:
+  - #60 / #61 / #62 (Predicted failure UX, paginate, distinction wording)
+  - #67 / #68 / #69 (Forecast → recommend chain, P-recovery context, band visibility)
+
+  Likely defer:
+  - #105 (DHA hub-spoke route legend animation)
+  - #76 (BASTION map free pan + recenter button)
+  - #119 (About link from chrome — may overlap with S-3)
+
+  ---
+
+  # Final checklist
+
+  1. `git ls-files | xargs grep -lE 'HawkStack|SGDR|1\\.77 ?M|0\\.5795|82\\.95|82\\.12|WEM-Inverted|FCOS|ConvNeXt|five-pillar|spillage scanner|Argus spillage|Tribunal cross-check|Hallucination
+  probe|Action Gate'` returns the same sanctioned-mention set as master (LICENSE / README / CONTRIBUTING / PR template / docs/DEMO_SCRIPT / marlog/LICENSE).
+  2. `cd frontend && npx tsc --noEmit` — exit 0.
+  3. `cd frontend && npm run build` — succeeds.
+  4. `python -m pytest backend/tests/ dataset/tests/ tests/` — all pass.
+  5. `gh issue list --state open --label pilot-feedback` — count drops from 97 to <20 (deferred enhancements + a handful of remaining bugs).
+  6. `SPIRO_TOOLS_AND_BACKLOG.md` updated with all WP / sweep checkboxes ticked.
+  7. Confirm `attached_assets/` and `tmp/` not committed (`git ls-files | grep -E '^(attached_assets|tmp)/'` empty).
+  8. `fly.toml` keeps the `[deploy] strategy = "bluegreen"` block.
+
+  # Open the PR
+
+  ```
+  gh pr create \
+    --base master \
+    --head spiro-tools-and-backlog-sweep \
+    --title "SPIRO tooling expansion (+25 tools, brevity codes) + 97-issue backlog sweep" \
+    --body "$(cat <<'EOF'
+  ## Summary
+  Two phases delivered together:
+
+  **Phase 1 — SPIRO tooling expansion**
+  - WP-A: Marine brevity vocabulary mapped to tool routing in the system prompt
+  - WP-B: 25 new tools across SENTRY, PULSE, BASTION, DHA, System, Audit surfaces — each audit-logged where mutating
+
+  **Phase 2 — 97-issue backlog sweep**
+  - 64 bug fixes batched by surface (TopBar restructure, blank-render views, network-monitor false positive, Mission Clock isolation, F9 failsafe, Pitch arrow nav, DHA scenario pills, PULSE Risk Board
+  polish, Draft Action persistence, Footer chip dedupe, cosmetic batch)
+  - 18 praise issues closed as recorded
+  - 11 enhancements triaged — cheap fixes inline, big ones deferred with `defer-post-MDM` label
+  - 4 question issues answered + closed
+
+  ## Rubric defense
+  - **Mission Impact (30%):** SPIRO is now a voice-text-equivalent surface for every operator action (25 tools + brevity codes).
+  - **Technical Innovation (25%):** Brevity-code-aware agent + audit-chain coverage on every mutating tool.
+  - **Usability & Design (20%):** Backlog cleanup, reachable views, clean TopBar across all viewports, multi-presenter handoff working.
+  - **Security & Sustainability (15%):** Network-monitor false-positive fixed; audit chain coverage extended to every new tool.
+  - **Team Collaboration (10%):** Identity strip works; presenter handoff is one-click.
+
+  ## Verification
+  - All disclosure scans clean.
+  - Frontend tsc + vite build green.
+  - Backend pytest + dataset regen + new tool tests + brevity tests all pass.
+  - 97 → <20 open issues on master.
+  - Three Playwright runs of demo flow at 1280×720, 1440×900, 1920×1080 — all pass.
+
+  ## Test plan
+  - [ ] Reviewer pulls branch, exercises each new tool via SPIRO panel
+  - [ ] Reviewer presses F9 to verify failsafe; toggles DDIL; clicks every TopBar chip
+  - [ ] Reviewer walks Hayes → Park → Hayes identity round-trip
+  - [ ] Reviewer clicks every tile on Decision Bridge and verifies all routes resolve
+  EOF
+  )"
+  ```
+
+  **Report back to me with the PR URL, the final open-issue count, and any sweeps that hit blockers. Do not merge.**
+
+  ---
+
+  # Edge cases / how to handle blockers
+
+  - If a tool requires a backend route that doesn't exist, ADD a thin route in the appropriate `routes/*.py` file. Don't reimplement existing logic.
+  - If a sweep touches `backend/auth.py` session middleware, STOP and flag — that file is locked.
+  - If a praise issue's body has an actionable suggestion buried in it, treat as enhancement and triage accordingly — don't auto-close.
+  - If a "deferred" enhancement turns out to be cheap (<2h) once you start, just do it.
+  - If you discover a NEW bug while fixing an old one, file a new issue (use `gh issue create` with `type:bug` label) rather than expanding scope.
+  - If you run out of context mid-session, your last act is to update `SPIRO_TOOLS_AND_BACKLOG.md` with exact next steps and stop. User resumes in a fresh chat.
+
+  Begin.
