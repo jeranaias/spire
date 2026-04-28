@@ -15,8 +15,13 @@
  *   - Slide counter + dot strip in the footer.
  *   - Presenter mode toggle (Shift+P) opens speaker notes in a *separate
  *     window* via `window.open` so the audience screen never sees them.
- *     If the browser blocks the pop-up, we confirm-gate before falling
- *     back to an inline panel on the active monitor.
+ *     If the browser blocks the pop-up, we surface a styled in-app
+ *     banner ("Show on this screen" / "Try popup again" / "Cancel")
+ *     instead of `window.confirm` — the native dialog is jarring on
+ *     stage (browser chrome flashes, focus jumps, and on some Linux
+ *     setups it appears off-center on the secondary monitor; see
+ *     Task #157). The banner is an alertdialog: Escape cancels,
+ *     focus is parked on the safe "Try popup again" action.
  *   - Slide 4 (live demo handoff) has the "Start demo" button that
  *     opens `/demo` in the same tab. After the demo, "Return to pitch
  *     — slide 5" jumps to slide 5.
@@ -37,6 +42,7 @@
  *     a true panic still works without pre-arming presenter mode.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import clsx from "clsx";
@@ -126,6 +132,11 @@ export function PitchView() {
     win: Window;
     root: HTMLElement;
   } | null>(null);
+  // Banner state for the popup-blocked recovery prompt. We surface a
+  // styled in-app alertdialog instead of `window.confirm` (Task #157).
+  // The banner is only ever visible when the popup attempt failed AND
+  // the operator hasn't yet decided how to recover.
+  const [popupBlockedPrompt, setPopupBlockedPrompt] = useState(false);
 
   // Refs let togglePresenter stay stable across renders so the keyboard
   // listener doesn't have to rebind every time presenter state shifts.
@@ -165,17 +176,17 @@ export function PitchView() {
     }
     setPresenterPortal(null);
     setPresenter("off");
+    // Defensive cleanup: a stale popup-blocked banner should never
+    // outlive the presenter session it was offered for.
+    setPopupBlockedPrompt(false);
   }, []);
 
-  const togglePresenter = useCallback(() => {
-    if (presenterRef.current !== "off") {
-      closePresenter();
-      return;
-    }
-    // First choice: open a *separate* window. window.open requires a
-    // user gesture, which we have because togglePresenter is invoked
-    // from a click handler or keydown. The named target lets the same
-    // window be reused if the presenter toggles off then on again.
+  // Pure side-effecty helper: try to open the presenter popup window
+  // and wire it up. Returns true on success, false when the browser
+  // blocked the popup or refused the cross-origin write. Must be
+  // invoked from a user-gesture handler (click / keydown), otherwise
+  // window.open will be blocked even on a permissive browser.
+  const attemptOpenPresenterPopup = useCallback((): boolean => {
     const opened = window.open(
       "",
       "spire-presenter-notes",
@@ -189,11 +200,15 @@ export function PitchView() {
         const root = preparePresenterDocument(opened);
         setPresenterPortal({ win: opened, root });
         setPresenter("popup");
-        return;
+        // Any successful popup-open clears the recovery banner — covers
+        // both the banner's own "Try popup again" path AND the case
+        // where the operator dismissed the banner, unblocked popups,
+        // and re-toggled presenter mode from the header / Shift+P.
+        setPopupBlockedPrompt(false);
+        return true;
       } catch {
-        // Cross-origin / write-blocked popup — close it and fall through
-        // to the confirm-gated inline fallback so we don't strand the
-        // presenter with an empty window.
+        // Cross-origin / write-blocked popup — close it and report
+        // failure so the caller can offer the inline fallback banner.
         try {
           opened.close();
         } catch {
@@ -201,15 +216,47 @@ export function PitchView() {
         }
       }
     }
-    // Pop-up blocker fired (or write-blocked). Notes on the active
-    // monitor are the dangerous fallback — confirm-gate so the presenter
-    // has to opt in knowing the audience will see them.
-    const ok = window.confirm(
-      "Couldn't open a separate presenter window (your browser may be blocking pop-ups).\n\n" +
-        "Show speaker notes on THIS screen instead? The audience will see them.",
-    );
-    if (ok) setPresenter("inline");
-  }, [closePresenter]);
+    return false;
+  }, []);
+
+  const togglePresenter = useCallback(() => {
+    if (presenterRef.current !== "off") {
+      closePresenter();
+      return;
+    }
+    // First choice: open a *separate* window so the audience screen
+    // never sees presenter notes. The named target lets the same
+    // window be reused if the presenter toggles off then on again.
+    if (attemptOpenPresenterPopup()) return;
+    // Pop-up blocker fired (or write-blocked). The native confirm
+    // dialog used to be jarring on stage (focus jumps, off-center on
+    // some Linux setups). Surface a styled in-app banner instead so
+    // the operator can pick a recovery path calmly. The inline
+    // fallback is the dangerous one — banner default focus is on
+    // "Try popup again" so a stray Enter doesn't dump notes onto the
+    // projector. See Task #157.
+    setPopupBlockedPrompt(true);
+  }, [closePresenter, attemptOpenPresenterPopup]);
+
+  // Banner action handlers. Defined here (not inline) so the banner
+  // component stays pure-render and the retry path can re-attempt the
+  // popup from inside its own user-gesture click handler — the second
+  // attempt is what most browsers actually allow once the operator
+  // unblocks popups for the site.
+  const dismissPopupPrompt = useCallback(() => {
+    setPopupBlockedPrompt(false);
+  }, []);
+  const acceptInlineFallback = useCallback(() => {
+    setPresenter("inline");
+    setPopupBlockedPrompt(false);
+  }, []);
+  const retryPresenterPopup = useCallback(() => {
+    // attemptOpenPresenterPopup clears popupBlockedPrompt on success,
+    // so we don't have to here. If the retry also fails, we leave the
+    // banner up so the operator can either try once more after
+    // unblocking, or fall back inline.
+    attemptOpenPresenterPopup();
+  }, [attemptOpenPresenterPopup]);
 
   const goToIndex = useCallback(
     (i: number) => {
@@ -356,6 +403,17 @@ export function PitchView() {
           win={presenterPortal.win}
           containerEl={presenterPortal.root}
           onClosed={closePresenter}
+        />
+      )}
+
+      {/* In-app recovery banner shown when the browser blocked the
+       * presenter-notes popup. Replaces the old `window.confirm` so
+       * stage focus / chrome doesn't lurch (Task #157). */}
+      {popupBlockedPrompt && (
+        <PopupBlockedBanner
+          onShowOnThisScreen={acceptInlineFallback}
+          onRetryPopup={retryPresenterPopup}
+          onCancel={dismissPopupPrompt}
         />
       )}
     </div>
@@ -574,6 +632,183 @@ function PresenterPanel({ slide, elapsedSec }: PresenterProps) {
         ))}
       </ul>
     </section>
+  );
+}
+
+// ─── Popup-blocked recovery banner ─────────────────────────────────────────
+//
+// Replaces the old `window.confirm` fallback (Task #157). Shown only
+// when the presenter popup was blocked or write-refused. Three explicit
+// recovery paths so the operator never falls into the dangerous one
+// (notes on the audience screen) by reflex:
+//
+//   - Try popup again — re-runs window.open from a fresh user gesture,
+//     which usually succeeds the moment the operator unblocks popups.
+//   - Show on this screen — opt-in to the inline fallback. The audience
+//     will see the notes; copy is blunt about that.
+//   - Cancel — leave presenter mode off. Escape also fires this path.
+//
+// Accessibility notes:
+//   - role="alertdialog" + aria-modal so screen readers announce it as
+//     a blocking decision rather than a passing toast.
+//   - aria-labelledby / aria-describedby point at the title and body
+//     so the announcement carries the full context.
+//   - Default focus is parked on "Try popup again" — it's the safest
+//     primary action; a stray Enter does not leak notes onto the
+//     projector.
+//   - Tab order is constrained to the three actions via a tiny focus
+//     trap; the banner is small enough that a full focus-trap library
+//     is overkill, but we still want Shift+Tab from the first button
+//     to wrap to the last so keyboard users never get stuck.
+
+interface PopupBlockedBannerProps {
+  onShowOnThisScreen: () => void;
+  onRetryPopup: () => void;
+  onCancel: () => void;
+}
+function PopupBlockedBanner({
+  onShowOnThisScreen,
+  onRetryPopup,
+  onCancel,
+}: PopupBlockedBannerProps) {
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const showHereRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Park focus on the safe primary action when the banner appears so
+  // keyboard / screen-reader users land somewhere meaningful and a
+  // stray Enter never triggers the dangerous "show on this screen"
+  // path. We capture the previously-focused element and restore it
+  // when the banner unmounts so the deck doesn't lose its tab anchor.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    retryRef.current?.focus();
+    return () => {
+      if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+        try {
+          previouslyFocused.focus();
+        } catch {
+          /* element may have unmounted — non-fatal */
+        }
+      }
+    };
+  }, []);
+
+  // Escape always cancels — matches the contract operators expect from
+  // any modal-ish surface, and means a presenter who hits Esc on stage
+  // never accidentally commits to the inline fallback.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  // Tiny inline focus trap — three buttons in a fixed order. Tab from
+  // the last wraps to the first; Shift+Tab from the first wraps to
+  // the last. Anything else falls through unchanged.
+  function onBannerKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Tab") return;
+    const order = [retryRef.current, showHereRef.current, cancelRef.current].filter(
+      (el): el is HTMLButtonElement => el !== null,
+    );
+    if (order.length === 0) return;
+    const active = document.activeElement;
+    const idx = order.findIndex((el) => el === active);
+    if (idx === -1) return;
+    const nextIdx = e.shiftKey
+      ? (idx - 1 + order.length) % order.length
+      : (idx + 1) % order.length;
+    e.preventDefault();
+    order[nextIdx]?.focus();
+  }
+
+  return (
+    <div
+      // Fixed top-center placement so the banner is visible regardless
+      // of which slide / panel currently owns the canvas. pointer-events
+      // gated to the inner card so the audience-visible deck stays
+      // interactive for the next-slide button while the banner is up
+      // (presenter still wants to advance).
+      className="pointer-events-none fixed inset-x-0 top-4 z-[10000] flex justify-center px-4"
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="pitch-popup-blocked-title"
+        aria-describedby="pitch-popup-blocked-desc"
+        onKeyDown={onBannerKeyDown}
+        className={clsx(
+          "pointer-events-auto w-full max-w-xl rounded-md border-2 shadow-2xl",
+          "border-amber-500/60 bg-[var(--color-surface-raised)]",
+          "px-5 py-4",
+        )}
+      >
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="mt-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full border border-amber-500/60 bg-amber-500/15 font-mono text-xs font-bold text-amber-300"
+          >
+            !
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <h2
+              id="pitch-popup-blocked-title"
+              className="font-mono text-xs uppercase tracking-[0.22em] text-amber-300"
+            >
+              Presenter popup blocked
+            </h2>
+            <p
+              id="pitch-popup-blocked-desc"
+              className="text-sm leading-snug text-[var(--color-text)]"
+            >
+              Your browser blocked the separate presenter window. You can show
+              speaker notes on{" "}
+              <span className="font-semibold text-amber-300">this screen</span>{" "}
+              (the audience will see them), or unblock popups for this site and
+              try again. In Chrome, click the popup-blocked icon at the right
+              edge of the address bar and choose &ldquo;Always allow&rdquo;.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+          {/* Order matters: safest action is leftmost AND focused first
+           * so a presenter pressing Enter under stage pressure picks the
+           * non-destructive recovery, not the audience-visible one. */}
+          <Button
+            ref={retryRef}
+            variant="primary"
+            size="sm"
+            onClick={onRetryPopup}
+          >
+            Try popup again
+          </Button>
+          <Button
+            ref={showHereRef}
+            variant="warning"
+            size="sm"
+            onClick={onShowOnThisScreen}
+            title="Notes will be visible to the audience on this screen."
+          >
+            Show on this screen
+          </Button>
+          <Button
+            ref={cancelRef}
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+            aria-label="Cancel and leave presenter mode off (Escape)"
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
