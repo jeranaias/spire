@@ -1666,6 +1666,22 @@ export interface MarkResult {
     status: "ok" | "warn" | "block";
     issues: string[];
   };
+  // Task-61 — engine-derived distribution + single REL TO so the panel
+  // stops rendering a hardcoded "Distribution C" for every sample.
+  distribution_statement?: {
+    letter: string;
+    label: string;
+    description: string;
+  };
+  rel_to_caveat?: string;
+  // Caveats the engine auto-added (and the evidence that triggered them),
+  // surfaced so the operator can see what was self-introduced.
+  auto_caveats?: {
+    caveat: string;
+    evidence: string;
+    rule: string;
+    reason: string;
+  }[];
   audit: {
     engine: string;
     engine_version?: string;
