@@ -14,9 +14,13 @@
  *      action navigates back to the hero card.
  *
  * Pre-conditions: backend booted with seed-42 dataset (default).
- * The spec calls Shift+F8 (the failsafe) at start to guarantee a
- * clean baseline, then drives the dataset to empty via the
- * `__spire_test_force_empty` test hook.
+ * The spec drives the dataset to empty via the SPIRE_TEST_HOOKS-gated
+ * /api/system/admin/force-empty stub so multiple specs can share one
+ * backend process. The real SPIRE_BOOT_EMPTY=1 lifespan boot path is
+ * covered by the pytest sibling test
+ * `test_lifespan_boots_empty_when_env_set` in tests/test_stage_ingest.py,
+ * which spins a fresh TestClient under that env to exercise main.py's
+ * lifespan branch end-to-end.
  */
 import { test, expect } from "@playwright/test";
 

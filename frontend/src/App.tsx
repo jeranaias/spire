@@ -131,13 +131,11 @@ function useGoToShortcuts() {
 //
 // We always confirm before activating (the failsafe overrides the live
 // surface and judges should never see it unless the live demo died).
-// Task #183 — Shift+F8 stage failsafe. Hard reset back to the
-// seed-42 baseline. Distinct from the Shift+F9 *recorded* failsafe
-// (above): F8 wipes whatever live-ingested dataset is staged and
-// rebuilds the canonical demo state, so a presenter who hits a bad
-// CSV mid-stage can recover the deterministic dashboards in one
-// keystroke. Capture-phase + inField guard so it never fires while
-// the operator is typing into a search box or SPIRO.
+// Shift+F8 stage failsafe — restores the seed-42 baseline. F8 alone
+// can mean "debugger pause" in some browsers, so the hotkey requires
+// shift; ctrl/alt/meta combinations bypass it for browser-shortcut
+// safety. Fires in the capture phase so view-level keydown listeners
+// can't shadow it.
 function useStageResetHotkey() {
   const pushToast = useSpireStore((s) => s.pushToast);
   useEffect(() => {
@@ -165,6 +163,14 @@ function useStageResetHotkey() {
           text: "Failsafe — restored seed-42 baseline.",
           ttlMs: 4000,
         });
+        // Refresh the active surface in place. The dataset-status
+        // poll (5s) will tick downstream views off their empty-state
+        // placeholders; broadcasting an explicit reset event lets
+        // surfaces opt in to an immediate refetch without a route
+        // change that would yank the operator out of context.
+        try {
+          window.dispatchEvent(new CustomEvent("spire:dataset-reset"));
+        } catch { /* tolerant */ }
       } catch (err) {
         pushToast({
           tone: "error",
@@ -176,7 +182,7 @@ function useStageResetHotkey() {
     // Capture phase so we beat any view-level keydown handlers.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [pushToast]);
+  }, [pushToast, nav]);
 }
 
 function useFailsafeHotkey() {

@@ -53,10 +53,16 @@ export function useDatasetStatus(): UseDatasetStatusResult {
     // Kick a refresh on window-focus so a presenter who alt-tabs back
     // from the curl session sees the hydrated dashboards immediately.
     const onFocus = () => refresh();
+    // Shift+F8 broadcasts spire:dataset-reset; refresh in place so
+    // the active surface flips off the empty placeholder without a
+    // route change.
+    const onReset = () => refresh();
     window.addEventListener("focus", onFocus);
+    window.addEventListener("spire:dataset-reset", onReset);
     return () => {
       window.clearInterval(id);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("spire:dataset-reset", onReset);
     };
   }, [refresh]);
 
