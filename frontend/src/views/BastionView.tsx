@@ -9,6 +9,8 @@ import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
 import { RefreshAge } from "../components/RefreshAge";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import { UseCaseStrip } from "../components/UseCaseStrip";
+import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
+import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import {
   Button,
   IconButton,
@@ -81,6 +83,12 @@ function resolveHomeBuilding(cop: BastionCOP | null, unitName: string | null | u
 }
 
 export function BastionView() {
+  // Task #183 — stage live-ingest mode. While the dataset is empty
+  // BASTION renders the "Awaiting GCSS-MC ingest" placeholder instead
+  // of the COP map, since /api/bastion/cop returns ``{empty: true}``
+  // and there is no fleet geometry to render. The hook polls so the
+  // view auto-flips after the operator hydrates from DECISION BRIDGE.
+  const datasetStatus = useDatasetStatus().status;
   const role = useSpireStore((s) => s.role);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAlertSeverityCounts = useSpireStore((s) => s.setAlertSeverityCounts);
@@ -88,6 +96,12 @@ export function BastionView() {
   const selectedBuildingIdGlobal = useSpireStore((s) => s.selectedBuildingId);
   const setSelectedBuildingIdGlobal = useSpireStore((s) => s.setSelectedBuildingId);
   const [cop, setCop] = useState<BastionCOP | null>(null);
+  // Tracks the case where the dataset *singleton* is non-empty (so
+  // useDatasetStatus returns empty=false and we issue the cop fetch),
+  // but the cop endpoint still responds with the {empty:true} envelope
+  // because no DailySnapshot rows are present. Keeps BASTION from
+  // sitting on the loading skeleton forever after an SR-only ingest.
+  const [bastionEnvelopeEmpty, setBastionEnvelopeEmpty] = useState(false);
   const [alerts, setAlerts] = useState<BastionAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<BastionAlert | null>(null);
   const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
@@ -178,6 +192,11 @@ export function BastionView() {
     setCop(null);
     setCopError(null);
     setWaking(false);
+    // Task #183 — skip the COP fetch while the dataset is empty. The
+    // route returns ``{empty: true}`` and downstream code (MapCanvas,
+    // resolveAlertTarget) cannot consume it. The early return at the
+    // top of BastionView handles render; we just avoid the wasted call.
+    if (datasetStatus?.empty) return;
     let cancelled = false;
     (async () => {
       try {
@@ -188,6 +207,17 @@ export function BastionView() {
           },
         });
         if (cancelled) return;
+        if ((c as unknown as { empty?: boolean }).empty) {
+          // Either: (a) race — ingest cleared between the dataset-status
+          // poll and this fetch, or (b) post-ingest partial — singleton
+          // has SRs but no DailySnapshot rows so cop legitimately has
+          // no map data to render. Either way, surface the placeholder
+          // instead of sitting on the loading skeleton.
+          setBastionEnvelopeEmpty(true);
+          setWaking(false);
+          return;
+        }
+        setBastionEnvelopeEmpty(false);
         setCop(c);
         setWaking(false);
       } catch (e) {
@@ -205,7 +235,7 @@ export function BastionView() {
     return () => {
       cancelled = true;
     };
-  }, [role]);
+  }, [role, datasetStatus?.empty]);
 
   // Walkthrough audit: '/' focuses the alert search box (vim/Slack/Linear
   // convention). Only fires when focus isn't already in a field, so a
@@ -605,6 +635,28 @@ export function BastionView() {
     return { activeAlerts: active, ackedAlerts: acked };
   }, [alerts, searchQuery, sevFilter]);
 
+  if (datasetStatus?.empty || bastionEnvelopeEmpty) {
+    return (
+      <div className="flex h-full flex-col">
+        <UseCaseStrip
+          number="11"
+          title="BASTION"
+          subtitle="COMMON OPERATING PICTURE — INSTALLATION SCHEMATIC"
+          accent="var(--color-warning)"
+        />
+        <div className="flex-1 overflow-hidden">
+          <AwaitingIngestEmpty
+            surface="BASTION"
+            description={
+              datasetStatus?.empty
+                ? "The COP map renders unit positions, MC%, and threats from the live GCSS-MC export. Drop the three sanitized CSVs into DECISION BRIDGE to populate this view."
+                : "The COP map needs daily readiness snapshots. The current ingest only contains SR records — drop a snapshot timeseries to populate this view."
+            }
+          />
+        </div>
+      </div>
+    );
+  }
   if (copError && !cop) {
     return (
       <ErrorState
