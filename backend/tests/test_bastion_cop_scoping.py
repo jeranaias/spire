@@ -20,6 +20,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.persistence import AUDIT_KIND_SCOPE_FILTERED, recent_entries
+from backend.routes import bastion as bastion_routes
 
 
 SENSITIVE_TYPES = {
@@ -184,3 +186,118 @@ def test_mef_commander_sees_full_installation_map(client):
     assert len(cop["buildings"]) == 50
     assert len(cop["ecps"]) == 4
     assert len(cop["rally_points"]) == 8
+
+
+# ---------------------------------------------------------------------------
+# Task #117 — `scope_filtered` audit row whenever the COP held records back.
+#
+# The auditing CDAO judge needs evidence that the role scope did its job.
+# `spillage_prevented` covers the classification path; this row covers the
+# OSINT path (Task #55's per-role building/ECP/RP filter), which used to be
+# silent.
+# ---------------------------------------------------------------------------
+
+
+def _last_scope_filtered_for(actor_role: str) -> dict | None:
+    """Return the most recent `scope_filtered` audit row for ``actor_role``,
+    or ``None`` if the chain has none in the recent tail. The test database
+    is shared across the whole module so we always look up by actor."""
+    rows = recent_entries(limit=200, include_payload=True)
+    for r in rows:
+        if r["kind"] == AUDIT_KIND_SCOPE_FILTERED and r["actor"] == actor_role:
+            return r
+    return None
+
+
+def test_scope_filtered_audit_emitted_for_maintenance_chief(client):
+    """A reduced-view role must leave a `scope_filtered` row in the chain
+    naming who, what view, and how many records were withheld — the
+    auditor's evidence the OSINT scope held back content."""
+    # Reset the rate-limit so this assertion isn't suppressed by a prior
+    # test in the same session having already logged for this role.
+    bastion_routes._SCOPE_FILTERED_LAST_LOG.pop("maintenance_chief", None)
+
+    _login(client, "2345678901")  # Diana Kowalski, maintenance_chief
+    cop_resp = _cop(client, "maintenance_chief")
+
+    row = _last_scope_filtered_for("maintenance_chief")
+    assert row is not None, (
+        "maintenance_chief should produce a scope_filtered audit row when "
+        "the COP held records back; chain has none."
+    )
+    payload = row["payload"]
+    assert payload["view"] == "/bastion"
+    assert payload["endpoint"] == "/api/bastion/cop"
+    assert payload["decision"] == "filtered"
+    assert payload["reason"] == "osint_role_scope"
+    withheld = payload["withheld"]
+    # The Chief gets a tiny scoped view; buildings + ECPs + RPs were all
+    # cut down from the master installation footprint.
+    assert withheld["buildings"] > 0, withheld
+    assert withheld["ecps"] > 0, withheld
+    assert withheld["rally_points"] > 0, withheld
+    # And the totals/withheld arithmetic must reconcile with the response.
+    totals = payload["totals"]
+    assert totals["buildings"] - withheld["buildings"] == len(cop_resp["buildings"])
+    assert totals["ecps"] - withheld["ecps"] == len(cop_resp["ecps"])
+    assert totals["rally_points"] - withheld["rally_points"] == len(cop_resp["rally_points"])
+
+
+def test_scope_filtered_audit_NOT_emitted_for_security_manager(client):
+    """A full-view role withholds nothing, so no `scope_filtered` row
+    should land for that actor on this request. Snapshot the chain
+    head row count for the kind, hit /cop, and assert it didn't move."""
+    bastion_routes._SCOPE_FILTERED_LAST_LOG.pop("security_manager", None)
+
+    before = len([
+        r for r in recent_entries(limit=200)
+        if r["kind"] == AUDIT_KIND_SCOPE_FILTERED
+        and r["actor"] == "security_manager"
+    ])
+
+    _login(client, "3456789012")  # James Park, security_manager
+    cop_resp = _cop(client, "security_manager")
+    # Sanity: full-view actually returned the master footprint.
+    assert len(cop_resp["buildings"]) == 50
+
+    after = len([
+        r for r in recent_entries(limit=200)
+        if r["kind"] == AUDIT_KIND_SCOPE_FILTERED
+        and r["actor"] == "security_manager"
+    ])
+    assert after == before, (
+        "security_manager is a full-view role and should NOT trigger a "
+        "scope_filtered audit row for /cop; chain row count moved."
+    )
+
+
+def test_scope_filtered_audit_rate_limited_per_role(client):
+    """A polling COP must not flood the chain. Two consecutive /cop
+    calls inside the rate-limit window emit at most one row for that
+    role — otherwise a 30-second refresh would write 2 rows / minute
+    per operator and drown the auditor's view."""
+    bastion_routes._SCOPE_FILTERED_LAST_LOG.pop("maintenance_chief", None)
+
+    _login(client, "2345678901")  # maintenance_chief
+
+    def _count() -> int:
+        return len([
+            r for r in recent_entries(limit=400)
+            if r["kind"] == AUDIT_KIND_SCOPE_FILTERED
+            and r["actor"] == "maintenance_chief"
+        ])
+
+    before = _count()
+    _cop(client, "maintenance_chief")
+    after_first = _count()
+    _cop(client, "maintenance_chief")
+    after_second = _count()
+
+    assert after_first == before + 1, (
+        f"first call should add exactly one scope_filtered row "
+        f"(before={before}, after={after_first})"
+    )
+    assert after_second == after_first, (
+        f"second call inside the rate-limit window must NOT add another "
+        f"scope_filtered row (after_first={after_first}, after_second={after_second})"
+    )

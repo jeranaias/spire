@@ -278,6 +278,27 @@ def init_db() -> None:
 _GENESIS = "0" * 64
 
 
+# ---------------------------------------------------------------------------
+# Audit-kind constants.
+#
+# Most audit kinds in SPIRE are passed as bare string literals at the call
+# site (`audit_log("spillage_prevented", ...)`). The handful that are
+# consumed by more than one module — by both an emitter and a query/filter
+# / verifier — get a named constant here so a typo doesn't silently split
+# the chain into two near-identical kinds.
+# ---------------------------------------------------------------------------
+#
+# Task #117 — emitted by `/api/bastion/cop` whenever the per-role OSINT
+# scoping in `backend/scoping.py` (filter_buildings / filter_perimeter /
+# allowed_units) actually withheld at least one record from the response.
+# Rate-limited per role per minute at the call site so a polling COP
+# doesn't write a row every refresh; the row exists so the auditing CDAO
+# judge can see *evidence* that the scope did its job ("operator X opened
+# the COP at FPCON Y and the system held back N records") instead of
+# trusting that absence-of-record means absence-of-leak.
+AUDIT_KIND_SCOPE_FILTERED = "scope_filtered"
+
+
 def _canonical(row: dict) -> str:
     """Stable JSON for hashing — sorted keys, no whitespace."""
     return json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
