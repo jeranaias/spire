@@ -163,7 +163,10 @@ def _mock_last_sync(now: datetime | None = None) -> dict:
         "system": "GCSS-MC",
         "system_long_name": "Global Combat Support System — Marine Corps",
         "environment": "REFERENCE_IMPLEMENTATION",
-        "connection_state": "MOCK_OK",  # never actually connected
+        # Honest state name — there is no live GCSS-MC link. Anything reading
+        # this JSON must not be able to mistake it for a healthy connection.
+        # Renamed from the previous "MOCK_OK" which lied at the field level.
+        "connection_state": "MOCK_UNCONNECTED",
         "last_sync_at": last_sync_at.isoformat(timespec="seconds"),
         "age_seconds": age_seconds,
         "run_id": run_id,
