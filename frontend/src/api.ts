@@ -1424,6 +1424,13 @@ export interface SentryJob {
   classification_counts: Record<string, number>;
   mismatches: number;
   aggregation_risks: any[];
+  // Task #65: backend wall-time for the synchronous classification pass
+  // and which engines were actually invoked. tier2_handled is "would-route"
+  // when engine_used === "rule_based_only" (the LLM tier is offline).
+  engine_seconds?: number;
+  engine_used?: "rule_based_only" | "rule_based_plus_model";
+  sentry_model_loaded?: boolean;
+  pulse_model_loaded?: boolean;
   done: boolean;
 }
 
