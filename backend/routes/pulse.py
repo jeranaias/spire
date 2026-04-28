@@ -2459,9 +2459,10 @@ async def model_card(refresh: bool = Query(False)):
 async def feedback(asset_id: str, request: Request, payload: dict):
     """Accept a 👍 / 👎 on a PULSE risk-scorer prediction.
 
-    Task #97 — sibling tightening to SENTRY review (#25). Two gates:
+    Three layered gates (in order):
 
-      1. Role allowlist. Only operator/maintenance class roles
+      1. Role allowlist (Task #97 — sibling tightening to SENTRY
+         review #25). Only operator/maintenance class roles
          (`g4`, `maintenance_chief`) can write into the PULSE
          training-loop chain. `mef_commander` can read every PULSE
          surface but doesn't sit at the rating console; the
@@ -2472,7 +2473,16 @@ async def feedback(asset_id: str, request: Request, payload: dict):
          `unauthorized_pulse_feedback` audit row carrying the
          operator's identity so the SOC sees the attempt.
 
-      2. Identity stamping. The chain entry now carries DODID +
+      2. Asset existence (Task #84). 404 on unknown asset_ids so we
+         don't silently write a row keyed to a nonexistent id.
+
+      3. Unit scope (Task #84). Mirrors the asset deep-dive scope gate
+         (see `asset_deep_dive` above): without this, a unit-scoped
+         role (e.g. g4 → 2d MLG) could post feedback against assets
+         they aren't allowed to see, poisoning the fleet-wide
+         `feedback_summary` as if it were authoritative ground truth.
+
+      4. Identity stamping (Task #97). The chain entry carries DODID +
          name + unit + CAC cert serial — not just the role string —
          so a judge inspecting the chain can answer "who" not just
          "which role".
@@ -2480,6 +2490,7 @@ async def feedback(asset_id: str, request: Request, payload: dict):
     user = getattr(request.state, "user", None) or {}
     role = session_role(request) or user.get("role") or "unknown"
 
+    # Gate 1 — role allowlist.
     if role not in PULSE_FEEDBACK_ROLES:
         audit_log(
             "unauthorized_pulse_feedback",
@@ -2511,6 +2522,20 @@ async def feedback(asset_id: str, request: Request, payload: dict):
                 ),
             },
         )
+
+    # Gate 2 — asset existence.
+    ds = get_dataset()
+    asset = ds.asset(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="asset not found")
+
+    # Gate 3 — unit scope. The role allowlist above lets `g4` and
+    # `maintenance_chief` post feedback at all; this extra check
+    # ensures they can only do so for assets in their allowed units
+    # (g4 → 2d MLG, maintenance_chief → CLB-6).
+    allowed = allowed_units(ds, role)
+    if allowed is not None and asset.unit_name not in allowed:
+        raise HTTPException(status_code=403, detail="asset out of scope")
 
     correct = bool(payload.get("correct", False))
     note = payload.get("note", "")

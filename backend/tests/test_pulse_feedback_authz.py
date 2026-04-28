@@ -32,7 +32,24 @@ from backend.persistence import (
     entries_for_subject,
     record_incident_response,
 )
-from backend.scoping import PULSE_FEEDBACK_ROLES
+from backend.scoping import PULSE_FEEDBACK_ROLES, allowed_units
+from backend.state import get_dataset
+
+
+def _pick_in_scope_asset_id(role: str) -> str:
+    """Return a real asset_id from the canonical dataset whose unit is in
+    `role`'s allowed_units. Task #84 added asset-existence + unit-scope
+    gates to POST /pulse/feedback, so synthetic IDs like
+    ``ASSET-AUTHZ-g4`` now (correctly) 404 before the identity-stamping
+    code runs. Pick a real asset so this test keeps exercising the
+    Task #97 in-role success path the way it did pre-#84.
+    """
+    ds = get_dataset()
+    allowed = allowed_units(ds, role) or set()
+    for a in ds.assets:
+        if a.unit_name in allowed:
+            return a.asset_id
+    pytest.skip(f"no in-scope asset for role {role!r}")
 
 
 def _pulse_feedback_rows_for(asset_id: str) -> list[dict]:
@@ -92,7 +109,11 @@ def test_pulse_feedback_in_role_writes_identity_to_chain(
 ):
     """In-role users land 200 and the hash-chained `pulse_feedback` row
     carries DODID + name + unit + CAC cert serial — not just role."""
-    asset_id = f"ASSET-AUTHZ-{role_label}"
+    # Task #84 added an asset-existence gate (404) and a unit-scope gate
+    # (403) to POST /pulse/feedback — so the asset_id has to be real AND
+    # in the caller's allowed_units to reach the identity-stamping path
+    # that this test asserts on.
+    asset_id = _pick_in_scope_asset_id(role_label)
     _login(client, dodid)
     try:
         r = _post_feedback(client, asset_id, correct=True)
