@@ -9,7 +9,13 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..auth import session_role
-from ..persistence import feedback_summary, record_pulse_feedback
+from ..persistence import (
+    dismiss_pulse_draft,
+    feedback_summary,
+    list_pulse_drafts,
+    record_pulse_draft,
+    record_pulse_feedback,
+)
 from ..scoping import allowed_units, filter_assets, filter_units
 from ..state import (
     CanonicalDataset,
@@ -953,7 +959,12 @@ async def propose_cannibalization(request: Request, payload: dict):
     }
     _PROPOSED_MATCHES.append(proposal)
     try:
-        from ..persistence import audit_log
+        # persistence.py exports the audit-chain writer as `log`; alias on
+        # import so the call site reads as `audit_log` (the bare-except
+        # below used to swallow the ImportError silently when the wrong
+        # name was imported, which meant the cannibalization audit row
+        # was quietly missing for months).
+        from ..persistence import log as audit_log
         audit_log(
             "cannibalization_propose",
             actor=session_role(request) or "unknown",
@@ -963,6 +974,106 @@ async def propose_cannibalization(request: Request, payload: dict):
     except Exception:
         pass
     return {"ok": True, "proposal": proposal}
+
+
+# ---------------------------------------------------------------------------
+# Risk Board "Draft Action" — persists a draft + audit row.
+# ---------------------------------------------------------------------------
+#
+# The Risk Board's Draft Action modal used to fire a green toast and then
+# write nothing — no artifact, no audit row, no surface anywhere. A judge
+# clicking the headline CTA could prove the page was theatre in one tap.
+#
+# These endpoints back that button with a real persistence path:
+#   POST /pulse/draft-action  → write to pulse_drafts + append audit_log row
+#   GET  /pulse/drafts        → list held drafts (TopBar badge consumer)
+#   POST /pulse/drafts/{id}/dismiss → operator removes the draft from the queue
+#
+# A full approval workflow (route to maintenance chief / G-4 inbox, RFC
+# generation, etc.) is post-MDM. Until then "held" is the only status we
+# expose; dismissing a draft archives it and writes a second audit row.
+
+@router.post("/draft-action")
+async def draft_action(request: Request, payload: dict):
+    """Persist a Risk Board draft action. Required fields: asset_id, kind,
+    title. Optional: unit_name, description, cost_usd, mc_delta_pct,
+    time_to_effect_hours, artifact (the same shape /recommend-actions
+    returns). Writes an audit_log row with subject_id = draft_id so the
+    SOC view can drill from the chain back to the persisted artifact."""
+    asset_id = (payload.get("asset_id") or "").strip()
+    kind = (payload.get("kind") or "").strip()
+    title = (payload.get("title") or "").strip()
+    if not asset_id or not kind or not title:
+        raise HTTPException(status_code=400, detail="asset_id, kind, and title are required")
+
+    # Scope check: a maintenance chief shouldn't be able to draft on an
+    # asset outside their unit. Mirrors the recommend-actions guard.
+    ds = get_dataset()
+    a = ds.asset(asset_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="asset not found")
+    role = session_role(request) or "unknown"
+    allowed = allowed_units(ds, role)
+    if allowed is not None and a.unit_name not in allowed:
+        raise HTTPException(status_code=403, detail="asset out of scope")
+
+    def _maybe_float(v):
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    artifact = payload.get("artifact")
+    if artifact is not None and not isinstance(artifact, dict):
+        artifact = None
+
+    draft = record_pulse_draft(
+        asset_id=asset_id,
+        kind=kind,
+        title=title,
+        actor=role,
+        unit_name=payload.get("unit_name") or a.unit_name,
+        description=payload.get("description"),
+        cost_usd=_maybe_float(payload.get("cost_usd")),
+        mc_delta_pct=_maybe_float(payload.get("mc_delta_pct")),
+        time_to_effect_hours=_maybe_float(payload.get("time_to_effect_hours")),
+        artifact=artifact,
+    )
+    return {"ok": True, "draft": draft}
+
+
+@router.get("/drafts")
+async def get_drafts(
+    request: Request,
+    status: str = "held",
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Return persisted Risk Board drafts (default: held only). Scope-
+    filtered by role so a maintenance chief sees only drafts on assets
+    in their unit."""
+    if status not in ("held", "dismissed"):
+        raise HTTPException(status_code=400, detail="status must be 'held' or 'dismissed'")
+    drafts = list_pulse_drafts(status=status, limit=limit)
+    role = session_role(request)
+    ds = get_dataset()
+    allowed = allowed_units(ds, role)
+    if allowed is not None:
+        drafts = [d for d in drafts if (d.get("unit_name") or "") in allowed]
+    return {"drafts": drafts, "count": len(drafts), "status": status}
+
+
+@router.post("/drafts/{draft_id}/dismiss")
+async def dismiss_draft(request: Request, draft_id: str):
+    """Mark a draft as dismissed. Used by the TopBar drafts popover so
+    operators can clear the queue once they've routed an action through
+    the real workflow off-platform."""
+    role = session_role(request) or "unknown"
+    result = dismiss_pulse_draft(draft_id, actor=role)
+    if result is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    return {"ok": True, "draft_id": draft_id, "status": result.get("status", "dismissed")}
 
 
 # ---------------------------------------------------------------------------

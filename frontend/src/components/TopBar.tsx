@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { ROLE_LABELS, useSpireStore, VIEW_SCOPE, type Density, type Role, type User } from "../state/store";
-import { api, type AuthUser } from "../api";
+import { api, type AuthUser, type PulseDraft } from "../api";
 import { formatApiError } from "../api-retry";
 import { NodeStatus } from "./NodeStatus";
 import { MissionClock } from "./MissionClock";
@@ -163,6 +163,7 @@ export function TopBar() {
           <span className="hidden xl:contents"><DensityToggle /></span>
           <ResetDemoButton />
           <PushToJointButton role={role} />
+          <DraftsBadge role={role} />
           <IdentityPill user={currentUser} role={role} />
           <span className="hidden xl:contents"><ModeBadge mode={operatingMode} /></span>
           <AlertBadge count={alertCount} />
@@ -648,6 +649,246 @@ function ModeBadge({ mode }: { mode: "full" | "lite" }) {
       </span>
     </div>
   );
+}
+
+// PULSE Risk Board "Draft Action" surface in the chrome.
+//
+// Backstory: the Draft Action modal used to fire a green toast and write
+// nothing — clicking the headline CTA proved the page was theatre. Now
+// every Draft this click POSTs to /pulse/draft-action which writes both
+// a pulse_drafts row AND an audit_log entry. This badge is the operator-
+// facing receipt: the count goes up immediately (store nonce bump), the
+// popover lists every held draft with the asset, kind, MC delta, and
+// creation time, and a Dismiss button archives the draft (writing a
+// second audit row). Click on a draft row navigates to the Risk Board
+// pre-selected on that asset so the operator can drill from "I drafted
+// X" back to "X is the asset I drafted on."
+//
+// Visible for the PULSE roles (maintenance_chief, g4, mef_commander). For
+// data_custodian / security_manager the surface they care about is the
+// SOC audit view, which already shows draft rows under the
+// pulse_draft_action / pulse_draft_dismiss kinds.
+function DraftsBadge({ role }: { role: Role }) {
+  const allowed = role === "maintenance_chief" || role === "g4" || role === "mef_commander";
+  const refreshTick = useSpireStore((s) => s.draftsRefreshTick);
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const setSelectedAssetId = useSpireStore((s) => s.setSelectedAssetId);
+  const bumpDrafts = useSpireStore((s) => s.bumpDraftsRefresh);
+  const nav = useNavigate();
+  const [drafts, setDrafts] = useState<PulseDraft[]>([]);
+  const [unreachable, setUnreachable] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [dismissing, setDismissing] = useState<string | null>(null);
+  const wrap = useRef<HTMLDivElement | null>(null);
+
+  // Poll every 15s while the role is allowed; also re-fetch when the
+  // store nonce bumps (operator just hit Draft this).
+  useEffect(() => {
+    if (!allowed) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    async function tick() {
+      try {
+        const r = await api.pulse.drafts("held");
+        if (cancelled) return;
+        setDrafts(r.drafts);
+        setUnreachable(false);
+      } catch {
+        if (cancelled) return;
+        setUnreachable(true);
+      } finally {
+        if (!cancelled) timer = setTimeout(tick, 15_000);
+      }
+    }
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [allowed, refreshTick]);
+
+  // Click-outside + Escape close the popover.
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (!wrap.current) return;
+      if (!wrap.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!allowed) return null;
+
+  const count = drafts.length;
+  const tone = unreachable ? "var(--color-warning)"
+    : count === 0 ? "var(--color-text-muted)"
+    : "var(--color-primary)";
+
+  async function dismiss(draftId: string) {
+    if (dismissing) return;
+    setDismissing(draftId);
+    try {
+      await api.pulse.dismissDraft(draftId);
+      // Optimistic local strip — the next poll round-trips the source of
+      // truth back in.
+      setDrafts((prev) => prev.filter((d) => d.draft_id !== draftId));
+      bumpDrafts();
+      pushToast({ tone: "ok", text: `Draft ${draftId} dismissed`, ttlMs: 3000 });
+    } catch (e) {
+      pushToast({ tone: "error", text: `Dismiss failed: ${formatApiError(e)}` });
+    } finally {
+      setDismissing(null);
+    }
+  }
+
+  function openOnAsset(d: PulseDraft) {
+    setSelectedAssetId(d.asset_id);
+    setOpen(false);
+    nav("/pulse/risk");
+  }
+
+  return (
+    <div ref={wrap} className="relative shrink-0">
+      <Pressable
+        onClick={() => setOpen((v) => !v)}
+        block={false}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`${count} draft action${count === 1 ? "" : "s"} held`}
+        title={unreachable
+          ? "Drafts queue unreachable — backend may be offline"
+          : count === 0
+            ? "No drafts held — Risk Board Draft Action lands here"
+            : `${count} draft action${count === 1 ? "" : "s"} held · click to review`}
+        className="!min-h-0 flex h-11 shrink-0 items-center gap-1.5 rounded-sm border bg-[var(--color-bg)] px-2 font-mono text-xs uppercase tracking-wider"
+        style={{
+          borderColor: count > 0
+            ? "color-mix(in oklab, var(--color-primary) 45%, var(--color-border))"
+            : "var(--color-border)",
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: tone }} aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M9 13h6" />
+          <path d="M9 17h4" />
+        </svg>
+        <span style={{ color: tone }}>DRAFTS</span>
+        <span className="tabular-nums" style={{ color: tone }}>
+          {String(count).padStart(2, "0")}
+        </span>
+      </Pressable>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Held drafts"
+          className="absolute right-0 top-[calc(100%+6px)] z-[8500] w-[28rem] max-w-[92vw] rounded-md border border-[var(--color-border-active)] bg-[var(--color-surface)] shadow-2xl"
+        >
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2.5">
+            <div>
+              <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
+                Risk Board · Held Drafts
+              </div>
+              <div className="mt-0.5 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
+                Persisted with audit row · no auto-approval workflow
+              </div>
+            </div>
+            <span
+              className="rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[10px] tabular-nums tracking-widest text-[var(--color-text-secondary)]"
+              title="Held drafts in this view"
+            >
+              {count}
+            </span>
+          </div>
+          {unreachable && (
+            <div className="border-b border-[var(--color-border)] px-4 py-2 font-mono text-[11px] text-[var(--color-warning)] tracking-wide">
+              Drafts service unreachable — list may be stale.
+            </div>
+          )}
+          {count === 0 && !unreachable && (
+            <div className="px-4 py-6 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+              No drafts held. Use the Draft Action button on the PULSE Risk Board to queue one.
+            </div>
+          )}
+          {count > 0 && (
+            <ul className="max-h-[60vh] divide-y divide-[var(--color-border)] overflow-y-auto">
+              {drafts.map((d) => (
+                <li key={d.draft_id} className="p-3">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-widest">
+                        <span className="font-semibold text-[var(--color-primary)]">
+                          {d.kind?.toUpperCase()}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openOnAsset(d)}
+                          className="font-semibold text-[var(--color-text)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-primary)]"
+                          title="Open this asset on the Risk Board"
+                        >
+                          {d.asset_id}
+                        </button>
+                        {d.unit_name && (
+                          <span className="text-[var(--color-text-muted)]">· {d.unit_name}</span>
+                        )}
+                      </div>
+                      <div className="mt-1 font-mono text-xs text-[var(--color-text)] tracking-wide">
+                        {d.title}
+                      </div>
+                      <div className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                        {d.draft_id} · by {d.actor} · {formatDraftAge(d.created_at)}
+                        {d.mc_delta_pct != null && (
+                          <> · MC +{(d.mc_delta_pct * 100).toFixed(0)}</>
+                        )}
+                        {d.cost_usd != null && (
+                          <> · ${d.cost_usd.toLocaleString("en-US")}</>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => dismiss(d.draft_id)}
+                      pending={dismissing === d.draft_id}
+                      disabled={!!dismissing}
+                      title="Archive this draft (writes an audit row)"
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatDraftAge(iso: string): string {
+  try {
+    const t = new Date(iso).getTime();
+    if (!isFinite(t)) return iso;
+    const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (sec < 60) return `${sec}s ago`;
+    const m = Math.floor(sec / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return `${d}d ago`;
+  } catch {
+    return iso;
+  }
 }
 
 function AlertBadge({ count }: { count: number }) {
