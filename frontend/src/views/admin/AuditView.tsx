@@ -29,11 +29,15 @@ import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, ErrorState, LoadingState, EmptyState, IconButton } from "../../components/ui";
 import { ClassifiedExport } from "../../components/classification/ClassifiedExport";
+import { useClearance } from "../../components/classification/useClearance";
 import { AdminTabs } from "../AdminView";
 import {
   CLASS_ORDER,
+  CLASS_RANK,
   classificationColors,
   classificationLabel,
+  normalizeClassification,
+  type Classification,
 } from "../../components/classification/levels";
 
 type TimeWindow = "any" | "15m" | "1h" | "24h" | "7d" | "custom";
@@ -76,6 +80,66 @@ function fmtUtc(iso: string): string {
   return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
 }
 
+/**
+ * Compute the bundle classification (= max row classification) plus a
+ * one-line provenance note: "stamped SECRET because 4 of 24 rows are SECRET".
+ *
+ * Rows with no classification field collapse to UNCLASSIFIED (matches
+ * `normalizeClassification`'s permissive fallback). The result drives both
+ * the visible export-stamp and the spillage gate; we deliberately reject
+ * the operator's filter chip as an input — the stamp must reflect the
+ * *contents* of the bundle, not the operator's intent (Task #37).
+ *
+ * Manual verification (curl walk-through, Security Manager session):
+ *
+ *   # 1. Confirm the chain contains a TOP_SECRET row in the export window.
+ *   curl -s "$API/system/admin/audit?limit=500" \
+ *     | jq '[.rows[] | .classification] | group_by(.) | map({(.[0]): length}) | add'
+ *   # → { "TOP_SECRET": 3, "SECRET": 41, "CUI": 12, "UNCLASSIFIED": 444 }
+ *
+ *   # 2. With *no* Classification chip selected, click "Export filtered set".
+ *   #    Old behaviour: file named `spire_audit_UNCLASSIFIED_*.json` and
+ *   #    `bundle_classification` field absent → spillage hatch.
+ *   #    New behaviour: file named `spire_audit_TOP_SECRET_*.json`,
+ *   #    JSON includes
+ *   #      "bundle_classification": "TOP_SECRET",
+ *   #      "bundle_classification_provenance":
+ *   #          "stamped TOP SECRET because 3 of 500 rows are TOP SECRET",
+ *   #    and if the operator's clearance < TOP_SECRET the download is
+ *   #    blocked and a `spillage_prevented` row is appended to the chain.
+ *
+ *   # 3. Pagination edge case. Page 6 (offset 500) shows only UNCLAS rows.
+ *   #    Old (page-derived) preview gate would have flipped the badge to
+ *   #    UNCLASSIFIED; the export-window-derived gate (this file) stays
+ *   #    pinned to TOP_SECRET because the 500-row export window is the
+ *   #    same regardless of which page the operator is viewing.
+ */
+function computeBundleClassification(rows: AuditEntry[]): {
+  level: Classification;
+  counts: Partial<Record<Classification, number>>;
+  provenance: string;
+} {
+  const counts: Partial<Record<Classification, number>> = {};
+  let maxRank = 0;
+  let maxLevel: Classification = "UNCLASSIFIED";
+  for (const r of rows) {
+    const lvl = normalizeClassification(r.classification);
+    counts[lvl] = (counts[lvl] ?? 0) + 1;
+    const rk = CLASS_RANK[lvl];
+    if (rk > maxRank) {
+      maxRank = rk;
+      maxLevel = lvl;
+    }
+  }
+  const total = rows.length;
+  const atLevel = counts[maxLevel] ?? 0;
+  const provenance =
+    total === 0
+      ? `stamped ${classificationLabel(maxLevel)} (empty bundle — defaulted to UNCLASSIFIED)`
+      : `stamped ${classificationLabel(maxLevel)} because ${atLevel} of ${total} row${total === 1 ? "" : "s"} ${atLevel === 1 ? "is" : "are"} ${classificationLabel(maxLevel)}`;
+  return { level: maxLevel, counts, provenance };
+}
+
 export function AuditView() {
   const role = useSpireStore((s) => s.role);
   if (role !== "security_manager") {
@@ -116,12 +180,20 @@ export function AuditView() {
   const [waking, setWaking]       = useState<boolean>(false);
   const [openRow, setOpenRow]     = useState<AuditEntry | null>(null);
 
+  const pushToast = useSpireStore((s) => s.pushToast);
+  const { clearance, can } = useClearance();
+
   // Reset to page 0 whenever a filter changes — otherwise a narrowed result
   // set leaves the operator on an empty trailing page. Use the *debounced*
   // search value so the page doesn't reset on every keystroke.
   useEffect(() => { setPage(0); }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms]);
 
-  const queryParams = useMemo<AuditQueryParams>(() => {
+  // Filter signature *without* pagination — drives both the page query
+  // (joined with limit/offset) and the export-set fetch (limit 500).
+  // Splitting it out lets the export-bundle gate stay stable across paging
+  // so navigating to page 6 of a mixed-classification result does not flip
+  // the gate to whatever happens to be on the current page.
+  const filterParams = useMemo<AuditQueryParams>(() => {
     const range = tw === "custom"
       ? { after: customAfter || undefined, before: customBefore || undefined }
       : windowToRange(tw);
@@ -134,10 +206,20 @@ export function AuditView() {
       before:         range.before,
       q:              debouncedQ.trim() || undefined,
       only_anomalies: onlyAnoms || undefined,
-      limit:          PAGE_SIZE,
-      offset:         page * PAGE_SIZE,
     };
-  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms, page]);
+  }, [actors, kinds, resource, classification, tw, customAfter, customBefore, debouncedQ, onlyAnoms]);
+
+  const queryParams = useMemo<AuditQueryParams>(() => ({
+    ...filterParams,
+    limit:  PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+  }), [filterParams, page]);
+
+  const exportSetParams = useMemo<AuditQueryParams>(() => ({
+    ...filterParams,
+    limit:  500,
+    offset: 0,
+  }), [filterParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -209,11 +291,65 @@ export function AuditView() {
     };
   }, [queryParams]);
 
+  // Bundle classification computed from the *export window* (the same
+  // 500-row fetch that `onExport` will download), NOT from the currently
+  // visible page. Driving the gate from the page would let pagination
+  // change what's classified: with PAGE_SIZE=100 the operator on page 6+
+  // is past the 500-row export window entirely, and a page-derived gate
+  // could flip from TS_SCI → UNCLASSIFIED based on which slice they
+  // happened to scroll to. Refreshing whenever the filter changes keeps
+  // the gate in lock-step with what `onExport` will actually fetch.
+  const [exportBundle, setExportBundle] = useState<ReturnType<typeof computeBundleClassification> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setExportBundle(null);
+    api.system.auditQuery(exportSetParams)
+      .then((r) => { if (!cancelled) setExportBundle(computeBundleClassification(r.rows)); })
+      .catch(() => { /* gate stays disabled until the next filter change retries */ });
+    return () => { cancelled = true; };
+  }, [exportSetParams]);
+
   const onExport = useCallback(async () => {
     if (!data) return;
     // Pull *all* rows matching the current filter (cap 500) so the exported
     // bundle reflects the operator's filter intent, not just the current page.
-    const wide = await api.system.auditQuery({ ...queryParams, limit: 500, offset: 0 });
+    // Re-fetched here (rather than reused from `exportBundle`) so the chain
+    // can grow between the gate-render and the click without the operator
+    // smuggling out a new TOP_SECRET row that landed in the last few
+    // seconds.
+    const wide = await api.system.auditQuery(exportSetParams);
+
+    // Stamp the bundle by the highest classification actually present in
+    // the rows — NOT by the operator's Classification chip. A blank chip
+    // used to mis-stamp mixed bundles UNCLASSIFIED, which was the one-click
+    // spillage hatch fixed under Task #37.
+    const bundle = computeBundleClassification(wide.rows);
+
+    // Authoritative second gate: even if the visible-page badge said
+    // UNCLASSIFIED, the wider fetch may surface a SECRET row. Re-check the
+    // operator's clearance against the *true* bundle level here, write a
+    // spillage_prevented audit entry, and abort the download.
+    if (!can(bundle.level)) {
+      pushToast({
+        tone: "error",
+        text: `Spillage prevented · bundle is ${classificationLabel(bundle.level)} (${bundle.provenance}); your clearance is ${clearance || "UNCLASSIFIED"}`,
+        ttlMs: 8000,
+      });
+      try {
+        await api.system.spillagePrevented({
+          action: "audit.export.json",
+          required_classification: bundle.level,
+          user_clearance: clearance,
+          surface: "frontend",
+        });
+      } catch {
+        // Toast already informed the operator; the next gated call will
+        // re-fire its own audit entry server-side.
+      }
+      return;
+    }
+
     const blob = new Blob(
       [JSON.stringify({
         exported_at: new Date().toISOString(),
@@ -221,6 +357,9 @@ export function AuditView() {
         head_hash: wide.head_hash,
         broken_at_id: wide.broken_at_id,
         anomaly_count: wide.anomaly_count,
+        bundle_classification: bundle.level,
+        bundle_classification_provenance: bundle.provenance,
+        bundle_classification_counts: bundle.counts,
         rows: wide.rows,
       }, null, 2)],
       { type: "application/json" },
@@ -228,12 +367,19 @@ export function AuditView() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `spire_audit_${classificationLabel(classification || "UNCLASSIFIED")}_${new Date().toISOString().replace(/[-:]/g, "").slice(0,15)}.json`;
+    // Filename carries the *bundle* classification — not the filter chip —
+    // so that a file mailed to the wrong network is at least labelled
+    // honestly per the marking on the file itself.
+    const stamp = classificationLabel(bundle.level).replace(/\s+/g, "_").replace(/\/+/g, "_");
+    a.download = `spire_audit_${stamp}_${new Date().toISOString().replace(/[-:]/g, "").slice(0,15)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [data, queryParams, classification]);
+    // Refresh the visible gate to match what we just exported (the wide
+    // fetch may have grown since the last filter-change effect fired).
+    setExportBundle(bundle);
+  }, [data, queryParams, exportSetParams, can, clearance, pushToast]);
 
   if (error && !data) {
     return (
@@ -290,12 +436,22 @@ export function AuditView() {
               {data.anomaly_count} anomal{data.anomaly_count === 1 ? "y" : "ies"} in view
             </span>
             <ClassifiedExport
-              classification={classification || "UNCLASSIFIED"}
+              classification={exportBundle?.level ?? "UNCLASSIFIED"}
               action="audit.export.json"
               label="Export filtered set"
               pendingLabel="Exporting…"
               onExport={onExport}
-              hint={`Up to 500 rows · stamped ${classification || "UNCLASSIFIED"}`}
+              disabled={exportBundle === null}
+              disabledReason={
+                exportBundle === null
+                  ? "Computing bundle classification from export window…"
+                  : undefined
+              }
+              hint={
+                exportBundle
+                  ? `Up to 500 rows · ${exportBundle.provenance} (recomputed at click)`
+                  : "Computing bundle classification from the 500-row export window…"
+              }
             />
           </div>
         </div>
