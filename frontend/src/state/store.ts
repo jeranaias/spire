@@ -118,6 +118,21 @@ export interface CannibPendingRetry {
   actor: string;
 }
 
+// Task #163 — track INTERMITTENT-mode write drops so the global DDIL
+// desync banner can name them after the fact. The interceptor used to
+// throw an ApiError and walk away; the per-call toast each caller raised
+// vanished in a few seconds and a presenter mid-narration could miss it.
+// Recording droppedAt lets the banner age them out of the "recent" set
+// after ~30s without holding them forever.
+export interface DdilDroppedWrite {
+  id: string;
+  method: string;
+  path: string;
+  droppedAt: number;
+  actor: string;
+  reason: string;
+}
+
 export interface SpireState {
   // CAC/PIV identity — null until the operator clears the cert-selection
   // splash. Every Wave 1 lane reads from here. `role` mirrors
@@ -205,6 +220,16 @@ export interface SpireState {
   // or hard reload doesn't drop the operator's only handle on a write
   // that the backend never confirmed.
   cannibPendingRetries: CannibPendingRetry[];
+  // Task #163 — recent INTERMITTENT-mode drops, kept here so the global
+  // DDIL desync banner can name what was lost without each caller having
+  // to thread its own drop telemetry. Pruned to the last ~30s by the
+  // banner's tick.
+  ddilDroppedWrites: DdilDroppedWrite[];
+  // Timestamp of the last operator dismissal of the desync banner.
+  // Visibility check is "any queued/dropped write whose timestamp is
+  // newer than this" — a fresh queue/drop after dismiss re-summons the
+  // banner so the operator can't accidentally hide future failures.
+  ddilDesyncDismissedAt: number | null;
   // Last cache hit served to a caller while DISCONNECTED. Used by the
   // DDIL freshness badge so the operator can see at a glance how stale
   // the data on screen actually is ("cached from H+xx:xx, n minutes
@@ -290,6 +315,12 @@ export interface SpireState {
   updateCannibPendingRetry: (id: string, patch: Partial<CannibPendingRetry>) => void;
   removeCannibPendingRetry: (id: string) => void;
   clearCannibPendingRetries: () => void;
+  // Task #163 — record / prune INTERMITTENT-mode write drops, plus the
+  // dismiss-banner action.
+  noteDdilWriteDropped: (w: Omit<DdilDroppedWrite, "id" | "droppedAt">) => DdilDroppedWrite;
+  pruneDdilDroppedWrites: (olderThanMs: number) => void;
+  clearDdilDroppedWrites: () => void;
+  dismissDdilDesyncBanner: () => void;
   setDensity: (d: Density) => void;
   setVisibleChip: (key: VisibleChipKey, visible: boolean) => void;
   setVisibleChips: (chips: VisibleChipsPrefs) => void;
@@ -615,6 +646,8 @@ export const useSpireStore = create<SpireState>((set) => ({
   ddilDrillActive: false,
   cannibPendingRetries:
     typeof window !== "undefined" ? loadCannibPendingRetries() : [],
+  ddilDroppedWrites: [],
+  ddilDesyncDismissedAt: null,
   ddilLastCacheHit: null,
   draftsRefreshTick: 0,
   draftsPopoverOpenTick: 0,
@@ -734,6 +767,27 @@ export const useSpireStore = create<SpireState>((set) => ({
     saveCannibPendingRetries([]);
     set({ cannibPendingRetries: [] });
   },
+  noteDdilWriteDropped: (w) => {
+    const entry: DdilDroppedWrite = {
+      ...w,
+      id: `DROP-${uid().toUpperCase()}`,
+      droppedAt: Date.now(),
+    };
+    set((s) => ({ ddilDroppedWrites: [...s.ddilDroppedWrites, entry] }));
+    return entry;
+  },
+  pruneDdilDroppedWrites: (olderThanMs) =>
+    set((s) => {
+      const cutoff = Date.now() - olderThanMs;
+      const next = s.ddilDroppedWrites.filter((d) => d.droppedAt >= cutoff);
+      // Reuse the same array if nothing changed so subscribers don't
+      // re-render on every tick.
+      return next.length === s.ddilDroppedWrites.length
+        ? {}
+        : { ddilDroppedWrites: next };
+    }),
+  clearDdilDroppedWrites: () => set({ ddilDroppedWrites: [] }),
+  dismissDdilDesyncBanner: () => set({ ddilDesyncDismissedAt: Date.now() }),
   setDensity: (density) => {
     saveDensity(density);
     set({ density });

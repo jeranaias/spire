@@ -21,8 +21,7 @@
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { useSpireStore, type DdilMode } from "../state/store";
-import { replayQueuedWrite } from "../api";
-import { formatApiError } from "../api-retry";
+import { drainDdilQueue } from "../state/ddilSync";
 import { Button, Pressable } from "./ui";
 
 const MODES: { mode: DdilMode; label: string; short: string; tone: string }[] = [
@@ -71,9 +70,6 @@ export function CommsControl() {
   const ddilSyncing = useSpireStore((s) => s.ddilSyncing);
   const ddilDrillActive = useSpireStore((s) => s.ddilDrillActive);
   const setDdilDrillActive = useSpireStore((s) => s.setDdilDrillActive);
-  const setDdilSyncing = useSpireStore((s) => s.setDdilSyncing);
-  const removeDdilWrite = useSpireStore((s) => s.removeDdilWrite);
-  const setDdilLastSyncAt = useSpireStore((s) => s.setDdilLastSyncAt);
   const pushToast = useSpireStore((s) => s.pushToast);
 
   const [open, setOpen] = useState(false);
@@ -111,59 +107,6 @@ export function CommsControl() {
     };
   }, []);
 
-  // Drain the queue when the operator drops out of DISCONNECTED. Reads
-  // straight from the store on each tick so a write queued mid-drain still
-  // replays. The actual fetch goes through replayQueuedWrite which bypasses
-  // the interceptor — otherwise the writes would just re-queue.
-  async function drainQueue() {
-    const queue = useSpireStore.getState().ddilQueue;
-    if (queue.length === 0) return;
-    // Snapshot the queue length at drain start so the SyncingOverlay's
-    // progress bar can show real done/total — the live ddilQueue.length
-    // shrinks as we drain, so passing it through every render makes the
-    // bar stick at 0%.
-    setDrainTotal(queue.length);
-    setDdilSyncing(true);
-    let succeeded = 0;
-    let failed = 0;
-    for (const w of queue) {
-      try {
-        await replayQueuedWrite({ method: w.method, path: w.path, body: w.body });
-        succeeded += 1;
-        removeDdilWrite(w.id);
-        // Visible per-write replay beat — keeps the overlay from blinking
-        // past for short queues.
-        await new Promise((r) => setTimeout(r, 220));
-      } catch (e) {
-        failed += 1;
-        removeDdilWrite(w.id);
-        // eslint-disable-next-line no-console
-        console.warn(`[ddil] replay failed for ${w.method} ${w.path}:`, formatApiError(e));
-      }
-    }
-    setDdilSyncing(false);
-    setDdilLastSyncAt(Date.now());
-    if (succeeded > 0 && failed === 0) {
-      pushToast({
-        tone: "ok",
-        text: `All caught up — ${succeeded} queued write${succeeded === 1 ? "" : "s"} replayed in order`,
-        ttlMs: 4500,
-      });
-    } else if (succeeded > 0 && failed > 0) {
-      pushToast({
-        tone: "warn",
-        text: `Replay partial — ${succeeded} applied, ${failed} failed (see console)`,
-        ttlMs: 5500,
-      });
-    } else if (failed > 0) {
-      pushToast({
-        tone: "error",
-        text: `Replay failed — ${failed} queued write${failed === 1 ? "" : "s"} could not be applied`,
-        ttlMs: 5500,
-      });
-    }
-  }
-
   function transitionTo(next: DdilMode, options: { fromUI?: boolean } = {}) {
     const prev = useSpireStore.getState().ddilMode;
     if (prev === next) return;
@@ -171,7 +114,7 @@ export function CommsControl() {
     if (prev === "DISCONNECTED" && next !== "DISCONNECTED") {
       // Defer the drain by a tick so the chip color flips first; the
       // operator sees the link come back, THEN the syncing overlay.
-      window.setTimeout(() => { void drainQueue(); }, 150);
+      window.setTimeout(() => { void drainDdilQueue({ setDrainTotal }); }, 150);
     }
     if (options.fromUI) {
       const labelByMode = Object.fromEntries(MODES.map((m) => [m.mode, m.label]));

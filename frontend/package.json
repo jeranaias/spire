@@ -17,6 +17,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@tailwindcss/vite": "^4.2.4",
     "clsx": "^2.1.1",
+    "fdir": "^6.5.0",
     "maplibre-gl": "^5.24.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
@@ -24,6 +25,7 @@
     "react-router-dom": "^7.14.2",
     "recharts": "^3.8.1",
     "tailwindcss": "^4.2.4",
+    "tinyglobby": "^0.2.16",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
@@ -45,8 +47,5 @@
     "typescript-eslint": "^8.58.2",
     "vite": "^8.0.10",
     "vitest": "^3.2.4"
-  },
-  "overrides": {
-    "fdir": "6.4.6"
   }
 }

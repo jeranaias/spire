@@ -189,6 +189,12 @@ registerDdilHandlers({
   noteCacheHit: (key, _ageMs, cachedAt) => {
     useSpireStore.getState().noteDdilCacheHit(key, cachedAt);
   },
+  // Task #163 — pipe INTERMITTENT-mode write drops into the store so the
+  // global DDIL desync banner has something to name past the 5-second
+  // per-call toast.
+  noteWriteDropped: (op) => {
+    useSpireStore.getState().noteDdilWriteDropped(op);
+  },
 });
 
 // Send users to their role-appropriate home view on first load.

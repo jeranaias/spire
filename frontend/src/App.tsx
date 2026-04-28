@@ -8,6 +8,7 @@ import { ToastLane } from "./components/ToastLane";
 import { NarrationOverlay } from "./components/NarrationOverlay";
 import { ScenarioPlayerHost } from "./components/ScenarioPlayerHost";
 import { ScenarioSyncBanner } from "./components/ScenarioSyncBanner";
+import { DdilDesyncBanner } from "./components/DdilDesyncBanner";
 import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
@@ -324,6 +325,11 @@ export default function App() {
        * mounted at the shell so they survive route changes. */}
       <ScenarioPlayerHost />
       <ScenarioSyncBanner />
+      {/* Task #163 — sticky cockpit banner for DDIL queued / dropped
+       * writes that aren't owned by the scenario player. Shares the
+       * z-stack with ScenarioSyncBanner and offsets itself when both
+       * are visible. */}
+      <DdilDesyncBanner />
       <NarrationOverlay />
       <FeedbackDrawer />
       <HelpOverlay />

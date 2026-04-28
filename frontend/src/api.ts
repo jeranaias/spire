@@ -53,6 +53,11 @@ export interface DdilHandlers {
   // badge / overlay reads from this so it can show "cached N minutes ago"
   // without each widget having to thread cache age into its props.
   noteCacheHit?: (key: string, ageMs: number, cachedAt: number) => void;
+  // Task #163 — surface an INTERMITTENT-mode write drop to the store so
+  // the global DDIL desync banner can name it. The interceptor still
+  // throws the ApiError; this is purely telemetry so the operator sees
+  // the loss past the 5-second per-call toast.
+  noteWriteDropped?: (op: { method: string; path: string; actor: string; reason: string }) => void;
 }
 
 let _ddil: DdilHandlers | null = null;
@@ -152,6 +157,20 @@ async function jsonFetch<T>(path: string, init?: RequestInit, injectRole = true)
       // which is the "retry" the operator narrates during the demo.
       await sleep(120 + Math.floor(Math.random() * 280));
       if (Math.random() < 0.3) {
+        // Task #163 — record dropped writes (not reads) so the global
+        // desync banner can name them. Reads are recoverable on the
+        // caller's next render; writes are state mutations that vanish
+        // off the wire and a 5s toast is too easy to miss.
+        if (!isRead && _ddil?.noteWriteDropped) {
+          try {
+            _ddil.noteWriteDropped({
+              method,
+              path,
+              actor: _getRole(),
+              reason: "INTERMITTENT · packet dropped",
+            });
+          } catch { /* tolerant — telemetry only */ }
+        }
         throw new ApiError(
           503,
           "DDIL Intermittent",
