@@ -61,12 +61,21 @@ export function MissionClock({ compact = false }: { compact?: boolean } = {}) {
   const setScenario = useSpireStore((s) => s.setScenario);
   const pushToast = useSpireStore((s) => s.pushToast);
 
-  const offsetLabel = useSpireStore((s) => s.scenarioOffsetLabel);
-  const phase = useSpireStore((s) => s.scenarioPhase);
+  const offsetLabelRaw = useSpireStore((s) => s.scenarioOffsetLabel);
+  const phaseRaw = useSpireStore((s) => s.scenarioPhase);
   const running = useSpireStore((s) => s.scenarioRunning);
   const rate = useSpireStore((s) => s.scenarioRate);
   const offsetMin = useSpireStore((s) => s.scenarioOffsetMin);
   const maxOffsetMin = useSpireStore((s) => s.scenarioMaxOffsetMin);
+  // QA #47 — until /scenario/state hydrates the store on a freshly
+  // mounted view we must not display the seed defaults (H+000:00 /
+  // Pre-conflict). Otherwise a route change makes the clock appear to
+  // jump from H+0 to whatever the backend's actual offset is the
+  // moment the first poll resolves. Show "—" placeholders instead so
+  // the chip reads as "loading" rather than "we are at H+0."
+  const scenarioLoaded = useSpireStore((s) => s.scenarioLoaded);
+  const offsetLabel = scenarioLoaded ? offsetLabelRaw : "H+—";
+  const phase = scenarioLoaded ? phaseRaw : "Loading";
 
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement | null>(null);

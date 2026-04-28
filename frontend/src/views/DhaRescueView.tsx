@@ -796,7 +796,7 @@ export function DhaRescueView() {
           }}
         >
           <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-danger)]">
-            USE CASE 4 · DHA RESCUE · BLOOD/CLASS VIII H+72 — DMO
+            USE CASE 4 · DHA RESCUE · BLOOD/CLASS VIII · {beat.label} — DMO
           </div>
           <h1 className="mt-1 font-sans text-xl font-semibold text-[var(--color-text)]">
             Predictive blood &amp; Class VIII sustainment under DMO
@@ -813,7 +813,7 @@ export function DhaRescueView() {
        * screen readers + document outline. */}
       {!stageMode && (
         <h1 className="font-mono text-sm font-semibold uppercase tracking-[0.22em] text-[var(--color-text)]">
-          DHA RESCUE · Class VIII / Blood Resupply · H+72
+          DHA RESCUE · Class VIII / Blood Resupply · {beat.label}
         </h1>
       )}
 
@@ -828,11 +828,23 @@ export function DhaRescueView() {
           <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
             Scenario hour
           </span>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" role="tablist" aria-label="Scenario hour selector">
             {BEATS.map((b, i) => (
-              <span
+              <button
                 key={b.label}
-                className="rounded-sm border px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums tracking-widest"
+                type="button"
+                role="tab"
+                aria-selected={i === beatIndex}
+                onClick={() => {
+                  if (i === beatIndex) return;
+                  setBeatIndex(i);
+                  pushToast({
+                    tone: "info",
+                    text: `Scenario set to ${b.label}`,
+                    ttlMs: 2500,
+                  });
+                }}
+                className="rounded-sm border px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums tracking-widest transition-colors hover:border-[var(--color-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-selected)]"
                 style={{
                   borderColor: i === beatIndex
                     ? "var(--color-primary)"
@@ -847,11 +859,13 @@ export function DhaRescueView() {
                     : i < beatIndex
                       ? "var(--color-success)"
                       : "var(--color-text-muted)",
+                  cursor: "pointer",
                 }}
                 aria-current={i === beatIndex ? "step" : undefined}
+                title={`Jump to ${b.label}`}
               >
                 {b.label}
-              </span>
+              </button>
             ))}
           </div>
           {/* Round-4 — backend-sourced injected-events count, proves

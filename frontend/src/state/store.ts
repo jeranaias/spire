@@ -125,6 +125,12 @@ export interface SpireState {
   scenarioPhase: string;
   scenarioMaxOffsetMin: number;
   scenarioFiredEventIds: string[];
+  // QA #47 — track whether the scenario state has been hydrated by the
+  // first /scenario/state poll. Until this is true the chrome shows a
+  // neutral placeholder instead of the seed defaults, so a tab change
+  // doesn't appear to "advance" the clock from H+0 to H+72 between
+  // routes when the backend is actually already past H+0.
+  scenarioLoaded: boolean;
 
   // W1 DDIL dramatization. Operator-controlled simulation; client-side only.
   // The API client interceptor reads `ddilMode` and applies latency / loss /
@@ -360,6 +366,7 @@ export const useSpireStore = create<SpireState>((set) => ({
   scenarioPhase: "Pre-conflict",
   scenarioMaxOffsetMin: 96 * 60,
   scenarioFiredEventIds: [],
+  scenarioLoaded: false,
   ddilMode: "CONNECTED",
   ddilQueue: [],
   ddilCache: {},
@@ -409,6 +416,7 @@ export const useSpireStore = create<SpireState>((set) => ({
       scenarioPhase: s.phase,
       scenarioMaxOffsetMin: s.maxOffsetMin,
       scenarioFiredEventIds: s.firedEventIds,
+      scenarioLoaded: true,
     }),
   setDdilMode: (ddilMode) => set({ ddilMode }),
   enqueueDdilWrite: (w) => {
