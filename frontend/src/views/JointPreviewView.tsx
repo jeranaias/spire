@@ -205,7 +205,7 @@ export function JointPreviewView() {
           <Console data={s.data} />
         ) : null}
       </main>
-      <JointFooter />
+      <JointFooter operator={s.data?.envelope.operator ?? null} subscription={s.data?.envelope.subscriptionModel ?? null} />
     </div>
   );
 }
@@ -1011,7 +1011,29 @@ function short(iso: string | undefined): string {
   }
 }
 
-function JointFooter() {
+function JointFooter({
+  operator,
+  subscription,
+}: {
+  operator: import("../api").JointOperatorFooter | null;
+  subscription: string | null;
+}) {
+  // Operator footer surfaces the human at the SPIRE console so the partner
+  // J4 can audit who released the bundle. Subscription model is shown so it
+  // is unambiguous on the receiving side that this is a topic feed (full
+  // MAGTF) rather than a per-operator slice.
+  // Task #80 contract: surface the operator's NAME and ROLE explicitly so
+  // the partner J4 can audit who released the bundle and the privilege under
+  // which it was released. Billet is also shown because it's human-readable
+  // ("Security Manager" reads better than "security_manager"), but role is
+  // always present — never collapsed to billet.
+  const op = operator
+    ? `Released by ${operator.rank ? operator.rank + " " : ""}${operator.name}` +
+      ` · role: ${operator.role}` +
+      (operator.billet ? ` (${operator.billet})` : "") +
+      ` · ${operator.unit || "—"}`
+    : "Released by unknown operator";
+  const sub = subscription || "TOPIC_FULL_MAGTF";
   return (
     <footer
       style={{
@@ -1025,6 +1047,8 @@ function JointFooter() {
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
+        gap: 12,
+        flexWrap: "wrap",
         fontFamily: "'IBM Plex Mono', monospace",
         fontSize: 11,
         color: "#7e94a8",
@@ -1033,6 +1057,7 @@ function JointFooter() {
       }}
     >
       <span>JLTC v0.1 · Sister-service viewer · Read-only OMS/UCI subscriber</span>
+      <span style={{ color: "#9ec3df" }}>{op} · subscription: {sub}</span>
       <span>SPIRE → JLTC bridge: export-only (no ingest, no engagement orders)</span>
     </footer>
   );

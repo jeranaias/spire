@@ -31,7 +31,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import session_role
-from ..scoping import allowed_units, require_clearance
+from ..scoping import JOINT_RELEASE_ROLES, require_clearance, require_role
 from ..state import CanonicalDataset, get_dataset, last_day_snapshots
 
 router = APIRouter()
@@ -129,6 +129,30 @@ def _link16_track_number(unit_name: str) -> str:
     return s
 
 
+def _operator_envelope(user: Optional[dict[str, Any]], role: Optional[str]) -> dict[str, Any]:
+    """Stamp the calling operator's identity into the export envelope so the
+    partner can audit who released the bundle. The pull itself is gated on
+    role + clearance (topic-style subscription); this is a transparency
+    record, not the gate."""
+    if not user:
+        return {
+            "name": "unknown",
+            "rank": "",
+            "billet": "",
+            "role": role or "unknown",
+            "unit": "",
+            "dodid": "",
+        }
+    return {
+        "name": user.get("name", "unknown"),
+        "rank": user.get("rank", ""),
+        "billet": user.get("billet", ""),
+        "role": role or user.get("role", "unknown"),
+        "unit": user.get("unit", ""),
+        "dodid": user.get("dodid", ""),
+    }
+
+
 def _readiness_status(mc_rate: float) -> dict[str, str]:
     """Map SPIRE MC rate → joint operational readiness words (C-rating
     style: C1 fully mission capable .. C4 not mission capable)."""
@@ -189,7 +213,7 @@ def _link16_surface_track_number(unit_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 @router.get("/oms-uci/export")
-async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[str, Any]:
+async def oms_uci_export(request: Request) -> dict[str, Any]:
     """Render current SPIRE state as an OMS/UCI-flavored JSON envelope.
 
     Reference: USAF OMS reference architecture (v2.x) + UCI message catalog.
@@ -204,6 +228,16 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
         action="joint:oms_uci_export",
         audit_actor=session_role(request),
     )
+    # Role gate. The OMS/UCI feed is a topic-style subscription consumed by
+    # a partner J4 console; the partner's view of MAGTF readiness must NOT
+    # depend on which Marine happens to be at the SPIRE console. Per-operator
+    # RBAC scoping (e.g. maintenance_chief → CLB-6 only) would silently
+    # truncate the partner's tracks the moment a lower-scope operator pulled,
+    # which fails the CDAO sanity test ("does my view evaporate if Kowalski
+    # signs in mid-engagement?"). Restrict emission to release-authority roles
+    # so the partner sees the full MAGTF every time.
+    actor_role = session_role(request)
+    require_role(actor_role, JOINT_RELEASE_ROLES, action="joint:oms_uci_export")
 
     ds = get_dataset()
     last = last_day_snapshots(ds)
@@ -212,10 +246,12 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
 
     # Single freshness anchor for the whole envelope. Sourced from the
     # snapshot date, NOT wall-clock, so back-to-back exports are byte-stable
-    # when the dataset hasn't changed (P0-3 in the joint-cop critique).
+    # when the dataset hasn't changed (P0-3 in the joint-cop critique). The
+    # per-operator unit filter that used to live here was removed in Task #80
+    # — joint exports are a topic subscription (full MAGTF) and the role gate
+    # at the top of the handler is the access control surface.
     published_iso = _snapshot_published_iso(ds, last)
 
-    allowed = allowed_units(ds, role)
     by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     equip_by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     for s in last:
@@ -226,8 +262,6 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
     tracks: list[dict] = []
     logistics: list[dict] = []
     for u in ds.units:
-        if allowed is not None and u.name not in allowed:
-            continue
         c = by_unit[u.name]
         total = sum(c.values())
         mc = c.get("MC", 0)
@@ -311,8 +345,6 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
     # firehose, they want what's hot now.
     alerts_out: list[dict] = []
     for u in ds.units:
-        if allowed is not None and u.name not in allowed:
-            continue
         c = by_unit[u.name]
         total = sum(c.values())
         if not total:
@@ -340,8 +372,6 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 break
         if unit_for_inc is None:
             continue
-        if allowed is not None and unit_for_inc.name not in allowed:
-            continue
         alerts_out.append({
             "messageType": "AlertNotification",
             "uciMessageId": _stable_track_id("UCI-ALT-", f"inc:{inc.incident_number}"),
@@ -360,6 +390,7 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
             "specification": "OMS/UCI",
             "specificationVersion": "OMS 2.4 / UCI 5.0",
             "messageStandard": "UCI Open Mission Systems",
+            "subscriptionModel": "TOPIC_FULL_MAGTF",
             "sourceSystem": "SPIRE",
             "sourceSystemVersion": "0.1.0-SBIR",
             "sourceService": "USMC",
@@ -372,6 +403,11 @@ async def oms_uci_export(request: Request, role: Optional[str] = None) -> dict[s
                 "dissemination": "REL TO USA, FVEY",
                 "originatorCountry": "USA",
             },
+            # Audit footer — partner can see who released the bundle so the
+            # provenance is auditable on the receiving side. The pull is
+            # role-gated, not unit-scoped, but the partner still gets to
+            # know the human at the SPIRE console.
+            "operator": _operator_envelope(user, actor_role),
             "messageCounts": {
                 "EntityState": len(entities),
                 "TrackData": len(tracks),
@@ -400,7 +436,7 @@ _J_ENV_CODES = {
 
 
 @router.get("/link16/export")
-async def link16_export(request: Request, role: Optional[str] = None) -> dict[str, Any]:
+async def link16_export(request: Request) -> dict[str, Any]:
     """Render current SPIRE state as MIL-STD-6016 J-series messages.
 
     Subset implemented (read-only export only):
@@ -422,6 +458,11 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
         action="joint:link16_export",
         audit_actor=session_role(request),
     )
+    # Same release-authority gate as OMS/UCI — see comment there. Link 16
+    # is even more obviously a topic feed (J-series messages on a TADIL
+    # net), so per-operator unit truncation makes no sense in this domain.
+    actor_role = session_role(request)
+    require_role(actor_role, JOINT_RELEASE_ROLES, action="joint:link16_export")
 
     ds = get_dataset()
     last = last_day_snapshots(ds)
@@ -430,10 +471,10 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
 
     # Snapshot-derived freshness anchor for the Link 16 header. Same rule as
     # the OMS/UCI envelope: deterministic across calls when the dataset
-    # hasn't changed.
+    # hasn't changed. Per-operator unit scoping was removed in Task #80; the
+    # role gate above is the access control surface.
     published_iso = _snapshot_published_iso(ds, last)
 
-    allowed = allowed_units(ds, role)
     by_unit: dict[str, Counter] = {u.name: Counter() for u in ds.units}
     for s in last:
         by_unit[s.unit_name][s.readiness_code] += 1
@@ -448,8 +489,6 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
     # Tracked / wheeled units also get a J3.3 surface track so partners
     # see the same entity in two appropriate message families.
     for u in ds.units:
-        if allowed is not None and u.name not in allowed:
-            continue
         c = by_unit[u.name]
         total = sum(c.values())
         mc_rate = (c.get("MC", 0) / total) if total else 0.0
@@ -547,6 +586,7 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
             "specificationVersion": "MIL-STD-6016G (Change 1)",
             "messageFamily": "Link 16 J-series",
             "operatingMode": "EXPORT_ONLY",
+            "subscriptionModel": "TOPIC_FULL_MAGTF",
             "sourceSystem": "SPIRE",
             "sourceJU": "01234",
             "originatorService": "USMC",
@@ -556,6 +596,8 @@ async def link16_export(request: Request, role: Optional[str] = None) -> dict[st
                 "releasability": "REL TO USA, FVEY",
                 "originatorCountry": "USA",
             },
+            # Operator audit footer — see OMS/UCI envelope for rationale.
+            "operator": _operator_envelope(user, actor_role),
             "messageCounts": {
                 "J3.5":  len(j35_messages),
                 "J3.3":  len(j33_messages),
@@ -639,7 +681,33 @@ async def conformance() -> dict[str, Any]:
                 "stamped in the OMS/UCI envelope and the Link 16 header; "
                 "the partner view re-asserts it on render."
             ),
-            "gate": "backend require_clearance(user, 'SECRET') on every export",
+            "gate": (
+                "backend require_clearance(user, 'SECRET') AND "
+                "require_role(user, JOINT_RELEASE_ROLES) on every export"
+            ),
+        },
+        "releaseAuthority": {
+            "subscriptionModel": "TOPIC_FULL_MAGTF",
+            "summary": (
+                "OMS/UCI and Link 16 exports are topic-style subscriptions: "
+                "the partner J4 console always sees the full MAGTF, never a "
+                "per-operator slice. Per-operator unit scoping (e.g. a "
+                "maintenance chief's CLB-6-only view) is intentionally NOT "
+                "applied to these feeds — a partner's tactical picture must "
+                "not depend on which Marine happened to pull last."
+            ),
+            "allowedRoles": sorted(JOINT_RELEASE_ROLES),
+            "deniedRolesExample": [
+                "g4 (per-unit operator scope, would truncate the feed)",
+                "maintenance_chief (single-unit scope, would truncate the feed)",
+                "data_custodian (custodian, not a release authority)",
+            ],
+            "auditFooter": (
+                "The calling operator's name, rank, billet, role, and DODID "
+                "are stamped into the export envelope (envelope.operator / "
+                "header.operator) so the partner can audit who released the "
+                "bundle. The pull is gated; the footer is provenance."
+            ),
         },
         "directionPolicy": {
             "egress": "SUPPORTED",
@@ -648,7 +716,10 @@ async def conformance() -> dict[str, Any]:
                 "Wave 1 lane is read-only export. Bidirectional ingest "
                 "would require a TADIL/UCI gateway, COMSEC/TRANSEC, and "
                 "an inbound classification gate which is a separate lane. "
-                "The line is intentionally bright."
+                "The line is intentionally bright. Egress itself is "
+                "release-authority-gated (see Release authority block) so "
+                "only a security manager / MEF commander class role can "
+                "push to a partner."
             ),
         },
         "sisterServiceDemonstration": {

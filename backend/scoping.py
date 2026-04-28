@@ -61,6 +61,18 @@ SCENARIO_CONTROL_ROLES   = frozenset({"security_manager", "mef_commander", "g4"}
 # motor pool. Matches `frontend/src/views/BastionView.tsx:674`.
 BASTION_SIMULATE_ROLES   = frozenset({"mef_commander", "security_manager", "g4"})
 
+# Joint COP export — release authority for the OMS/UCI and Link 16 adapters.
+# A joint export is a topic-style subscription (the partner J4 console wants
+# the full MAGTF), not a per-operator slice. We therefore gate emission to
+# release-authority roles instead of letting per-operator unit scoping
+# silently shape the partner's view. `joint_release_authority` is reserved
+# for a future dedicated billet; the two existing roles cover demo identities.
+JOINT_RELEASE_ROLES      = frozenset({
+    "security_manager",
+    "mef_commander",
+    "joint_release_authority",
+})
+
 # Model registry / supply-chain page (W1 task #30). The model card surface
 # enumerates every model SPIRE uses with its provenance, hosting target,
 # vendor jurisdiction, and validation history. The data is mostly public

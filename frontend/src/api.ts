@@ -1839,16 +1839,27 @@ export interface JointClassification {
   originatorCountry?: string;
 }
 
+export interface JointOperatorFooter {
+  name: string;
+  rank: string;
+  billet: string;
+  role: string;
+  unit: string;
+  dodid: string;
+}
+
 export interface JointOmsUciEnvelope {
   specification: string;
   specificationVersion: string;
   messageStandard: string;
+  subscriptionModel?: string;
   sourceSystem: string;
   sourceSystemVersion: string;
   sourceService: string;
   sourceUnit: string;
   publishedAtUtc: string;
   classification: JointClassification;
+  operator?: JointOperatorFooter;
   messageCounts: Record<string, number>;
 }
 
@@ -1867,11 +1878,13 @@ export interface JointLink16Header {
   specificationVersion: string;
   messageFamily: string;
   operatingMode: string;
+  subscriptionModel?: string;
   sourceSystem: string;
   sourceJU: string;
   originatorService: string;
   publishedAtUtc: string;
   classification: JointClassification;
+  operator?: JointOperatorFooter;
   messageCounts: Record<string, number>;
 }
 
@@ -1896,6 +1909,14 @@ export interface JointStandardEntry {
   notWired: string[];
 }
 
+export interface JointReleaseAuthority {
+  subscriptionModel: string;
+  summary: string;
+  allowedRoles: string[];
+  deniedRolesExample: string[];
+  auditFooter: string;
+}
+
 export interface JointConformance {
   standardsAdopted: JointStandardEntry[];
   classificationPosture: {
@@ -1904,6 +1925,7 @@ export interface JointConformance {
     rationale: string;
     gate: string;
   };
+  releaseAuthority?: JointReleaseAuthority;
   directionPolicy: {
     egress: string;
     ingress: string;
