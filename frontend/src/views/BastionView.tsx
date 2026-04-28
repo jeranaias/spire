@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
 import { withRetry, pollWithBackoff, formatApiError, consecutiveErrorTracker } from "../api-retry";
-import { useSpireStore } from "../state/store";
+import { ROLE_LABELS, useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
 import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
@@ -1056,18 +1056,49 @@ export function BastionView() {
           <div
             className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-xs text-[var(--color-text-secondary)] tracking-wider"
           >
-            <span className="whitespace-nowrap">
-              {cop.buildings_count} buildings
-            </span>
-            <span className="whitespace-nowrap">
-              {cop.ecps.length} ECPs
-            </span>
-            <span
-              className="whitespace-nowrap"
-              title={`${cop.rally_points.length} rally points, ${cop.response_forces_count} response-force teams assigned`}
-            >
-              {cop.rally_points.length} RP · {cop.response_forces_count} RF
-            </span>
+            {/* Honest "(N hidden — full-view roles only)" suffix on each
+             * count so a Maintenance Chief reading "0 ECPs" doesn't take
+             * it as "no ECPs exist" — the BASTION COP elides sensitive
+             * infra and out-of-sector perimeter records by role scope.
+             * Tooltip names the roles that see the unredacted map. */}
+            {(() => {
+              const sc = cop.scoping;
+              const fullViewLabels = sc?.full_view_roles
+                ?.map((r) => (ROLE_LABELS as Record<string, string>)[r] ?? r)
+                .join(" / ") ?? "";
+              const hiddenSuffix = (n: number) =>
+                n > 0 ? (
+                  <span
+                    className="ml-1 text-[var(--color-text-muted)]"
+                    title={
+                      sc
+                        ? `${sc.reason} Full installation map visible to: ${fullViewLabels}.`
+                        : undefined
+                    }
+                  >
+                    ({n} hidden{fullViewLabels ? ` — ${fullViewLabels} only` : ""})
+                  </span>
+                ) : null;
+              return (
+                <>
+                  <span className="whitespace-nowrap">
+                    {cop.buildings_count} buildings
+                    {hiddenSuffix(sc?.buildings_hidden ?? 0)}
+                  </span>
+                  <span className="whitespace-nowrap">
+                    {cop.ecps.length} ECPs
+                    {hiddenSuffix(sc?.ecps_hidden ?? 0)}
+                  </span>
+                  <span
+                    className="whitespace-nowrap"
+                    title={`${cop.rally_points.length} rally points, ${cop.response_forces_count} response-force teams assigned`}
+                  >
+                    {cop.rally_points.length} RP · {cop.response_forces_count} RF
+                    {hiddenSuffix(sc?.rally_points_hidden ?? 0)}
+                  </span>
+                </>
+              );
+            })()}
             {/* Walkthrough audit: dropped the FPCON pill + // SYNTHETIC DATA
              * stamp from the COP card. FPCON lives in the StatusStrip and
              * classification banner already (3 mentions on one screen

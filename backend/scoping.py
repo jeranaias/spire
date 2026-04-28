@@ -794,3 +794,57 @@ def filter_perimeter(
     if sectors is None:
         return items
     return [i for i in items if i.get("sector") in sectors]
+
+
+def cop_scoping_summary(
+    role: Optional[str],
+    *,
+    buildings_total: int,
+    buildings_visible: int,
+    ecps_total: int,
+    ecps_visible: int,
+    rps_total: int,
+    rps_visible: int,
+) -> dict:
+    """Build the `scoping` block surfaced on `/api/bastion/cop`.
+
+    Operators on a scoped role used to see "0 ECPs" with no signal that
+    other ECPs existed but were filtered out — a Maintenance Chief could
+    reasonably read that as "the installation has no other ECPs" instead
+    of "you don't have visibility on them". This helper produces the
+    honest indicator: how many records were elided, why, and which roles
+    see the unredacted map.
+
+    Counts are clamped at zero (can't hide a negative number even if the
+    upstream filter accidentally adds rows). Reason / full_view_roles are
+    always populated so the FE can render a tooltip without branching.
+    """
+    full_roles = sorted(INSTALLATION_FULL_VIEW_ROLES)
+    b_hidden = max(0, buildings_total - buildings_visible)
+    e_hidden = max(0, ecps_total - ecps_visible)
+    r_hidden = max(0, rps_total - rps_visible)
+
+    if role in INSTALLATION_FULL_VIEW_ROLES:
+        reason = "Full installation view — no scoping applied for this role."
+    elif role in INSTALLATION_NO_VIEW_ROLES:
+        reason = (
+            "Installation map is outside this role's workflow; the COP "
+            "footprint is intentionally empty."
+        )
+    elif b_hidden or e_hidden or r_hidden:
+        reason = (
+            "Sensitive infrastructure (ammo, ARMS, fuel, hazmat, comms, TOC) "
+            "and records outside your sector are hidden by role scope."
+        )
+    else:
+        # Scoped role with nothing to elide (rare — e.g. tiny test
+        # fixture). Still emit a reason so the FE tooltip renders.
+        reason = "Scoped view — sensitive infrastructure and out-of-sector records would be hidden if present."
+
+    return {
+        "buildings_hidden": b_hidden,
+        "ecps_hidden": e_hidden,
+        "rally_points_hidden": r_hidden,
+        "reason": reason,
+        "full_view_roles": full_roles,
+    }

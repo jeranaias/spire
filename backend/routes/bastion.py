@@ -18,6 +18,7 @@ from ..scoping import (
     allowed_buildings,
     allowed_sectors,
     allowed_units,
+    cop_scoping_summary,
     filter_buildings,
     filter_perimeter,
     require_role,
@@ -209,8 +210,23 @@ async def cop(request: Request, role: Optional[str] = None):
     # battalion-scope CAC isn't handed the OSINT installation product.
     scoped_buildings = filter_buildings(inst["buildings"], ds, role)
     sectors = allowed_sectors(ds, role, inst["buildings"])
-    scoped_ecps = filter_perimeter(inst["ecps"], sectors)
-    scoped_rps = filter_perimeter(inst.get("rally_points", []), sectors)
+    raw_ecps = inst["ecps"]
+    raw_rps = inst.get("rally_points", [])
+    scoped_ecps = filter_perimeter(raw_ecps, sectors)
+    scoped_rps = filter_perimeter(raw_rps, sectors)
+
+    # Honest indicator: tell the operator how many records their role
+    # elided so "0 ECPs" doesn't read as "no ECPs exist". Mirrors the
+    # SENTRY scoped-count + "elsewhere" pattern.
+    scoping = cop_scoping_summary(
+        role,
+        buildings_total=len(inst["buildings"]),
+        buildings_visible=len(scoped_buildings),
+        ecps_total=len(raw_ecps),
+        ecps_visible=len(scoped_ecps),
+        rps_total=len(raw_rps),
+        rps_visible=len(scoped_rps),
+    )
 
     # Task #117 — audit-chain evidence that the OSINT scope did its job.
     # Task #55 stripped sensitive installation records for lower-scoped
@@ -286,6 +302,7 @@ async def cop(request: Request, role: Optional[str] = None):
         "ecps": scoped_ecps,
         "rally_points": scoped_rps,
         "response_forces_count": len(inst["response_forces"]),
+        "scoping": scoping,
         "as_of": last_day.isoformat(),
     }
 

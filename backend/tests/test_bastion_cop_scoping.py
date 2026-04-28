@@ -301,3 +301,62 @@ def test_scope_filtered_audit_rate_limited_per_role(client):
         f"second call inside the rate-limit window must NOT add another "
         f"scope_filtered row (after_first={after_first}, after_second={after_second})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task #116 — `scoping` block surfaces hidden counts so a Chief reading
+# "0 ECPs" understands records were elided rather than absent.
+# ---------------------------------------------------------------------------
+
+def test_scoping_block_shape_and_full_view_roles(client):
+    _login(client, "2345678901")
+    cop = _cop(client, "maintenance_chief")
+    sc = cop.get("scoping")
+    assert sc is not None, "scoping block missing from /cop response"
+    for key in ("buildings_hidden", "ecps_hidden", "rally_points_hidden", "reason", "full_view_roles"):
+        assert key in sc, f"scoping missing {key}"
+    assert isinstance(sc["buildings_hidden"], int)
+    assert isinstance(sc["ecps_hidden"], int)
+    assert isinstance(sc["rally_points_hidden"], int)
+    # The full_view_roles is now sourced from INSTALLATION_FULL_VIEW_ROLES
+    assert sorted(sc["full_view_roles"]) == ["mef_commander", "security_manager"]
+    assert sc["reason"]
+
+
+def test_maintenance_chief_scoping_reports_hidden_counts(client):
+    """Chief sees < the master count of buildings/ECPs/RPs; the
+    `scoping` block reports the exact difference so the COP card can
+    render '(N hidden)' alongside the visible numbers."""
+    _login(client, "2345678901")
+    cop = _cop(client, "maintenance_chief")
+    sc = cop["scoping"]
+    # Must hide at least some sensitive infra and out-of-sector perimeter.
+    assert sc["buildings_hidden"] > 0
+    assert sc["ecps_hidden"] > 0
+    assert sc["rally_points_hidden"] > 0
+    # Hidden + visible == master totals (50 buildings, 4 ECPs, 8 RPs).
+    assert sc["buildings_hidden"] + len(cop["buildings"]) == 50
+    assert sc["ecps_hidden"] + len(cop["ecps"]) == 4
+    assert sc["rally_points_hidden"] + len(cop["rally_points"]) == 8
+    assert "sensitive infrastructure" in sc["reason"].lower()
+
+
+def test_security_manager_scoping_reports_zero_hidden(client):
+    _login(client, "3456789012")
+    cop = _cop(client, "security_manager")
+    sc = cop["scoping"]
+    assert sc["buildings_hidden"] == 0
+    assert sc["ecps_hidden"] == 0
+    assert sc["rally_points_hidden"] == 0
+    assert "full" in sc["reason"].lower()
+
+
+def test_g4_scoping_hidden_counts_consistent_with_payload(client):
+    _login(client, "1234567890")
+    cop = _cop(client, "g4")
+    sc = cop["scoping"]
+    assert sc["buildings_hidden"] == 50 - len(cop["buildings"])
+    assert sc["ecps_hidden"] == 4 - len(cop["ecps"])
+    assert sc["rally_points_hidden"] == 8 - len(cop["rally_points"])
+    assert sc["buildings_hidden"] > 0  # 2d MLG is a strict subset of MAGTF
+

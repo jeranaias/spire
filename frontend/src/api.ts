@@ -2180,6 +2180,14 @@ export interface ECP {
   notes?: string;
 }
 
+export interface BastionCOPScoping {
+  buildings_hidden: number;
+  ecps_hidden: number;
+  rally_points_hidden: number;
+  reason: string;
+  full_view_roles: string[];
+}
+
 export interface BastionCOP {
   installation: { name: string; description: string; fictional: boolean };
   center: { lat: number; lon: number };
@@ -2189,6 +2197,7 @@ export interface BastionCOP {
   ecps: ECP[];
   rally_points: RallyPoint[];
   response_forces_count: number;
+  scoping?: BastionCOPScoping;
   as_of: string;
 }
 
