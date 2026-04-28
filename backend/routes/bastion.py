@@ -698,12 +698,21 @@ def _build_thermalhawk_model_info() -> dict:
       - weights_present   — proprietary weights deployed; inference
                             disabled in this public build
       - rule_based_sim    — no weights; scripted alert path
+
+    Finding F5 split: the operator response panel only renders `note`
+    (operator-facing copy). Vendor licensing / contact strings are now
+    namespaced under `admin_note` + the existing `license` / `contact`
+    keys so the admin model registry can surface them, but the Marine
+    in the response panel sees plain operator copy — no vendor email,
+    no license clause, no "available under separate license".
     """
     from ..model_hooks import STATE as MS
     base = {
         "model": "ThermalHawk (Thornveil)",
         "capability": "thermal infrared drone detection",
         "deployment_target": "edge accelerator",
+        # license + contact are admin-registry fields — surfaced by
+        # /admin model surfaces, suppressed by the operator panel.
         "license": "Thornveil proprietary — see LICENSE.md §2",
         "contact": "jesse@thornveil.ai",
     }
@@ -711,13 +720,23 @@ def _build_thermalhawk_model_info() -> dict:
         base["load_state"] = "live"
     elif MS.thermalhawk_path:
         base["load_state"] = "weights_present"
-        base["note"] = (
+        # Operator copy on the response panel.
+        base["note"] = "Live thermal inference disabled in this build."
+        # Admin-only context for the model registry.
+        base["admin_note"] = (
             "Thornveil-licensed weights deployed; "
             "live inference disabled in this public build."
         )
     else:
         base["load_state"] = "rule_based_sim"
+        # Operator copy: short, plain, actionable (no vendor email,
+        # no separate-license language).
         base["note"] = (
+            "Scripted incident profile — live thermal inference "
+            "model not deployed in this build."
+        )
+        # Admin-only context for the model registry / licensing review.
+        base["admin_note"] = (
             "Scripted sim — Thornveil ThermalHawk inference is "
             "available under separate license (jesse@thornveil.ai)."
         )

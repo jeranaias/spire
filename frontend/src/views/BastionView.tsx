@@ -6,6 +6,7 @@ import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
 import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
+import { RefreshAge } from "../components/RefreshAge";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import {
   Button,
@@ -88,6 +89,13 @@ export function BastionView() {
   // Acknowledged group is collapsed by default — operators want active rows
   // up top and acked rows tucked away at the bottom unless they ask.
   const [showAcked, setShowAcked] = useState(false);
+  // Wall-clock timestamp of the last successful /alerts response. Drives
+  // the "Stream last refreshed Nm Ns ago" indicator on the alert sidebar
+  // header (findings F6/F9 in `.local/critiques/bastion-cop.md`). The
+  // poll backs off to 60s when the alert fingerprint is unchanged, so
+  // without this stamp the operator can't tell if the silent stream is
+  // current truth or a degraded link sitting on stale data.
+  const [alertsLastRefreshedAt, setAlertsLastRefreshedAt] = useState<number | null>(null);
   // Counters bumped by intent — MapCanvas listens for changes and acts.
   // simResolveSignal: restore the cached pre-sim viewport (cordon overlays
   // already drop because `simActive` flips false). resetViewSignal: refit
@@ -174,6 +182,10 @@ export function BastionView() {
       const total = typeof r.total === "number" ? r.total : r.alerts.length;
       setAlertCount(total);
       setAlertSeverityCounts(r.severity_counts ?? {});
+      // Stamp success time for the sidebar's "last refreshed" indicator.
+      // Only successful responses bump the stamp; failed polls leave the
+      // age ticking up so amber/red tones surface honestly.
+      setAlertsLastRefreshedAt(Date.now());
     },
     [setAlertCount, setAlertSeverityCounts],
   );
@@ -353,6 +365,54 @@ export function BastionView() {
     return () => window.removeEventListener("spire:simulate-thermalhawk", handler);
   }, [triggerThermalHawk]);
 
+  // F13 — Sim auto-expiry mirror.
+  //
+  // Server-side, an active sim is dropped from `_ACTIVE_SIMS` after
+  // `SIM_TTL` (30 min) and stops appearing in `/alerts`. Locally, `sim`
+  // was previously only cleared via the explicit Resolve button — so
+  // an operator who triggered ThermalHawk and walked away would come
+  // back to a "Sim Active" chip and a Resolve button the server had
+  // already forgotten. Acting on that chip projects confidence in
+  // state that no longer exists.
+  //
+  // Strategy:
+  //   1. Track whether the active sim's alert id has ever been seen
+  //      in a poll response. The trigger response includes the alert
+  //      directly, but the very next /alerts poll race could fire
+  //      before the server-side prepend lands; we only clear AFTER
+  //      we've observed it once and then watch it disappear.
+  //   2. When the alert id was previously present in the alerts
+  //      stream and the latest poll no longer contains it, clear
+  //      `sim` and notify the operator.
+  const simSeenInPollRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sim) {
+      simSeenInPollRef.current = null;
+      return;
+    }
+    const simId = sim.alert.id;
+    const presentInStream = alerts.some((a) => a.id === simId);
+    if (presentInStream) {
+      simSeenInPollRef.current = simId;
+      return;
+    }
+    // Only clear once we've previously seen this sim id in the stream
+    // — otherwise a poll that races the trigger response would clear
+    // a freshly-armed sim before the server-side prepend lands.
+    if (simSeenInPollRef.current === simId) {
+      setSim(null);
+      setSelectedAlert((cur) => (cur && cur.id === simId ? null : cur));
+      setSelectedUnit(null);
+      setSelectedUnitIdGlobal(null);
+      simSeenInPollRef.current = null;
+      pushToast({
+        tone: "warn",
+        text: "Sim auto-cleared · server expired the ThermalHawk incident · FPCON returning to BRAVO",
+        ttlMs: 4500,
+      });
+    }
+  }, [alerts, sim, pushToast, setSelectedUnitIdGlobal]);
+
   // Drop FPCON back to BRAVO whenever the simulation clears. Reviewer flagged
   // that the prior 30s setTimeout could revert FPCON while the sim was still
   // visibly active (rendered cordon rings, target reticle, response panel).
@@ -500,6 +560,7 @@ export function BastionView() {
           onSevFilter={setSevFilter}
           searchQuery={searchQuery}
           onSearchQuery={setSearchQuery}
+          lastRefreshedAt={alertsLastRefreshedAt}
           // Walkthrough audit: prior code passed alertSeverityCounts
           // (raw API counts including acked rows). After an ACK the
           // 'ALL N' chip stayed at 30 while the stream rendered 29.
@@ -1022,6 +1083,7 @@ function AlertStreamHeader({
   searchQuery,
   onSearchQuery,
   severityCounts,
+  lastRefreshedAt,
 }: {
   activeCount: number;
   ackedCount: number;
@@ -1030,10 +1092,15 @@ function AlertStreamHeader({
   onSevFilter: (s: SeverityFilter) => void;
   searchQuery: string;
   onSearchQuery: (s: string) => void;
+  /** Wall-clock ms timestamp of the last successful /alerts response;
+   * null while the very first response is in flight. Drives the
+   * "Stream last refreshed Nm Ns ago" indicator that goes amber after
+   * 30s and red after 90s — see findings F6/F9. */
+  lastRefreshedAt: number | null;
 }) {
   return (
     <div className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex items-center justify-between p-3 pb-2">
+      <div className="flex items-center justify-between p-3 pb-1">
         <h3 className="font-mono text-xs font-semibold uppercase text-[var(--color-text)] tracking-widest">
           Alert Stream
         </h3>
@@ -1047,6 +1114,14 @@ function AlertStreamHeader({
         >
           {activeCount}
         </span>
+      </div>
+      {/* Recency indicator — ticks every second so motion = freshness on
+       * the alert stream the same way it did on the Mission Clock.
+       * Without this stamp the operator can't tell whether a quiet
+       * sidebar means "nothing is happening" or "the link went yellow
+       * a minute ago and we're sitting on stale data". */}
+      <div className="px-3 pb-2">
+        <RefreshAge ts={lastRefreshedAt} />
       </div>
       <div className="flex items-center gap-1 px-2 pb-1.5">
         {SEV_FILTER_OPTIONS.map((opt) => {
@@ -1116,28 +1191,34 @@ function AlertStreamHeader({
 }
 
 function MissionHUD() {
+  // Findings F6/F9: a 1-Hz seconds tick on the Mission Clock dominated
+  // the page and broadcast "everything is current" while the alert
+  // stream and fused-threats card had no comparable motion. Operators
+  // read motion as freshness; on a yellow SATCOM link they were
+  // trusting the clock while reading minute-old alerts.
+  //
+  // The seconds counter is demoted (the visible DTG only resolves to
+  // the minute, so we tick once per 5s — enough to roll over within a
+  // minute boundary on time, never enough to dominate). The data-
+  // recency indicators on the alert sidebar / fused-threats card now
+  // own the per-second tick across the page.
   const [now, setNow] = useState(new Date());
   useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 1000);
+    const id = window.setInterval(() => setNow(new Date()), 5000);
     return () => window.clearInterval(id);
   }, []);
 
   const z = (n: number, w = 2) => String(n).padStart(w, "0");
-  // Walkthrough audit (round 2): the prior layout was 'DDHHMMZ' on the
-  // top line and 'MMM YY · NNs' on the bottom. At 270034Z (e.g. 12:34am
-  // on the 27th UTC), the bottom line still showed 'APR 26 · 23s' —
-  // operators could misread that as 'April 26th' (the wrong day) when
-  // it's actually the year-suffix '26' (i.e. 2026). Show the full
-  // 'DD MMM YYYY · NNs' on line 2 so the day is unambiguous and the
-  // year is the full four digits.
+  // DTG resolves to HHMM only — the seconds suffix on the secondary
+  // line was deliberately dropped so motion = freshness lives on the
+  // data-recency stamps, not the clock face.
   const dtg = `${z(now.getUTCDate())}${z(now.getUTCHours())}${z(now.getUTCMinutes())}Z`;
-  const seconds = z(now.getUTCSeconds());
   const dd = z(now.getUTCDate());
   const month = now
     .toLocaleString("en-US", { month: "short", timeZone: "UTC" })
     .toUpperCase();
   const yyyy = String(now.getUTCFullYear());
-  const datestamp = `${dd} ${month} ${yyyy} · ${seconds}s`;
+  const datestamp = `${dd} ${month} ${yyyy}`;
 
   return (
     <div
@@ -1149,7 +1230,7 @@ function MissionHUD() {
         Mission Clock
       </div>
       <div
-        className="mt-0.5 font-mono text-xl font-semibold tabular-nums text-[var(--color-text)] tracking-wide"
+        className="mt-0.5 font-mono text-base font-semibold tabular-nums text-[var(--color-text)] tracking-wide"
         style={{ lineHeight: 1 }}
       >
         {dtg}

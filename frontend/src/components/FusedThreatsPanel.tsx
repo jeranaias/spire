@@ -13,6 +13,7 @@ import { api, type FusedThreat } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { Pressable } from "./ui";
+import { RefreshAge } from "./RefreshAge";
 
 const SEV_COLOR: Record<string, string> = {
   CRITICAL: "var(--color-danger)",
@@ -32,10 +33,19 @@ export function FusedThreatsPanel({
   const role = useSpireStore((s) => s.role);
   const [threats, setThreats] = useState<FusedThreat[]>(initialThreats ?? []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Wall-clock ms timestamp of the last successful /fused-threats poll.
+  // Drives the "Stream last refreshed Nm Ns ago" indicator on the
+  // fused-threats card header (findings F6/F9). The poll backs off to
+  // 60s when the threat fingerprint is unchanged, so without this
+  // stamp a quiet card masks a stale link.
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(
+    initialThreats ? Date.now() : null,
+  );
 
   useEffect(() => {
     if (initialThreats && initialThreats.length > 0) {
       setThreats(initialThreats);
+      setLastRefreshedAt(Date.now());
       return;
     }
     // Walkthrough audit: 5s setInterval hammered /fused-threats with no
@@ -47,7 +57,10 @@ export function FusedThreatsPanel({
       maxMs: 60000,
       fingerprint: (r) =>
         (r.fused_threats || []).map((t) => `${t.id}:${t.severity}`).join(","),
-      onResult: (r) => setThreats(r.fused_threats || []),
+      onResult: (r) => {
+        setThreats(r.fused_threats || []);
+        setLastRefreshedAt(Date.now());
+      },
     });
     return () => ctrl.stop();
   }, [initialThreats, role]);
@@ -57,22 +70,28 @@ export function FusedThreatsPanel({
     // null as a confidence gap — operators want to see that the fusion engine
     // is up and reporting zero, not nothing-at-all.
     return (
-      <div className="mb-2 flex items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5">
-        <span
-          className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
-          style={{ boxShadow: "0 0 4px var(--color-success)" }}
-          aria-hidden
-        />
-        <span
-          className="font-mono text-xs font-semibold uppercase text-[var(--color-success)] tracking-widest"
-        >
-          Fused Threats
-        </span>
-        <span
-          className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
-        >
-          All clear · 0 active correlations
-        </span>
+      <div className="mb-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
+            style={{ boxShadow: "0 0 4px var(--color-success)" }}
+            aria-hidden
+          />
+          <span
+            className="font-mono text-xs font-semibold uppercase text-[var(--color-success)] tracking-widest"
+          >
+            Fused Threats
+          </span>
+          <span
+            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
+          >
+            All clear · 0 active correlations
+          </span>
+        </div>
+        {/* Refresh-age stamp on the empty state so the operator can see
+         * the fusion engine is reporting "all clear" recently, vs. a
+         * stale link parked at zero. */}
+        <RefreshAge ts={lastRefreshedAt} className="mt-1" />
       </div>
     );
   }
@@ -92,6 +111,10 @@ export function FusedThreatsPanel({
             {threats.length} active
           </span>
         </div>
+        {/* Stream-age stamp under the count so the operator can see at
+         * a glance whether the active threat list is current truth or
+         * a snapshot from a minute ago on a degraded link. */}
+        <RefreshAge ts={lastRefreshedAt} className="mt-1" />
       </div>
       <div className="flex flex-col">
         {threats.map((t) => {
