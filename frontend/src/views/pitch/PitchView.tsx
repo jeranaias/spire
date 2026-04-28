@@ -392,7 +392,7 @@ function PitchHeader({
           SPIRE · Pitch
         </div>
         <div className="font-mono text-xs text-[var(--color-text-muted)]">
-          8-minute deck · target {formatMmSs(totalBudget)} total
+          {Math.round(totalBudget / 60)}-minute deck · target {formatMmSs(totalBudget)} total
         </div>
       </div>
       <div className="flex items-center gap-3">
