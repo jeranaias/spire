@@ -162,8 +162,8 @@ function TrainingFlywheelTab() {
         </a>
       </div>
 
-      {/* Hero stats row */}
-      <div className="mb-4 grid grid-cols-4 gap-3">
+      {/* Hero stats row — Task #185: 2col <md, 4col md+ */}
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Total outcomes" value={tel.total_outcomes.toLocaleString("en-US")} />
         <Stat
           label="Overall accuracy"
@@ -208,8 +208,8 @@ function TrainingFlywheelTab() {
         </div>
       </div>
 
-      {/* Rolling accuracy + decision-kind */}
-      <div className="mb-4 grid grid-cols-2 gap-3">
+      {/* Rolling accuracy + decision-kind — Task #185: stack on <lg */}
+      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div
             className="mb-3 font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest"

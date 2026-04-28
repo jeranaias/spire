@@ -1051,7 +1051,13 @@ function StageGrid() {
           SPIRE · Decision Surface · pick a use-case tile to drive the live surface
         </p>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 md:grid-cols-2">
+      {/* Task #185 — stage tile grid scales: 1col <md, 2col md-3xl, 4col 3xl+
+       *  so the four use-case tiles fan out across the whole 1920+ canvas
+       *  instead of stacking at 50% width with empty side gutters. */}
+      <div
+        data-testid="stage-tile-grid"
+        className="grid min-h-0 flex-1 grid-cols-1 gap-5 md:grid-cols-2 3xl:grid-cols-4"
+      >
         {STAGE_TILES.map((s) => (
           <StageTile key={s.key} spec={s} />
         ))}
@@ -1235,7 +1241,15 @@ export function DecisionBridgeView() {
        * canvas without scrolling — tile bodies use min-h-0 + overflow so an
        * occasional long entry truncates inside the tile rather than pushing
        * the row off-screen. */}
-      <div className="grid min-h-0 flex-1 grid-cols-6 grid-rows-2 gap-3">
+      {/* Task #185 — hero grid: stack to a single column at <lg so each
+       *  tile retains usable height on 1024×768 without crushing the
+       *  charts. Restore the 6col×2row hero layout from lg upward; the
+       *  col-span/row-span classes on each tile below cap to 1 col at
+       *  <lg (full width) and pick up their original spans at lg+. The
+       *  hero column is allowed to scroll vertically at <lg via the
+       *  `overflow-y-auto` so we don't trade horizontal scroll for
+       *  vertical clipping. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-6 lg:grid-rows-2 lg:overflow-visible">
         <div className="col-span-2 row-span-1 min-h-0">
           <MissionTile mission={mission} error={missionErr} />
         </div>

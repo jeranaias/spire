@@ -137,6 +137,41 @@ export function BastionView() {
     catch { /* tolerant — quota / disabled storage shouldn't crash the view */ }
   }, [mapFocusMode]);
 
+  // Task #185 — at <xl viewports the alerts column collapses to a 48px
+  // rail regardless of the operator's Focus Mode preference. The map
+  // needs that real estate at 1024-1279, and the rail still surfaces
+  // severity counts so situational awareness isn't dropped. Tracked
+  // via matchMedia so a window resize updates the layout live (helpful
+  // when an operator pops the panel out to a second monitor mid-session).
+  //
+  // Click-to-expand on the rail at <xl opens the alerts content as an
+  // OVERLAY pinned to the left edge of the map column instead of
+  // pushing the map — the operator gets the full alert stream when
+  // they explicitly ask for it without losing the wide schematic.
+  const [viewportXl, setViewportXl] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try { return window.matchMedia("(min-width: 1280px)").matches; }
+    catch { return true; }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia("(min-width: 1280px)");
+    const onChange = () => setViewportXl(mql.matches);
+    mql.addEventListener?.("change", onChange);
+    return () => mql.removeEventListener?.("change", onChange);
+  }, []);
+  const [alertsOverlayOpen, setAlertsOverlayOpen] = useState(false);
+  // The aside is rail-only when Focus Mode is engaged OR the viewport
+  // is below xl. The overlay path is independent — it never affects
+  // the in-flow column width.
+  const railOnly = mapFocusMode || !viewportXl;
+  const showAlertsOverlay = !viewportXl && !mapFocusMode && alertsOverlayOpen;
+  // Auto-close the overlay if the operator widens the window past xl —
+  // the in-flow alerts column is back, the overlay is now redundant.
+  useEffect(() => {
+    if (viewportXl && alertsOverlayOpen) setAlertsOverlayOpen(false);
+  }, [viewportXl, alertsOverlayOpen]);
+
   const pushToast = useSpireStore((s) => s.pushToast);
 
   useEffect(() => {
@@ -614,13 +649,26 @@ export function BastionView() {
        * Focus Mode (#37). The rail still surfaces the active count + a
        * severity-tinted top edge so the operator hasn't lost situational
        * awareness; click the rail to expand back. */}
+      {/* Task #185 — alerts column responsive widths.
+       *
+       * Off-stage at 1024–1279 the column is a 48px rail so the
+       * schematic gets the breathing room operators ask for; click on
+       * the rail opens the alerts content as an OVERLAY pinned to the
+       * left edge of the map (no push). 1280–1535 (xl → 2xl) gives
+       * 240px (w-60) in-flow — wide enough for the AlertRow severity
+       * chip + truncated title without crowding the map. 1536+
+       * (2xl/3xl) gives the legacy 288px (w-72) so wide-monitor demos
+       * retain the original information density.
+       *
+       * Map Focus Mode (#37) still forces the rail at every breakpoint
+       * — it's an explicit operator override, not a viewport hint. */}
       <aside
         className={clsx(
           "flex shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]",
-          mapFocusMode ? "w-12" : "w-72",
+          railOnly ? "w-12" : "w-60 2xl:w-72",
         )}
       >
-      {mapFocusMode ? (
+      {railOnly ? (
         <FocusModeAlertRail
           activeCount={activeAlerts.length}
           ackedCount={ackedAlerts.length}
@@ -632,7 +680,20 @@ export function BastionView() {
             }
             return c;
           })()}
-          onExpand={() => setMapFocusMode(false)}
+          onExpand={() => {
+            // Click-to-expand has to work in EVERY rail state, including
+            // the (<xl ∧ focus-on) corner case the reviewer caught: if we
+            // only set `alertsOverlayOpen` there, `showAlertsOverlay` =
+            // `!viewportXl && !mapFocusMode && alertsOverlayOpen` stays
+            // false because `mapFocusMode` is still true → click does
+            // nothing visually. Fix: always drop focus mode first, then
+            // open the overlay at <xl. At xl+, dropping focus mode alone
+            // restores the full alerts column without needing the overlay.
+            setMapFocusMode(false);
+            if (!viewportXl) {
+              setAlertsOverlayOpen(true);
+            }
+          }}
         />
       ) : (
         <>
@@ -747,8 +808,13 @@ export function BastionView() {
       )}
       </aside>
 
-      {/* Center: schematic */}
-      <div className="relative flex-1">
+      {/* Center: schematic — Task #185 adds `min-w-0` so the flex child
+       *  stops claiming its content's intrinsic width when the alerts
+       *  column / response drawer expand. Without this, MapLibre's
+       *  internal width measurement was occasionally pushing the row
+       *  past the parent and triggering horizontal scroll on 1024-wide
+       *  viewports. */}
+      <div className="relative flex-1 min-w-0">
         <MapCanvas
           buildings={cop.buildings}
           units={cop.units}
@@ -767,6 +833,70 @@ export function BastionView() {
           drawerOpen={!!selectedAlert && !mapFocusMode}
           simResolveSignal={simResolveSignal}
         />
+
+        {/* Task #185 — at <xl viewports the alerts content overlays the
+         *  map column when the operator clicks expand on the rail. The
+         *  panel is pinned to the left edge so the rail stays as the
+         *  visible affordance to close it again. */}
+        {showAlertsOverlay && (
+          <div
+            role="dialog"
+            aria-label="BASTION alert stream (overlay)"
+            className="absolute inset-y-0 left-0 z-20 flex w-72 max-w-[80vw] flex-col overflow-hidden border-r border-[var(--color-border-active)] bg-[var(--color-bg)] shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                Alerts (overlay)
+              </span>
+              <Pressable
+                onClick={() => setAlertsOverlayOpen(false)}
+                block={false}
+                aria-label="Collapse alerts overlay"
+                title="Collapse alerts overlay"
+                className="!min-h-0 flex h-6 items-center gap-1 rounded-sm border border-transparent px-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+              >
+                <span aria-hidden>↦</span>
+                <span>Collapse</span>
+              </Pressable>
+            </div>
+            <AlertStreamHeader
+              activeCount={activeAlerts.length}
+              ackedCount={ackedAlerts.length}
+              sevFilter={sevFilter}
+              onSevFilter={setSevFilter}
+              searchQuery={searchQuery}
+              onSearchQuery={setSearchQuery}
+              lastRefreshedAt={alertsLastRefreshedAt}
+              severityCounts={(() => {
+                const c: Record<string, number> = { CRITICAL: 0, HIGH: 0, MODERATE: 0, LOW: 0, INFO: 0 };
+                for (const a of alerts) {
+                  if (a._state?.status === "acknowledged") continue;
+                  c[a.severity] = (c[a.severity] ?? 0) + 1;
+                }
+                return c;
+              })()}
+            />
+            <div className="flex-1 overflow-y-auto p-2">
+              <FusedThreatsPanel />
+              {dedupeAlerts(activeAlerts).map((a) => (
+                <AlertRow
+                  key={a.id}
+                  alert={a}
+                  groupCount={a._groupCount}
+                  justArrived={recentAlertIds.has(a.id)}
+                  selected={selectedAlert?.id === a.id}
+                  onClick={() => {
+                    onAlertClick(a);
+                    setAlertsOverlayOpen(false);
+                  }}
+                  onAck={() => alertAction(a.id, "ack")}
+                  onSnooze={() => alertAction(a.id, "snooze")}
+                  onResolve={() => alertAction(a.id, "resolve")}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Installation title badge — top-left. Metrics row uses chip-flow
          * so when the response drawer narrows the map column the chips wrap
@@ -1541,8 +1671,15 @@ function ResponsePanel({
     setChecked((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
+  // Task #185 — response drawer scales with viewport. md/lg keep
+  // the legacy 400px feel but at xl+ we lift to 28rem (448px) so
+  // the model-info / checklist sections stop forcing a vertical
+  // scroll on first paint, and 3xl+ takes 32rem to match the
+  // wider alerts column. <md falls back to a fluid panel that
+  // consumes the right two-thirds of the viewport so the schematic
+  // remains glanceable behind it.
   return (
-    <aside className="flex w-[400px] shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)]">
+    <aside className="flex w-[min(72vw,400px)] md:w-[400px] xl:w-[28rem] 3xl:w-[32rem] shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div className="flex items-start justify-between">
           <div>

@@ -131,12 +131,98 @@ export function StatusStrip() {
 
   const mcDisplay = overallMc == null ? "—" : `${(overallMc * 100).toFixed(1)}%`;
 
+  // Task #185 — at <lg viewports the four headline chips + mission
+  // pressable wrap onto two rows on most laptops, eating into the
+  // active-view canvas. Collapse to a single summary chip ("MC ·
+  // FPCON · alerts") that opens the full chip set as a click-to-expand
+  // overlay below the strip — no layout push, dismissible by clicking
+  // the chip again.
+  const [viewportLg, setViewportLg] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try { return window.matchMedia("(min-width: 1024px)").matches; }
+    catch { return true; }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => setViewportLg(mql.matches);
+    mql.addEventListener?.("change", onChange);
+    return () => mql.removeEventListener?.("change", onChange);
+  }, []);
+  const [summaryOverlayOpen, setSummaryOverlayOpen] = useState(false);
+  // Auto-close the overlay if the operator widens past lg — the full
+  // chip row is back in flow, the overlay is now redundant.
+  useEffect(() => {
+    if (viewportLg && summaryOverlayOpen) setSummaryOverlayOpen(false);
+  }, [viewportLg, summaryOverlayOpen]);
+
   return (
     <div
       role="region"
       aria-label="Mission status summary"
       className="relative shrink-0 border-b border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))]"
     >
+      {!viewportLg ? (
+        // <lg compact mode: a single summary chip that opens an overlay
+        // beneath the strip. Mission context still gets its own chip
+        // (truncated) so the operator never loses the objective.
+        <div className="flex items-center gap-2 px-4 py-1.5">
+          <Pressable
+            onClick={() => setSummaryOverlayOpen((v) => !v)}
+            block={false}
+            aria-expanded={summaryOverlayOpen}
+            aria-controls="status-strip-summary-overlay"
+            aria-label={`Status summary — MC ${mcDisplay}, FPCON ${fpcon}, comms ${commsEffective.toLowerCase()}, ${alertCount} alerts (${highCount} high). Click to expand.`}
+            title="Click to expand the full status chip set"
+            className="!min-h-0 flex shrink-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-[3px] font-mono text-xs leading-none text-[var(--color-text)] hover:border-[var(--color-border-active)]"
+          >
+            <span className="font-semibold uppercase tracking-widest text-[var(--color-text-secondary)]">Status</span>
+            <span className="tabular-nums" style={{ color: mcTone }}>{mcDisplay}</span>
+            <span className="text-[var(--color-text-muted)]">·</span>
+            <span style={{ color: fp.fg }}>{fpcon}</span>
+            <span className="text-[var(--color-text-muted)]">·</span>
+            <span style={{ color: commsTone }}>{commsEffective}</span>
+            <span className="text-[var(--color-text-muted)]">·</span>
+            <span className="tabular-nums" style={{ color: alertTone }}>
+              {alertCount}
+              {highCount > 0 && (
+                <span
+                  className="ml-1 rounded-sm border px-1 text-[10px] font-semibold tabular-nums tracking-widest"
+                  style={{
+                    color: "var(--color-danger)",
+                    borderColor: "color-mix(in oklab, var(--color-danger) 50%, var(--color-border))",
+                  }}
+                >
+                  {highCount} HIGH
+                </span>
+              )}
+            </span>
+            <span aria-hidden className="text-[var(--color-text-muted)]">
+              {summaryOverlayOpen ? "▴" : "▾"}
+            </span>
+          </Pressable>
+          <Pressable
+            onClick={() => setMissionOpen((v) => !v)}
+            block={false}
+            aria-expanded={missionOpen}
+            aria-controls="status-strip-mission-detail"
+            className="!min-h-0 ml-auto flex min-w-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-xs text-[var(--color-text)] hover:border-[var(--color-border-active)] tracking-wide"
+            title={`${datasetInfo?.installation_name ?? "Camp Henderson"} mission summary`}
+          >
+            <span className="truncate">
+              <span className="font-semibold uppercase tracking-widest text-[var(--color-text-secondary)]">
+                {datasetInfo?.mission_essential_task ?? "BASE DEFENSE / FORCE PROTECTION"}{" "}
+              </span>
+              <span className="ml-2 text-[var(--color-text-muted)]">
+                {datasetInfo?.installation_name ?? "Camp Henderson"}
+              </span>
+            </span>
+            <span aria-hidden className="text-[var(--color-text-muted)]">
+              {missionOpen ? "▴" : "▾"}
+            </span>
+          </Pressable>
+        </div>
+      ) : (
       <div className="flex flex-wrap items-center gap-2 px-4 py-1.5">
         <div className="relative flex items-center">
           <Chip
@@ -242,6 +328,70 @@ export function StatusStrip() {
           </Pressable>
         </div>
       </div>
+      )}
+
+      {summaryOverlayOpen && !viewportLg && (
+        // Overlay panel — absolute so it doesn't push the active view
+        // canvas. Width spans the full strip so each chip keeps the
+        // same "first-glance scan" layout the operator already knows
+        // from wider viewports; click the summary chip again or
+        // anywhere on the underlying view to dismiss.
+        <div
+          id="status-strip-summary-overlay"
+          role="dialog"
+          aria-label="Status chip set (overlay)"
+          className="absolute inset-x-0 top-full z-30 flex flex-wrap items-center gap-2 border-b border-[var(--color-border-active)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))] px-4 py-2 shadow-2xl"
+        >
+          <Chip
+            label="Overall MC"
+            value={mcDisplay}
+            tone={mcTone}
+            onClick={() => { setSummaryOverlayOpen(false); nav("/pulse/overview"); }}
+            ariaLabel={`Overall mission capable rate ${mcDisplay}.`}
+            title={`Mission-capable rate · click to open PULSE Fleet Overview`}
+          />
+          <Chip
+            label="FPCON"
+            value={fpcon}
+            tone={fp.fg}
+            background={fp.bg}
+            onClick={() => { setSummaryOverlayOpen(false); nav("/bastion"); }}
+            ariaLabel={`Force protection condition ${fpcon}.`}
+            title="Force-protection condition · click to open BASTION"
+          />
+          <Chip
+            label="Comms"
+            value={commsEffective}
+            tone={commsTone}
+            onClick={() => { setSummaryOverlayOpen(false); nav("/bastion"); }}
+            ariaLabel={`Communications ${commsEffective.toLowerCase()}.`}
+            title={airGap ? "Air-gap mode engaged" : `Comms ${commsEffective.toLowerCase()}`}
+          />
+          <Chip
+            label="Alerts"
+            value={
+              <span>
+                <span className="tabular-nums">{alertCount}</span>
+                {highCount > 0 && (
+                  <span
+                    className="ml-1.5 rounded-sm border px-1 text-[10px] font-semibold tabular-nums tracking-widest"
+                    style={{
+                      color: "var(--color-danger)",
+                      borderColor: "color-mix(in oklab, var(--color-danger) 50%, var(--color-border))",
+                    }}
+                  >
+                    {highCount} HIGH
+                  </span>
+                )}
+              </span>
+            }
+            tone={alertTone}
+            onClick={() => { setSummaryOverlayOpen(false); nav("/bastion"); }}
+            ariaLabel={`${alertCount} active alerts, ${highCount} high severity.`}
+            title="Open alert count · click to open BASTION alert stream"
+          />
+        </div>
+      )}
 
       {missionOpen && (
         <div

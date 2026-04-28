@@ -211,7 +211,8 @@ export function AuthView() {
           </div>
         )}
 
-        <div className="grid gap-4 md:grid-cols-2">
+        {/* Task #185 — cert grid: 1col <sm, 2col sm-lg, 3col lg+. */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {users === null && !usersErr && (
             <>
               <CertSkeleton />

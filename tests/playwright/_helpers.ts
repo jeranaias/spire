@@ -63,12 +63,31 @@ export async function signIn(
     null,
     { timeout: 15_000 },
   );
-  // The Onboarding intro modal queries the server for a per-identity
-  // "seen" flag and may render even when the localStorage cache says
-  // seen=true (cache is treated as a hint, server response wins). When
-  // it does, it sits at z-[9100] and intercepts every TopBar click. Wait
-  // briefly for the post-auth render and dismiss it if present so the
-  // chrome under it is reachable.
+  // Belt-and-braces dismissal of the 4-screen Onboarding intro modal.
+  // The Onboarding component (frontend/src/components/Onboarding.tsx)
+  // reconciles against `/prefs/onboarding-intro` on every mount and
+  // trusts the server value over the localStorage cache. So we both:
+  //   1) POST the per-identity "seen" pref to the server so the modal
+  //      stays dismissed across reconciliations, and
+  //   2) If the modal is already on screen for this paint, click its
+  //      backdrop to drop it so it doesn't intercept TopBar clicks.
+  // Use the page's own `fetch` (via page.evaluate) so the auth cookies
+  // set by the sign-in form are guaranteed to attach — `page.request`
+  // sometimes does not pick up cookies set by an in-page POST.
+  // Route lives under the `system` router (prefix `/api/system`); see
+  // backend/main.py:93.
+  await page.evaluate(async () => {
+    try {
+      await fetch("/api/system/prefs/onboarding-intro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ seen: true }),
+      });
+    } catch {
+      /* server pref is best-effort; cache fallback still works. */
+    }
+  });
   const introModal = page.locator(
     "div[role='presentation'].fixed.inset-0.z-\\[9100\\]",
   );

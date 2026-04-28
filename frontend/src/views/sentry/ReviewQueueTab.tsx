@@ -21,6 +21,13 @@ import {
   normalizeClassification,
   useClearance,
 } from "../../components/classification";
+import { SentrySplitPane } from "../../components/SentrySplitPane";
+
+// Task #185 (review pass) — REVIEW screen owns the canonical
+// `spire.sentry.splitterPx` slot per reviewer guidance. The splitter sits
+// between the queue columns and the InspectorPane and only mounts when an
+// inspector is active (no record selected → columns get the full row).
+const REVIEW_SPLITTER_KEY = "spire.sentry.splitterPx";
 
 // Walkthrough #34 — bulk-approve gates. Hard-cap below requires only modal
 // click; ≥ TYPED_CONFIRM_THRESHOLD requires the operator to type the literal
@@ -406,50 +413,68 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
         {queue && queue.aggregation_risks.length > 0 && (
           <AggregationRiskRail risks={queue.aggregation_risks} />
         )}
-        <div className={clsx("flex flex-1 overflow-hidden", selectedRecord && "pr-0")}>
-          <ReviewColumn
-            title="Auto-cleared"
-            accent="var(--color-success)"
-            records={filteredQueue.auto_cleared}
-            selectedIdx={selected?.col === "auto_cleared" ? selected.idx : null}
-            onSelect={(idx) => setSelected({ col: "auto_cleared", idx })}
-            bulkAction="Approve all"
-            onBulk={() => requestBulk("auto_cleared", "approve")}
-            bulkRunning={bulkRunning}
-            onApprove={(sr) => resolveOne(sr, "approve")}
-            onReject={(sr) => resolveOne(sr, "reject")}
-          />
-          <ReviewColumn
-            title="Flagged"
-            accent="var(--color-warning)"
-            records={filteredQueue.flagged}
-            selectedIdx={selected?.col === "flagged" ? selected.idx : null}
-            onSelect={(idx) => setSelected({ col: "flagged", idx })}
-            bulkAction="Approve remaining"
-            onBulk={() => requestBulk("flagged", "approve")}
-            bulkRunning={bulkRunning}
-            onApprove={(sr) => resolveOne(sr, "approve")}
-            onReject={(sr) => resolveOne(sr, "reject")}
-          />
-          <ReviewColumn
-            title="Held"
-            accent="var(--color-danger)"
-            records={filteredQueue.held}
-            selectedIdx={selected?.col === "held" ? selected.idx : null}
-            onSelect={(idx) => setSelected({ col: "held", idx })}
-            onApprove={(sr) => resolveOne(sr, "approve")}
-            onReject={(sr) => resolveOne(sr, "reject")}
-          />
-        </div>
-
-        {selectedRecord && (
-          <InspectorPane
-            record={selectedRecord}
-            onApprove={() => resolveOne(selectedRecord.sr_number, "approve")}
-            onReject={() => resolveOne(selectedRecord.sr_number, "reject")}
-            onClose={() => setSelected(null)}
-          />
-        )}
+        {(() => {
+          // Task #185 (review pass) — when an inspector is open, the queue
+          // columns ↔ inspector relationship is the operator-resizable
+          // split (persisted to spire.sentry.splitterPx via SentrySplitPane).
+          // No selection? Columns get the full row, no splitter mounts. At
+          // <lg the SentrySplitPane component itself stacks columns-above /
+          // inspector-below to honour the 1024×768 minimum-resolution rule.
+          const columns = (
+            <div className="flex flex-1 overflow-hidden">
+              <ReviewColumn
+                title="Auto-cleared"
+                accent="var(--color-success)"
+                records={filteredQueue.auto_cleared}
+                selectedIdx={selected?.col === "auto_cleared" ? selected.idx : null}
+                onSelect={(idx) => setSelected({ col: "auto_cleared", idx })}
+                bulkAction="Approve all"
+                onBulk={() => requestBulk("auto_cleared", "approve")}
+                bulkRunning={bulkRunning}
+                onApprove={(sr) => resolveOne(sr, "approve")}
+                onReject={(sr) => resolveOne(sr, "reject")}
+              />
+              <ReviewColumn
+                title="Flagged"
+                accent="var(--color-warning)"
+                records={filteredQueue.flagged}
+                selectedIdx={selected?.col === "flagged" ? selected.idx : null}
+                onSelect={(idx) => setSelected({ col: "flagged", idx })}
+                bulkAction="Approve remaining"
+                onBulk={() => requestBulk("flagged", "approve")}
+                bulkRunning={bulkRunning}
+                onApprove={(sr) => resolveOne(sr, "approve")}
+                onReject={(sr) => resolveOne(sr, "reject")}
+              />
+              <ReviewColumn
+                title="Held"
+                accent="var(--color-danger)"
+                records={filteredQueue.held}
+                selectedIdx={selected?.col === "held" ? selected.idx : null}
+                onSelect={(idx) => setSelected({ col: "held", idx })}
+                onApprove={(sr) => resolveOne(sr, "approve")}
+                onReject={(sr) => resolveOne(sr, "reject")}
+              />
+            </div>
+          );
+          if (!selectedRecord) return columns;
+          return (
+            <SentrySplitPane
+              storageKey={REVIEW_SPLITTER_KEY}
+              testId="sentry-review-splitpane"
+              defaultLeftRatio={0.62}
+              left={columns}
+              right={
+                <InspectorPane
+                  record={selectedRecord}
+                  onApprove={() => resolveOne(selectedRecord.sr_number, "approve")}
+                  onReject={() => resolveOne(selectedRecord.sr_number, "reject")}
+                  onClose={() => setSelected(null)}
+                />
+              }
+            />
+          );
+        })()}
       </div>
 
       {/* Walkthrough #20 — aggregation matrix renders matrix-first, prose
@@ -956,8 +981,10 @@ function InspectorPane({
   const detected = record.detected_classification;
   const detectedColor = CLASS_COLOR[detected] ?? "var(--color-text-secondary)";
 
+  // Task #185 — inspector pane scales with viewport so it's never
+  // the thing pushing horizontal scroll on 1024-wide screens.
   return (
-    <aside className="flex w-[28rem] shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)]">
+    <aside className="flex w-[min(80vw,24rem)] lg:w-[26rem] xl:w-[28rem] 3xl:w-[32rem] shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="sticky top-0 z-10 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div className="flex items-start justify-between">
           <div>

@@ -96,6 +96,21 @@
 }
 
 @theme {
+  /* ----------------------------------------------------------------- *
+   * Task #185 — responsive breakpoints.
+   *
+   * Tailwind 4 ships sm/md/lg/xl/2xl by default (640/768/1024/1280/
+   * 1536px). SPIRE targets a viewport range of 1024×768 → 2560×1440;
+   * 2xl (1536px) is the "1080-tier" hinge but we need a 1920-tier
+   * hinge so the alerts column / hero grids can claim the extra real
+   * estate that wide demo monitors give us without stretching the
+   * 1080-tier layout. `--breakpoint-3xl: 120rem` introduces a `3xl:`
+   * variant at 1920px without disturbing the existing breakpoint set.
+   *
+   * See docs/responsive-breakpoints.md for the per-screen breakpoint
+   * map and the BASTION alerts-column / SENTRY splitter contracts.
+   * ----------------------------------------------------------------- */
+  --breakpoint-3xl: 120rem;     /* 1920px — wide-monitor demo tier */
   --color-bg: #0a0c13;
   --color-surface: #12151e;
   --color-surface-raised: #161a27;

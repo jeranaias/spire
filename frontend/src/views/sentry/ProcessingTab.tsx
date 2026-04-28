@@ -12,6 +12,12 @@ import {
   type Classification,
 } from "../../components/classification";
 import { useSpireStore } from "../../state/store";
+import { SentrySplitPane } from "../../components/SentrySplitPane";
+
+// Task #185 (review pass) — Processing keeps its own splitter key so it
+// does not collide with the REVIEW screen's splitter, which now owns the
+// canonical `spire.sentry.splitterPx` slot per reviewer guidance.
+const PROCESSING_SPLITTER_KEY = "spire.sentry.processingSplitterPx";
 
 const FLAG_COLORS: Record<string, string> = {
   pii: "var(--color-info)",
@@ -416,45 +422,53 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Raw input column */}
-        <div className="flex w-[55%] flex-col overflow-hidden border-r border-[var(--color-border)]">
-          <div className="bg-[var(--color-bg)] px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            Raw input
+      {/* Task #185 — split-pane is operator-resizable. Persisted px width
+       *  for the raw column lives at `spire.sentry.processingSplitterPx`
+       *  (kept distinct from the REVIEW screen's `spire.sentry.splitterPx`
+       *  so the two splitters don't fight). Splitter clamps to 25–75% of
+       *  viewport and falls back to a stacked layout below lg. */}
+      <SentrySplitPane
+        storageKey={PROCESSING_SPLITTER_KEY}
+        testId="sentry-processing-splitpane"
+        left={
+          <div className="flex h-full flex-col overflow-hidden">
+            <div className="bg-[var(--color-bg)] px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Raw input
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              {recent.map((r, idx) => (
+                <RawRecord key={r.sr_number} record={r} isMostRecent={idx === 0 && !done} />
+              ))}
+              {recent.length === 0 && (
+                <div className="text-xs text-[var(--color-text-muted)]">Waiting to begin ...</div>
+              )}
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-3">
-            {recent.map((r, idx) => (
-              <RawRecord key={r.sr_number} record={r} isMostRecent={idx === 0 && !done} />
-            ))}
-            {recent.length === 0 && (
-              <div className="text-xs text-[var(--color-text-muted)]">Waiting to begin ...</div>
-            )}
+        }
+        right={
+          <div className="flex h-full flex-col overflow-hidden">
+            <div className="flex items-center justify-between gap-3 bg-[var(--color-bg)] px-3 py-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                Sanitized output
+              </span>
+              <ReleasePreviewSelector value={release} onChange={setRelease} />
+            </div>
+            <div className="flex-1 overflow-y-auto p-3">
+              {recent.map((r) => (
+                <SanitizedRecord
+                  key={r.sr_number}
+                  record={r}
+                  release={release}
+                  ceilingRank={ceilingRank}
+                />
+              ))}
+              {recent.length === 0 && (
+                <div className="text-xs text-[var(--color-text-muted)]">Awaiting sanitized output …</div>
+              )}
+            </div>
           </div>
-        </div>
-
-        {/* Sanitized column */}
-        <div className="flex w-[45%] flex-col overflow-hidden">
-          <div className="flex items-center justify-between gap-3 bg-[var(--color-bg)] px-3 py-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-              Sanitized output
-            </span>
-            <ReleasePreviewSelector value={release} onChange={setRelease} />
-          </div>
-          <div className="flex-1 overflow-y-auto p-3">
-            {recent.map((r) => (
-              <SanitizedRecord
-                key={r.sr_number}
-                record={r}
-                release={release}
-                ceilingRank={ceilingRank}
-              />
-            ))}
-            {recent.length === 0 && (
-              <div className="text-xs text-[var(--color-text-muted)]">Awaiting sanitized output …</div>
-            )}
-          </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Bottom strip */}
       <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
@@ -925,3 +939,4 @@ function FlagCounter({ label, value, color }: { label: string; value: number; co
     </div>
   );
 }
+

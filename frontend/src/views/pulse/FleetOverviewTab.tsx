@@ -103,7 +103,15 @@ export function FleetOverviewTab() {
       {/* Walkthrough #14 — outer container scrolls so KPI + narrative + heatmap
        * all stay reachable. Inner heatmap retains its own scroll for cols. */}
       <div className="flex flex-1 flex-col overflow-y-auto p-4">
-        <div className="mb-4 grid grid-cols-4 gap-3">
+        {/* Task #185 — fleet-readiness KPI row scales across the full
+         *  responsive matrix per reviewer guidance: 1col on phone-narrow
+         *  (<md, where the operator is on a 768-or-narrower DDIL laptop),
+         *  2col at md (1024-wide tablets), 3col at xl (1280-wide field
+         *  laptops where 4 cards eat the heatmap real-estate), and 4col
+         *  at 3xl (1920+, the ops-floor wall display). The earlier
+         *  2-col-then-4-col ladder truncated "Critical Assets" mid-word
+         *  on 1024 and left ghost gutters at 1920. */}
+        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
           {/* Walkthrough #26 — tooltip explains the 7d delta. */}
           {/* Walkthrough #29 — KPI labels bumped via component default. */}
           {/* Walkthrough #30 — consistent severity-by-threshold tone across all 4. */}
@@ -651,7 +659,7 @@ function FleetSkeleton() {
   return (
     <div className="flex h-full">
       <div className="flex flex-1 flex-col overflow-y-auto p-4">
-        <div className="mb-4 grid grid-cols-4 gap-3">
+        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
