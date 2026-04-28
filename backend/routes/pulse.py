@@ -970,7 +970,11 @@ async def propose_cannibalization(request: Request, payload: dict):
 # ---------------------------------------------------------------------------
 
 @router.get("/forecast")
-async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=30)):
+async def forecast(
+    request: Request,
+    unit: Optional[str] = None,
+    window: int = Query(14, ge=7, le=30),
+):
     """Monte Carlo readiness projection.
 
     Fits slope + residual std on the last 30 days of history, then samples
@@ -980,14 +984,30 @@ async def forecast(unit: Optional[str] = None, window: int = Query(14, ge=7, le=
       - paths: 200 sample paths at daily resolution (for the "spaghetti plot"
         rendering on the frontend)
       - threshold + probability-of-cross readout
+
+    Role-scoped: every aggregate is intersected with `allowed_units(role)`
+    so a G-4 sees the forecast over their own units only — the FLEET label
+    means "the units this caller can see," never the dataset-wide
+    aggregate. Asking for a single unit outside the caller's scope returns
+    403 (matches the pattern used by every sibling PULSE endpoint). This
+    closes the OPSEC leak where any authenticated session could pull
+    another command's readiness curve by typing its name into the URL.
     """
     import random as _r
     import math
 
     ds = get_dataset()
+    role = session_role(request)
+    allowed = allowed_units(ds, role)
+
+    if unit and allowed is not None and unit not in allowed:
+        raise HTTPException(status_code=403, detail="unit out of scope")
+
     by_date = defaultdict(lambda: defaultdict(Counter))
     for s in ds.snapshots:
         if unit and s.unit_name != unit:
+            continue
+        if allowed is not None and s.unit_name not in allowed:
             continue
         by_date[s.snapshot_date]["all"][s.readiness_code] += 1
 

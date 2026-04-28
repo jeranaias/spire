@@ -338,7 +338,9 @@ function ShortagesTile({
   const drill = (s?: DecisionBridgeShortage) => {
     if (s?.drill_unit) {
       setSelectedUnitId(s.drill_unit);
-      nav(`/pulse/forecast?unit=${encodeURIComponent(s.drill_unit)}`);
+      // Pass the unit through router state, not the URL — keeps unit
+      // names out of copy-pasted/share-screened URLs (forecast-leak F-15).
+      nav("/pulse/forecast", { state: { unit: s.drill_unit } });
     } else {
       nav("/pulse/forecast");
     }

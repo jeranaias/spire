@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import {
   ComposedChart,
   Line,
@@ -42,7 +42,7 @@ function useElementWidth<T extends HTMLElement>(): [(el: T | null) => void, numb
   useEffect(() => () => obsRef.current?.disconnect(), []);
   return [setRef, w];
 }
-import { api, type Forecast } from "../../api";
+import { api, ApiError, type Forecast } from "../../api";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { RecommendPanel } from "../../components/RecommendPanel";
@@ -53,23 +53,37 @@ type Horizon = "7" | "14" | "30";
 
 export function ForecastTab() {
   const role = useSpireStore((s) => s.role);
-  const [params] = useSearchParams();
-  // Honor an inbound ?unit=… deep link (e.g. from PredictedFailurePanel's
-  // Draft Action button). Defaults to FLEET if no param.
-  const initialUnit = params.get("unit") ?? "FLEET";
+  const location = useLocation();
+  // Honor an inbound deep link (e.g. from PredictedFailurePanel's Draft
+  // Action button or DecisionBridge's shortages tile) via router state.
+  // We deliberately do NOT read from `?unit=` query params: a unit name
+  // in a copy-pasted / screen-shared URL is itself an OPSEC leak (per
+  // forecast-leak finding F-15), and the backend now 403s on out-of-scope
+  // unit requests anyway. Router state lives in history, not the URL.
+  const initialUnit =
+    typeof location.state === "object" &&
+    location.state !== null &&
+    typeof (location.state as { unit?: unknown }).unit === "string"
+      ? ((location.state as { unit: string }).unit)
+      : "FLEET";
   const [unit, setUnit] = useState<string>(initialUnit);
   const [horizon, setHorizon] = useState<Horizon>("14");
   const [data, setData] = useState<Forecast | null>(null);
+  // Out-of-scope unit message — set when the backend returns 403 for a
+  // unit the current role can't see (e.g. role changed while a stale
+  // unit was selected, or a deep link from a higher-scoped session).
+  const [scopeError, setScopeError] = useState<string | null>(null);
   const [units, setUnits] = useState<string[]>([]);
   const [chartRef, chartWidth] = useElementWidth<HTMLDivElement>();
   const CHART_HEIGHT = 360;
 
-  // Re-sync local state if the URL param changes (back / forward nav).
+  // Re-sync local state if the navigation state changes (back / forward
+  // nav lands us on a different deep link).
   useEffect(() => {
-    const u = params.get("unit");
-    if (u && u !== unit) setUnit(u);
+    const next = (location.state as { unit?: string } | null)?.unit;
+    if (next && next !== unit) setUnit(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params]);
+  }, [location.key]);
 
   // Scoped units — role-aware so a G-4 doesn't get MALS-31 in the dropdown.
   useEffect(() => {
@@ -83,12 +97,30 @@ export function ForecastTab() {
 
   useEffect(() => {
     setData(null);
+    setScopeError(null);
     const targetUnit = unit === "FLEET" ? undefined : unit;
-    // Same pattern: catch transient errors so the chart shows its
-    // 'forecast unavailable' state rather than logging an uncaught.
+    // Catch transient errors so the chart shows its 'forecast
+    // unavailable' state rather than logging an uncaught. A 403 from
+    // the new server-side scope gate (forecast-leak F-1) means the
+    // selected unit is outside the caller's role scope — surface a
+    // clear error and snap back to scoped FLEET so the pane doesn't
+    // sit on a perpetual loading skeleton.
     api.pulse.forecast(targetUnit, Number(horizon))
-      .then(setData)
-      .catch(() => { /* keep prior data, chart shows skeleton/empty */ });
+      .then((d) => {
+        setData(d);
+        setScopeError(null);
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 403) {
+          setScopeError(
+            unit === "FLEET"
+              ? "You don't have access to any units in this scope."
+              : `${unit} is outside your scope. Snapping back to FLEET.`,
+          );
+          if (unit !== "FLEET") setUnit("FLEET");
+        }
+        /* other errors: keep prior data, chart shows skeleton/empty */
+      });
   }, [unit, horizon]);
 
   // Build the combined series. Null-guarded so hooks order stays stable.
@@ -225,7 +257,13 @@ export function ForecastTab() {
         className="relative shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
         style={{ height: CHART_HEIGHT, minHeight: CHART_HEIGHT }}
       >
-        {!dataLoaded ? (
+        {scopeError ? (
+          <ErrorState
+            variant="inline"
+            title="Out of scope"
+            description={scopeError}
+          />
+        ) : !dataLoaded ? (
           <LoadingState size="panel" label="Running Monte Carlo forecast …" />
         ) : !chartUsable ? (
           <ErrorState
