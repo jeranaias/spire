@@ -12,11 +12,21 @@ import { UseCaseStrip } from "../components/UseCaseStrip";
 import {
   Button,
   IconButton,
+  Pressable,
   ErrorState,
   LoadingState,
   fireIdempotent,
   pushUndoToast,
 } from "../components/ui";
+
+// Walkthrough audit (#37 from the in-app feedback drawer): "The map needs
+// to be given a bit more space, it is very crowded." At 1440×731 the map
+// column was sandwiched between a 288px alerts aside (left) and the
+// response drawer (right, when an alert is selected) — leaving the
+// schematic with as little as ~840px wide. Map Focus Mode collapses the
+// alerts aside to a 48px rail and suppresses the right drawer so the map
+// owns the full width. Persisted across reloads via localStorage.
+const FOCUS_MODE_STORAGE_KEY = "spire.bastion.mapFocus";
 
 const SEVERITY_COLOR: Record<string, string> = {
   CRITICAL: "#ef4444",
@@ -112,6 +122,21 @@ export function BastionView() {
   // is spinning up and 5xx'ing the first request.
   const [waking, setWaking] = useState(false);
 
+  // Walkthrough audit (#37): Map Focus Mode. When ON the alerts aside
+  // collapses to a 48px rail and the right response drawer is suppressed,
+  // giving the map the full canvas width. State is hydrated from
+  // localStorage so an operator who prefers the focused layout doesn't
+  // have to re-toggle on every reload. The selected alert is preserved
+  // internally so exiting Focus Mode restores the same drawer state.
+  const [mapFocusMode, setMapFocusMode] = useState<boolean>(() => {
+    try { return localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === "1"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(FOCUS_MODE_STORAGE_KEY, mapFocusMode ? "1" : "0"); }
+    catch { /* tolerant — quota / disabled storage shouldn't crash the view */ }
+  }, [mapFocusMode]);
+
   const pushToast = useSpireStore((s) => s.pushToast);
 
   useEffect(() => {
@@ -165,6 +190,33 @@ export function BastionView() {
         search.focus();
         search.select();
       }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Walkthrough audit (#37): 'F' toggles Map Focus Mode. Same input-skip
+  // guard as the '/' shortcut so it's safe to type 'f' inside the search
+  // input or SPIRO. Hotkey is documented in the toggle button's title
+  // attribute so an operator who hovers the affordance discovers it.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "f" && e.key !== "F") return;
+      // Code review: App.tsx 'g f' chord opens the feedback drawer and the
+      // chord handler now calls e.preventDefault() once it consumes the F.
+      // If we see a defaultPrevented F here, the chord already fired — do
+      // NOT also toggle Focus Mode (a single keypress would do both).
+      if (e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        (t && t.isContentEditable)
+      ) return;
+      // Don't fight modifier-key combos (Ctrl+F find, Cmd+F find).
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      setMapFocusMode((v) => !v);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -558,8 +610,47 @@ export function BastionView() {
     <div className="flex h-full flex-col overflow-hidden">
       <UseCaseStrip number="15" title="BASTION" subtitle="INSTALLATION COP AGGREGATOR · gates · utilities · emergency · weather · sensors" accent="var(--color-danger)" />
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Left sidebar: alert stream */}
-      <aside className="flex w-72 shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]">
+      {/* Left sidebar: alert stream — collapses to a 48px rail in Map
+       * Focus Mode (#37). The rail still surfaces the active count + a
+       * severity-tinted top edge so the operator hasn't lost situational
+       * awareness; click the rail to expand back. */}
+      <aside
+        className={clsx(
+          "flex shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-bg)]",
+          mapFocusMode ? "w-12" : "w-72",
+        )}
+      >
+      {mapFocusMode ? (
+        <FocusModeAlertRail
+          activeCount={activeAlerts.length}
+          ackedCount={ackedAlerts.length}
+          severityCounts={(() => {
+            const c: Record<string, number> = { CRITICAL: 0, HIGH: 0, MODERATE: 0, LOW: 0, INFO: 0 };
+            for (const a of alerts) {
+              if (a._state?.status === "acknowledged") continue;
+              c[a.severity] = (c[a.severity] ?? 0) + 1;
+            }
+            return c;
+          })()}
+          onExpand={() => setMapFocusMode(false)}
+        />
+      ) : (
+        <>
+        {/* Focus Mode toggle row — sits above the alert stream header
+         * so the affordance is the first thing an operator sees on the
+         * column. Title carries the F hotkey for keyboard discovery. */}
+        <div className="flex justify-end border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1">
+          <Pressable
+            onClick={() => setMapFocusMode(true)}
+            block={false}
+            aria-label="Focus map (F) — collapse alerts column and response drawer"
+            title="Focus map (F) — give the schematic the full canvas. Click again to restore."
+            className="!min-h-0 flex h-6 items-center gap-1 rounded-sm border border-transparent px-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+          >
+            <span aria-hidden>↤</span>
+            <span>Focus map</span>
+          </Pressable>
+        </div>
         <AlertStreamHeader
           activeCount={activeAlerts.length}
           ackedCount={ackedAlerts.length}
@@ -652,6 +743,8 @@ export function BastionView() {
          *   await fetch('/api/bastion/simulate/thermalhawk-detection',
          *     {method:'POST', body:'{}', headers:{'Content-Type':'application/json'}})
          */}
+        </>
+      )}
       </aside>
 
       {/* Center: schematic */}
@@ -671,7 +764,7 @@ export function BastionView() {
           simActive={!!sim}
           simTargetBuilding={simTargetBuilding}
           simCordons={sim?.cordon_zones}
-          drawerOpen={!!selectedAlert}
+          drawerOpen={!!selectedAlert && !mapFocusMode}
           simResolveSignal={simResolveSignal}
         />
 
@@ -804,8 +897,11 @@ export function BastionView() {
         {/* Track-G1 — G-4 command summary card. Three columns of "what
          * matters in the next 30 seconds": MC% per scoped unit, top alerts,
          * top fused threats. Renders only for the G-4 role and only when no
-         * alert is selected (so it doesn't fight with the response panel). */}
-        {role === "g4" && !selectedAlert && (
+         * alert is selected (so it doesn't fight with the response panel).
+         * Also hidden in Map Focus Mode (#37) — the whole point of focus
+         * is to give the map breathing room, and this card spans the
+         * top-center of the schematic. */}
+        {role === "g4" && !selectedAlert && !mapFocusMode && (
           <G4CommandSummary alerts={alerts} onAlertClick={(a) => setSelectedAlert(a)} />
         )}
 
@@ -816,8 +912,11 @@ export function BastionView() {
          * from app shell and handles all natural-language operator input. */}
       </div>
 
-      {/* Right sidebar: response panel */}
-      {selectedAlert && (
+      {/* Right sidebar: response panel — suppressed in Map Focus Mode
+       * (#37). selectedAlert is preserved internally so exiting Focus
+       * Mode restores the same drawer; the operator doesn't have to
+       * re-click the alert. */}
+      {selectedAlert && !mapFocusMode && (
         <ResponsePanel
           alert={selectedAlert}
           sim={sim}
@@ -1195,6 +1294,93 @@ function AlertStreamHeader({
         />
       </div>
     </div>
+  );
+}
+
+// Walkthrough audit (#37): collapsed-rail rendering of the alert column
+// for Map Focus Mode. The rail surfaces (a) the active alert count so
+// the operator hasn't lost situational awareness, (b) a top edge
+// tinted by the highest-severity bucket so a CRITICAL doesn't become
+// invisible just because the panel is narrow, and (c) a clickable
+// chevron at the bottom that expands the column back to full width.
+// Whole rail is a click target — no precision-aiming a tiny chevron
+// during a live incident.
+function FocusModeAlertRail({
+  activeCount,
+  ackedCount,
+  severityCounts,
+  onExpand,
+}: {
+  activeCount: number;
+  ackedCount: number;
+  severityCounts: Record<string, number>;
+  onExpand: () => void;
+}) {
+  // Highest-severity bucket with at least one alert. CRITICAL > HIGH >
+  // MODERATE > LOW > INFO. Drives the rail's top edge tint so a single
+  // CRITICAL still reads at a glance with the column at 48px.
+  const topSeverity = (
+    (severityCounts.CRITICAL ?? 0) > 0 ? "CRITICAL" :
+    (severityCounts.HIGH ?? 0) > 0     ? "HIGH" :
+    (severityCounts.MODERATE ?? 0) > 0 ? "MODERATE" :
+    (severityCounts.LOW ?? 0) > 0      ? "LOW" :
+    (severityCounts.INFO ?? 0) > 0     ? "INFO" :
+                                          null
+  ) as keyof typeof SEVERITY_COLOR | null;
+  const tint = topSeverity ? SEVERITY_COLOR[topSeverity] : "var(--color-border)";
+  return (
+    <Pressable
+      onClick={onExpand}
+      block={false}
+      aria-label={`Expand alerts column (F) — ${activeCount} active${ackedCount ? `, ${ackedCount} acknowledged` : ""}`}
+      title={`Expand alerts (F) — ${activeCount} active${topSeverity ? `, top severity ${topSeverity}` : ""}`}
+      className="!min-h-0 group flex h-full w-full flex-col items-center gap-2 px-1.5 pt-2 pb-2 hover:bg-[color-mix(in_oklab,var(--color-text)_4%,transparent)]"
+    >
+      {/* Top tint bar — shouts the highest severity bucket. */}
+      <span
+        className="h-1 w-full rounded-sm"
+        style={{ background: tint, opacity: topSeverity ? 0.85 : 0.3 }}
+        aria-hidden
+      />
+      {/* Vertical "ALERTS" label — stays legible at 48px wide. */}
+      <span
+        className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]"
+        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+      >
+        Alerts
+      </span>
+      {/* Active count — large + tabular so it reads at a glance. */}
+      <span
+        className="font-mono text-base font-semibold tabular-nums leading-none"
+        style={{ color: topSeverity ? tint : "var(--color-text-secondary)" }}
+      >
+        {activeCount}
+      </span>
+      {/* Severity stack — only buckets with > 0 are rendered to keep
+       * the rail uncluttered. Tooltip on each shows the count. */}
+      <div className="mt-1 flex flex-col items-center gap-1">
+        {(["CRITICAL", "HIGH", "MODERATE", "LOW", "INFO"] as const).map((sev) => {
+          const n = severityCounts[sev] ?? 0;
+          if (n === 0) return null;
+          return (
+            <span
+              key={sev}
+              className="flex items-center gap-0.5 font-mono text-[10px] tabular-nums"
+              style={{ color: SEVERITY_COLOR[sev] }}
+              title={`${sev} · ${n}`}
+            >
+              <span aria-hidden style={{ fontSize: "9px", lineHeight: 1 }}>{SEVERITY_GLYPH[sev]}</span>
+              <span>{n}</span>
+            </span>
+          );
+        })}
+      </div>
+      {/* Spacer + expand chevron at the bottom — mirrors the rail's
+       * "click anywhere to expand" affordance with a literal cue. */}
+      <span className="mt-auto font-mono text-base text-[var(--color-text-muted)] group-hover:text-[var(--color-text)]" aria-hidden>
+        ↦
+      </span>
+    </Pressable>
   );
 }
 

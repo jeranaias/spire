@@ -1,0 +1,96 @@
+﻿Column,Comment
+DOC_NBR,"Used to identify the Document during the entire processing cycle. The R-001 Doc_history is the base of the feed. It is comprised of either a standard DoD document number (DOCUMENT-NUM), Only including the following Document Identifiers as the base:  A0A, A01, A2A, A21, A3A, A31, Z2M, ZBE"
+DIC,"Document Identifier code that established the requisition, redistribution within GCSS-MC"
+NSN_ORDERED,"Fifteen character national stock nuber. The first 4 characters are the FSC, the next 9 characters are the NIIN."
+NIIN,"The NIIN is the last nine digits of the NSN that differentiates each individual supply item from all other supply items. The first two digits signify the National Codification Bureau that assigned the NIIN, while the last seven digits are non-significant and are sequentially assigned by the FLIS."
+PRI_CD,"1. THIS DATA ITEM INDICATES TO THE SUPPLIER THE URGENCY OF THE MATERIEL REQUIREMENTS FOR THE REQUISITIONER.2. A PRECEDENCE APPLIED TO SUPPLY REQUISITIONS, WHICH IS BASED UPON THE REQUESTING UNITS MISSION, FORCED ACTIVITY DESIGNATOR, AND DEGREE OF COMBAT ENGAGEMENT. 3. PRIORITY INDICATES A PRIORITY OF CUSTOMERS RELATIVE NEEDS BASED UPON THEIR MISSIONS."
+IPG,"Issue Priority Groups (IPGs) categorize works or material requisitions based on urgency, with IPG 1(highest) reserved for critical, mission-stopping, or immediate needs, often designated by priority codes (01-03), IPG 2 (04-08) and IPG 3 (09-15)."
+RDD,"The julian date or proper code (777, 999) that relays to the provider when the materiel is required in order to support unit operations."
+PROJECT_CD,"Assigned by a military service or the Department of Defense (DoD) to identify a specific project of a general or specific program nature for recognition throughout the distribution system to identify the requisition and related documents applicable to specific projects or programs, the shipments of material for specific projects or programs and the specific programs to provide for funding and costing of extraordinary programs at the requisitioner or supplier level."
+PURPOSE_CD,indicates purpose code that the requisition is processed for.
+ESTA,"D_DT"" IS 'Utilizes the status_received_date that is provided with the initiating DIC as mention in the Document number field."
+MAX_STAT_DT,Represents the maxium status_Received_date identified within the GCSS-MC R-001 data feed.
+SUPP_ADD,"FINAL DESTINATION/RECEIVING UNIT OF REQUISITIONED ITEM if utilizing Signal code J, else it could represent a section within the unit."
+SR_NUMBER,Identifies applicable Service Request number from which the demand was created.
+ADVICE_CODE,ALPHA/NUMERIC FIELD PROVIDING CODED INSTRUCTION TO SUPPLIER PERTAINING TO SUBJECT SDN - see DLM 4400.25-1 Appendix 2.15 for details.
+ITEM_TYPE,INDICATES WHETHER THE ITEM IS AN INVENTORY (CONSUMABLE) ITEM OR SECREP.
+RCVR_CD,"PLM_RECOVERABILITY_CD  Indicates the disposition action on unserviceable items.  Also, fifth position in the Source Maintenance Recoverability Code."
+CEC,"CODE ASSIGNED TO CRITICAL ITEMS INDICATING THE ITEM IS ESSENTIAL TO MILITARY MISISONS.  ITEM MAY BE FUNCTIONAL PART OF AN END ITEM, COMPONENT, OR ASSEMBLY WHERE FAILURE OF SUBJECT ITEM WOULD MAKE THE END ITEM INOPERABLE OR INCAPABLE OF FULFILLING ITS MISSION."
+SAC,"STORES_ACCOUNT_CODE-STATES THE FUNDS REQUIRED TO OBTAIN ITEM (UNIT FUNDS, HQMC.)"
+SOS,THE RIC FOR THE ORGANIZATION THAT SUPPLIES THE ITEM
+UNIT_PRICE,[Unit Price] Provides the unit price prescribed from the source of supply for the item.
+STATUS_QTY,Applicable Quantity of the original requirement for the received status.
+REMAIN_DUE,"After receipts, cancellations, adjustments from the SOS, this represents the balance still due in."
+REMAIN_DUE_RULE,Indicates which rule was applied when determining the Remain_due.  There are approximately 60 Rules that may be applied. Helps to determine which rule and why based on the data.
+DOC_STATUS,"Determined by a CASE statement within the code by looking across all statuses received and applied and indicate current state ie., Backordered, Shipped, etc."
+RULE_ASSIGNED,Indicates which rule was applied when determining the Doc Status that was applied. The rules are contained within the code.
+BO_QTY_FIRST,"There is a Look up (LU) table within the MDR that assigns a category to all Backorder type status (BB, BD, etc.,) based on the category and the minimum status received date, this is used to show the first backorder status."
+BO_QTY_LAST,"There is a Look up (LU) table within the MDR that assigns a category to all Backorder type status (BB, BD, etc.,) based on the category and the maximum status received date, this is used to show the last backorder status."
+QTY_PEND_SHIP,"An average of the various status codes that indicate an item is being prepared for shipment, such as BA, SRO, A5A, etc., Then it is used within various case statements to help determine overall status."
+BM_QTY,This qty is based on the BM status along with various document number suffix codes to help determine what the qty is that is being passed to a SOS.
+BZ_BV_QTY,"This qty is pulled when the status code is either BZ or BV.  At times, this qty can adjust the original qty ordered either up or down, based on quantity of pack."
+BG_QTY,"This qty is pulled when the status code is BG.  At times, this qty can adjust the original qty ordered either up or down, based on quantity of pack."
+BJ_QTY,"This qty is pulled when the status code is BJ.  At times, this qty can adjust the original qty ordered either up or down, based on quantity of pack."
+QTY_CANCELLED,"There is a Look up (LU) table within the MDR that assigns a category to all cancellation type statuses (CA, CS, CJ, etc.,) based on the category and the maximum status received date."
+D9_QTY,"This qty is pulled with the Document Identifier code is like D9L, which indicates a lost shipment.  At times other types of D9s are processed as well to reduce the qty."
+QTY_SHIPPED,"The qty based on various document identifier codes that represents an item has been shipped, such as AS1."
+QTY_RECEIVED,"The qty based on various document identifier codes that represent an item has been receipt for, such as D6T, D6A."
+DRA_QTY,"The qty based on document identifier codes that represents an item has been receipt for, such as DRA."
+COR_QTY,"The qty based on document identifier codes that represents an item has been receipt for, such as COR."
+DRB_QTY,"The qty based on document identifier codes that represents an item has been receipt for, such as DRB."
+DRF_QTY,"The qty based on document identifier codes that represents an item has been receipt for, such as DRF."
+MAX_DT_EST,Represents the maximum status received date on the entire history of the document.
+MIN_BO_DT,Represents the minimum status received date on the entire history of the document based on back order type statuses.
+MAX_BO_DT,Represents the maximum status received date on the entire history of the document based on back order type statuses.
+MIN_BA_DT,Represents the minimum status received date on the entire history of the document based on items being prepared for shipment type statuses.
+MAX_BA_DT,Represents the maximum status received date on the entire history of the document based on items being prepared for shipment type statuses.
+MIN_BM_DT,Represents the minimum status received date on the entire history of the document based on the BM status code.
+MAX_BM_DT,Represents the maximum status received date on the entire history of the document based on the BM status code.
+MIN_BJ_DT,Represents the minimum status received date on the entire history of the document based on the BJ status code.
+MAX_BJ_DT,Represents the maximum status received date on the entire history of the document based on the BJ status code.
+MIN_BG_DT,Represents the minimum status received date on the entire history of the document based on the BG status code.
+MAX_BG_DT,Represents the maximum status received date on the entire history of the document based on the BG status code.
+MIN_CANC_DT,Represents the minimum status received date on the entire history of the document based on the cancellation type status code.
+MAX_CANC_DT,Represents the maximum status received date on the entire history of the document based on the cancellation type status code.
+MIN_AS1_DT,Represents the minimum status received date on the entire history of the document based on the shipped type document identifiers such as AS1.
+MAX_AS1_DT,Represents the maximum status received date on the entire history of the document based on the shipped type document identifiers such as AS1.
+MIN_D6_DT,"Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as D6T, D6A."
+MAX_D6_DT,"Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as D6T, D6A."
+MIN_DRA_DT,Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as DRA.
+MAX_DRA_DT,Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as DRA.
+MIN_COR_DT,Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as COR.
+MAX_COR_DT,Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as COR.
+MIN_DRB_DT,Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as DRB.
+MAX_DRB_DT,Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as DRB.
+MIN_DRF_DT,Represents the minimum status received date on the entire history of the document based on the receipt type document identifiers such as DRF.
+MAX_DRF_DT,Represents the maximum status received date on the entire history of the document based on the receipt type document identifiers such as DRF.
+MIN_D9_DT,Represents the minimum status received date on the entire history of the document based on the document identifiers such as D9L.
+MAX_D9_DT,Represents the maximum status received date on the entire history of the document based on the document identifiers such as D9L.
+ESTA,"D_TO_MRO"" IS 'set t.established_to_mro = round((t.ba_dt_min - t.established_dt), 4 ). "
+MRO_TO_SHIP,"set t.mro_to_ship = case When t.as1_dt_max >= t.ba_dt_max  then round((t.as1_dt_max - t.ba_dt_max), 4 )  When t.ba_dt_max  >= t.as1_dt_max then abs(round((t.as1_dt_max - t.ba_dt_max), 4 )) end."
+OST,"set t.ost = case When t.as1_dt_max <= t.d6_dt_max and round((nvl(t.as1_dt_max, t.ba_dt_max)  - t.established_dt),4) > 0 then round((nvl(t.as1_dt_max, t.ba_dt_max)  - t.established_dt),4)   When round((coalesce(t.ba_dt_max, t.d6_dt_max, t.dra_dt_max)- t.established_dt), 4) > 0                then round((coalesce(t.ba_dt_max, t.d6_dt_max, t.dra_dt_max)- t.established_dt), 4) end."
+LRT,"set t.lrt = round((nvl(t.d6_dt_max,  t.dra_dt_max) - t.established_dt),4)."
+CWT,"set t.cwt = round((nvl(t.cor_dt_max, t.d6_dt_max)  - t.established_dt),4)."
+DOC_FY,Represents the Fiscal Year that the document was established based on the status received date.
+FY_QTR,Represents the Fiscal year and quarter the document was established based on the status received date.
+DOC_FY_QTR,The quarter in which the document was established.
+SIGNAL_CD,"1. Designates the fields that contain the intended consignee (Ship To) and the Activity (Bill To) to receive the bills and effect payment when applicable.2. Requisitions will cite the Signal Codes which indicate whether the Requisitioner (RP 30-35), the Supplemental Addressee (RP 45-50) or the Fund Code (RP 52-530 is to be used to find the Bill-To address. Marine Corps activities are authorized to use Signal Codes E and N which indicates the Bill-To address is in the remarks field.3. When ASA Signal Code is cited and the item is SFA, the requisition will be rejected citing Status Code CM. If SFA Signal Code is cited and the item is ASA, status BN will be furnished, the Signal Code changed to W or X as appropriate, and supply action continued.4. Identifies where requested material is to be shipped and who is to be billed for funded items. This information will be provided to the Source of Supply on requisitions and due-out details."
+APPROVED_DT,Extracted from the GCSS-MC approver comments.  Helps to understand a potential gap between approved and established.
+FY_MTH,The fiscal year month the document was established.
+ACQ_ADV_CD,ALPHA/NUMERIC FIELD PROVIDING CODED INSTRUCTION TO SUPPLIER PERTAINING TO SUBJECT SDN - see DLM 4400.25-1 Appendix 2.15 for details.
+#VALUE!,"R_OPEN"" IS 'Based on the incident number (sr number) of the requisition compared to the gcss sr header information to determine if the SR is open/closed."
+IMPORT_DT,Represents the date and time the table was loaded.
+CONDITION_CODE,CODE USED TO CLASSIFY MATERIEL IN TERMS OF READINESS FOR ISSUE AND USE OR TO IDENTIFY ACTIONS NECESSARY TO CHANGE THE STATUS OF MATERIEL.
+RCPT_COND_CD,Represents the actual condition of the materiel when the unit received the item.
+FILLED_BY,"Indicates the SOS that filled the requisition, if more than one provider, then multiple is used to indicate more than one provider."
+TASK_NBR,The task number from GCSS-MC that the requisition is part of.
+CUR_SR_NBR,GCSS-MC does not provide an updated sr-number when a requisition is transferred to a new sr_number.  MDR created a process to pull current sr_number for a requisition via the OAS reports from GCSS-MC.
+COCOM,Represents which MEF the requisitioner is part of.
+RDD_CAL_DT,Represents the calculated date based on the RDD when it is a julian date.
+RDD_CAL_DT_CURATED,"Represents the curated calculated date based on if the RDD is a 777, 999, 555, 444 and the number of days from the established date as to when an item should be received once shipped."
+RDD_DAYS_FROM_BASE,Represents the number of days it has been since the requisition has been established.
+RDD_DAYS_FROM_TODAY,Represents the number of days from today it has been since requisition was processed.
+RDD_MEANING,English description of the RDD - Required Delivery Date represents.
+RDD_ERROR,Represents if there is a problem with the assigned julian date.  Either the RDD is before the established date or is greater than 100 days from date established.
+CURATED_RDD_MEANING,Represents a meaning for the RDD if the RDD is abnormal.
+ARCHIVE_FLAG,"Identifies open/closed status. L=Live, N=Near to Archiving, F=Archived."

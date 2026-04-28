@@ -210,8 +210,12 @@ export function ScenarioPlayerHost() {
       }
     }
 
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Code review: register in CAPTURE phase so play/pause ('p'),
+    // advance ('arrow' / space), and narration ('n') always fire before
+    // view-level bubble-phase listeners (e.g. MapCanvas 'P' pitch toggle).
+    // The view handlers gate on e.defaultPrevented and we call it here.
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [next, prev, pause, togglePlay, toggleNarration]);
 
   return null;
