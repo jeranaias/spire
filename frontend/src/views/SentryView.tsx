@@ -8,6 +8,8 @@ import { MarkTab } from "./sentry/MarkTab";
 import { CoalitionTab } from "./sentry/CoalitionTab";
 import { useSpireStore } from "../state/store";
 import { UseCaseStrip } from "../components/UseCaseStrip";
+import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
+import { useDatasetStatus } from "../hooks/useDatasetStatus";
 
 export interface SentryContext {
   batchId: string | null;
@@ -31,6 +33,11 @@ export function SentryView() {
   const batchId = useSpireStore((s) => s.sentryBatchId);
   const jobId = useSpireStore((s) => s.sentryJobId);
   const setBatchStore = useSpireStore((s) => s.setSentryBatch);
+  // Task #183 — stage live-ingest mode. SENTRY surfaces (Upload,
+  // Processing, Review Queue, etc.) all read from the dataset
+  // singleton, so until ingest completes we replace the routed body
+  // with the standard "Awaiting GCSS-MC ingest" placeholder.
+  const datasetStatus = useDatasetStatus().status;
 
   const ctx: SentryContext = {
     batchId,
@@ -46,6 +53,12 @@ export function SentryView() {
       <UseCaseStrip number="14" title="SENTRY" subtitle="CUI AUTO-TAGGING — DoDM 5200.01" accent="var(--color-info)" />
       <SentrySubnav />
       <div className="flex-1 overflow-hidden">
+        {datasetStatus?.empty ? (
+          <AwaitingIngestEmpty
+            surface="SENTRY"
+            description="The classification queue, review board, and coalition export pipelines all read from the live GCSS-MC dataset. Drop the three sanitized CSVs into DECISION BRIDGE to populate this view."
+          />
+        ) : (
         <Routes>
           <Route index                  element={<UploadTab ctx={ctx} />} />
           <Route path="upload"          element={<UploadTab ctx={ctx} />} />
@@ -55,6 +68,7 @@ export function SentryView() {
           <Route path="export"          element={<ExportTab ctx={ctx} />} />
           <Route path="coalition"       element={<CoalitionTab />} />
         </Routes>
+        )}
       </div>
     </div>
   );

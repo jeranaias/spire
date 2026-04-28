@@ -113,7 +113,11 @@ async def cop(role: Optional[str] = None):
     inst = _load_installation()
     last = last_day_snapshots(ds)
     if not last:
-        raise HTTPException(status_code=503, detail="dataset empty")
+        # Stage live-ingest mode (Task #183): empty dataset is a valid
+        # state, not an error. Return 200 with an explicit ``empty``
+        # flag so the frontend can render the "awaiting GCSS-MC ingest"
+        # empty state instead of the 503 toast pattern.
+        return {"empty": True, "message": "Awaiting GCSS-MC ingest"}
 
     allowed = allowed_units(ds, role)
     last_day = last[0].snapshot_date

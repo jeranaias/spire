@@ -5,12 +5,21 @@ For a hackathon we run the dataset engine in-process at boot rather than
 parsing the XLSX files — gives us live Python objects at zero I/O cost.
 Regeneration under RANDOM_SEED = 42 produces the canonical dataset every
 time.
+
+Task #183 (stage live-ingest mode): when ``SPIRE_BOOT_EMPTY=1`` is set
+the lifespan skips ``load_dataset()`` and the singleton starts as an
+empty ``CanonicalDataset`` (zero units/assets/srs/snapshots/...). The
+``swap_dataset()`` helper atomically replaces the singleton from inside
+the stage-ingest route, and ``dataset_status()`` exposes the current
+shape so the frontend can branch between hydrated dashboards and the
+"awaiting GCSS-MC ingest" empty state.
 """
 from __future__ import annotations
 
 import sys
+import threading
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -75,13 +84,52 @@ class CanonicalDataset:
         return self._incidents_by_id.get(incident_id)
 
 
+# Module-level singleton + provenance metadata. The singleton is *never*
+# None after import: ``init_empty_dataset()`` runs at module import so
+# every caller of ``get_dataset()`` gets a valid, possibly-empty object.
+# That removes a class of latent NoneType bugs across the routes.
+_DATASET_LOCK = threading.Lock()
 _DATASET: Optional[CanonicalDataset] = None
+_DATASET_META: dict = {
+    "source": "uninitialized",      # "seed-42" | "stage-ingest" | "empty"
+    "ingested_at": None,             # ISO-8601 string or None
+    "ingested_by": None,             # actor DODID or None
+    "ingest_hash": None,             # sha256 trunc-16 of the source bytes
+}
+
+
+def _utc_iso() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def init_empty_dataset() -> CanonicalDataset:
+    """Initialize ``_DATASET`` to an explicit zero-state ``CanonicalDataset``.
+
+    Used by:
+      • module import (so the singleton is never None);
+      • the lifespan when ``SPIRE_BOOT_EMPTY=1`` (stage live-ingest mode).
+    """
+    global _DATASET
+    with _DATASET_LOCK:
+        _DATASET = CanonicalDataset(
+            units=[], assets=[], roster=[], srs=[], snapshots=[], reqs=[],
+            cannib_events=[], incidents=[], tmrs=[], dq_defects={},
+            violations=[],
+            generated_at=_utc_iso(),
+            seed=RANDOM_SEED,
+        )
+        _DATASET_META.update({
+            "source": "empty",
+            "ingested_at": None,
+            "ingested_by": None,
+            "ingest_hash": None,
+        })
+    return _DATASET
 
 
 def load_dataset(*, seed: int = RANDOM_SEED) -> CanonicalDataset:
     """Generate (or regenerate) the canonical dataset under the given seed."""
     global _DATASET
-    from datetime import datetime
 
     units, assets = generate_fleet(seed)
     roster = generate_personnel(units, OUTPUT_TARGETS["personnel_count"], seed)
@@ -92,7 +140,7 @@ def load_dataset(*, seed: int = RANDOM_SEED) -> CanonicalDataset:
     tmrs = generate_tmrs(units, seed)
     violations = run_all_checks(srs, assets, snapshots, cannib)
 
-    _DATASET = CanonicalDataset(
+    new_ds = CanonicalDataset(
         units=units,
         assets=assets,
         roster=roster,
@@ -104,17 +152,93 @@ def load_dataset(*, seed: int = RANDOM_SEED) -> CanonicalDataset:
         tmrs=tmrs,
         dq_defects=dq,
         violations=violations,
-        generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        generated_at=_utc_iso(),
         seed=seed,
     )
+    with _DATASET_LOCK:
+        _DATASET = new_ds
+        _DATASET_META.update({
+            "source": f"seed-{seed}",
+            "ingested_at": new_ds.generated_at,
+            "ingested_by": "lifespan",
+            "ingest_hash": None,
+        })
+    return _DATASET
+
+
+def swap_dataset(
+    new: CanonicalDataset,
+    *,
+    source: str,
+    ingested_by: Optional[str] = None,
+    ingest_hash: Optional[str] = None,
+) -> CanonicalDataset:
+    """Atomically replace the singleton dataset under the module lock.
+
+    Used by the stage-ingest route after parsing the GCSS-MC export so
+    every downstream reader of ``get_dataset()`` flips to the real data
+    on the next call without a race window.
+    """
+    global _DATASET
+    with _DATASET_LOCK:
+        _DATASET = new
+        _DATASET_META.update({
+            "source": source,
+            "ingested_at": _utc_iso(),
+            "ingested_by": ingested_by,
+            "ingest_hash": ingest_hash,
+        })
     return _DATASET
 
 
 def get_dataset() -> CanonicalDataset:
-    """Return the loaded dataset. Raises if not loaded."""
+    """Return the loaded dataset. Always returns a valid object (possibly
+    empty) after module import — never raises NoneType errors."""
     if _DATASET is None:
-        raise RuntimeError("Dataset not loaded — call load_dataset() first")
+        # Defensive: should never happen because ``init_empty_dataset``
+        # runs at module import. Fall back rather than 500 the request.
+        return init_empty_dataset()
     return _DATASET
+
+
+def is_dataset_empty(ds: Optional[CanonicalDataset] = None) -> bool:
+    """True iff the dataset carries no SRs and no snapshots — the signal
+    SPIRE uses to decide between "render dashboards" and "render the
+    awaiting-GCSS-MC-ingest empty state"."""
+    target = ds if ds is not None else _DATASET
+    if target is None:
+        return True
+    return not target.srs and not target.snapshots
+
+
+def dataset_status() -> dict:
+    """Public, JSON-shaped descriptor of the current dataset. Returned by
+    ``GET /api/system/dataset-status`` and used by the frontend to gate
+    between the hydrated dashboards and the stage-ingest hero."""
+    ds = get_dataset()
+    return {
+        "empty": is_dataset_empty(ds),
+        "source": _DATASET_META.get("source"),
+        "ingested_at": _DATASET_META.get("ingested_at"),
+        "ingested_by": _DATASET_META.get("ingested_by"),
+        "ingest_hash": _DATASET_META.get("ingest_hash"),
+        "counts": {
+            "units": len(ds.units),
+            "assets": len(ds.assets),
+            "srs": len(ds.srs),
+            "snapshots": len(ds.snapshots),
+            "incidents": len(ds.incidents),
+            "requisitions": len(ds.reqs),
+        },
+        "generated_at": ds.generated_at,
+        "seed": ds.seed,
+    }
+
+
+# Initialize the singleton at module import so callers of ``get_dataset()``
+# never see ``None``. The lifespan in ``backend/main.py`` decides whether
+# to overlay seed-42 data (default) or leave this empty (SPIRE_BOOT_EMPTY).
+init_empty_dataset()
 
 
 # Last-day snapshot helpers -----------------------------------------------

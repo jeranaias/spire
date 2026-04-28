@@ -445,6 +445,25 @@ async def reset_demo(request: Request):
     feedback_cleared = len(_FEEDBACK_LOG)
     _FEEDBACK_LOG.clear()
 
+    # 7. Task #183 — stage live-ingest mode. The Shift+F8 failsafe lands
+    #    here, and a presenter who hits it after a stage-ingest needs the
+    #    dataset singleton itself rebuilt back to the seed-42 baseline.
+    #    Rehydrate by loading the canonical dataset and atomically
+    #    swapping it into the singleton with source="seed-42". On a normal
+    #    reset (dataset already populated and identical) this is a cheap
+    #    rebuild; on a stage-ingest reset it flips ``is_dataset_empty()``
+    #    back to False and the empty-state placeholders disappear.
+    dataset_rehydrated = False
+    try:
+        from .. import state as _state_mod
+        fresh = _state_mod.load_dataset()
+        _state_mod.swap_dataset(
+            fresh, source="seed-42", ingested_by=actor or "failsafe"
+        )
+        dataset_rehydrated = True
+    except Exception as e:  # noqa: BLE001
+        failed_steps.append({"step": "dataset_rehydrate", "error": str(e)[:160]})
+
     finished = datetime.utcnow()
     duration_ms = int((finished - started).total_seconds() * 1000)
     overall_ok = not failed_steps
@@ -457,6 +476,7 @@ async def reset_demo(request: Request):
         "decision_outcomes_cleared": outcomes_cleared,
         "feedback_log_cleared": feedback_cleared,
         "mission_clock": clock_state,
+        "dataset_rehydrated": dataset_rehydrated,
         "duration_ms": duration_ms,
     }
 

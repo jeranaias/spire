@@ -453,17 +453,20 @@ export const api = {
         undefined,
         false,
       ),
-    // WP-7 — published GCSS-MC field dictionary + coverage summary. Backend
-    // routes live at /api/integrations/gcss-mc/{coverage-summary,dictionary}.
+    // Task #177 — GCSS-MC schema-fidelity work. Backs the Field Dictionary
+    // section that proves SPIRE's coverage against the real 163-column
+    // schema. Pulled once on the Integrations page, no polling needed.
     gcssMcCoverageSummary: () =>
       jsonFetch<GcssMcCoverageSummary>(
         "/integrations/gcss-mc/coverage-summary",
         undefined,
         false,
       ),
-    gcssMcDictionary: () =>
+    gcssMcDictionary: (section?: "header" | "parts" | "due_in") =>
       jsonFetch<GcssMcDictionary>(
-        "/integrations/gcss-mc/dictionary",
+        section
+          ? `/integrations/gcss-mc/dictionary?section=${section}`
+          : "/integrations/gcss-mc/dictionary",
         undefined,
         false,
       ),
@@ -473,6 +476,25 @@ export const api = {
     // chrome unless the operator is signed in.
     resetDemo: () =>
       jsonFetch<ResetDemoResult>("/system/admin/reset-demo", { method: "POST" }, false),
+    // Task #183 — stage live-ingest mode. Read-only descriptor of the
+    // current dataset (empty? source? counts?). Used by every view to
+    // decide whether to render the "awaiting GCSS-MC ingest" empty state
+    // or the populated dashboards.
+    datasetStatus: () => jsonFetch<DatasetStatus>("/system/dataset-status"),
+    // Drag-drop hydration — POST the three sanitized GCSS-MC CSVs.
+    // Form fields are named `header`, `sr_parts`, `due_in` to match
+    // the backend route's `UploadFile = File(...)` signature exactly.
+    stageIngest: (files: { header: File; sr_parts: File; due_in: File }) => {
+      const fd = new FormData();
+      fd.append("header", files.header, files.header.name);
+      fd.append("sr_parts", files.sr_parts, files.sr_parts.name);
+      fd.append("due_in", files.due_in, files.due_in.name);
+      return jsonFetch<StageIngestResult>(
+        "/system/stage-ingest",
+        { method: "POST", body: fd },
+        false,
+      );
+    },
   },
   pulse: {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
@@ -785,6 +807,66 @@ export interface DatasetInfo {
   as_of: string | null;
   generated_at: string;
   seed: number;
+}
+
+// Task #183 — stage live-ingest mode. Shape mirrors backend
+// `state.dataset_status()`. The frontend uses `empty` to gate between
+// the populated dashboards and the "awaiting GCSS-MC ingest" hero card.
+export interface DatasetStatus {
+  empty: boolean;
+  source: string | null;          // "seed-42" | "stage-ingest" | "empty"
+  ingested_at: string | null;     // ISO-8601
+  ingested_by: string | null;     // actor DODID or "lifespan"
+  ingest_hash: string | null;     // sha256 trunc-16 of the 3 source files
+  counts: {
+    units: number;
+    assets: number;
+    srs: number;
+    snapshots: number;
+    incidents: number;
+    requisitions: number;
+  };
+  generated_at: string;
+  seed: number;
+}
+
+// Response shape from POST /api/system/stage-ingest. Used by the
+// DECISION BRIDGE hero card to surface post-hydration counts.
+export interface StageIngestResult {
+  ok: boolean;
+  ingest_hash: string;
+  elapsed_ms: number;
+  actor: { role: string; dodid: string | null };
+  source_files: Record<"header" | "sr_parts" | "due_in", { name: string; bytes: number }>;
+  counts: DatasetStatus["counts"];
+  ingest_report: {
+    rows_total: number;
+    rows_kept: number;
+    rows_filtered_pmcs: number;
+    rows_with_warnings: number;
+    schema_warnings: string[];
+    defect_code_trailing_period_normalized: number;
+    date_parse_failures: number;
+  };
+}
+
+// Domain endpoints can return an empty-state envelope under stage
+// live-ingest mode. The frontend branches on `empty: true` and renders
+// the "awaiting GCSS-MC ingest" placeholder instead of unpacking the
+// usual payload. Wrap the existing payload type with this union at the
+// call site to keep type-narrowing precise.
+export interface EmptyEnvelope {
+  empty: true;
+  message: string;
+}
+
+export function isEmptyEnvelope(payload: unknown): payload is EmptyEnvelope {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    "empty" in payload &&
+    (payload as { empty?: unknown }).empty === true
+  );
 }
 
 // Task #76 — sample-endpoint payload for the GCSS-MC reference adapter.
@@ -1703,18 +1785,6 @@ export interface GcssIngestReport {
   adapter: string;
   // "enforced" when no clear (non-hashed) UICs were accepted.
   sanitization_gate: "enforced" | string;
-}
-
-// Task #67 — `scope` is the role-scoping descriptor SENTRY routes return
-// so the FE can render an honest "Showing N of M (CLB-6 only)" footer.
-// `unrestricted=true` means the caller's role sees the entire batch.
-export interface SentryScope {
-  role: string;
-  unrestricted: boolean;
-  allowed_units: string[];
-  total_records: number;
-  scoped_records: number;
-  label: string;
 }
 
 // Task #67 — `scope` is the role-scoping descriptor SENTRY routes return
