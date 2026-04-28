@@ -656,10 +656,21 @@ export const api = {
       jsonFetch<{ profiles: CoalitionProfileSummary[] }>("/sentry/coalition/profiles"),
     coalitionView: (profileKey: string) =>
       jsonFetch<CoalitionView>(`/sentry/coalition/${encodeURIComponent(profileKey)}`),
-    coalitionRelease: (profileKey: string) =>
+    coalitionRelease: (
+      profileKey: string,
+      opts?: { acknowledgedOverCeiling?: boolean; overCeilingCount?: number },
+    ) =>
       jsonFetch<CoalitionReleaseResult>(`/sentry/coalition/${encodeURIComponent(profileKey)}/release`, {
         method: "POST",
-        body: JSON.stringify({ actor_role: _getRole() }),
+        body: JSON.stringify({
+          actor_role: _getRole(),
+          // Task #154 — record the over-ceiling acknowledgement on the
+          // audit row. Defaults preserve old call-site behavior (no
+          // acknowledgement, count 0) for callers that haven't been
+          // updated.
+          acknowledged_over_ceiling: !!opts?.acknowledgedOverCeiling,
+          over_ceiling_count: opts?.overCeilingCount ?? 0,
+        }),
       }),
     // Walkthrough #31 — per-subject audit-chain viewer.
     auditFor: (subjectId: string, limit = 50) =>
@@ -1550,6 +1561,11 @@ export interface CoalitionView {
      * classification exceeds the profile's authorized ceiling. Drives
      * the red-tint signal on the Generate Release button (F1). */
     sample_srs_over_ceiling?: number;
+    /** Capped drill-down list of the over-ceiling records (SR number +
+     * source classification) so the confirmation modal can show the
+     * operator *which* records they're acknowledging instead of just a
+     * count. (Task #154.) */
+    sample_srs_over_ceiling_list?: { sr_number: string; classification: string }[];
   };
   allowed_units: { unit: string; parent: string; uic: string; location: string }[];
   sample_records: {
@@ -1591,6 +1607,13 @@ export interface CoalitionReleaseResult {
   record_count: number;
   /** Inherited classification ceiling stamped onto the audit row. */
   classification?: string;
+  /** Task #154 — over-ceiling sample count the operator was prompted on
+   * (0 means the acknowledgement gate never applied). */
+  over_ceiling_sample_count?: number;
+  /** Task #154 — whether the operator ticked the over-ceiling
+   * acknowledgement checkbox before typing RELEASE. Stamped onto the
+   * audit row alongside the manifest hash. */
+  over_ceiling_acknowledged?: boolean;
 }
 
 export interface FailurePrediction {

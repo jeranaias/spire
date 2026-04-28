@@ -2199,6 +2199,13 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
     sr_allowed = 0
     sr_blocked = 0
     sr_over_ceiling = 0
+    # Drill-down list (capped) of the over-ceiling SR numbers + their
+    # source classifications. Surfaced so the confirmation modal can show
+    # the operator *which* records they're acknowledging instead of just
+    # a count. Cap protects the JSON payload from blowing up on profiles
+    # whose ceiling is well below the dataset's source classifications.
+    sr_over_ceiling_list: list[dict] = []
+    OVER_CEILING_LIST_CAP = 25
     for sr in ds.srs[:200]:
         rec = {
             "sr_number": sr.sr_number,
@@ -2226,6 +2233,11 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
             not decision.allowed and "exceeds profile ceiling" in decision.reason
         ):
             sr_over_ceiling += 1
+            if len(sr_over_ceiling_list) < OVER_CEILING_LIST_CAP:
+                sr_over_ceiling_list.append({
+                    "sr_number": sr.sr_number,
+                    "classification": normalize_classification(rec_cls),
+                })
         if decision.allowed:
             sr_allowed += 1
             redacted, spans = apply_redactions_with_spans(rec, decision.redactions_applied)
@@ -2266,6 +2278,7 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
             "sample_srs_blocked": sr_blocked,
             "sample_srs_total_inspected": min(200, len(ds.srs)),
             "sample_srs_over_ceiling": sr_over_ceiling,
+            "sample_srs_over_ceiling_list": sr_over_ceiling_list,
         },
         "allowed_units": allowed_units_list,
         "sample_records": sample_srs,
@@ -2346,20 +2359,85 @@ async def coalition_release(
     manifest_sha256 = manifest["manifest_sha256"]
     record_count = manifest["record_count"]
 
+    # Task #154 — over-ceiling acknowledgement. The frontend modal now
+    # blocks the typed-RELEASE input until the operator ticks an "I
+    # reviewed the over-ceiling records" checkbox when the inspected
+    # sample contains records above the partner ceiling. Capture both
+    # whether the operator was prompted and whether they ticked the box,
+    # so an after-action review can tell "warning was shown and
+    # acknowledged" from "warning never applied" (count == 0) and from
+    # "warning was shown but not acknowledged" (legacy clients pre-#154).
+    #
+    # Audit trustworthiness: the count stamped onto the audit row is
+    # always recomputed server-side using the same SR walk + classify
+    # rule coalition_view runs, so a tampered or stale client can't
+    # under-report what it was prompted with. The client-supplied
+    # "ack_count" is recorded separately when it disagrees, so a
+    # security manager can later see the divergence.
+    ceiling_rank_release = 0
+    for _c in auth_cls:
+        _rk = classification_rank(_c)
+        if _rk >= ceiling_rank_release:
+            ceiling_rank_release = _rk
+    server_over_ceiling_count = 0
+    for sr in ds.srs[:200]:
+        rec_cls = sr.detected_classification or "UNCLASSIFIED"
+        if classification_rank(rec_cls) <= ceiling_rank_release:
+            continue
+        rec = {
+            "sr_number": sr.sr_number,
+            "asset_id": sr.asset_id,
+            "unit_name": sr.unit_name,
+            "unit_parent": unit_parent_map.get(sr.unit_name, ""),
+            "equipment_type": sr.equipment_type,
+            "fault_component": sr.fault_component,
+            "tm_reference": sr.tm_reference,
+            "serial_number": sr.serial_number,
+            "remark": sr.remark_text,
+            "detected_classification": rec_cls,
+            "category": "readiness_summary",
+        }
+        decision = classify_record(profile_key, rec)
+        if not decision.allowed and "exceeds profile ceiling" in decision.reason:
+            server_over_ceiling_count += 1
+
+    client_over_ceiling_count: Optional[int] = None
+    raw_client_count = payload.get("over_ceiling_count")
+    if raw_client_count is not None:
+        try:
+            client_over_ceiling_count = int(raw_client_count)
+        except (TypeError, ValueError):
+            client_over_ceiling_count = None
+    acknowledged_over_ceiling = bool(payload.get("acknowledged_over_ceiling"))
+    over_ceiling_count = server_over_ceiling_count
+
     release_id = f"REL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    audit_payload = {
+        "profile": profile_key,
+        "partners": profile_data["partners"],
+        "distribution": profile_data["distribution_statement"],
+        "classification": release_cls,
+        "manifest_sha256": manifest_sha256,
+        "record_count": record_count,
+        "redactions": sorted(profile_data.get("field_redactions", [])),
+        # Server-derived count is the source of truth for the audit row.
+        "over_ceiling_sample_count": over_ceiling_count,
+        "over_ceiling_acknowledged": acknowledged_over_ceiling,
+    }
+    # Only stamp the client-reported count when it disagrees with what
+    # the server saw. Equal values are the common case (no signal); a
+    # divergence is the interesting one — it tells a security manager
+    # the operator may have ticked the gate against a stale view.
+    if (
+        client_over_ceiling_count is not None
+        and client_over_ceiling_count != server_over_ceiling_count
+    ):
+        audit_payload["over_ceiling_client_reported_count"] = client_over_ceiling_count
     audit_log(
         "sentry_coalition_release",
         actor=actor,
         subject_id=release_id,
-        payload={
-            "profile": profile_key,
-            "partners": profile_data["partners"],
-            "distribution": profile_data["distribution_statement"],
-            "classification": release_cls,
-            "manifest_sha256": manifest_sha256,
-            "record_count": record_count,
-            "redactions": sorted(profile_data.get("field_redactions", [])),
-        },
+        payload=audit_payload,
     )
     return {
         "ok": True,
@@ -2372,6 +2450,8 @@ async def coalition_release(
         "audit_logged": True,
         "manifest_sha256": manifest_sha256,
         "record_count": record_count,
+        "over_ceiling_sample_count": over_ceiling_count,
+        "over_ceiling_acknowledged": acknowledged_over_ceiling,
         "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 

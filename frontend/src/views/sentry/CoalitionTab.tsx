@@ -98,16 +98,20 @@ export function CoalitionTab() {
       .finally(() => setLoading(false));
   }, [selected, pushToast]);
 
-  async function generateRelease() {
+  async function generateRelease(acknowledgedOverCeiling: boolean = false) {
     if (!view) return;
     // Idempotency guard — coalition release writes to the audit chain.
     // Rapid double-tap on "Generate Release Package" must not register
     // two release events for the same profile.
     const profileKey = view.profile_key;
+    const overCeilingCount = view.scope.sample_srs_over_ceiling ?? 0;
     await fireIdempotent(`sentry:coalition:release:${profileKey}`, async () => {
       setReleasing(true);
       try {
-        const r = await api.sentry.coalitionRelease(profileKey);
+        const r = await api.sentry.coalitionRelease(profileKey, {
+          acknowledgedOverCeiling,
+          overCeilingCount,
+        });
         setRecentReleases((prev) => {
           const next = [
             ...prev,
@@ -590,9 +594,9 @@ export function CoalitionTab() {
           view={view}
           releasing={releasing}
           onCancel={() => setConfirmOpen(false)}
-          onConfirm={async () => {
+          onConfirm={async (acknowledgedOverCeiling) => {
             setConfirmOpen(false);
-            await generateRelease();
+            await generateRelease(acknowledgedOverCeiling);
           }}
         />
       )}
@@ -614,9 +618,15 @@ function CoalitionReleaseConfirmModal({
   view: CoalitionView;
   releasing: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: (acknowledgedOverCeiling: boolean) => void;
 }) {
   const [typed, setTyped] = useState("");
+  // Task #154 — over-ceiling acknowledgement gate. When the inspected
+  // sample contains records above the partner ceiling, the typed-RELEASE
+  // input stays disabled until the operator explicitly ticks this box.
+  // Two-step gate: review the blocked records, then type RELEASE.
+  const [ackOverCeiling, setAckOverCeiling] = useState(false);
+  const [showOverCeilingList, setShowOverCeilingList] = useState(false);
   const authCls = view.authorized_classifications ?? [];
   // Same rank-derived ceiling preference as the header banner — fall back
   // to last-element only for older view payloads.
@@ -626,12 +636,17 @@ function CoalitionReleaseConfirmModal({
       ? "UNCLASSIFIED"
       : (authCls[authCls.length - 1] ?? "UNCLASSIFIED"));
   const overCeiling = view.scope.sample_srs_over_ceiling ?? 0;
+  const overCeilingList = view.scope.sample_srs_over_ceiling_list ?? [];
   // Estimate of what the audit row will record. Authoritative count comes
   // from the backend (it walks the full dataset, not the sample); this
   // gives the operator a representative figure so the confirm dialog
   // isn't blank where the count belongs.
   const inScopeSample = view.scope.sample_srs_allowed;
-  const ready = typed.trim().toUpperCase() === "RELEASE" && !releasing;
+  // The typed-RELEASE input itself is disabled (not just the button) when
+  // an unacknowledged over-ceiling situation exists. That's what converts
+  // the warning into an actual gate instead of a passive red band.
+  const ackGateOpen = overCeiling === 0 || ackOverCeiling;
+  const ready = ackGateOpen && typed.trim().toUpperCase() === "RELEASE" && !releasing;
   return (
     <div
       className="fixed inset-0 z-[8500] flex items-center justify-center bg-black/60 p-6"
@@ -706,34 +721,102 @@ function CoalitionReleaseConfirmModal({
               background: "color-mix(in oklab, var(--color-danger) 12%, transparent)",
             }}
           >
-            ⚠ {overCeiling} record(s) in the inspected sample exceed the {ceiling} ceiling.
-            Those records will be blocked, but the release event itself will still fire.
+            <div>
+              ⚠ {overCeiling} record(s) in the inspected sample exceed the {ceiling} ceiling.
+              Those records will be blocked, but the release event itself will still fire.
+            </div>
+            {overCeilingList.length > 0 && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  data-testid="coalition-release-over-ceiling-toggle"
+                  onClick={() => setShowOverCeilingList((v) => !v)}
+                  className="font-mono text-[11px] uppercase tracking-widest text-[var(--color-danger)] underline-offset-2 hover:underline"
+                >
+                  {showOverCeilingList ? "Hide" : "Show"} blocked records
+                  {overCeiling > overCeilingList.length
+                    ? ` (first ${overCeilingList.length} of ${overCeiling})`
+                    : ""}
+                </button>
+                {showOverCeilingList && (
+                  <ul
+                    data-testid="coalition-release-over-ceiling-list"
+                    className="mt-2 max-h-40 overflow-y-auto rounded-sm border border-[var(--color-danger)]/40 bg-[var(--color-bg)]/40 p-2 font-mono text-[11px] tracking-wider text-[var(--color-text)]"
+                  >
+                    {overCeilingList.map((r) => (
+                      <li key={r.sr_number} className="flex justify-between gap-3 py-0.5">
+                        <span>{r.sr_number}</span>
+                        <span className="text-[var(--color-danger)]">{r.classification}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <label
+              className="mt-3 flex cursor-pointer items-start gap-2 font-mono text-xs normal-case tracking-normal text-[var(--color-text)]"
+              htmlFor="coalition-release-ack-over-ceiling"
+            >
+              <input
+                id="coalition-release-ack-over-ceiling"
+                data-testid="coalition-release-ack-over-ceiling"
+                type="checkbox"
+                checked={ackOverCeiling}
+                onChange={(e) => setAckOverCeiling(e.target.checked)}
+                className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--color-danger)]"
+              />
+              <span>
+                I have reviewed the {overCeiling} record(s) that will be blocked and
+                confirm this release should still proceed.
+              </span>
+            </label>
           </div>
         )}
 
         <div className="mt-4">
           <label
             htmlFor="coalition-release-confirm-input"
-            className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
+            className={clsx(
+              "font-mono text-xs uppercase tracking-widest",
+              ackGateOpen
+                ? "text-[var(--color-text-muted)]"
+                : "text-[var(--color-text-muted)] opacity-60",
+            )}
           >
             Type <strong className="text-[var(--color-text)]">RELEASE</strong> to confirm
           </label>
           <input
             id="coalition-release-confirm-input"
             data-testid="coalition-release-confirm-input"
-            autoFocus
+            autoFocus={ackGateOpen}
             type="text"
             value={typed}
+            disabled={!ackGateOpen}
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && ready) onConfirm();
+              if (e.key === "Enter" && ready) onConfirm(ackOverCeiling);
               if (e.key === "Escape") onCancel();
             }}
-            className="mt-1 w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm tracking-widest text-[var(--color-text)] focus:border-[var(--color-primary)] focus:outline-none"
-            placeholder="RELEASE"
+            className={clsx(
+              "mt-1 w-full rounded-sm border bg-[var(--color-bg)] px-3 py-2 font-mono text-sm tracking-widest text-[var(--color-text)] focus:outline-none",
+              ackGateOpen
+                ? "border-[var(--color-border)] focus:border-[var(--color-primary)]"
+                : "cursor-not-allowed border-[var(--color-border)]/40 opacity-50",
+            )}
+            placeholder={
+              ackGateOpen
+                ? "RELEASE"
+                : "Tick the over-ceiling acknowledgement above to enable"
+            }
             autoComplete="off"
             spellCheck={false}
           />
+          {!ackGateOpen && (
+            <div className="mt-1 font-mono text-[11px] italic text-[var(--color-danger)] tracking-wider">
+              Release blocked: acknowledge the {overCeiling} over-ceiling record(s)
+              first.
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex items-center justify-end gap-2">
@@ -741,7 +824,7 @@ function CoalitionReleaseConfirmModal({
             Cancel
           </Button>
           <Button
-            onClick={onConfirm}
+            onClick={() => onConfirm(ackOverCeiling)}
             disabled={!ready}
             pending={releasing}
             variant="primary"
