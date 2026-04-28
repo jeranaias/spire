@@ -79,15 +79,18 @@ export const api = {
       }, false),
   },
   pulse: {
-    fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
-    riskBoard: (top = 20) => jsonFetch<RiskBoard>(`/pulse/risk-board?top=${top}`),
-    assetDeepDive: (assetId: string) => jsonFetch<AssetDeepDive>(`/pulse/assets/${encodeURIComponent(assetId)}`),
+    // Every PULSE endpoint accepts an optional AbortSignal so callers can
+    // cancel in-flight requests when navigating away or changing inputs.
+    // Without this, late-arriving responses overwrite fresh ones (race)
+    // and the UI desyncs from server truth. (PRs #29 + #30 together.)
+    fleetOverview: (signal?: AbortSignal) =>
+      jsonFetch<FleetOverview>("/pulse/fleet-overview", { signal }),
+    riskBoard: (top = 20, signal?: AbortSignal) =>
+      jsonFetch<RiskBoard>(`/pulse/risk-board?top=${top}`, { signal }),
+    assetDeepDive: (assetId: string, signal?: AbortSignal) =>
+      jsonFetch<AssetDeepDive>(`/pulse/assets/${encodeURIComponent(assetId)}`, { signal }),
     cannibalization: (signal?: AbortSignal) =>
       jsonFetch<Cannibalization>("/pulse/cannibalization", { signal }),
-    // Issues #19–#22 — accept an AbortSignal so callers can cancel
-    // in-flight requests when navigating away or changing inputs. Without
-    // this, late-arriving responses overwrite fresh ones (race) and the
-    // chart appears stuck on stale or missing data.
     forecast: (unit?: string, window = 14, signal?: AbortSignal) =>
       jsonFetch<Forecast>(
         `/pulse/forecast?window=${window}${unit ? `&unit=${encodeURIComponent(unit)}` : ""}`,
@@ -159,7 +162,7 @@ export const api = {
       ),
   },
   bastion: {
-    cop: () => jsonFetch<BastionCOP>("/bastion/cop"),
+    cop: (signal?: AbortSignal) => jsonFetch<BastionCOP>("/bastion/cop", { signal }),
     alerts: (limit = 30) =>
       jsonFetch<BastionAlertsResponse>(`/bastion/alerts?limit=${limit}`),
     fusedThreats: () => jsonFetch<{ fused_threats: FusedThreat[] }>("/bastion/fused-threats"),
