@@ -63,6 +63,23 @@ export async function signIn(
     null,
     { timeout: 15_000 },
   );
+  // The Onboarding intro modal queries the server for a per-identity
+  // "seen" flag and may render even when the localStorage cache says
+  // seen=true (cache is treated as a hint, server response wins). When
+  // it does, it sits at z-[9100] and intercepts every TopBar click. Wait
+  // briefly for the post-auth render and dismiss it if present so the
+  // chrome under it is reachable.
+  const introModal = page.locator(
+    "div[role='presentation'].fixed.inset-0.z-\\[9100\\]",
+  );
+  try {
+    await introModal.waitFor({ state: "visible", timeout: 1_500 });
+    // Clicking the backdrop dismisses the modal (its onClick handler).
+    await introModal.click({ position: { x: 5, y: 5 } });
+    await introModal.waitFor({ state: "hidden", timeout: 3_000 });
+  } catch {
+    /* no modal → nothing to dismiss */
+  }
 }
 
 export async function gotoHash(page: Page, hashPath: string): Promise<void> {
