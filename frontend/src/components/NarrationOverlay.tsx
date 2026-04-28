@@ -18,6 +18,7 @@
  */
 import { useEffect, useState } from "react";
 import { useScenarioPlayer } from "../state/scenarioPlayer";
+import { useFailsafe } from "../state/failsafe";
 import { Pressable } from "./ui";
 
 export function NarrationOverlay() {
@@ -32,6 +33,13 @@ export function NarrationOverlay() {
   const setNarrationVisible = useScenarioPlayer((s) => s.setNarrationVisible);
   const next = useScenarioPlayer((s) => s.next);
   const togglePlay = useScenarioPlayer((s) => s.togglePlay);
+  // Task #48 (F-02): when the failsafe is up, the recorded backup must
+  // own the screen alone. The narration strip used z-[7800] vs the
+  // failsafe's z-[200], so the live narration + its Next button were
+  // painting on top of the recording. Short-circuit instead of fighting
+  // z-indexes — the live narration is meaningless once the live demo has
+  // been replaced by a pre-recorded take.
+  const failsafeMode = useFailsafe((s) => s.mode);
 
   // Hide whenever the player has nothing to say. "ready" is the loaded-
   // but-not-started state; we still hide there so the operator's first
@@ -39,7 +47,10 @@ export function NarrationOverlay() {
   // intro view.
   const beat = beats[idx];
   const shouldRender =
-    visible && beat && (status === "playing" || status === "paused" || status === "complete");
+    failsafeMode === "off" &&
+    visible &&
+    beat &&
+    (status === "playing" || status === "paused" || status === "complete");
 
   // Tick a redraw at ~10Hz so the per-beat progress bar advances
   // smoothly without the store re-rendering on every wall tick. The
