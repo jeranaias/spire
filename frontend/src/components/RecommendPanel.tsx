@@ -11,8 +11,8 @@
  * operator. The score is the same primitive a G-4 would use to choose
  * between "wait for the depot order" and "burn the expedite budget."
  */
-import { useEffect, useState } from "react";
-import { api, type RecommendActionsAsset, type RecommendedAction } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { api, ApiError, type RecommendActionsAsset, type RecommendedAction } from "../api";
 import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { Button, ErrorState, LoadingState, EmptyState } from "./ui";
@@ -34,10 +34,22 @@ const KIND_LABEL: Record<string, string> = {
 export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hideHeader?: boolean }) {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
+  // Task #133 — subscribe to the DDIL replay queue so a CANNIBALIZE
+  // approval that was queued under DISCONNECTED auto-flips its badge
+  // from "Queued · DDIL" to "Replayed" the moment the CommsControl
+  // drain removes its id from the store. Mirrors the pattern in
+  // CannibalizationTab so this Forecast surface tells the same DDIL
+  // story as the rest of the app.
+  const ddilQueue = useSpireStore((s) => s.ddilQueue);
+  const queuedIds = useMemo(() => new Set(ddilQueue.map((q) => q.id)), [ddilQueue]);
   const [data, setData] = useState<RecommendActionsAsset[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<string | null>(null);
   const [executed, setExecuted] = useState<Set<string>>(new Set());
+  // Task #133 — track per-row DDIL queue id so the button can render a
+  // "Queued · DDIL" badge while the local id is still in the global
+  // queue, and flip to "Replayed" once it drains.
+  const [queuedActions, setQueuedActions] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setData(null);
@@ -55,24 +67,35 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
       // Cannibalization is the only action with a real backend endpoint today;
       // expedite and cross-level surface their artifact and toast — production
       // wires them up to TMR/MILSTRIP submission paths.
-      // Walkthrough audit (CRITICAL): the POST didn't have a client-side
-      // timeout. Approve clicked during a Fly cold-start sat in
-      // 'Approval pending' for ~60s before nginx 502'd, freezing the row.
-      // 15s AbortController guarantees the button releases.
+      //
+      // Task #133 — route the propose POST through the DDIL-aware client
+      // (`api.pulse.cannibalizationPropose`) instead of a raw fetch. The
+      // interceptor applies LIMITED latency, INTERMITTENT packet drops,
+      // and DISCONNECTED queue-for-replay automatically; we branch on
+      // the structured ApiError it raises so the row's state and the
+      // operator-facing toast match the actual transport outcome (the
+      // raw fetch silently exited the "we work when comms are yellow"
+      // demo on this surface). 15s AbortController is preserved so a
+      // Fly cold-start can't freeze the button.
       if (action.kind === "cannibalize" && (action.artifact as any).recipient_sr) {
         const ctrl = new AbortController();
         const timer = window.setTimeout(() => ctrl.abort(), 15_000);
         try {
-          const r = await fetch("/api/pulse/cannibalization/propose", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(action.artifact),
-            signal: ctrl.signal,
-          });
-          if (!r.ok) {
-            const body = await r.text().catch(() => "");
-            throw new Error(`${r.status} ${r.statusText}: ${body.slice(0, 120)}`);
-          }
+          const artifact = action.artifact as {
+            recipient_sr: string;
+            donor_asset_id?: string;
+            donor_sr?: string;
+            nsn: string;
+          };
+          await api.pulse.cannibalizationPropose(
+            {
+              recipient_sr: artifact.recipient_sr,
+              donor_asset_id: artifact.donor_asset_id ?? "",
+              donor_sr: artifact.donor_sr,
+              nsn: artifact.nsn,
+            },
+            { signal: ctrl.signal },
+          );
         } finally {
           window.clearTimeout(timer);
         }
@@ -90,7 +113,49 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
         return n;
       });
     } catch (e) {
-      pushToast({ tone: "error", text: `Approval failed: ${formatApiError(e)}` });
+      const apiErr = e instanceof ApiError ? e : null;
+      const ddilTag = apiErr ? ((apiErr.body as any)?.ddil ?? null) : null;
+      const status = apiErr ? apiErr.status : 0;
+      if (ddilTag === "queued") {
+        // DDIL DISCONNECTED — interceptor pushed the write into the
+        // local replay queue. Mark the row as "Queued · DDIL"; the
+        // CommsControl drain will replay it on reconnect and the
+        // useMemo'd queuedIds will flip the badge to "Replayed"
+        // automatically. A global "All caught up" toast covers the
+        // batch summary, but the per-row badge tells the operator
+        // exactly which approval is in flight.
+        const localId = apiErr ? ((apiErr.body as any)?.local_id as string | undefined) : undefined;
+        setQueuedActions((prev) => ({ ...prev, [key]: localId ?? "" }));
+        setExecuted((prev) => {
+          const n = new Set(prev);
+          n.add(key);
+          return n;
+        });
+        pushToast({
+          tone: "warn",
+          text: `Comms denied — ${KIND_LABEL[action.kind]} for ${asset.asset_id} queued for replay${localId ? ` (${localId})` : ""}.`,
+          ttlMs: 5000,
+        });
+      } else if (ddilTag === "intermittent") {
+        // INTERMITTENT — wire dropped the request. Don't mark the row
+        // executed; the operator re-issues the approval to retry, which
+        // is the demo beat the DDIL spec asks for.
+        pushToast({
+          tone: "warn",
+          text: `Comms intermittent — ${KIND_LABEL[action.kind]} packet dropped on the wire. Re-issue the approval.`,
+          ttlMs: 5000,
+        });
+      } else if (status === 401) {
+        // Session expired mid-approval. Bounce out via the store's
+        // signOut bridge so the operator can sign back in and re-issue.
+        pushToast({
+          tone: "warn",
+          text: "Session expired · sign in again to re-issue the approval.",
+        });
+        useSpireStore.getState().signOut();
+      } else {
+        pushToast({ tone: "error", text: `Approval failed: ${formatApiError(e)}` });
+      }
     } finally {
       setPendingApproval(null);
     }
@@ -146,6 +211,8 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
             asset={asset}
             executed={executed}
             pendingApproval={pendingApproval}
+            queuedActions={queuedActions}
+            queuedIds={queuedIds}
             onApprove={approve}
           />
         ))}
@@ -158,11 +225,15 @@ function AssetActionGroup({
   asset,
   executed,
   pendingApproval,
+  queuedActions,
+  queuedIds,
   onApprove,
 }: {
   asset: RecommendActionsAsset;
   executed: Set<string>;
   pendingApproval: string | null;
+  queuedActions: Record<string, string>;
+  queuedIds: Set<string>;
   onApprove: (a: RecommendActionsAsset, act: RecommendedAction) => void;
 }) {
   if (asset.actions.length === 0) {
@@ -195,17 +266,47 @@ function AssetActionGroup({
           const done = executed.has(key);
           const pending = pendingApproval === key;
           const color = KIND_COLOR[action.kind] ?? "var(--color-text-secondary)";
+          // Task #133 — DDIL-aware row state. A queued local id that is
+          // still in the global ddilQueue renders as "Queued · DDIL"
+          // (warning border); once CommsControl drains the queue the
+          // local id falls out and the badge auto-flips to "Replayed"
+          // (success border) with no extra useEffect.
+          const queuedLocalId = queuedActions[key];
+          const stillQueued = queuedLocalId !== undefined && queuedLocalId !== "" && queuedIds.has(queuedLocalId);
+          const wasReplayed = queuedLocalId !== undefined && !stillQueued;
+          const buttonBorder = stillQueued
+            ? "var(--color-warning)"
+            : done
+              ? "var(--color-success)"
+              : "var(--color-primary)";
+          const buttonColor = buttonBorder;
+          const buttonBg = stillQueued
+            ? "color-mix(in oklab, var(--color-warning) 12%, transparent)"
+            : done
+              ? "color-mix(in oklab, var(--color-success-muted) 30%, transparent)"
+              : "transparent";
+          const buttonLabel = stillQueued
+            ? "Queued · DDIL"
+            : wasReplayed
+              ? "✓ Replayed"
+              : done
+                ? "✓ Approved"
+                : "Approve";
           return (
             <div
               key={i}
               className="flex items-center gap-3 rounded-sm border bg-[var(--color-surface)] px-3 py-2 transition-colors"
               style={{
-                borderColor: done
-                  ? "color-mix(in oklab, var(--color-success) 40%, var(--color-border))"
-                  : "var(--color-border)",
-                background: done
-                  ? "color-mix(in oklab, var(--color-success-muted) 18%, var(--color-surface))"
-                  : "var(--color-surface)",
+                borderColor: stillQueued
+                  ? "color-mix(in oklab, var(--color-warning) 50%, var(--color-border))"
+                  : done
+                    ? "color-mix(in oklab, var(--color-success) 40%, var(--color-border))"
+                    : "var(--color-border)",
+                background: stillQueued
+                  ? "color-mix(in oklab, var(--color-warning) 10%, var(--color-surface))"
+                  : done
+                    ? "color-mix(in oklab, var(--color-success-muted) 18%, var(--color-surface))"
+                    : "var(--color-surface)",
               }}
             >
               <span
@@ -242,14 +343,12 @@ function AssetActionGroup({
                 variant="secondary"
                 size="sm"
                 style={{
-                  borderColor: done ? "var(--color-success)" : "var(--color-primary)",
-                  color: done ? "var(--color-success)" : "var(--color-primary)",
-                  background: done
-                    ? "color-mix(in oklab, var(--color-success-muted) 30%, transparent)"
-                    : "transparent",
+                  borderColor: buttonBorder,
+                  color: buttonColor,
+                  background: buttonBg,
                 }}
               >
-                {done ? "✓ Approved" : "Approve"}
+                {buttonLabel}
               </Button>
             </div>
           );
