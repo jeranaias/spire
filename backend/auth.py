@@ -266,13 +266,18 @@ def me(request: Request) -> dict[str, Any]:
 
 # Path predicates — kept tight so we don't accidentally open a backend
 # surface. Static asset paths (mounted under `/assets`, `/favicon.svg`,
-# `/`) are always open. Everything under `/api/` requires auth EXCEPT the
-# `/api/auth/*` cluster which is the means of getting a session.
+# `/`) are always open. Everything under `/api/` requires auth EXCEPT
+# the `/api/auth/*` cluster (the means of getting a session) and the
+# bare `/api/system/status` health-discovery endpoint that container
+# healthchecks + uptime probes hit before any session exists.
 _OPEN_API_PREFIXES = ("/api/auth/",)
+_OPEN_API_EXACT = frozenset({"/api/system/status"})
 
 
 def _is_protected_api(path: str) -> bool:
     if not path.startswith("/api/"):
+        return False
+    if path in _OPEN_API_EXACT:
         return False
     for prefix in _OPEN_API_PREFIXES:
         if path.startswith(prefix):
