@@ -345,6 +345,237 @@ async def gcss_mc_sample(
 
 
 # ---------------------------------------------------------------------------
+# Sibling-system reference adapters — TC-AIMS-II, MIMMS, AESIP/LMP, GFEBS
+#
+# Task #166. These integration targets are documented as planned source-of-
+# record adapters alongside GCSS-MC. The frontend renders an integrations
+# subpage for each of them and that subpage needs a sample endpoint to
+# poll on its claimed cadence — without one, the page either bypasses the
+# DDIL interceptor entirely (no comms-degraded acknowledgement) or it
+# fakes a slice client-side (the integrity-of-claims posture this app is
+# built around forbids that).
+#
+# Every endpoint below follows the same contract as `gcss_mc_sample`:
+#   * carries a `_mock` block labeled REFERENCE IMPLEMENTATION so a
+#     downstream consumer cannot mistake it for a live link
+#   * sources its rows from the same canonical synthetic SPIRE dataset
+#     (no separate fixture to drift)
+#   * routes through the FastAPI app, which means jsonFetch picks it up
+#     and the DDIL middleware can intercept / latency-dramatize / deny
+# ---------------------------------------------------------------------------
+
+def _ref_mock_block(*, system: str, shape: str, sources: tuple[str, ...]) -> dict:
+    """Shared `_mock` block for sibling sample endpoints. Every adapter
+    response prints the same posture so a curl reviewer can be sure the
+    payload is reference-only no matter which target they hit."""
+    return {
+        "label": "REFERENCE IMPLEMENTATION",
+        "system": system,
+        "warning": (
+            f"This payload is shaped to match {system} but is sourced from "
+            "the SPIRE synthetic dataset. No live connection is in place. "
+            "Do not treat as authoritative."
+        ),
+        "shape_version": shape,
+        "spec_sources": list(sources),
+    }
+
+
+@router.get("/tc-aims-ii/sample")
+async def tc_aims_ii_sample(
+    limit: int = Query(5, ge=1, le=50, description="Movement records per slice"),
+):
+    """TC-AIMS-II — Transportation Coordinators' Automated Information for
+    Movements System II. Joint movement-tracking system for unit moves,
+    cargo manifests, and TPFDD execution. Reference adapter emits movement-
+    shaped rows derived from SPIRE's deployed/garrison asset state."""
+    ds = get_dataset()
+    deployed = [a for a in ds.assets if (a.current_deployment_status or "") == "DEPLOYED"]
+    sample = deployed[:limit] if deployed else ds.assets[:limit]
+    rows = [
+        {
+            "MOVEMENT_ID": f"TC-{(a.unit_uic or 'XXX')[:6]}-{i:04d}",
+            "UIC": a.unit_uic,
+            "TAMCN": a.tamcn,
+            "SERIAL_NO": a.serial_number,
+            "NSN": a.nsn,
+            "ORIGIN_GEOLOC": a.location or "GARRISON",
+            "DEST_GEOLOC": "DEPLOYED" if (a.current_deployment_status or "") == "DEPLOYED" else "GARRISON",
+            "POE": "NORVA",
+            "POD": "BAHRAIN",
+            "MODE": "SEALIFT",
+            "CARGO_CATEGORY": "ROLLING_STOCK",
+            "MANIFEST_STATUS": "MANIFESTED" if i % 3 else "STAGED",
+            "STATUS_DATE": (datetime.now(timezone.utc) - timedelta(hours=i)).date().isoformat(),
+        }
+        for i, a in enumerate(sample, start=1)
+    ]
+    return {
+        "_mock": _ref_mock_block(
+            system="TC-AIMS-II",
+            shape="spire-tc-aims-ii-adapter/0.1.0",
+            sources=(
+                "USTRANSCOM Joint Deployment Distribution Enterprise documentation",
+                "TC-AIMS II User's Manual (publicly-released training materials)",
+                "JP 4-09 Distribution Operations (movement-tracking nomenclature)",
+            ),
+        ),
+        "MOVEMENT_RECORDS": rows,
+        "totals_in_canonical_dataset": {
+            "deployed_assets": len(deployed),
+            "garrison_assets": sum(
+                1 for a in ds.assets if (a.current_deployment_status or "") != "DEPLOYED"
+            ),
+        },
+    }
+
+
+@router.get("/mimms/sample")
+async def mimms_sample(
+    limit: int = Query(5, ge=1, le=50, description="Daily readiness rows per slice"),
+):
+    """MIMMS — Marine Corps Integrated Maintenance Management System.
+    The readiness sub-component of GCSS-MC, called out separately here
+    because PM IRONSIDE evaluators have asked about it on its own. Slices
+    the per-day readiness rollup from the same canonical dataset."""
+    ds = get_dataset()
+    snaps = last_day_snapshots(ds)[:limit]
+    rows = [_readiness_status_row(s) for s in snaps]
+    return {
+        "_mock": _ref_mock_block(
+            system="MIMMS",
+            shape="spire-mimms-adapter/0.1.0",
+            sources=(
+                "MCO P4790.2 — MIMMS readiness reporting standards",
+                "USMC EOH_STAT code set (MC / PMC / NMCM / NMCS)",
+            ),
+        ),
+        "MIMMS_DAILY_READINESS": rows,
+        "totals_in_canonical_dataset": {
+            "MIMMS_DAILY_READINESS_today": len(last_day_snapshots(ds)),
+        },
+    }
+
+
+@router.get("/aesip-lmp/sample")
+async def aesip_lmp_sample(
+    limit: int = Query(5, ge=1, le=50, description="Material-master rows per slice"),
+):
+    """AESIP / LMP — Army Enterprise Systems Integration Program is the
+    hub the Army's Logistics Modernization Program (LMP) projects through.
+    SPIRE consumes AESIP material-master and order-status feeds as a
+    parallel adapter to GCSS-MC for joint readiness rollups. Reference
+    payload is sourced from the same synthetic dataset for now."""
+    ds = get_dataset()
+    sample_assets = ds.assets[:limit]
+    rows = [
+        {
+            "MATERIAL_NUMBER": a.nsn,
+            "PLANT": (a.unit_uic or "USA0")[:4],
+            "DESCRIPTION": a.nomenclature,
+            "MATERIAL_TYPE": "FERT",
+            "BASE_UOM": "EA",
+            "STORAGE_LOCATION": a.location or "MAIN",
+            "VALUATION_CLASS": "3001",
+            "STOCK_TYPE": "UNRESTRICTED",
+            "QTY_ON_HAND": 1,
+            "READINESS_LINK_TAMCN": a.tamcn,
+        }
+        for a in sample_assets
+    ]
+    open_orders = [
+        {
+            "PO_NUMBER": (req.document_number or "")[:14],
+            "MATERIAL_NUMBER": req.nsn,
+            "QTY": req.qty_ordered,
+            "DLA_STATUS_CODE": req.current_status,
+            "RDD": (
+                req.received_date.isoformat()
+                if req.received_date and hasattr(req.received_date, "isoformat")
+                else None
+            ),
+        }
+        for s in ds.srs
+        for req in s.requisitions
+        if req.received_date is None
+    ][: limit * 2]
+    return {
+        "_mock": _ref_mock_block(
+            system="AESIP / LMP",
+            shape="spire-aesip-lmp-adapter/0.1.0",
+            sources=(
+                "AR 700-127 Integrated Logistics Support",
+                "LMP Functional Description (publicly-released Army training materials)",
+                "SAP ERP material-master conventions (FERT / ROH / HAWA)",
+            ),
+        ),
+        "MATERIAL_MASTER": rows,
+        "PURCHASE_ORDERS_OPEN": open_orders,
+        "totals_in_canonical_dataset": {
+            "MATERIAL_MASTER": len(ds.assets),
+            "PURCHASE_ORDERS_OPEN": sum(
+                1 for s in ds.srs for r in s.requisitions if r.received_date is None
+            ),
+        },
+    }
+
+
+@router.get("/gfebs/sample")
+async def gfebs_sample(
+    limit: int = Query(5, ge=1, le=50, description="Funding-line rows per slice"),
+):
+    """GFEBS — General Fund Enterprise Business System. Army's general-
+    fund financial system (SAP). SPIRE's planned read of GFEBS is the
+    funding-line / commitment / obligation view that lets a J4 see whether
+    the parts a deadlined asset needs are funded as well as ordered.
+    Reference payload uses the synthetic requisition stream."""
+    ds = get_dataset()
+    open_reqs = [
+        r for s in ds.srs for r in s.requisitions if r.received_date is None
+    ][: limit * 3]
+    rows = []
+    for i, r in enumerate(open_reqs, start=1):
+        unit_cost = float(getattr(r, "unit_cost", 0.0) or 0.0)
+        qty = int(getattr(r, "qty_ordered", 1) or 1)
+        commit = round(unit_cost * qty, 2)
+        rows.append(
+            {
+                "DOC_NO": r.document_number,
+                "FUND": "97-2026/2027",
+                "FUNDS_CENTER": (r.sr_number or "FCXXX")[:8],
+                "FUNCTIONAL_AREA": "121A",
+                "COMMITMENT_ITEM": "2620",
+                "WBS_ELEMENT": f"WBS-{i:05d}",
+                "OBLIGATION_USD": commit,
+                "DISBURSEMENT_USD": 0.0 if i % 4 else commit,
+                "POSTING_DATE": (
+                    r.ordered_date.isoformat()
+                    if r.ordered_date and hasattr(r.ordered_date, "isoformat")
+                    else None
+                ),
+            }
+        )
+    return {
+        "_mock": _ref_mock_block(
+            system="GFEBS",
+            shape="spire-gfebs-adapter/0.1.0",
+            sources=(
+                "DFAS / OUSD(C) DoD Financial Management Regulation Vol 6A",
+                "GFEBS Functional Reference Guide (publicly-released Army materials)",
+                "Standard Financial Information Structure (SFIS) accounting strings",
+            ),
+        ),
+        "FUNDING_LINES_OPEN": rows,
+        "totals_in_canonical_dataset": {
+            "FUNDING_LINES_OPEN": len(open_reqs),
+            "FUNDING_LINES_OBLIGATED_USD": round(
+                sum(r["OBLIGATION_USD"] for r in rows), 2
+            ),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # T6 — GCSS-MC export adapter
 #
 # Emit the synthetic dataset back out in the *exact* shape of the real

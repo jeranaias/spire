@@ -33,15 +33,19 @@ import { Link, useParams } from "react-router-dom";
 import { ErrorState, LoadingState, Pressable } from "../components/ui";
 import {
   api,
-  ApiError,
   type DdilMode,
   type GcssMcCoverageSummary,
   type GcssMcDictionary,
   type GcssMcDictionaryColumn,
   type GcssMcDictionarySection,
   type GcssMcSamplePayload,
+  type SiblingSamplePayload,
 } from "../api";
 import { formatApiError } from "../api-retry";
+import {
+  useSamplePolling,
+  type SampleStatus,
+} from "../hooks/useSamplePolling";
 import { useSpireStore } from "../state/store";
 
 // Sample payload shape — re-exported alias so the rest of the file reads
@@ -55,106 +59,45 @@ type SamplePayload = GcssMcSamplePayload;
 const SAMPLE_REFRESH_INTERVAL_S = 30;
 
 export function IntegrationsView() {
-  // Route is /integrations/gcss-mc — the slug is fixed for now (only one
-  // adapter contract exists), but plumbing the param keeps us ready for
-  // /integrations/palantir, /integrations/magtf-ii etc. without churn.
+  // Route is /integrations/:system. GCSS-MC carries the rich field-
+  // mapping + dictionary surface; the sibling integrations (TC-AIMS-II,
+  // MIMMS, AESIP/LMP, GFEBS) render the lighter reference-adapter
+  // contract page that still honors the SATCOM-denial drill end-to-end
+  // (Task #166).
   const params = useParams<{ system?: string }>();
   const system = (params.system || "gcss-mc").toLowerCase();
-  if (system !== "gcss-mc") {
-    return (
-      <ErrorState
-        title="Adapter not implemented"
-        description={`No reference adapter exists yet for "${system}". GCSS-MC is the only system-of-record contract documented in this build.`}
-      />
-    );
-  }
-  return <GcssMcContractPage />;
+  if (system === "gcss-mc") return <GcssMcContractPage />;
+  const sibling = SIBLING_INTEGRATIONS[system];
+  if (sibling) return <SiblingContractPage spec={sibling} />;
+  return (
+    <ErrorState
+      title="Adapter not implemented"
+      description={`No reference adapter exists yet for "${system}". The documented targets are GCSS-MC, TC-AIMS-II, MIMMS, AESIP/LMP, and GFEBS.`}
+    />
+  );
 }
 
-// State of the sample-endpoint roundtrip, including the DDIL-specific
-// shapes ("session expired" and "comms denied · no cache") that the page
-// needs to render distinctly from a generic backend failure.
-type SampleStatus =
-  | "idle"
-  | "auth_required"
-  | "ddil_no_cache"
-  | "error";
-
 function GcssMcContractPage() {
-  const [sample, setSample] = useState<SamplePayload | null>(null);
-  const [status, setStatus] = useState<SampleStatus>("idle");
-  const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  // Tracks the wall-clock deadline of the next refresh so the countdown
-  // remains correct across a tab-away/return — the 1Hz tick recomputes
-  // from this value rather than incrementing a counter that would freeze
-  // when the tab loses focus.
-  const [nextRefreshAt, setNextRefreshAt] = useState<number>(
-    () => Date.now() + SAMPLE_REFRESH_INTERVAL_S * 1000,
-  );
-  // Bumps every time a fresh fetch completes so the SampleEndpointSection
-  // can flash its "just refreshed" indicator without us re-deriving from
-  // the payload itself (the payload bytes are nearly identical between
-  // polls in the synthetic dataset).
-  const [refreshTick, setRefreshTick] = useState<number>(0);
-
   // DDIL state lives in the global store. Reading both fields keeps the
   // comms-degraded banner reactive to the operator flipping the topbar
   // switch mid-page — the very drill this page is supposed to honor.
   const ddilMode = useSpireStore((s) => s.ddilMode);
   const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const runFetch = async () => {
-      try {
-        const payload = await api.system.gcssMcSample(3);
-        if (cancelled) return;
-        setSample(payload);
-        setStatus("idle");
-        setErrorDetail(null);
-        setRefreshTick((n) => n + 1);
-      } catch (err) {
-        if (cancelled) return;
-        if (err instanceof ApiError && err.status === 401) {
-          // Session expired — surface a clean "re-tap your CAC" panel
-          // instead of dumping the literal "HTTP 401: {detail:...}"
-          // string the old fetch used to bleed into the page (P1-6).
-          // The global UnauthenticatedBridge will also navigate to
-          // /auth; this UI is the safety net if the bridge isn't
-          // mounted (e.g. test harness, embedded preview).
-          setStatus("auth_required");
-          setErrorDetail(null);
-        } else if (err instanceof ApiError && err.status === 0) {
-          // DDIL interceptor served a structured "no cached data" /
-          // "queued for replay" response. Render the comms banner +
-          // a calm posture line, not a red 5xx.
-          setStatus("ddil_no_cache");
-          setErrorDetail(formatApiError(err));
-        } else {
-          setStatus("error");
-          setErrorDetail(formatApiError(err));
-        }
-      } finally {
-        if (!cancelled) {
-          setNextRefreshAt(Date.now() + SAMPLE_REFRESH_INTERVAL_S * 1000);
-        }
-      }
-    };
-
-    runFetch();
-    const interval = window.setInterval(runFetch, SAMPLE_REFRESH_INTERVAL_S * 1000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  const refreshNow = () => {
-    // Force the next interval tick to fire on the next animation frame
-    // by collapsing the deadline. Cheaper than tearing down the effect.
-    setNextRefreshAt(Date.now());
-  };
+  // Polling moved into useSamplePolling (Task #166) so every sibling
+  // integrations page can re-use the exact same DDIL-aware loop instead
+  // of copy-pasting the GCSS-MC handler.
+  const {
+    data: sample,
+    status,
+    errorDetail,
+    nextRefreshAt,
+    refreshTick,
+    refreshNow,
+  } = useSamplePolling<GcssMcSamplePayload>({
+    fetcher: () => api.system.gcssMcSample(3),
+    intervalSeconds: SAMPLE_REFRESH_INTERVAL_S,
+  });
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--color-bg)]">
@@ -1634,5 +1577,415 @@ function SubCard({
       </div>
       <div className="spire-body">{body}</div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sibling integrations subpages — TC-AIMS-II, MIMMS, AESIP/LMP, GFEBS
+//
+// Task #166. Before this lane, /integrations/<anything-but-gcss-mc> hit a
+// hardcoded "Adapter not implemented" error state. The integration story
+// SPIRE has been advertising names four other planned source-of-record
+// adapters and a presenter who flipped Comms to LIMITED / INTERMITTENT /
+// DISCONNECTED on the missing pages saw nothing — no comms-degraded
+// banner, no polling cadence, no clean 401 handling — because the page
+// itself didn't exist.
+//
+// These subpages are the lighter sibling of the GCSS-MC page: a header,
+// the comms-posture banner, a polling-cadence callout, and the sample
+// endpoint. The same `useSamplePolling` hook that drives GCSS-MC drives
+// every subpage, so DDIL acknowledgement, the wall-clock countdown, the
+// "re-tap your CAC" panel for 401, and the "comms denied · no cache"
+// surface for a structured DDIL response are guaranteed to behave
+// identically across every integration target.
+// ---------------------------------------------------------------------------
+
+interface SiblingIntegrationSpec {
+  /** Route slug (also `params.system`). */
+  slug: string;
+  /** Short SPIRE label — appears in the page header. */
+  shortName: string;
+  /** Full system name spelled out for an evaluator who isn't a logistician. */
+  longName: string;
+  /** Single-paragraph plain-language description of what this system is
+   * and what SPIRE intends to read from it. */
+  description: string;
+  /** Curl-style endpoint path printed in the sample-endpoint card. Always
+   * /api/integrations/<slug>/sample for these — kept as a string so the
+   * card and the fetcher cannot drift. */
+  endpointPath: string;
+  /** Polling cadence in seconds. Most adapters claim 30s. */
+  intervalSeconds: number;
+  /** Sample-endpoint fetcher. Always routes through jsonFetch so the
+   * DDIL interceptor applies. */
+  fetcher: () => Promise<SiblingSamplePayload>;
+  /** Names of the table keys to render in the sample slice. Order is the
+   * order they appear in the sample-endpoint card. */
+  tableKeys: string[];
+  /** Per-target spec sources — the public DoD documentation that justifies
+   * the field shape. Re-prints in the sample-endpoint card so a reviewer
+   * can verify the contract without leaving the page. */
+  specSources: string[];
+}
+
+const SIBLING_INTEGRATIONS: Record<string, SiblingIntegrationSpec> = {
+  "tc-aims-ii": {
+    slug: "tc-aims-ii",
+    shortName: "TC-AIMS-II",
+    longName: "Transportation Coordinators' Automated Information for Movements System II",
+    description:
+      "Joint movement-tracking system for unit moves, cargo manifests, and TPFDD execution. SPIRE intends to read TC-AIMS-II to correlate readiness against in-theater movement state — a deadlined asset on a sealift manifest is a different decision than one in garrison.",
+    endpointPath: "/api/integrations/tc-aims-ii/sample",
+    intervalSeconds: SAMPLE_REFRESH_INTERVAL_S,
+    fetcher: () => api.system.tcAimsIiSample(3),
+    tableKeys: ["MOVEMENT_RECORDS"],
+    specSources: [
+      "USTRANSCOM Joint Deployment Distribution Enterprise documentation",
+      "TC-AIMS II User's Manual (publicly-released training materials)",
+      "JP 4-09 Distribution Operations (movement-tracking nomenclature)",
+    ],
+  },
+  "mimms": {
+    slug: "mimms",
+    shortName: "MIMMS",
+    longName: "Marine Corps Integrated Maintenance Management System",
+    description:
+      "The readiness sub-component of GCSS-MC, called out separately because PM-side evaluators have asked SPIRE to defend its MIMMS posture on its own. The slice is the per-day EOH_STAT readiness rollup; the cadence and DDIL-handling story matches GCSS-MC's MIMMS_DAILY_READINESS lane.",
+    endpointPath: "/api/integrations/mimms/sample",
+    intervalSeconds: SAMPLE_REFRESH_INTERVAL_S,
+    fetcher: () => api.system.mimmsSample(5),
+    tableKeys: ["MIMMS_DAILY_READINESS"],
+    specSources: [
+      "MCO P4790.2 — MIMMS readiness reporting standards",
+      "USMC EOH_STAT code set (MC / PMC / NMCM / NMCS)",
+    ],
+  },
+  "aesip-lmp": {
+    slug: "aesip-lmp",
+    shortName: "AESIP / LMP",
+    longName: "Army Enterprise Systems Integration Program · Logistics Modernization Program",
+    description:
+      "AESIP is the integration hub the Army's LMP projects through. SPIRE consumes AESIP material-master and order-status feeds as a parallel adapter to GCSS-MC, so a joint readiness rollup can compare USMC and Army parts-on-order without leaving the surface.",
+    endpointPath: "/api/integrations/aesip-lmp/sample",
+    intervalSeconds: SAMPLE_REFRESH_INTERVAL_S,
+    fetcher: () => api.system.aesipLmpSample(3),
+    tableKeys: ["MATERIAL_MASTER", "PURCHASE_ORDERS_OPEN"],
+    specSources: [
+      "AR 700-127 Integrated Logistics Support",
+      "LMP Functional Description (publicly-released Army training materials)",
+      "SAP ERP material-master conventions (FERT / ROH / HAWA)",
+    ],
+  },
+  "gfebs": {
+    slug: "gfebs",
+    shortName: "GFEBS",
+    longName: "General Fund Enterprise Business System",
+    description:
+      "Army's general-fund financial system (SAP). SPIRE's planned read of GFEBS is the funding-line / commitment / obligation view that lets a J4 see whether the parts a deadlined asset needs are funded as well as ordered — ordered-but-unfunded is a real failure mode SPIRE wants to surface.",
+    endpointPath: "/api/integrations/gfebs/sample",
+    intervalSeconds: SAMPLE_REFRESH_INTERVAL_S,
+    fetcher: () => api.system.gfebsSample(5),
+    tableKeys: ["FUNDING_LINES_OPEN"],
+    specSources: [
+      "DFAS / OUSD(C) DoD Financial Management Regulation Vol 6A",
+      "GFEBS Functional Reference Guide (publicly-released Army materials)",
+      "Standard Financial Information Structure (SFIS) accounting strings",
+    ],
+  },
+};
+
+function SiblingContractPage({ spec }: { spec: SiblingIntegrationSpec }) {
+  const ddilMode = useSpireStore((s) => s.ddilMode);
+  const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
+  const {
+    data,
+    status,
+    errorDetail,
+    nextRefreshAt,
+    refreshTick,
+    refreshNow,
+  } = useSamplePolling<SiblingSamplePayload>({
+    fetcher: spec.fetcher,
+    intervalSeconds: spec.intervalSeconds,
+    // Re-arm the loop when the route param changes so navigating between
+    // /integrations/tc-aims-ii and /integrations/gfebs doesn't keep
+    // pointing the previous spec's fetcher at the new page.
+    deps: [spec.slug],
+  });
+
+  return (
+    <div
+      className="h-full overflow-y-auto bg-[var(--color-bg)]"
+      data-testid={`integrations-sibling-${spec.slug}`}
+    >
+      <UnbuiltBanner sticky />
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
+        <SiblingHeader spec={spec} />
+        <CommsPostureBanner
+          mode={ddilMode}
+          servedFromCache={
+            ddilLastCacheHit
+              ? { cachedAt: ddilLastCacheHit.cachedAt }
+              : null
+          }
+        />
+        <SiblingSampleSection
+          spec={spec}
+          sample={data}
+          status={status}
+          errorDetail={errorDetail}
+          nextRefreshAt={nextRefreshAt}
+          refreshTick={refreshTick}
+          onRefreshNow={refreshNow}
+          ddilMode={ddilMode}
+        />
+        <SiblingFooter spec={spec} />
+      </div>
+    </div>
+  );
+}
+
+function SiblingHeader({ spec }: { spec: SiblingIntegrationSpec }) {
+  return (
+    <header className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="font-mono text-xs uppercase tracking-widest text-[var(--color-primary)]">
+            Adapter Contract · System of Record
+          </div>
+          <div className="mt-1 font-mono text-2xl font-semibold tracking-wide text-[var(--color-text)]">
+            {spec.shortName}
+          </div>
+          <div className="mt-0.5 spire-body-muted">{spec.longName}</div>
+        </div>
+        <PreAtoStamp />
+      </div>
+      <p className="mt-4 spire-body">{spec.description}</p>
+      <p className="mt-3 spire-body">
+        <span className="font-semibold text-[var(--color-text)]">
+          What is built today:
+        </span>{" "}
+        a reference sample endpoint that emits {spec.shortName}-shaped
+        rows out of the SPIRE synthetic dataset, polled on a{" "}
+        <span className="font-mono text-[var(--color-primary)]">
+          {spec.intervalSeconds}s
+        </span>{" "}
+        cadence so a presenter can see the contract roundtrip live. SPIRE
+        never writes upstream and there is no live {spec.shortName} link.
+      </p>
+    </header>
+  );
+}
+
+function SiblingSampleSection({
+  spec,
+  sample,
+  status,
+  errorDetail,
+  nextRefreshAt,
+  refreshTick,
+  onRefreshNow,
+  ddilMode,
+}: {
+  spec: SiblingIntegrationSpec;
+  sample: SiblingSamplePayload | null;
+  status: SampleStatus;
+  errorDetail: string | null;
+  nextRefreshAt: number;
+  refreshTick: number;
+  onRefreshNow: () => void;
+  ddilMode: DdilMode;
+}) {
+  const [copied, setCopied] = useState(false);
+  const curl =
+    `curl -sS -b "$SPIRE_COOKIE_JAR" \\\n` +
+    `     "$SPIRE_BASE_URL${spec.endpointPath}?limit=3" \\\n` +
+    `  | jq '.${spec.tableKeys[0] ?? "_mock"}'`;
+
+  // 1Hz countdown ticker — same approach as the GCSS-MC sample card so
+  // the count survives a tab-away/return.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const secondsToNext = Math.max(0, Math.round((nextRefreshAt - now) / 1000));
+  const justRefreshed =
+    refreshTick > 0 &&
+    now - (nextRefreshAt - spec.intervalSeconds * 1000) < 3000;
+
+  return (
+    <Section
+      title="Sample endpoint"
+      subtitle={`Contract-shape roundtrip. Hits the canonical SPIRE synthetic dataset and emits ${spec.shortName}-shaped rows. The endpoint reads SPIRE's own dataset — it is not querying ${spec.shortName}.`}
+    >
+      <SectionUnbuiltStrip />
+      <div className="rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-primary)_4%,var(--color-bg))] p-3 font-mono text-xs">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="uppercase tracking-widest text-[var(--color-text-muted)]">
+            GET {spec.endpointPath}
+          </span>
+          <Pressable
+            block={false}
+            onClick={() => {
+              navigator.clipboard.writeText(curl).then(
+                () => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                },
+                () => {
+                  /* clipboard denied — silent */
+                },
+              );
+            }}
+            className="!min-h-0 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+          >
+            {copied ? "Copied" : "Copy curl"}
+          </Pressable>
+        </div>
+        <pre className="overflow-x-auto whitespace-pre text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+{curl}
+        </pre>
+      </div>
+
+      <div
+        className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[11px]"
+        data-testid={`sibling-refresh-cadence-${spec.slug}`}
+      >
+        <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
+          <span
+            aria-hidden
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{
+              background: justRefreshed
+                ? "var(--color-success)"
+                : ddilMode === "DISCONNECTED"
+                ? "var(--color-danger)"
+                : ddilMode !== "CONNECTED"
+                ? "var(--color-warning)"
+                : "var(--color-text-muted)",
+            }}
+          />
+          <span className="uppercase tracking-widest">
+            Polling cadence · {spec.intervalSeconds}s
+          </span>
+          <span className="text-[var(--color-text)]">
+            · next refresh in{" "}
+            <span className="tabular-nums">{secondsToNext}s</span>
+          </span>
+        </div>
+        <Pressable
+          block={false}
+          onClick={onRefreshNow}
+          className="!min-h-0 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-2.5 py-1 text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
+          aria-label="Refresh sample slice now"
+        >
+          Refresh now
+        </Pressable>
+      </div>
+
+      {status === "auth_required" && (
+        <div className="mt-3">
+          <ErrorState
+            title="Session expired"
+            description={`Your sign-in session timed out. Re-tap your CAC to resume the ${spec.shortName} sample fetch.`}
+            secondaryAction={
+              <Link
+                to="/auth"
+                className="inline-flex items-center justify-center rounded-sm border border-[var(--color-primary)] bg-[var(--color-primary)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-[var(--color-on-primary,white)] hover:opacity-90"
+              >
+                Re-tap CAC
+              </Link>
+            }
+          />
+        </div>
+      )}
+
+      {status === "ddil_no_cache" && !sample && (
+        <div className="mt-3">
+          <ErrorState
+            title="Sample slice unavailable · comms denied"
+            description={`SPIRE is operating DISCONNECTED and has no cached ${spec.shortName} slice yet. Restore comms or pull the slice once while CONNECTED to seed the cache.`}
+            detail={errorDetail ?? undefined}
+            onRetry={onRefreshNow}
+            retryLabel="Try again"
+          />
+        </div>
+      )}
+
+      {status === "error" && !sample && (
+        <div className="mt-3">
+          <ErrorState
+            title="Sample endpoint unreachable"
+            description="The reference adapter could not be queried. The backend may be cycling or the dataset is still loading."
+            detail={errorDetail ?? undefined}
+            onRetry={onRefreshNow}
+          />
+        </div>
+      )}
+
+      {status === "idle" && !sample && (
+        <div className="mt-3">
+          <LoadingState
+            size="inline"
+            label={`Pulling ${spec.shortName} reference slice…`}
+          />
+        </div>
+      )}
+
+      {sample && (
+        <div className="mt-3 grid gap-3">
+          <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-[var(--color-text-muted)] uppercase tracking-wider">
+            <span>
+              shape{" "}
+              <span className="text-[var(--color-primary)]">
+                {sample._mock.shape_version}
+              </span>
+            </span>
+            {sample.totals_in_canonical_dataset && (
+              <span>
+                total rows in canonical set ·{" "}
+                {Object.entries(sample.totals_in_canonical_dataset)
+                  .map(([k, v]) => `${k}=${(v as number).toLocaleString()}`)
+                  .join(", ")}
+              </span>
+            )}
+            {(status === "ddil_no_cache" || ddilMode === "DISCONNECTED") && (
+              <span
+                className="rounded-sm border px-1.5 py-0.5 text-[10px]"
+                style={{
+                  borderColor: "var(--color-warning)",
+                  color: "var(--color-warning)",
+                }}
+              >
+                showing cached slice · live fetch denied
+              </span>
+            )}
+          </div>
+          {spec.tableKeys.map((tk) => (
+            <SampleTable
+              key={tk}
+              title={tk}
+              rows={(sample[tk] as Record<string, unknown>[]) || []}
+            />
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function SiblingFooter({ spec }: { spec: SiblingIntegrationSpec }) {
+  return (
+    <footer className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-xs font-mono leading-relaxed text-[var(--color-text-muted)]">
+      <div className="mb-1 uppercase tracking-widest text-[var(--color-text-secondary)]">
+        Spec sources · public {spec.shortName} / DoD documentation
+      </div>
+      <ul className="list-inside list-disc">
+        {spec.specSources.map((s) => (
+          <li key={s}>{s}</li>
+        ))}
+      </ul>
+    </footer>
   );
 }

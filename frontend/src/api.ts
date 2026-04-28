@@ -467,6 +467,36 @@ export const api = {
         undefined,
         false,
       ),
+    // Task #166 — sibling integrations subpages (TC-AIMS-II, MIMMS,
+    // AESIP/LMP, GFEBS) reach for these. Each routes through jsonFetch
+    // so the DDIL interceptor applies on every integration page, not
+    // just GCSS-MC. The shared `_mock` block on every payload labels
+    // it REFERENCE IMPLEMENTATION so a curl reviewer cannot mistake
+    // any of them for a live source-of-record link.
+    tcAimsIiSample: (limit = 3) =>
+      jsonFetch<SiblingSamplePayload>(
+        `/integrations/tc-aims-ii/sample?limit=${limit}`,
+        undefined,
+        false,
+      ),
+    mimmsSample: (limit = 3) =>
+      jsonFetch<SiblingSamplePayload>(
+        `/integrations/mimms/sample?limit=${limit}`,
+        undefined,
+        false,
+      ),
+    aesipLmpSample: (limit = 3) =>
+      jsonFetch<SiblingSamplePayload>(
+        `/integrations/aesip-lmp/sample?limit=${limit}`,
+        undefined,
+        false,
+      ),
+    gfebsSample: (limit = 3) =>
+      jsonFetch<SiblingSamplePayload>(
+        `/integrations/gfebs/sample?limit=${limit}`,
+        undefined,
+        false,
+      ),
     // Task #177 — GCSS-MC schema-fidelity work. Backs the Field Dictionary
     // section that proves SPIRE's coverage against the real 163-column
     // schema. Pulled once on the Integrations page, no polling needed.
@@ -936,6 +966,31 @@ export interface GcssMcSamplePayload {
   EQUIPMENT_REPAIR_ORDER: Record<string, unknown>[];
   SUPPLY_DOC: Record<string, unknown>[];
   totals_in_canonical_dataset: Record<string, number>;
+}
+
+// Task #166 — sibling integrations sample-endpoint payloads. Every page
+// shares the same `_mock` envelope shape so the integrity-of-claims story
+// (REFERENCE IMPLEMENTATION, not live) reads identically no matter which
+// adapter a curl reviewer hits. Per-target rows live under their canonical
+// table key (TC-AIMS movement records, MIMMS daily readiness, etc.).
+export interface SiblingMockBlock {
+  label: string;
+  system: string;
+  warning: string;
+  shape_version: string;
+  spec_sources: string[];
+}
+// All sibling adapters (TC-AIMS-II, MIMMS, AESIP/LMP, GFEBS) share the
+// same envelope: a `_mock` block, an optional totals-in-canonical-set
+// summary, and one or more table arrays keyed by their canonical name
+// (e.g. MOVEMENT_RECORDS, MIMMS_DAILY_READINESS, MATERIAL_MASTER,
+// FUNDING_LINES_OPEN). The view walks `tableKeys` from its spec map, so
+// a single index-signature type is the right shape — per-system
+// interfaces would force casts at every call site.
+export interface SiblingSamplePayload {
+  _mock: SiblingMockBlock;
+  totals_in_canonical_dataset?: Record<string, number>;
+  [tableKey: string]: unknown;
 }
 
 // Wave-1 lane #27 — GCSS-MC reference adapter freshness.
