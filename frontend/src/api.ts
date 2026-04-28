@@ -2389,14 +2389,72 @@ export interface JointLink16Header {
   messageCounts: Record<string, number>;
 }
 
+export interface JointLink16TrackBase {
+  messageNumber?: string;
+  label?: string;
+  trackNumber?: string;
+  tn?: string;
+  exerciseIndicator?: string;
+  trackQuality?: number;
+  identity?: string;
+  country?: string;
+  latitudeDegrees?: number;
+  longitudeDegrees?: number;
+  course?: number;
+  speedKnots?: number;
+}
+
+export interface JointLink16J35Track extends JointLink16TrackBase {
+  platformPlatformActivity?: string;
+  specificType?: string;
+  altitudeFeet?: number;
+  readinessC?: string;
+  callsign?: string;
+  uic?: string;
+}
+
+export interface JointLink16J33Track extends JointLink16TrackBase {
+  platform?: string;
+}
+
+export interface JointLink16J70Message {
+  messageNumber?: string;
+  trackNumber?: string;
+  tn?: string;
+  originatorJU?: string;
+  managementAction?: string;
+  linkStatus?: string;
+}
+
+export interface JointLink16J72Message {
+  messageNumber?: string;
+  primaryTN?: string;
+  secondaryTN?: string;
+  correlationType?: string;
+  originatorJU?: string;
+}
+
+export interface JointLink16J282Message {
+  messageNumber?: string;
+  trackNumber?: string;
+  tn?: string;
+  supplyClass?: string;
+  missionCapableRate?: number;
+  missionCapablePlatforms?: number;
+  totalPlatforms?: number;
+  readinessC?: string;
+  callsign?: string;
+  uic?: string;
+}
+
 export interface JointLink16Export {
   header: JointLink16Header;
   messages: {
-    J3_5_LandPointTrack: any[];
-    J3_3_SurfaceTrack: any[];
-    J7_0_TrackManagement: any[];
-    J7_2_TrackCorrelation: any[];
-    J28_2_LogisticsStatus: any[];
+    J3_5_LandPointTrack: JointLink16J35Track[];
+    J3_3_SurfaceTrack: JointLink16J33Track[];
+    J7_0_TrackManagement: JointLink16J70Message[];
+    J7_2_TrackCorrelation: JointLink16J72Message[];
+    J28_2_LogisticsStatus: JointLink16J282Message[];
   };
 }
 

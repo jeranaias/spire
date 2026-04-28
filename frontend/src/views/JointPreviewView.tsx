@@ -1,9 +1,9 @@
 /**
  * JointPreviewView — faux Navy / Joint J4 console rendering the SPIRE
- * OMS/UCI export. Lives at /joint/preview, opened in a new tab from the
- * "Push to Joint COP" topbar action so a judge can hold both windows
- * side-by-side and see SPIRE's data appearing coherently in a sister-
- * service shell.
+ * joint-COP exports. Lives at /joint/preview, opened in a new tab from
+ * the "Push to Joint COP" topbar action so a judge can hold both
+ * windows side-by-side and see SPIRE's data appearing coherently in a
+ * sister-service shell.
  *
  * Design intent: this is INTENTIONALLY not the SPIRE chrome. Different
  * banner, different colors (Navy steel-blue vs SPIRE primary), different
@@ -11,7 +11,22 @@
  * show the data is portable across services, so the shell has to feel
  * unfamiliar relative to the parent app.
  *
- * Task #79 — contested-fight survival pass:
+ * Task #145 — Link 16 partner view:
+ *  - Two adapter tabs at the top of the body: OMS/UCI (USAF Open Mission
+ *    Systems) and MIL-STD-6016 Link 16 (J-series). The conformance page
+ *    already advertises both; before this pass the partner view only
+ *    rendered OMS/UCI, so a Marine demoing JLTC to a Navy / joint judge
+ *    couldn't show the J-series traffic. Each tab keeps its own
+ *    last-good cache + pulled/published timestamps so flipping between
+ *    them never re-loads from scratch and never blurs the staleness
+ *    story.
+ *  - Hotline rollup is OMS/UCI-only by design: J-series messages don't
+ *    carry an Alert family, so synthesizing one would be inventing data.
+ *    On the Link 16 tab the strip is replaced with a J-series counts
+ *    pill row that reads as the same kind of glance — message families
+ *    + count + readiness rollup from J28.2.
+ *
+ * Task #79 — contested-fight survival pass (still applies on both tabs):
  *  - SPIRE comms control surfaced on JLTC topbar (Limited/Intermittent/
  *    Disconnected). Drives `useSpireStore.ddilMode`; the API interceptor
  *    (registered in `main.tsx`) applies latency / loss / cache effects to
@@ -19,26 +34,43 @@
  *    app.
  *  - Auto-refresh: 30s default, 60s on LIMITED, suspended on DISCONNECTED
  *    (the page renders the last-good cache instead of hammering an
- *    unreachable backend).
+ *    unreachable backend). Polling is scoped to the *active* adapter
+ *    tab so the partner only spends bandwidth on the picture they're
+ *    actually looking at.
  *  - "What's hot now" rollup (worst alert / worst MC unit / C3-C4 count /
  *    active alert count) so a Marine glancing for ≤5 seconds gets ground
  *    truth without scrolling.
  *  - Stale stripe when DISCONNECTED with the last-good pull T-N seconds
- *    so the operator can never confuse cached data for live truth.
+ *    so the operator can never confuse cached data for live truth. The
+ *    stripe reads from the *active* tab's last-good pull so flipping
+ *    tabs never makes a fresher number appear over a stale picture.
  *  - Legibility pass for projection at 30 ft (banner ≥18px bold; field
- *    values and table cells ≥14px).
+ *    values and table cells ≥14px). Link 16 tables inherit the same
+ *    `Table` component and the same 14px cell floor.
  *  - ErrorPanel: corrects the misleading "sign in as Security Manager"
  *    hint (any SECRET-cleared operator can pull) and surfaces a "Sign in
  *    to SPIRE" link specifically on 401.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, type JointOmsUciExport } from "../api";
+import {
+  api,
+  ApiError,
+  type JointLink16Export,
+  type JointLink16J282Message,
+  type JointOmsUciExport,
+} from "../api";
 import { ClassificationBannerStrip } from "../components/ClassificationBannerStrip";
 import { useSpireStore, type DdilMode } from "../state/store";
 
-interface State {
+// Both adapter tabs are kept in the same view so a partner can flip
+// between OMS/UCI and Link 16 without reopening the JLTC window or
+// losing the comms-state context. The tab id is a string union so we
+// can index the per-tab state dictionary type-safely.
+type AdapterTab = "omsUci" | "link16";
+
+interface AdapterState<T> {
   loading: boolean;
-  data: JointOmsUciExport | null;
+  data: T | null;
   error: string | null;
   errorStatus: number | null;
   pulledAt: number | null;
@@ -47,6 +79,17 @@ interface State {
   // pull moment, never overwritten by a cached pull, so the "Last good
   // pull" stripe stays honest across DISCONNECTED transitions.
   lastGoodPullAt: number | null;
+}
+
+function emptyAdapterState<T>(): AdapterState<T> {
+  return {
+    loading: true,
+    data: null,
+    error: null,
+    errorStatus: null,
+    pulledAt: null,
+    lastGoodPullAt: null,
+  };
 }
 
 const REFRESH_HINT = "Re-pull from SPIRE";
@@ -66,15 +109,22 @@ const POLL_CADENCE_MS: Record<DdilMode, number | null> = {
 export function JointPreviewView() {
   const ddilMode = useSpireStore((s) => s.ddilMode);
   const ddilLastCacheHit = useSpireStore((s) => s.ddilLastCacheHit);
-  const [s, setS] = useState<State>({
-    loading: true,
-    data: null,
-    error: null,
-    errorStatus: null,
-    pulledAt: null,
-    lastGoodPullAt: null,
-  });
-  const inflight = useRef(false);
+
+  // Each adapter has its own slot. Switching tabs preserves the other
+  // tab's last-good cache + pulled timestamp so a flip back doesn't
+  // re-show the loading panel and doesn't wipe the staleness story.
+  const [omsUci, setOmsUci] = useState<AdapterState<JointOmsUciExport>>(() =>
+    emptyAdapterState<JointOmsUciExport>(),
+  );
+  const [link16, setLink16] = useState<AdapterState<JointLink16Export>>(() =>
+    emptyAdapterState<JointLink16Export>(),
+  );
+  const [tab, setTab] = useState<AdapterTab>("omsUci");
+
+  // One in-flight gate per adapter so a slow OMS/UCI poll doesn't block
+  // the operator from kicking the Link 16 fetch (and vice versa).
+  const inflight = useRef<Record<AdapterTab, boolean>>({ omsUci: false, link16: false });
+
   // Tick the clock so the relative-time pills ("T-30s", "2 min stale")
   // re-render without each timestamp computation re-firing on every
   // setState. 1Hz is plenty — Marines aren't reading sub-second time.
@@ -84,23 +134,34 @@ export function JointPreviewView() {
     return () => window.clearInterval(id);
   }, []);
 
-  async function pull(opts: { quiet?: boolean } = {}) {
-    if (inflight.current) return;
-    inflight.current = true;
+  // Generic, typed per-adapter fetch helper. Each adapter has its own
+  // payload shape (JointOmsUciExport vs JointLink16Export) so the state
+  // setter is parameterised on T; no `any` casts needed to thread them
+  // through the same retry/cache-cursor/error logic.
+  async function pullOne<T>(
+    setter: React.Dispatch<React.SetStateAction<AdapterState<T>>>,
+    fetcher: () => Promise<T>,
+    opts: { quiet?: boolean },
+  ): Promise<void> {
     if (!opts.quiet) {
-      setS((prev) => ({ ...prev, loading: true, error: null, errorStatus: null }));
+      setter((prev) => ({
+        ...prev,
+        loading: true,
+        error: null,
+        errorStatus: null,
+      }));
     }
     // Snapshot the cache-hit cursor BEFORE the call so we can detect
     // whether the response we just got was served from the DDIL cache
     // (and therefore should NOT advance lastGoodPullAt).
     const cacheCursorBefore = useSpireStore.getState().ddilLastCacheHit;
     try {
-      const data = await api.joint.omsUci();
+      const data = await fetcher();
       const cacheCursorAfter = useSpireStore.getState().ddilLastCacheHit;
       const servedFromCache =
         cacheCursorAfter !== cacheCursorBefore && cacheCursorAfter !== null;
       const pulledAtMs = Date.now();
-      setS(() => ({
+      setter(() => ({
         loading: false,
         data,
         error: null,
@@ -119,46 +180,80 @@ export function JointPreviewView() {
         e instanceof ApiError && e.body && typeof e.body === "object"
           ? ((e.body as { detail?: { error?: string } }).detail || {}).error || e.message
           : (e as Error).message || "fetch failed";
-      setS((prev) => ({
+      setter((prev) => ({
         ...prev,
         loading: false,
         error: String(msg),
         errorStatus: status,
       }));
-    } finally {
-      inflight.current = false;
     }
   }
 
-  // Initial pull on mount.
+  async function pullAdapter(which: AdapterTab, opts: { quiet?: boolean } = {}) {
+    if (inflight.current[which]) return;
+    inflight.current[which] = true;
+    try {
+      if (which === "omsUci") {
+        await pullOne<JointOmsUciExport>(setOmsUci, () => api.joint.omsUci(), opts);
+      } else {
+        await pullOne<JointLink16Export>(setLink16, () => api.joint.link16(), opts);
+      }
+    } finally {
+      inflight.current[which] = false;
+    }
+  }
+
+  // Initial pull for the default tab on mount; the other tab waits to
+  // be opened so we don't burn bandwidth the partner didn't ask for.
   useEffect(() => {
-    void pull();
+    void pullAdapter("omsUci");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // When the operator flips to a tab whose adapter we've never pulled,
+  // kick a pull immediately so the new picture loads instead of
+  // showing a stale "loading…" skeleton from the initial state.
+  useEffect(() => {
+    const target = tab === "omsUci" ? omsUci : link16;
+    if (target.data == null && target.error == null && !target.loading) {
+      // We arrived on this tab with empty state and no error — start
+      // the first pull. (Loading is set true in the initial state, so
+      // we explicitly check `data == null && error == null` to avoid
+      // double-firing on the omsUci initial mount.)
+      void pullAdapter(tab);
+    } else if (target.data == null && !inflight.current[tab]) {
+      // First-ever entry to a tab while its slot is still in the
+      // emptyAdapterState `loading: true` shape. Kick the pull.
+      void pullAdapter(tab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   // Auto-refresh polling. Cadence is comms-state-aware. DISCONNECTED
   // suspends the interval entirely; transitioning out of DISCONNECTED
   // fires an immediate pull so the operator sees fresh data the moment
-  // the link comes back, not 30 seconds later.
+  // the link comes back, not 30 seconds later. Polling is scoped to
+  // the active tab — there's no point burning a refresh on a Link 16
+  // picture nobody's looking at, and the partner only sees one tab at
+  // a time anyway.
   const prevModeRef = useRef<DdilMode>(ddilMode);
   useEffect(() => {
     const prev = prevModeRef.current;
     prevModeRef.current = ddilMode;
-    // Reconnection edge — pull immediately.
+    // Reconnection edge — pull the active tab immediately.
     if (prev === "DISCONNECTED" && ddilMode !== "DISCONNECTED") {
-      void pull({ quiet: true });
+      void pullAdapter(tab, { quiet: true });
     }
     const cadence = POLL_CADENCE_MS[ddilMode];
     if (cadence == null) return;
     const id = window.setInterval(() => {
-      void pull({ quiet: true });
+      void pullAdapter(tab, { quiet: true });
     }, cadence);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ddilMode]);
+  }, [ddilMode, tab]);
 
-  // Compute "what's hot now" off the live data.
-  const hot = useMemo(() => computeHotline(s.data), [s.data]);
+  const active = tab === "omsUci" ? omsUci : link16;
 
   // Staleness math for the DISCONNECTED stripe and the topbar pills.
   // Two distinct pills (Task #146):
@@ -169,26 +264,62 @@ export function JointPreviewView() {
   //     Sourced from the dataset snapshot, distinct from the publish
   //     moment so we never lie about freshness.
   const isDisconnected = ddilMode === "DISCONNECTED";
-  const lastGoodAgeSec = s.lastGoodPullAt != null ? Math.max(0, Math.floor((nowMs - s.lastGoodPullAt) / 1000)) : null;
-  const pulledAgoSec = s.pulledAt != null ? Math.max(0, Math.floor((nowMs - s.pulledAt) / 1000)) : null;
+  const lastGoodAgeSec = active.lastGoodPullAt != null ? Math.max(0, Math.floor((nowMs - active.lastGoodPullAt) / 1000)) : null;
+  const pulledAgoSec = active.pulledAt != null ? Math.max(0, Math.floor((nowMs - active.pulledAt) / 1000)) : null;
+
   const ageSecOf = (iso: string | undefined): number | null => {
     if (!iso) return null;
     const t = Date.parse(iso);
     return Number.isFinite(t) ? Math.max(0, Math.floor((nowMs - t) / 1000)) : null;
   };
-  const publishedAgoSec = ageSecOf(s.data?.envelope.publishedAtUtc);
-  const asOfAgoSec = ageSecOf(s.data?.envelope.asOfUtc);
+
+  const publishedIso =
+    tab === "omsUci"
+      ? omsUci.data?.envelope.publishedAtUtc
+      : link16.data?.header.publishedAtUtc;
+  const publishedAgoSec = ageSecOf(publishedIso);
+
+  const asOfIso =
+    tab === "omsUci"
+      ? omsUci.data?.envelope.asOfUtc
+      : link16.data?.header.asOfUtc;
+  const asOfAgoSec = ageSecOf(asOfIso);
+
+  // Compute "what's hot now" off the OMS/UCI payload only — Link 16
+  // doesn't carry an Alert family, so synthesizing one would be
+  // inventing data. The strip hides itself on the Link 16 tab.
+  const hot = useMemo(() => computeHotline(omsUci.data), [omsUci.data]);
+
+  // Banner / footer envelope fields. Both adapters carry the same
+  // classification + releasability + operator, but the OMS/UCI envelope
+  // calls the field `envelope` while Link 16 uses `header`; squash to a
+  // common shape so the chrome doesn't have to branch on tab.
+  const activeClassification =
+    tab === "omsUci"
+      ? omsUci.data?.envelope.classification
+      : link16.data?.header.classification;
+  const activeOperator =
+    tab === "omsUci"
+      ? omsUci.data?.envelope.operator
+      : link16.data?.header.operator;
+  const activeSubscription =
+    tab === "omsUci"
+      ? omsUci.data?.envelope.subscriptionModel
+      : link16.data?.header.subscriptionModel;
+  const activeStandard =
+    tab === "omsUci" ? "OMS 2.4 / UCI 5.0" : "MIL-STD-6016G";
 
   // Layout: outer column flex pins the canonical CAPCO classification
   // strips to the very top and bottom of the viewport (DoDM 5200.01-V2
   // page-level marking, task #151). The Navy partner chrome — its own
-  // SECRET/REL header, JLTC topbar, hotline strip, body and operator
-  // footer — lives inside the flex-1 middle pane that scrolls. The
-  // strip is the canonical green CAPCO block (UNCLASSIFIED // DEMO DATA
-  // // NOT FOR OPERATIONAL USE) regardless of the Navy palette below;
-  // classification marking is service-agnostic and must be visible in
-  // the first frame on a 30-ft projector. No FPCON badge: the partner
-  // shell has no SPIRE session state to surface.
+  // SECRET/REL header, JLTC topbar, hotline / Link 16 counts strip,
+  // body and operator footer — lives inside the flex-1 middle pane
+  // that scrolls. The strip is the canonical green CAPCO block
+  // (UNCLASSIFIED // DEMO DATA // NOT FOR OPERATIONAL USE) regardless
+  // of the Navy palette below; classification marking is service-
+  // agnostic and must be visible in the first frame on a 30-ft
+  // projector. No FPCON badge: the partner shell has no SPIRE session
+  // state to surface.
   return (
     <div
       className="flex h-screen w-full flex-col"
@@ -208,34 +339,221 @@ export function JointPreviewView() {
         }}
       >
         <JointBanner
-          classification={s.data?.envelope.classification.marking ?? "SECRET"}
-          releasability={s.data?.envelope.classification.releasability ?? "REL TO USA, FVEY"}
+          classification={activeClassification?.marking ?? "SECRET"}
+          releasability={activeClassification?.releasability ?? "REL TO USA, FVEY"}
         />
         {isDisconnected && (
-          <StaleStripe lastGoodAgeSec={lastGoodAgeSec} cachedAt={ddilLastCacheHit?.cachedAt ?? s.lastGoodPullAt ?? null} />
+          <StaleStripe
+            lastGoodAgeSec={lastGoodAgeSec}
+            // Prefer the per-tab last-good timestamp so the cached-at
+            // label always describes the picture you're looking at, not
+            // the *other* adapter's last cache hit. Fall back to the
+            // global ddilLastCacheHit only if the active tab has no
+            // pull on record yet.
+            cachedAt={active.lastGoodPullAt ?? ddilLastCacheHit?.cachedAt ?? null}
+          />
         )}
         <JointTopBar
+          standard={activeStandard}
           publishedAgoSec={publishedAgoSec}
           asOfAgoSec={asOfAgoSec}
           pulledAgoSec={pulledAgoSec}
-          loading={s.loading}
-          onPull={() => void pull()}
+          loading={active.loading}
+          onPull={() => void pullAdapter(tab)}
           ddilMode={ddilMode}
         />
-        <HotlineStrip hot={hot} ddilMode={ddilMode} />
-        <main style={{ padding: "16px 24px 24px", maxWidth: 1600, margin: "0 auto", width: "100%" }}>
-          {s.error ? (
-            <ErrorPanel message={s.error} status={s.errorStatus} />
-          ) : s.loading && !s.data ? (
-            <LoadingPanel />
-          ) : s.data ? (
-            <Console data={s.data} />
+        {tab === "omsUci" ? (
+          <HotlineStrip hot={hot} ddilMode={ddilMode} />
+        ) : (
+          <Link16CountsStrip data={link16.data} ddilMode={ddilMode} />
+        )}
+        <main style={{ padding: "16px 24px 64px", maxWidth: 1600, margin: "0 auto", width: "100%" }}>
+          <AdapterTabBar tab={tab} onChange={setTab} omsUciLoading={omsUci.loading} link16Loading={link16.loading} />
+          {active.error ? (
+            <ErrorPanel message={active.error} status={active.errorStatus} />
+          ) : active.loading && !active.data ? (
+            <LoadingPanel adapter={tab} />
+          ) : tab === "omsUci" && omsUci.data ? (
+            <Console data={omsUci.data} />
+          ) : tab === "link16" && link16.data ? (
+            <Link16Console data={link16.data} />
           ) : null}
         </main>
-        <JointFooter operator={s.data?.envelope.operator ?? null} subscription={s.data?.envelope.subscriptionModel ?? null} />
+        <JointFooter operator={activeOperator ?? null} subscription={activeSubscription ?? null} adapter={tab} />
       </div>
       <ClassificationBannerStrip position="bottom" />
     </div>
+  );
+}
+
+// Tab strip lives inside the body card region (under the topbar +
+// hotline) rather than on the topbar itself: putting it on the topbar
+// would crowd the comms-state switcher, the standard pill, and the
+// re-pull button at the resolution we expect a JLTC window to be
+// docked at side-by-side with the SPIRE app. Inside the body, the tab
+// strip reads as the obvious "which adapter" toggle for the partner.
+function AdapterTabBar({
+  tab,
+  onChange,
+  omsUciLoading,
+  link16Loading,
+}: {
+  tab: AdapterTab;
+  onChange: (t: AdapterTab) => void;
+  omsUciLoading: boolean;
+  link16Loading: boolean;
+}) {
+  const TABS: { id: AdapterTab; label: string; sub: string; loading: boolean }[] = [
+    { id: "omsUci",  label: "OMS-UCI", sub: "USAF Open Mission Systems · J-less",   loading: omsUciLoading },
+    { id: "link16",  label: "Link 16", sub: "MIL-STD-6016 · J3.5 / J3.3 / J7 / J28", loading: link16Loading },
+  ];
+  return (
+    <div
+      role="tablist"
+      aria-label="Joint adapter"
+      style={{
+        display: "flex",
+        gap: 0,
+        marginTop: 4,
+        borderBottom: "1px solid #1f2c39",
+        background: "#0a131c",
+      }}
+    >
+      {TABS.map((t) => {
+        const active = t.id === tab;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(t.id)}
+            style={{
+              flex: "0 1 auto",
+              padding: "10px 18px",
+              background: active ? "#101a26" : "transparent",
+              color: active ? "#e6eef5" : "#7e94a8",
+              border: "1px solid #1f2c39",
+              borderBottom: active ? "1px solid #101a26" : "1px solid #1f2c39",
+              borderRadius: "2px 2px 0 0",
+              cursor: "pointer",
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 14,
+              fontWeight: active ? 700 : 500,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              marginRight: 4,
+              position: "relative",
+              top: 1,
+            }}
+            title={t.sub}
+          >
+            <span>{t.label}</span>
+            {t.loading && (
+              <span
+                aria-hidden
+                style={{
+                  marginLeft: 8,
+                  fontSize: 10,
+                  color: "#9ec3df",
+                  letterSpacing: "0.12em",
+                }}
+              >
+                · pulling…
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Link 16 glance strip — lives where the OMS/UCI hotline would be on
+// the other tab. J-series messages don't carry an alert family so we
+// can't reuse the hotline shape honestly; instead we surface the
+// per-message-family counts plus the worst readiness rollup synthesized
+// from J28.2 (the only J-series message in our subset that carries
+// per-unit MC rate). Same 30-ft legibility rules as the hotline cells.
+function Link16CountsStrip({
+  data,
+  ddilMode,
+}: {
+  data: JointLink16Export | null;
+  ddilMode: DdilMode;
+}) {
+  const counts = data?.header.messageCounts ?? {};
+  const j282 = data?.messages.J28_2_LogisticsStatus ?? [];
+  // Worst MC rate from J28.2. Synthesized — backend already exposes
+  // `missionCapableRate` on J28.2 messages, so this is a faithful read,
+  // not invention.
+  const worstMc = (() => {
+    if (!j282.length) return null;
+    const ranked = j282
+      .filter((m): m is JointLink16J282Message & { missionCapableRate: number } =>
+        typeof m.missionCapableRate === "number",
+      )
+      .sort((a, b) => a.missionCapableRate - b.missionCapableRate);
+    const w = ranked[0];
+    if (!w) return null;
+    return {
+      callsign: String(w.trackNumber || w.tn || "—"),
+      rate: Number(w.missionCapableRate ?? 0),
+      readinessC: String(w.readinessC || "—"),
+    };
+  })();
+  // C3/C4 unit count (synthesized from J28.2's readinessC field).
+  const degraded = j282.filter(
+    (m) => m.readinessC === "C3" || m.readinessC === "C4",
+  ).length;
+
+  return (
+    <section
+      aria-label="Link 16 message families"
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 5,
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 1.4fr) minmax(0, 1fr)",
+        gap: 12,
+        padding: "12px 24px",
+        background: "linear-gradient(180deg, #0f1822 0%, #0a131c 100%)",
+        borderBottom: "1px solid #1f2c39",
+        boxShadow: "0 4px 12px -6px rgba(0,0,0,0.6)",
+      }}
+    >
+      <HotCell
+        label="J3.5 land tracks"
+        accent="#9ec3df"
+        primary={String(counts["J3.5"] ?? 0)}
+        secondary={`J7.0 mgmt: ${counts["J7.0"] ?? 0}`}
+      />
+      <HotCell
+        label="J3.3 surface tracks"
+        accent="#9ec3df"
+        primary={String(counts["J3.3"] ?? 0)}
+        secondary={`J7.2 correlations: ${counts["J7.2"] ?? 0}`}
+      />
+      <HotCell
+        label="Worst MC unit (J28.2)"
+        accent={mcRateAccent(worstMc?.rate)}
+        primary={
+          worstMc
+            ? `${worstMc.callsign} · ${(worstMc.rate * 100).toFixed(0)}% MC`
+            : ddilMode === "DISCONNECTED"
+            ? "no J28.2 in cache"
+            : "no logistics data"
+        }
+        secondary={worstMc ? `readiness ${worstMc.readinessC}` : ""}
+      />
+      <HotCell
+        label="C3 / C4 units"
+        accent={degraded > 0 ? "#ff9b95" : "#7be39c"}
+        primary={String(degraded)}
+        secondary={degraded > 0 ? "non-mission-capable readiness" : "all reporting C1/C2"}
+      />
+    </section>
   );
 }
 
@@ -499,6 +817,7 @@ function formatStale(sec: number): string {
 }
 
 function JointTopBar({
+  standard,
   publishedAgoSec,
   asOfAgoSec,
   pulledAgoSec,
@@ -506,6 +825,7 @@ function JointTopBar({
   onPull,
   ddilMode,
 }: {
+  standard: string;
   publishedAgoSec: number | null;
   asOfAgoSec: number | null;
   pulledAgoSec: number | null;
@@ -532,13 +852,13 @@ function JointTopBar({
             JLTC · JOINT LOGISTICS &amp; TRACKS CONSOLE
           </div>
           <div style={{ fontSize: 11, color: "#7e94a8", letterSpacing: "0.12em", textTransform: "uppercase", marginTop: 2 }}>
-            Sister-service viewer · OMS/UCI subscriber
+            Sister-service viewer · OMS/UCI &amp; Link 16 subscriber
           </div>
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, flexWrap: "wrap", justifyContent: "flex-end" }}>
         <Pill label="Source" value="SPIRE · USMC" />
-        <Pill label="Standard" value="OMS 2.4 / UCI 5.0" />
+        <Pill label="Standard" value={standard} />
         <Pill label="Published" value={publishedAgoSec == null ? "—" : `T-${formatStale(publishedAgoSec)}`} />
         <Pill label="As of" value={asOfAgoSec == null ? "—" : `T-${formatStale(asOfAgoSec)}`} />
         <Pill label="Pulled" value={pulledAgoSec == null ? "—" : `T-${formatStale(pulledAgoSec)}`} />
@@ -746,7 +1066,11 @@ function ErrorPanel({ message, status }: { message: string; status: number | nul
   );
 }
 
-function LoadingPanel() {
+function LoadingPanel({ adapter }: { adapter: AdapterTab }) {
+  const label =
+    adapter === "omsUci"
+      ? "Subscribing to SPIRE OMS/UCI feed…"
+      : "Subscribing to SPIRE Link 16 J-series feed…";
   return (
     <div
       style={{
@@ -760,7 +1084,7 @@ function LoadingPanel() {
         textTransform: "uppercase",
       }}
     >
-      Subscribing to SPIRE OMS/UCI feed…
+      {label}
     </div>
   );
 }
@@ -851,6 +1175,156 @@ function Console({ data }: { data: JointOmsUciExport }) {
               a.EntityIdentifierRef,
               a.summary,
               short(a.asOfTime),
+            ])}
+          />
+        )}
+      </section>
+    </>
+  );
+}
+
+// Link16Console — analogous to <Console> for the OMS/UCI tab. Each
+// J-series message family becomes its own table so a partner reading
+// the picture can map "track number / JU / lat·lon / quality / readiness
+// / logistics" cleanly. Field names match the MIL-STD-6016 J-series
+// vocabulary the backend emits (`trackNumber`, `originatorJU`,
+// `latitudeDegrees`, `trackQuality`, `missionCapableRate`, etc.); SMEs
+// will eyeball these column headers first.
+function Link16Console({ data }: { data: JointLink16Export }) {
+  const hdr = data.header;
+  const counts = hdr.messageCounts;
+  const j35 = data.messages.J3_5_LandPointTrack ?? [];
+  const j33 = data.messages.J3_3_SurfaceTrack ?? [];
+  const j70 = data.messages.J7_0_TrackManagement ?? [];
+  const j72 = data.messages.J7_2_TrackCorrelation ?? [];
+  const j282 = data.messages.J28_2_LogisticsStatus ?? [];
+  return (
+    <>
+      <section style={cardSection}>
+        <SectionHeader title="Link 16 header" subtitle="MIL-STD-6016 J-series envelope" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+          <Field label="Source system" value={hdr.sourceSystem} />
+          <Field label="Source JU" value={hdr.sourceJU} />
+          <Field label="Originator service" value={hdr.originatorService} />
+          <Field label="Originator country" value={hdr.classification.originatorCountry ?? "USA"} />
+          <Field label="Specification" value={hdr.specification} />
+          <Field label="Spec version" value={hdr.specificationVersion} />
+          <Field label="Marking" value={hdr.classification.marking} />
+          <Field label="Releasability" value={hdr.classification.releasability} />
+        </div>
+        <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {Object.entries(counts).map(([k, v]) => (
+            <CountChip key={k} label={k} count={v} />
+          ))}
+        </div>
+      </section>
+
+      <section style={cardSection}>
+        <SectionHeader
+          title="J3.5 land point / track"
+          subtitle={`${j35.length} J3.5 messages`}
+        />
+        {j35.length === 0 ? (
+          <Empty text="No J3.5 land tracks in this window." />
+        ) : (
+          <Table
+            columns={["TN", "Callsign", "UIC", "Identity", "Specific type (SIDC)", "Lat", "Lon", "Track quality (0..15)", "Readiness"]}
+            rows={j35.map((m) => [
+              m.tn ?? m.trackNumber ?? "—",
+              m.callsign ?? "—",
+              m.uic ?? "—",
+              m.identity ?? "—",
+              m.specificType ?? "—",
+              num(m.latitudeDegrees, 4),
+              num(m.longitudeDegrees, 4),
+              m.trackQuality ?? "—",
+              <ReadinessChip key="r" code={m.readinessC ?? "—"} />,
+            ])}
+          />
+        )}
+      </section>
+
+      <section style={cardSection}>
+        <SectionHeader
+          title="J3.3 surface track"
+          subtitle={`${j33.length} J3.3 messages`}
+        />
+        {j33.length === 0 ? (
+          <Empty text="No J3.3 surface tracks in this window." />
+        ) : (
+          <Table
+            columns={["TN", "Identity", "Platform", "Lat", "Lon", "Course", "Speed (kt)", "Track quality (0..15)"]}
+            rows={j33.map((m) => [
+              m.tn ?? m.trackNumber ?? "—",
+              m.identity ?? "—",
+              m.platform ?? "—",
+              num(m.latitudeDegrees, 4),
+              num(m.longitudeDegrees, 4),
+              m.course ?? 0,
+              m.speedKnots ?? 0,
+              m.trackQuality ?? "—",
+            ])}
+          />
+        )}
+      </section>
+
+      <section style={cardSection}>
+        <SectionHeader
+          title="J7.0 track management"
+          subtitle={`${j70.length} J7.0 messages`}
+        />
+        {j70.length === 0 ? (
+          <Empty text="No J7.0 management messages in this window." />
+        ) : (
+          <Table
+            columns={["TN", "Originator JU", "Action", "Link status"]}
+            rows={j70.map((m) => [
+              m.tn ?? m.trackNumber ?? "—",
+              m.originatorJU ?? "—",
+              m.managementAction ?? "—",
+              m.linkStatus ?? "—",
+            ])}
+          />
+        )}
+      </section>
+
+      <section style={cardSection}>
+        <SectionHeader
+          title="J7.2 track correlation"
+          subtitle={`${j72.length} J7.2 messages`}
+        />
+        {j72.length === 0 ? (
+          <Empty text="No J7.2 correlations in this window — partners see one TN per entity." />
+        ) : (
+          <Table
+            columns={["Primary TN", "Secondary TN", "Correlation", "Originator JU"]}
+            rows={j72.map((m) => [
+              m.primaryTN ?? "—",
+              m.secondaryTN ?? "—",
+              m.correlationType ?? "—",
+              m.originatorJU ?? "—",
+            ])}
+          />
+        )}
+      </section>
+
+      <section style={cardSection}>
+        <SectionHeader
+          title="J28.2 logistics status (broadcast)"
+          subtitle={`${j282.length} J28.2 messages · supply class VII`}
+        />
+        {j282.length === 0 ? (
+          <Empty text="No J28.2 logistics messages in this window." />
+        ) : (
+          <Table
+            columns={["TN", "Supply class", "MC rate", "MC platforms", "Total platforms", "Readiness"]}
+            rows={j282.map((m) => [
+              m.tn ?? m.trackNumber ?? "—",
+              m.supplyClass ?? "—",
+              <ReadinessBar key="r" rate={m.missionCapableRate ?? 0} />,
+              m.missionCapablePlatforms ?? 0,
+              m.totalPlatforms ?? 0,
+              <ReadinessChip key="rc" code={m.readinessC ?? "—"} />,
             ])}
           />
         )}
@@ -1048,9 +1522,11 @@ function short(iso: string | undefined): string {
 function JointFooter({
   operator,
   subscription,
+  adapter,
 }: {
   operator: import("../api").JointOperatorFooter | null;
   subscription: string | null;
+  adapter: AdapterTab;
 }) {
   // Operator footer surfaces the human at the SPIRE console so the partner
   // J4 can audit who released the bundle. Subscription model is shown so it
@@ -1091,7 +1567,10 @@ function JointFooter({
         textTransform: "uppercase",
       }}
     >
-      <span>JLTC v0.1 · Sister-service viewer · Read-only OMS/UCI subscriber</span>
+      <span>
+        JLTC v0.1 · Sister-service viewer · Read-only{" "}
+        {adapter === "omsUci" ? "OMS/UCI" : "MIL-STD-6016 Link 16"} subscriber
+      </span>
       <span style={{ color: "#9ec3df" }}>{op} · subscription: {sub}</span>
       <span>SPIRE → JLTC bridge: export-only (no ingest, no engagement orders)</span>
     </footer>
