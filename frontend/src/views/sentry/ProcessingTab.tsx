@@ -275,6 +275,14 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
   const ceiling = RELEASE_CEILING[release];
   const ceilingRank = classificationRank(ceiling);
 
+  // Task #132 — same honesty fix as the bottom-strip Tier-2 counter, but
+  // applied per-record. When neither weights bundle is loaded the engine
+  // ran rule-based regex only, so claiming "Routed to Tier 2 LLM" on a
+  // would-route record is a lie. Keep the truthful wording when a model
+  // is actually loaded so a deployed-with-weights build doesn't lose
+  // accuracy.
+  const llmOffline = !((job.sentry_model_loaded ?? false) || (job.pulse_model_loaded ?? false));
+
   // Task #67 — surface DDIL state without blocking the operator. LIMITED
   // and INTERMITTENT still let traffic through (just degraded), and
   // DISCONNECTED is being served from the DDIL cache here (otherwise we'd
@@ -468,6 +476,7 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
                   record={r}
                   release={release}
                   ceilingRank={ceilingRank}
+                  llmOffline={llmOffline}
                 />
               ))}
               {recent.length === 0 && (
@@ -689,10 +698,12 @@ function SanitizedRecord({
   record,
   release,
   ceilingRank,
+  llmOffline,
 }: {
   record: any;
   release: ReleasePreview;
   ceilingRank: number;
+  llmOffline: boolean;
 }) {
   const flags: string[] = record.flags || [];
   const highlights = record.highlights || [];
@@ -929,8 +940,23 @@ function SanitizedRecord({
         </>
       )}
 
+      {/* Task #132 — when no LLM weights are loaded, the Tier-2 path
+          never actually executes. Render the would-route wording (and a
+          subtle "model offline" tag) instead of falsely claiming a
+          Tier-2 LLM acted on this record. Tier 1 wording is unchanged
+          because rule-based regex genuinely did classify it. */}
       <div className="mt-1 text-sm text-[var(--color-text-muted)]">
-        Routed to {record.routed_to === "tier2_llm" ? "Tier 2 LLM" : "Tier 1 classifier"} · confidence {record.confidence?.toFixed(2)}
+        {record.routed_to === "tier2_llm" ? (
+          llmOffline ? (
+            <>
+              Would route to Tier-2 (model offline) · rule-based confidence {record.confidence?.toFixed(2)}
+            </>
+          ) : (
+            <>Routed to Tier 2 LLM · confidence {record.confidence?.toFixed(2)}</>
+          )
+        ) : (
+          <>Routed to Tier 1 classifier · confidence {record.confidence?.toFixed(2)}</>
+        )}
         {release !== "US_ONLY" && !blockedByRelease && (
           <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-primary)]">
             · {RELEASE_LABEL[release]} preview
