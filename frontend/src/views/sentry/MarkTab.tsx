@@ -6,7 +6,13 @@ import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Pressable } from "../../components/ui";
-import { ClassifiedExport } from "../../components/classification";
+import {
+  ClassifiedExport,
+  MaskedSpan,
+  RedactionToggle,
+  usePiiRedaction,
+  type PiiRedactionController,
+} from "../../components/classification";
 
 const RELEASE_AUTHS = [
   { value: "US_ONLY", label: "U.S." },
@@ -174,184 +180,282 @@ export function MarkTab() {
           </div>
         )}
         {result && (
-          <>
-            <MarkingBanner result={result} />
-
-            {/* Walkthrough #4 — release-authority validator banner. */}
-            {result.release_compatibility && result.release_compatibility.status !== "ok" && (
-              <ReleaseCompatibilityBanner compat={result.release_compatibility} />
-            )}
-
-            {/* Walkthrough #5 / Task-61 — Distribution Statement + REL TO
-                caveat side-by-side, both selected by the engine from
-                content + release authority. */}
-            <DistributionAuthorityPanel result={result} release={release} />
-
-            <div className="mb-4 flex items-center gap-3">
-              <div className="font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
-                Confidence <span className="tabular-nums text-[var(--color-text)]">{(result.confidence * 100).toFixed(0)}%</span>
-                <span className="mx-2 text-[var(--color-border-active)]">│</span>
-                Release: <span className="text-[var(--color-text)]">{result.release_authority_requested}</span>
-              </div>
-              <div className="ml-auto">
-                <ClassifiedExport
-                  classification={result.recommended_classification}
-                  caveats={result.caveats_recommended}
-                  action="sentry.mark.attestation"
-                  label="↓ Attestation"
-                  pendingLabel="…"
-                  loading={downloading}
-                  disabled={result.release_compatibility?.status === "block"}
-                  disabledReason={
-                    result.release_compatibility?.status === "block"
-                      ? "Cannot generate attestation while release is blocked."
-                      : undefined
-                  }
-                  onExport={async (cls) => {
-                    setDownloading(true);
-                    try {
-                      const text = textareaRef.current?.value ?? "";
-                      // Visible classification banner stamped at the top of
-                      // the attestation file. Top-level field on the JSON so
-                      // any downstream parser can route by sensitivity
-                      // without inspecting nested rules.
-                      const banner = cls === "TS_SCI" ? "TOP SECRET // SCI" : cls.replace("_", " ");
-                      const attest = {
-                        _classification: cls,
-                        _classification_banner: `// CLASSIFICATION: ${banner} //`,
-                        _handling: "Handle per DoDM 5200.01",
-                        input_hash: await sha256(text),
-                        recommended_marking: result.recommended_classification,
-                        caveats: result.caveats_recommended,
-                        confidence: result.confidence,
-                        evidence: result.evidence,
-                        release_compatibility: result.release_compatibility,
-                        engine: result.audit.engine,
-                        timestamp: result.audit.timestamp,
-                        release_authority: release,
-                      };
-                      const blob = new Blob([JSON.stringify(attest, null, 2)], { type: "application/json" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      // Filename inherits classification so the marking is
-                      // visible on disk before the file is ever opened.
-                      const safeCls = cls.replace(/\//g, "_");
-                      a.download = `spire_${safeCls}_mark_attestation_${Date.now()}.json`;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      pushToast({ tone: "ok", text: `Attestation downloaded · ${banner}` });
-                    } finally {
-                      setDownloading(false);
-                    }
-                  }}
-                />
-              </div>
-            </div>
-
-            <section className="mb-4">
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                Evidence ({result.evidence.length} rule match{result.evidence.length === 1 ? "" : "es"})
-              </h4>
-              {result.evidence.length === 0 && (
-                <div className="text-xs text-[var(--color-text-muted)]">
-                  No sensitive patterns detected. Consider open release pending reviewer confirmation.
-                </div>
-              )}
-              <div className="flex flex-col gap-2">
-                {result.evidence.map((e, i) => (
-                  <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
-                    <div className="flex items-baseline gap-2">
-                      <span
-                        className="rounded-sm px-1.5 py-0.5 text-xs font-mono uppercase"
-                        style={{
-                          background: "color-mix(in oklab, var(--color-warning-muted) 25%, var(--color-surface))",
-                          color: "var(--color-warning)",
-                        }}
-                      >
-                        {e.flag}
-                      </span>
-                      <span className="text-xs font-mono text-[var(--color-text-muted)]">rule: {e.rule}</span>
-                    </div>
-                    <div className="mt-1 font-mono text-[var(--color-text)]">"{e.evidence}"</div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-                Audit trail
-              </h4>
-              <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm text-[var(--color-text-secondary)]">
-                <div>
-                  Engine: {result.audit.engine}
-                  {result.audit.engine_version && (
-                    <span className="ml-1 text-[var(--color-text-muted)]">
-                      ({result.audit.engine_version})
-                    </span>
-                  )}
-                </div>
-                <div title={result.audit.timestamp}>
-                  Timestamp:{" "}
-                  <span className="font-mono">
-                    {/* Walkthrough audit: prior render dumped raw ISO
-                     * ('2026-04-27T15:30:42Z') into the audit panel. Format
-                     * as DD MMM YYYY · HHMMz so the line reads as audit
-                     * prose; raw ISO stays available via the title attr. */}
-                    {(() => {
-                      const iso = result.audit.timestamp;
-                      const d = new Date(iso);
-                      if (Number.isNaN(d.getTime())) return iso;
-                      const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-                      const z = (n: number) => String(n).padStart(2, "0");
-                      return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
-                    })()}
-                  </span>
-                </div>
-                {/* Chain index returned by the backend audit table. Same
-                 * row id an investigator pulls in the audit-log viewer —
-                 * proves the marking actually wrote to the chain instead
-                 * of just being claimed in the UI. */}
-                {typeof result.audit.chain_index === "number" && (
-                  <div>
-                    Chain entry:{" "}
-                    <span className="font-mono text-[var(--color-text)]">
-                      #{result.audit.chain_index}
-                    </span>
-                    {result.audit.input_hash && (
-                      <span
-                        className="ml-2 font-mono text-xs text-[var(--color-text-muted)]"
-                        title={`SHA-256 ${result.audit.input_hash}`}
-                      >
-                        sha256 {result.audit.input_hash.slice(0, 8)}…
-                      </span>
-                    )}
-                  </div>
-                )}
-                {result.audit.actor_name && (
-                  <div>
-                    Actor:{" "}
-                    <span className="text-[var(--color-text)]">
-                      {result.audit.actor_name}
-                    </span>
-                    {result.audit.actor_role && (
-                      <span className="ml-1 text-[var(--color-text-muted)]">
-                        ({result.audit.actor_role})
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div className="mt-1 italic">
-                  Marking written to the hash-chained audit trail per LICENSE §Security Architecture.
-                </div>
-              </div>
-            </section>
-          </>
+          <MarkResultPanel
+            result={result}
+            release={release}
+            downloading={downloading}
+            setDownloading={setDownloading}
+            pushToast={pushToast}
+            textareaRef={textareaRef}
+          />
         )}
       </div>
     </div>
   );
+}
+
+// Task #169 — Mark result pane is split out so it owns the shared
+// `usePiiRedaction` controller. Evidence strings (EDIPI, POC, MGRS, …)
+// surfaced from the pattern engine carry the same PII the Review Queue
+// inspector masks; without this gate a presenter clicking "Radar fault
+// (classified TM)" sample would project an EDIPI on the projector
+// unprompted.
+function MarkResultPanel({
+  result,
+  release,
+  downloading,
+  setDownloading,
+  pushToast,
+  textareaRef,
+}: {
+  result: MarkResult;
+  release: Auth;
+  downloading: boolean;
+  setDownloading: (v: boolean) => void;
+  pushToast: ReturnType<typeof useSpireStore.getState>["pushToast"];
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+}) {
+  const piiRedaction = usePiiRedaction(result.recommended_classification);
+  // Reset reveals when a fresh marking lands so revealed evidence from a
+  // prior input doesn't bleed onto the next sample. Projection mode is
+  // preserved on purpose — same demo posture as the Review Queue.
+  useEffect(() => {
+    piiRedaction.resetRevealed();
+  }, [result.audit?.timestamp, result.recommended_classification, piiRedaction.resetRevealed]);
+  return (
+    <>
+      <MarkingBanner result={result} />
+
+      {/* Walkthrough #4 — release-authority validator banner. */}
+      {result.release_compatibility && result.release_compatibility.status !== "ok" && (
+        <ReleaseCompatibilityBanner compat={result.release_compatibility} />
+      )}
+
+      {/* Walkthrough #5 / Task-61 — Distribution Statement + REL TO
+          caveat side-by-side, both selected by the engine from
+          content + release authority. */}
+      <DistributionAuthorityPanel result={result} release={release} />
+
+      {/* Task #169 — projection/redaction toggle for the spillage tab.
+          Mirrors the chip on the Review Queue inspector so a presenter
+          flipping into Mark/spillage doesn't leak the matched evidence
+          (EDIPI / POC / MGRS) onto the projector. */}
+      <RedactionToggle controller={piiRedaction} className="mb-4" />
+
+      <div className="mb-4 flex items-center gap-3">
+        <div className="font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
+          Confidence <span className="tabular-nums text-[var(--color-text)]">{(result.confidence * 100).toFixed(0)}%</span>
+          <span className="mx-2 text-[var(--color-border-active)]">│</span>
+          Release: <span className="text-[var(--color-text)]">{result.release_authority_requested}</span>
+        </div>
+        <div className="ml-auto">
+          <ClassifiedExport
+            classification={result.recommended_classification}
+            caveats={result.caveats_recommended}
+            action="sentry.mark.attestation"
+            label="↓ Attestation"
+            pendingLabel="…"
+            loading={downloading}
+            disabled={result.release_compatibility?.status === "block"}
+            disabledReason={
+              result.release_compatibility?.status === "block"
+                ? "Cannot generate attestation while release is blocked."
+                : undefined
+            }
+            onExport={async (cls) => {
+              setDownloading(true);
+              try {
+                const text = textareaRef.current?.value ?? "";
+                // Visible classification banner stamped at the top of
+                // the attestation file. Top-level field on the JSON so
+                // any downstream parser can route by sensitivity
+                // without inspecting nested rules.
+                const banner = cls === "TS_SCI" ? "TOP SECRET // SCI" : cls.replace("_", " ");
+                const attest = {
+                  _classification: cls,
+                  _classification_banner: `// CLASSIFICATION: ${banner} //`,
+                  _handling: "Handle per DoDM 5200.01",
+                  input_hash: await sha256(text),
+                  recommended_marking: result.recommended_classification,
+                  caveats: result.caveats_recommended,
+                  confidence: result.confidence,
+                  evidence: result.evidence,
+                  release_compatibility: result.release_compatibility,
+                  engine: result.audit.engine,
+                  timestamp: result.audit.timestamp,
+                  release_authority: release,
+                };
+                const blob = new Blob([JSON.stringify(attest, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                // Filename inherits classification so the marking is
+                // visible on disk before the file is ever opened.
+                const safeCls = cls.replace(/\//g, "_");
+                a.download = `spire_${safeCls}_mark_attestation_${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                pushToast({ tone: "ok", text: `Attestation downloaded · ${banner}` });
+              } finally {
+                setDownloading(false);
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      <section className="mb-4">
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          Evidence ({result.evidence.length} rule match{result.evidence.length === 1 ? "" : "es"})
+        </h4>
+        {result.evidence.length === 0 && (
+          <div className="text-xs text-[var(--color-text-muted)]">
+            No sensitive patterns detected. Consider open release pending reviewer confirmation.
+          </div>
+        )}
+        <div className="flex flex-col gap-2">
+          {result.evidence.map((e, i) => (
+            <EvidenceRow
+              key={i}
+              flag={e.flag}
+              rule={e.rule}
+              evidence={e.evidence}
+              spanKey={`mark:evidence:${i}`}
+              controller={piiRedaction}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          Audit trail
+        </h4>
+        <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm text-[var(--color-text-secondary)]">
+          <div>
+            Engine: {result.audit.engine}
+            {result.audit.engine_version && (
+              <span className="ml-1 text-[var(--color-text-muted)]">
+                ({result.audit.engine_version})
+              </span>
+            )}
+          </div>
+          <div title={result.audit.timestamp}>
+            Timestamp:{" "}
+            <span className="font-mono">
+              {/* Walkthrough audit: prior render dumped raw ISO
+               * ('2026-04-27T15:30:42Z') into the audit panel. Format
+               * as DD MMM YYYY · HHMMz so the line reads as audit
+               * prose; raw ISO stays available via the title attr. */}
+              {(() => {
+                const iso = result.audit.timestamp;
+                const d = new Date(iso);
+                if (Number.isNaN(d.getTime())) return iso;
+                const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+                const z = (n: number) => String(n).padStart(2, "0");
+                return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
+              })()}
+            </span>
+          </div>
+          {/* Chain index returned by the backend audit table. Same
+           * row id an investigator pulls in the audit-log viewer —
+           * proves the marking actually wrote to the chain instead
+           * of just being claimed in the UI. */}
+          {typeof result.audit.chain_index === "number" && (
+            <div>
+              Chain entry:{" "}
+              <span className="font-mono text-[var(--color-text)]">
+                #{result.audit.chain_index}
+              </span>
+              {result.audit.input_hash && (
+                <span
+                  className="ml-2 font-mono text-xs text-[var(--color-text-muted)]"
+                  title={`SHA-256 ${result.audit.input_hash}`}
+                >
+                  sha256 {result.audit.input_hash.slice(0, 8)}…
+                </span>
+              )}
+            </div>
+          )}
+          {result.audit.actor_name && (
+            <div>
+              Actor:{" "}
+              <span className="text-[var(--color-text)]">
+                {result.audit.actor_name}
+              </span>
+              {result.audit.actor_role && (
+                <span className="ml-1 text-[var(--color-text-muted)]">
+                  ({result.audit.actor_role})
+                </span>
+              )}
+            </div>
+          )}
+          <div className="mt-1 italic">
+            Marking written to the hash-chained audit trail per LICENSE §Security Architecture.
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+// Task #169 — single evidence row. Wraps the engine-matched substring
+// (which is the literal PII the pattern engine fired on — EDIPI, POC,
+// MGRS, classified TM ref) with the shared `MaskedSpan` so it renders
+// as a black ██ block by default and clicks-to-reveal on the same
+// clearance gate as the Review Queue inspector.
+function EvidenceRow({
+  flag,
+  rule,
+  evidence,
+  spanKey,
+  controller,
+}: {
+  flag: string;
+  rule: string;
+  evidence: string;
+  spanKey: string;
+  controller: PiiRedactionController;
+}) {
+  return (
+    <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
+      <div className="flex items-baseline gap-2">
+        <span
+          className="rounded-sm px-1.5 py-0.5 text-xs font-mono uppercase"
+          style={{
+            background: "color-mix(in oklab, var(--color-warning-muted) 25%, var(--color-surface))",
+            color: "var(--color-warning)",
+          }}
+        >
+          {flag}
+        </span>
+        <span className="text-xs font-mono text-[var(--color-text-muted)]">rule: {rule}</span>
+      </div>
+      <div className="mt-1 font-mono text-[var(--color-text)]">
+        {"\""}
+        <MaskedSpan
+          controller={controller}
+          spanKey={spanKey}
+          text={evidence}
+          category={mapFlagToMaskCategory(flag)}
+          alwaysMask
+        />
+        {"\""}
+      </div>
+    </div>
+  );
+}
+
+// Map the engine's flag strings (EDIPI, POC_PHONE, MGRS, CLASSIFIED_TM,
+// SERIAL, etc.) onto the inspector's category palette so the accent
+// stripe under each ██ block matches the Review Queue.
+function mapFlagToMaskCategory(flag: string): string {
+  const f = flag.toUpperCase();
+  if (f.includes("MGRS") || f.includes("GEO") || f.includes("GRID") || f.includes("COORD")) return "geo";
+  if (f.includes("CLASS") || f.includes("SECRET")) return "classified";
+  if (f.includes("SERIAL") || f.includes("CONTROLLED") || f.includes("TM")) return "controlled";
+  if (f.includes("FREQ") || f.includes("COMM") || f.includes("CALL")) return "comms";
+  return "pii";
 }
 
 // Full-width DoDM-5200.01-style marking banner. Coloured left-border bar,

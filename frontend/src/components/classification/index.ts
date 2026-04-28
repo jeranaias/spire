@@ -25,3 +25,11 @@ export { ClassificationBadge } from "./ClassificationBadge";
 export { ClassificationBanner } from "./ClassificationBanner";
 export { ClassifiedExport } from "./ClassifiedExport";
 export { DemoSurfaceMarker } from "./DemoSurfaceMarker";
+export {
+  PII_MASK_CATEGORIES,
+  FLAG_COLOR,
+  usePiiRedaction,
+  RedactionToggle,
+  MaskedSpan,
+} from "./InspectorRedaction";
+export type { PiiRedactionController, MaskedSpanProps } from "./InspectorRedaction";

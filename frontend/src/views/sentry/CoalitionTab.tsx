@@ -24,6 +24,12 @@ import { formatApiError } from "../../api-retry";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, Pressable, ErrorState, LoadingState, fireIdempotent } from "../../components/ui";
+import {
+  MaskedSpan,
+  RedactionToggle,
+  usePiiRedaction,
+  type PiiRedactionController,
+} from "../../components/classification";
 
 export function CoalitionTab() {
   const role = useSpireStore((s) => s.role);
@@ -42,6 +48,19 @@ export function CoalitionTab() {
   const [profiles, setProfiles] = useState<CoalitionProfileSummary[]>([]);
   const [selected, setSelected] = useState<string>("FVEY_BASE");
   const [view, setView] = useState<CoalitionView | null>(null);
+  // Task #169 — same click-to-reveal PII gate the Review Queue inspector
+  // uses, hoisted to the tab so the projection toggle in the header
+  // controls every sample-record card on the page at once. Source records
+  // here originate from the canonical SECRET-tier dataset, so the gate
+  // defaults to SECRET — operators below SECRET can still see the
+  // sanitized partner view but can't click to peek at the redacted
+  // originals.
+  const piiRedaction = usePiiRedaction(view?.classification_ceiling ?? "SECRET");
+  // Reset reveals when the partner profile flips so revealed originals
+  // from one partner don't bleed onto the next sample set.
+  useEffect(() => {
+    piiRedaction.resetRevealed();
+  }, [selected, piiRedaction.resetRevealed]);
   const [loading, setLoading] = useState(false);
   const [viewError, setViewError] = useState<string | null>(null);
   const [releasing, setReleasing] = useState(false);
@@ -467,12 +486,25 @@ export function CoalitionTab() {
             </div>
 
             <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-              <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
-                Sample Records · Live Redacted Preview
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
+                  Sample Records · Live Redacted Preview
+                </div>
+                {/* Task #169 — projection/redaction toggle. Mirrors the
+                    Review Queue inspector chip; controls every sample
+                    card in this section so a presenter can blank the
+                    pre-redaction originals before flipping into a screen
+                    share / projector. */}
+                <RedactionToggle controller={piiRedaction} variant="compact" className="shrink-0" />
               </div>
               <div className="mt-2 flex flex-col gap-2">
                 {view.sample_records.map((s, i) => (
-                  <CoalitionSampleRecord key={i} record={s} />
+                  <CoalitionSampleRecord
+                    key={i}
+                    record={s}
+                    sampleIdx={i}
+                    controller={piiRedaction}
+                  />
                 ))}
                 {view.sample_records.length === 0 && (
                   <div className="rounded-sm border border-dashed border-[var(--color-border)] p-4 text-center font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
@@ -923,7 +955,15 @@ type SampleRecord = {
   redaction_spans?: { field: string; before: string; after: string; kind: string }[];
 };
 
-function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
+function CoalitionSampleRecord({
+  record,
+  sampleIdx,
+  controller,
+}: {
+  record: SampleRecord;
+  sampleIdx: number;
+  controller: PiiRedactionController;
+}) {
   const spans = record.redaction_spans ?? [];
   const remarkSpan = spans.find((s) => s.field === "remark");
   const remarkBefore = remarkSpan?.before ?? record.remark_original ?? record.remark_preview ?? "";
@@ -935,6 +975,10 @@ function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
   const otherSpans = spans.filter(
     (s) => s.field !== "remark" && s.field !== "fault_component",
   );
+  // Stable per-card key prefix so reveal-state for one record's PII
+  // doesn't bleed across cards. The sample list re-orders only on
+  // partner-profile change (which already resets reveals upstream).
+  const keyPrefix = `coalition:${sampleIdx}:${record.sr_number ?? "anon"}`;
 
   return (
     <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono">
@@ -960,16 +1004,23 @@ function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
           Fault:{" "}
           {faultChanged ? (
             <>
-              <span
-                className="rounded-sm px-0.5 line-through"
-                style={{
+              {/* Task #169 — fault_component_original is the pre-redaction
+                  value (TM ref / serial / controlled identifier). Mask
+                  by default so a presenter doesn't read the original off
+                  the screen while the partner column says it was
+                  generalised. */}
+              <MaskedSpan
+                controller={controller}
+                spanKey={`${keyPrefix}:fault`}
+                text={record.fault_component_original ?? ""}
+                category="controlled"
+                alwaysMask
+                revealedClassName="line-through"
+                revealedStyle={{
                   background: "color-mix(in oklab, var(--color-danger) 15%, transparent)",
                   color: "var(--color-danger)",
                 }}
-                title="original value (preview only — never released)"
-              >
-                {record.fault_component_original}
-              </span>
+              />
               <span className="mx-1 text-[var(--color-text-muted)]">→</span>
               <span
                 className="rounded-sm px-0.5 font-semibold"
@@ -991,28 +1042,31 @@ function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
       {/* Remark with inline highlights for any redacted substrings */}
       <div className="mt-1 text-xs leading-relaxed text-[var(--color-text)]">
         {remarkAfter ? (
-          <RemarkDiff before={remarkBefore} after={remarkAfter} />
+          <RemarkDiff
+            before={remarkBefore}
+            after={remarkAfter}
+            controller={controller}
+            keyPrefix={`${keyPrefix}:remark`}
+          />
         ) : (
           <span className="text-[var(--color-text-muted)]">[no preview]</span>
         )}
       </div>
 
-      {/* Per-field redaction chips for non-remark, non-fault redactions */}
+      {/* Per-field redaction chips for non-remark, non-fault redactions.
+          The chip's tooltip used to leak the pre-redaction value via the
+          `title` attribute even with the inline preview masked — Task
+          #169 strips the raw original from the tooltip and gates a
+          click-to-reveal flyout on the same controller. */}
       {otherSpans.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {otherSpans.map((s, i) => (
-            <span
+            <CoalitionRedactionChip
               key={i}
-              className="rounded-sm border px-1.5 py-[1px] text-[10px] uppercase tracking-wider"
-              style={{
-                color: REDACTION_COLORS[s.kind] ?? "var(--color-warning)",
-                borderColor: `color-mix(in oklab, ${REDACTION_COLORS[s.kind] ?? "var(--color-warning)"} 50%, transparent)`,
-                background: `color-mix(in oklab, ${REDACTION_COLORS[s.kind] ?? "var(--color-warning)"} 10%, transparent)`,
-              }}
-              title={`Original: ${s.before} → After: ${s.after}`}
-            >
-              {s.kind} ✕ redacted
-            </span>
+              span={s}
+              controller={controller}
+              spanKey={`${keyPrefix}:other:${i}`}
+            />
           ))}
         </div>
       )}
@@ -1020,11 +1074,69 @@ function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
   );
 }
 
+// Task #169 — per-field redaction chip. Renders the redaction kind +
+// state, but the original value is hidden behind the same masking gate
+// as the rest of the inspector. Click reveals (clearance + projection
+// permitting); tooltip is generic by default.
+function CoalitionRedactionChip({
+  span,
+  controller,
+  spanKey,
+}: {
+  span: { field: string; before: string; after: string; kind: string };
+  controller: PiiRedactionController;
+  spanKey: string;
+}) {
+  const color = REDACTION_COLORS[span.kind] ?? "var(--color-warning)";
+  const revealed = controller.isRevealed(spanKey) && !controller.projectionMode && controller.canRevealPII;
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-sm border px-1.5 py-[1px] text-[10px] uppercase tracking-wider"
+      style={{
+        color,
+        borderColor: `color-mix(in oklab, ${color} 50%, transparent)`,
+        background: `color-mix(in oklab, ${color} 10%, transparent)`,
+      }}
+      title={
+        revealed
+          ? `Revealed · original: ${span.before} → after: ${span.after}`
+          : "Original value masked — click the bar to reveal"
+      }
+    >
+      {span.kind} ✕ redacted
+      {/* Inline reveal control. Sized smaller than the main remark
+          masking treatment so the chip stays compact. */}
+      <MaskedSpan
+        controller={controller}
+        spanKey={spanKey}
+        text={span.before || "···"}
+        category="pii"
+        alwaysMask
+        revealedClassName="font-semibold"
+        revealedStyle={{
+          background: `color-mix(in oklab, ${color} 25%, transparent)`,
+          color,
+        }}
+      />
+    </span>
+  );
+}
+
 // Render a remark with inline highlights on any substring that the partner
 // view does NOT contain (i.e. what was stripped or replaced). We do this by
 // walking the "after" string and projecting the "before" segments alongside
 // the redaction tokens we see in the after string ([PHONE REDACTED], etc).
-function RemarkDiff({ before, after }: { before: string; after: string }) {
+function RemarkDiff({
+  before,
+  after,
+  controller,
+  keyPrefix,
+}: {
+  before: string;
+  after: string;
+  controller: PiiRedactionController;
+  keyPrefix: string;
+}) {
   // If the strings are identical, nothing to highlight — render plain.
   if (before === after || !before) {
     return <span>{after ? `"${after}…"` : ""}</span>;
@@ -1077,17 +1189,23 @@ function RemarkDiff({ before, after }: { before: string; after: string }) {
       "
       {segments.map((s, i) =>
         s.kind === "original" ? (
-          <span
+          /* Task #169 — original (pre-redaction) substrings render as
+             black ██ blocks by default; clicking reveals the strike-
+             through original styling, gated on the inspector controller's
+             clearance + projection-mode rules. */
+          <MaskedSpan
             key={i}
-            className="rounded-sm px-0.5 line-through"
-            style={{
+            controller={controller}
+            spanKey={`${keyPrefix}:orig:${i}`}
+            text={s.text}
+            category="pii"
+            alwaysMask
+            revealedClassName="rounded-sm px-0.5 line-through"
+            revealedStyle={{
               background: "color-mix(in oklab, var(--color-danger) 18%, transparent)",
               color: "var(--color-danger)",
             }}
-            title="original value (preview only — never released)"
-          >
-            {s.text}
-          </span>
+          />
         ) : s.kind === "redacted" ? (
           <span
             key={i}

@@ -20,7 +20,10 @@ import {
   CLASS_RANK,
   ClassificationBanner,
   normalizeClassification,
-  useClearance,
+  FLAG_COLOR,
+  MaskedSpan,
+  RedactionToggle,
+  usePiiRedaction,
   type Classification,
 } from "../../components/classification";
 import { SentrySplitPane } from "../../components/SentrySplitPane";
@@ -48,14 +51,16 @@ const BULK_TYPED_CONFIRM_THRESHOLD = 50;
 type Column = "auto_cleared" | "flagged" | "held";
 type Action = "approve" | "reject";
 
-// Task #149 — span-based redaction shared between the queue card preview
-// and the inspector's default view. Walks the highlight ranges and emits
-// `[REDACTED:CAT]` tokens over the offending substrings, identical to the
+// Task #149 — span-based redaction used by the queue card preview to
+// render a `[REDACTED:CAT]` token over each highlight, identical to the
 // `SanitizedRecord` pass on the Processing tab. Categories covered:
 // `pii` (EDIPI / SSN4 / POC / ext), `geo` (MGRS), `comms` (HF / VHF freqs),
 // `classified`, and `controlled` (USA/USMC serials). Non-highlighted text
 // is passed through verbatim — the highlight set is the contract for what
-// counts as CUI on the surface.
+// counts as CUI on the surface. The inspector pane uses the shared
+// `MaskedSpan` (Task #169) which gives the same default-redacted look
+// plus per-span click-to-reveal; this helper stays for the card preview
+// where the rendered output is non-interactive.
 type RedactedSegment = {
   text: string;
   redactedAs?: string;
@@ -88,14 +93,6 @@ function buildRedactedSegments(
   if (cursor < remark.length) segments.push({ text: remark.slice(cursor) });
   return segments;
 }
-
-const FLAG_COLOR: Record<string, string> = {
-  pii: "var(--color-info)",
-  geo: "var(--color-primary)",
-  comms: "var(--color-warning)",
-  classified: "var(--color-danger)",
-  controlled: "#fb923c",
-};
 
 const CLASS_COLOR: Record<string, string> = {
   UNCLASSIFIED: "var(--color-success)",
@@ -1043,51 +1040,40 @@ function InspectorPane({
   // W1 #30 — gate the model-card cross-link on role; supply-chain page
   // is restricted to security_manager.
   const role = useSpireStore((s) => s.role);
-  // Task #149 — the inspector now defaults to the redacted view (every
-  // PII / GEO / COMMS / CLASSIFIED / CONTROLLED span is replaced with
-  // a `[REDACTED:CAT]` token, same machinery as the queue card preview
-  // and the SanitizedRecord export pane). The operator can flip a single
-  // "Show original" toggle to expose the underlying CUI text — but only
-  // if their clearance meets the record's detected classification. This
-  // replaces the prior partial scheme where `pii`/`geo` were masked but
-  // `comms`/`classified`/`controlled` painted in the clear by default.
-  const clearance = useClearance();
+  // Task #149 + #169 — the inspector now defaults to a fully-redacted
+  // remark: every highlight category (PII / GEO / COMMS / CLASSIFIED /
+  // CONTROLLED) renders as a black ██ block. The operator clicks a
+  // single block to reveal that one value, gated by the shared
+  // `usePiiRedaction` controller's `useClearance().can(recordClass)`
+  // check. The header `<RedactionToggle />` (REDACTED for projection)
+  // forces every revealed value back to a black block at once — safe
+  // for projector / camera. This is the same controller the Coalition,
+  // Mark, and Export inspectors mount, so behaviour is identical.
   const recordClass = normalizeClassification(
     record.detected_classification ?? record.source_classification ?? "UNCLASSIFIED",
   );
-  const canShowOriginal = clearance.can(recordClass);
-  const [showOriginal, setShowOriginal] = useState(false);
-  // Reset to the redacted view whenever the operator selects a different
-  // record. A presenter who left "show original" on for a TS record must
-  // not bleed that posture into the next CUI record they click into.
+  const piiRedaction = usePiiRedaction(recordClass);
+  // Reset reveal-state on record change so revealed spans from one record
+  // never carry over visually to another. Projection mode is preserved on
+  // purpose — the presenter sets it once for the demo and it should stick.
   useEffect(() => {
-    setShowOriginal(false);
-  }, [record.sr_number]);
-  // If the operator's clearance changes (role swap mid-review), force the
-  // inspector back to the redacted default so a now-uncleared operator
-  // never keeps seeing a span the role swap should have re-masked.
-  useEffect(() => {
-    if (!canShowOriginal && showOriginal) setShowOriginal(false);
-  }, [canShowOriginal, showOriginal]);
-
+    piiRedaction.resetRevealed();
+  }, [record.sr_number, piiRedaction.resetRevealed]);
   const highlights: { start: number; end: number; category: string }[] = record.highlights || [];
   const remark: string = record.remark || "";
-  // Original-text segmentation — used only when `showOriginal` is true and
-  // the operator's clearance permits. Mirrors the prior highlight-overlay
-  // rendering so the original view is unchanged.
-  const originalSegments: { text: string; category?: string }[] = [];
+  // Walk the highlight ranges and split the remark into a flat segment
+  // list. Highlighted segments carry their `category` so the inspector
+  // renders them through `<MaskedSpan alwaysMask>` with the right accent
+  // stripe; non-highlighted segments pass through verbatim.
+  const remarkSegments: { text: string; category?: string }[] = [];
   let cursor = 0;
   const sorted = [...highlights].sort((a, b) => a.start - b.start);
   sorted.forEach((h) => {
-    if (h.start > cursor) originalSegments.push({ text: remark.slice(cursor, h.start) });
-    originalSegments.push({ text: remark.slice(h.start, h.end), category: h.category });
+    if (h.start > cursor) remarkSegments.push({ text: remark.slice(cursor, h.start) });
+    remarkSegments.push({ text: remark.slice(h.start, h.end), category: h.category });
     cursor = h.end;
   });
-  if (cursor < remark.length) originalSegments.push({ text: remark.slice(cursor) });
-  // Default redacted segments — the SAME `[REDACTED:CAT]` token rendering
-  // the queue card and the export bundle use, so what the operator sees
-  // here matches what would actually leave the building.
-  const redactedSegments = buildRedactedSegments(remark, highlights);
+  if (cursor < remark.length) remarkSegments.push({ text: remark.slice(cursor) });
 
   const detected = record.detected_classification;
   const detectedColor = CLASS_COLOR[detected] ?? "var(--color-text-secondary)";
@@ -1115,50 +1101,18 @@ function InspectorPane({
             <span aria-hidden>✕</span>
           </IconButton>
         </div>
-        {/* Task #149 — single "Show original" toggle. Default state is the
-            redacted view (every PII / GEO / COMMS / CLASSIFIED / CONTROLLED
-            highlight rendered as a `[REDACTED:CAT]` token). The reveal is
-            gated on the operator's clearance vs the record's detected
-            classification — an UNCLAS operator on a SECRET record sees a
-            disabled toggle that names the missing clearance. Replaces the
-            prior projection-mode toggle and the per-category split that
-            painted COMMS / CLASSIFIED / CONTROLLED in the clear by default. */}
-        <div className="mt-2 flex items-center justify-between gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            {showOriginal
-              ? "Original · CUI exposed for cleared review"
-              : canShowOriginal
-                ? "Redacted · default view"
-                : `Redacted · ${recordClass} clearance required to reveal`}
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={showOriginal}
-            aria-label="Toggle show original CUI text"
-            disabled={!canShowOriginal}
-            title={
-              canShowOriginal
-                ? showOriginal
-                  ? "Hide original — return to redacted view"
-                  : "Show original CUI text (requires clearance)"
-                : `Insufficient clearance — record is ${recordClass}`
-            }
-            onClick={() => {
-              if (!canShowOriginal) return;
-              setShowOriginal((v) => !v);
-            }}
-            className={clsx(
-              "rounded-sm border px-2 py-[2px] font-mono text-[10px] font-semibold uppercase tracking-widest transition-colors",
-              !canShowOriginal && "cursor-not-allowed opacity-50",
-              showOriginal
-                ? "border-[var(--color-danger)] bg-[var(--color-danger)] text-white"
-                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-danger)]",
-            )}
-          >
-            {showOriginal ? "ORIGINAL ✓" : "Show original"}
-          </button>
-        </div>
+        {/* Walkthrough #37 / Task #149 / Task #169 — projection toggle.
+            Default state is the fully-redacted view: every highlighted
+            span (PII / GEO / COMMS / CLASSIFIED / CONTROLLED) renders as
+            a black ██ block. Operators reveal individual spans by
+            clicking them — gated through the shared `usePiiRedaction`
+            controller's `useClearance().can(recordClass)` check, so an
+            UNCLAS operator on a SECRET record can never reveal.
+            Flipping "REDACTED for projection" ON re-masks every revealed
+            value at once and disables further reveals — safe for
+            projector / camera. The same chip mounts on the Coalition,
+            Mark, and Export inspectors so behaviour is identical. */}
+        <RedactionToggle controller={piiRedaction} className="mt-2" />
       </div>
       <div className="flex flex-col gap-4 p-4">
         {/* Classification banner */}
@@ -1229,54 +1183,30 @@ function InspectorPane({
           <div
             className="mb-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
           >
-            Remark · {showOriginal && canShowOriginal ? "Highlighted (original)" : "Redacted"}
+            Remark · Redacted
           </div>
           <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-base leading-relaxed text-[var(--color-text)]">
-            {showOriginal && canShowOriginal
-              ? originalSegments.map((s, i) => {
-                  if (!s.category) return <span key={i}>{s.text}</span>;
-                  const flagColor = FLAG_COLOR[s.category] || "#fff";
-                  return (
-                    <span
-                      key={i}
-                      className="rounded-sm px-0.5"
-                      style={{
-                        background: `color-mix(in oklab, ${flagColor} 28%, transparent)`,
-                        color: flagColor,
-                      }}
-                      title={`${s.category.toUpperCase()} span — toggle "Show original" off to re-redact`}
-                    >
-                      {s.text}
-                    </span>
-                  );
-                })
-              : redactedSegments.length === 0
-                ? <span>{remark}</span>
-                : redactedSegments.map((s, i) =>
-                    s.redactedAs ? (
-                      <span
-                        key={i}
-                        className="mx-[1px] rounded-sm px-1 font-mono text-[10px] font-semibold uppercase tracking-wider"
-                        style={{
-                          background: `color-mix(in oklab, ${
-                            FLAG_COLOR[s.category || "pii"] ||
-                            "var(--color-warning)"
-                          } 18%, var(--color-bg))`,
-                          color:
-                            FLAG_COLOR[s.category || "pii"] ||
-                            "var(--color-warning)",
-                          border: `1px solid color-mix(in oklab, ${
-                            FLAG_COLOR[s.category || "pii"] ||
-                            "var(--color-warning)"
-                          } 50%, transparent)`,
-                        }}
-                      >
-                        {s.redactedAs}
-                      </span>
-                    ) : (
-                      <span key={i}>{s.text}</span>
-                    ),
-                  )}
+            {/* Walk the segment list once. Non-highlighted text passes
+                through; every highlight (regardless of category) renders
+                through `<MaskedSpan alwaysMask>` so it shows as a black
+                ██ block by default and reveals only on click + clearance
+                + projection-off. This preserves Task #149's expanded
+                coverage (PII / GEO / COMMS / CLASSIFIED / CONTROLLED all
+                masked by default) on top of Task #169's shared
+                click-to-reveal controller. */}
+            {remarkSegments.map((s, i) => {
+              if (!s.category) return <span key={i}>{s.text}</span>;
+              return (
+                <MaskedSpan
+                  key={i}
+                  controller={piiRedaction}
+                  spanKey={`${record.sr_number}:${i}`}
+                  text={s.text}
+                  category={s.category}
+                  alwaysMask
+                />
+              );
+            })}
           </div>
         </section>
 

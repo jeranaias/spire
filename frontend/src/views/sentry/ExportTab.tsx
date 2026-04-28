@@ -1,11 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError, type ExportResult } from "../../api";
 import type { SentryContext } from "../SentryView";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Pressable, fireIdempotent } from "../../components/ui";
-import { ClassifiedExport, ClassificationBadge } from "../../components/classification";
+import {
+  ClassifiedExport,
+  ClassificationBadge,
+  MaskedSpan,
+  RedactionToggle,
+  usePiiRedaction,
+  type PiiRedactionController,
+} from "../../components/classification";
 
 const AUTHORITIES = [
   { value: "US_ONLY",  label: "U.S. Only" },
@@ -384,7 +391,11 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
           </div>
 
           {result.sample_diffs && result.sample_diffs.length > 0 && (
-            <SampleDiffPanel diffs={result.sample_diffs} />
+            <SampleDiffPanel
+              diffs={result.sample_diffs}
+              recordClass={result.classification ?? "SECRET"}
+              exportId={result.export_id}
+            />
           )}
         </div>
       )}
@@ -424,14 +435,38 @@ const FLAG_COLOR: Record<string, string> = {
   controlled: "#fb923c",
 };
 
-function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
+function SampleDiffPanel({
+  diffs,
+  recordClass,
+  exportId,
+}: {
+  diffs: DiffSample[];
+  recordClass: string;
+  exportId?: string;
+}) {
   const [expanded, setExpanded] = useState<string | null>(diffs[0]?.sr_number ?? null);
+  // Task #169 — same click-to-reveal PII gate the Review Queue inspector
+  // uses, scoped to this export's diff panel. recordClass tracks the
+  // bundle's effective classification so the gate authorises against the
+  // strictest level the export contains. Reset on export_id change so a
+  // freshly-built bundle doesn't inherit reveals from the previous one.
+  const piiRedaction = usePiiRedaction(recordClass);
+  // Reset reveals whenever a new export bundle replaces the prior one.
+  // We piggy-back on `exportId` because the diff list is stable within a
+  // single bundle but flips wholesale when the operator re-exports.
+  useEffect(() => {
+    piiRedaction.resetRevealed();
+  }, [exportId, piiRedaction.resetRevealed]);
   return (
     <div className="mt-4 border-t border-[var(--color-border)] pt-4">
-      <div
-        className="mb-2 font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest"
-      >
-        Before / After · {diffs.length} Sample Records
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="font-mono text-xs font-semibold uppercase text-[var(--color-text-muted)] tracking-widest">
+          Before / After · {diffs.length} Sample Records
+        </div>
+        {/* Task #169 — projection/redaction toggle. Black ██ blocks
+            replace the strike-through originals on the left pane until
+            the operator clicks to reveal (or flips off projection mode). */}
+        <RedactionToggle controller={piiRedaction} variant="compact" className="shrink-0" />
       </div>
       <div className="flex flex-col gap-2">
         {diffs.map((d) => {
@@ -479,6 +514,8 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
                       <OriginalWithMarkedSpans
                         original={d.original}
                         spans={d.removed_spans ?? []}
+                        controller={piiRedaction}
+                        keyPrefix={`export:${d.sr_number}`}
                       />
                     </div>
                   </div>
@@ -510,9 +547,13 @@ function SampleDiffPanel({ diffs }: { diffs: DiffSample[] }) {
 function OriginalWithMarkedSpans({
   original,
   spans,
+  controller,
+  keyPrefix,
 }: {
   original: string;
   spans: NonNullable<DiffSample["removed_spans"]>;
+  controller: PiiRedactionController;
+  keyPrefix: string;
 }) {
   if (!spans || spans.length === 0) return <>{original}</>;
   const sorted = [...spans].sort((a, b) => a.start - b.start);
@@ -522,23 +563,39 @@ function OriginalWithMarkedSpans({
     const sp = sorted[i];
     if (sp.start < cursor) continue;
     if (sp.start > cursor) out.push(<span key={`p${i}`}>{original.slice(cursor, sp.start)}</span>);
+    // Task #169 — the pre-redaction substring (PII / geo / classified
+    // identifier) renders as a black ██ block by default and reveals
+    // (with the strike-through styling) only on click + clearance +
+    // projection-off. Category drives the accent stripe.
     out.push(
-      <span
+      <MaskedSpan
         key={`s${i}`}
-        className="rounded-sm px-0.5 line-through decoration-2"
-        style={{
+        controller={controller}
+        spanKey={`${keyPrefix}:span:${i}`}
+        text={sp.before}
+        category={mapExportSpanToCategory(sp.category)}
+        alwaysMask
+        revealedClassName="rounded-sm px-0.5 line-through decoration-2"
+        revealedStyle={{
           background: "color-mix(in oklab, var(--color-danger) 16%, transparent)",
           color: "var(--color-danger)",
         }}
-        title={`Will be replaced with: ${sp.after}`}
-      >
-        {sp.before}
-      </span>,
+      />,
     );
     cursor = sp.end;
   }
   if (cursor < original.length) out.push(<span key="tail">{original.slice(cursor)}</span>);
   return <>{out}</>;
+}
+
+// Map the backend's removed_span category strings (already lowercase
+// "pii"/"geo"/"comms"/"classified"/"controlled") onto the inspector
+// palette. Falls through to "pii" for unknown categories — the safe
+// default for any value the backend tagged as worth redacting.
+function mapExportSpanToCategory(category: string | undefined): string {
+  const c = (category ?? "").toLowerCase();
+  if (c === "geo" || c === "comms" || c === "classified" || c === "controlled" || c === "pii") return c;
+  return "pii";
 }
 
 // Walkthrough #1 — sanitized pane: highlight every [REDACTED:...] token in
