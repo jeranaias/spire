@@ -1,94 +1,145 @@
-# SPIRE — Replit Environment
+# Workspace
 
 ## Overview
 
-SPIRE (Sanitization, Prediction, Intelligence, Readiness Engine) is a contested-logistics operating system designed to provide sanitization, prediction, intelligence, and readiness capabilities, originally built for USMC pilots. The project aims to offer a robust operating system for contested logistics environments.
+pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
 
-Key capabilities include:
-- Generating synthetic canonical datasets.
-- Serving a REST API.
-- Providing a dynamic frontend for user interaction.
-- Implementing a comprehensive authentication system with role-based access control.
-- Managing classification and export controls for sensitive data.
-- Integrating with external logistics systems (GCSS-MC, OMS-UCI, MIL-STD-6016).
-- Simulating various communication states for disaster preparedness drills.
-- Maintaining a model registry for AI/ML supply chain transparency.
-- Offering a "Decision Bridge" dashboard for critical decision-making.
-- Supporting scenario-based vignettes for training and demonstration purposes.
-- Providing an in-app pitch deck and live-demo failsafe mechanisms for presentations.
+## MARLOG — Marine Logistics Calculator
 
-## User Preferences
+Offline-capable Marine Corps sustainment planning tool aligned to MCWP 4-11 doctrine.
+Supports Class I (subsistence), Class III(P) (POL/power), Class V (ammo, weapon-driven), Class VIII (medical),
+Class IX (repair parts). Calculates Days of Supply per unit (climate × tempo × personnel × days),
+flags deficiencies (red <2 DOS, amber <5, green ≥5), schedules resupply events, and simulates
+sync with SPIRE (Master Data Management) including a real outbox queue, per-record push results,
+and catalog reconciliation report.
 
-- I want iterative development.
-- I prefer clear and concise communication.
-- Ask before making major changes.
-- Do not make changes to the folder `dataset/`.
-- Do not make changes to the file `backend/auth.MOCK_USERS`.
+A "Push to SPIRE as PR" feature opens a real GitHub pull request against the SPIRE master-data
+repository from three planning surfaces: the standalone Calculator (an ad-hoc requirements bill),
+a Unit detail page (current on-hand supply snapshot), and a Schedule page (comms-denied resupply
+schedule). Each push commits a JSON payload under `proposals/marlog/<kind>/<branch>.json` to a
+new branch and opens a PR titled with the source label. The shared `/spire-prs` page lists all
+MARLOG-opened PRs with live state (open/merged/closed) refreshed against GitHub on demand.
+Repo coords come from env vars `SPIRE_GITHUB_REPO_OWNER`, `SPIRE_GITHUB_REPO_NAME`, and
+optional `SPIRE_GITHUB_BASE_BRANCH` (default `main`); the GitHub API token is fetched from the
+Replit GitHub connector. When the env vars are unset the button still renders but the dialog
+shows "SPIRE repo not configured" and submission is disabled — no silent fallback.
 
-## System Architecture
+Class V (Ammunition) uses doctrinal weapon-system-driven burn rates (Σ weapon_qty × per-weapon DODIC rate)
+across three postures: combat_load (total issue target), assault (daily high-intensity), sustain (daily
+steady-state). Each unit has GCE/Non-GCE classification. Weapon systems have per-DODIC rates for both GCE
+and Non-GCE configurations. The frontend "Class V / Weapons" tab allows posture/GCE toggle, weapon
+assignment management, and combat load gap visualization. Weapon assignments can also be configured
+during unit creation (`/units/new`, staged locally then POSTed after the unit exists) and edited inline
+on the dedicated unit edit page (`/units/:id/edit`, immediate-save via the weapons API).
 
-The SPIRE application is built with a clear separation between its backend and frontend components, designed for scalability and maintainability.
+Artifacts:
+- `artifacts/logistics` — React + Vite frontend (path `/`), TanStack Query offlineFirst caching,
+  sidebar navigation: Dashboard / Units / Calculator / Sync. Command-center dark UI (navy-black canvas, cyan accent, Space Mono headers).
+  Public read-only share view at `/s/:shareToken` (no sidebar) lets receiving units open a
+  published pre-coordinated schedule and download the same client-side PDF for offline handoff
+  via the shared `<ScheduleView shareMode />` component and `lib/schedule-pdf.ts`
+  (`downloadSchedulePdf`). The `Email` action on the schedule page opens a `mailto:` draft via
+  `buildScheduleMailtoUrl`; recipients are pre-filled from the receiving unit's
+  `distroEmails` array (S-4, supporting battalion, logistics POCs, etc.), edited on the
+  unit edit page (`/units/:id/edit` → "Schedule Distribution List" textarea).
+- `artifacts/api-server` — Express 5 API at `/api`, routes: units, supply, resupply, calculate,
+  catalog, dashboard (summary/deficiencies/forecast/activity, plus `class/:supplyClass`
+  drill-down used by the dashboard's clickable Class Breakdown rows → `/classes/:supplyClass`),
+  sync. Centralized error handler maps Zod errors → 400 and Postgres FK/unique violations → 409.
+  Background schedulers: auto-sync (`startAutoSyncScheduler`) and a weekly
+  comms-hygiene email (`startCommsHygieneScheduler` in
+  `src/lib/comms-hygiene.ts`) that re-runs the shared `runDistroAudit`
+  (`src/lib/distro-audit.ts`, also backing `GET /dashboard/distro-audit`)
+  and emails a digest of flagged units — with `/units/:id/edit` deep links —
+  to the regiment S-6 via SMTP. Suppressed when zero malformed entries.
+  Every scheduled or on-demand run is persisted to the
+  `comms_hygiene_runs` table (timestamp, audit counts, recipients, outcome,
+  SMTP error if any) so the dashboard's "Last digest" line and the
+  collapsible "Recent digest runs" history both survive API restarts. The
+  history list is exposed at `GET /dashboard/comms-hygiene-runs?limit=N`
+  (newest first, capped at 200). The dashboard also surfaces a footnote
+  underneath the recent-runs panel showing total stored row count and the
+  projected expiry of the oldest row, backed by
+  `GET /dashboard/comms-hygiene-stats` so planners can see the prune
+  policy is working. The same footnote also exposes an inline "Edit"
+  control that lets planners override `COMMS_HYGIENE_RETENTION_DAYS` at
+  runtime without restarting the API — the override is persisted in the
+  single-row `comms_hygiene_settings` table and read on every prune tick
+  and stats request, with a "Reset" button to clear it and fall back to
+  the env default. Backed by `GET` and `PUT
+  /dashboard/comms-hygiene-settings`; every change writes an
+  `activity` row of kind `comms_hygiene_retention_changed` for audit.
+  Configured via env vars: `COMMS_HYGIENE_ENABLED`, `COMMS_HYGIENE_TO`,
+  `COMMS_HYGIENE_CC`, `COMMS_HYGIENE_INTERVAL_HOURS` (default 168 = weekly),
+  `COMMS_HYGIENE_RETENTION_DAYS` (default 180; daily sweep deletes
+  `comms_hygiene_runs` rows older than this so the audit table can't grow
+  without bound — set to 0 to disable. The DB-backed override above wins
+  when set. Sweep runs even when the digest scheduler itself is disabled,
+  since manual "Send Digest Now" still appends rows.), `COMMS_HYGIENE_FROM`,
+  `MARLOG_PUBLIC_BASE_URL`, plus
+  standard SMTP vars (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
+  `SMTP_PASS`). When SMTP is unconfigured the digest is logged instead of sent.
+- `lib/db` — Drizzle schemas: units, catalog_items, catalog_item_deletions
+  (snapshot table backing the catalog delete undo window), supply_entries,
+  resupply_events, activity, sync_state, sync_outbox, sync_runs,
+  weapon_systems, weapon_dodic_rates, unit_weapons, comms_hygiene_runs
+  (audit trail for the comms-hygiene digest scheduler), comms_hygiene_settings
+  (single-row table storing the in-app retention override).
+- `lib/api-spec` — OpenAPI YAML, single source of truth (Orval codegen).
+  Audited (Task #175): all 58 spec operations have a 1:1 matching Express
+  handler, and every endpoint cross-reference inside `description:` text
+  resolves to a real operation. Intentional REST gaps (no `DELETE
+  /resupply/{eventId}` — cancellation is `PATCH status: "cancelled"`; no
+  `POST /catalog/items` collection — items are seeded or auto-created via
+  `POST /units/{unitId}/supply` custom-item path; no list/create/delete on
+  weapon DODIC rates — seed-only matrix; no row-scoped `GET /sync/outbox/{id}`
+  — list payload is complete; no `PATCH`/`DELETE` on baselines or published
+  schedules — both are immutable / append-only audit records) are now
+  documented in the relevant operation's `description:` so they aren't
+  mistaken for missing endpoints.
+- `scripts/src/seed.ts` — seeds 9 units + 26 catalog items + 11 weapon systems + 13 DODIC rate rows
+  + unit weapon assignments + supply/resupply/activity/sync rows.
+  Run with `pnpm --filter @workspace/scripts run seed`.
 
-### UI/UX Decisions
-- **Frontend Framework**: React 19 with Vite 8 and TypeScript.
-- **Styling**: Tailwind 4 for utility-first CSS.
-- **Mapping**: MapLibre for geographical data visualization.
-- **Charting**: Recharts for data representation.
-- **State Management**: Zustand for reactive state management.
-- **Routing**: React Router for navigation.
-- **Authentication UI**: CAC cert-selection splash at `/#/auth` with mocked Marine roles.
-- **TopBar**: Features identity pill, role badge, sign-out, and specific operational indicators like `GcssMcSyncPill` and `MissionClock`.
-- **Classification Display**: `ClassificationBadge.tsx` for visual representation of data classification levels.
-- **Joint COP Preview**: Faux Navy/Joint "JLTC" shell (`JointPreviewView`) with a distinct steel-blue palette and fouled-anchor mark. Hardened for the contested fight (Task #79): JLTC topbar surfaces a 4-state SPIRE comms control (CONN/LIM/INT/DISC) wired to `useSpireStore.ddilMode` so the shared API interceptor's latency / packet-loss / cache effects apply to this tab too. Auto-refreshes the OMS/UCI export on a comms-aware cadence (30s default, 60s on LIMITED, polling suspended on DISCONNECTED with the cached payload still rendered behind a red "STALE — DISCONNECTED · last good pull T-Ns" stripe). A fixed "what's hot now" 4-cell strip (worst alert, worst MC unit, C3/C4 unit count, active alert count) sits between topbar and tables for ≤5-second glance reads. Pulled/Published pills now show relative `T-Ns` ages that tick at 1Hz. Projection legibility pass: classification banner 18px bold; field values and table cells 14px. ErrorPanel hint corrected — any SECRET-cleared operator can pull (no longer claims only Security Manager / MEF Commander), and a 401 surfaces an actionable "Sign in to SPIRE" link instead of the generic clearance hint.
-- **Decision Bridge**: 6x2 grid layout designed to fit without vertical scroll at 1920x1080 resolution.
-- **Stage Mode (MDM 2026 pivot)**: `?stage=1` query param activates an 8-minute demo UI that collapses SPIRE to four hero use-case tiles (SENTRY, PULSE, BASTION, DHA RESCUE). Persists in `sessionStorage`, hydrated in `main.tsx` before first paint, gated throughout TopBar/DecisionBridge/AuditView. Adds `/dha-rescue` route, AUDIT pill, and an additive `POST /api/auth/quick-switch` endpoint (env-gated by `SPIRE_DEMO_QUICK_SWITCH=1`) for presenter role-hopping without PIN re-entry. Presenter rehearsal aid at `scripts/demo_rehearsal.ts`.
+Logistics constants live in `artifacts/api-server/src/lib/logistics.ts`
+(climate/tempo multipliers, status thresholds, readiness weighting).
 
-### Technical Implementations
-- **Backend Framework**: FastAPI (Python 3.12) for high-performance API services.
-- **Dataset Generation**: Synthetic canonical dataset generated at boot by the `dataset/` engine.
-- **Authentication**: HMAC-SHA256-signed `HttpOnly` `SameSite=Lax` cookie (`spire_session`, 12h TTL) for session management. Role-based access control derived from signed-in cert with server-side validation using `request.state.user.role`.
-- **Classification Enforcement**: Server-side gates in `backend/scoping.py` (`require_clearance`, `require_no_downgrade`) ensuring data integrity and access control. Classification stamps applied to all exported artifacts and HTTP headers.
-- **Integrations Contract Pages**: Reference implementation (`IntegrationsView.tsx`) detailing field mapping, polling cadence, auth, ATO posture, and failure modes for GCSS-MC. Includes a Field Dictionary section that pulls the derived 163-column GCSS-MC schema from `dataset/data/gcss_dictionary.json` (built from the sanitized dictionary CSVs in `tmp/gcss-mc/`, which are gitignored) and renders coverage badges (consumed / partial / dropped). Backed by `/api/integrations/gcss-mc/coverage-summary` and `/api/integrations/gcss-mc/dictionary`.
-- **GCSS-MC schema-aligned export adapter** (`backend/routes/integrations.py`): Three new endpoints (`/gcss-mc/export/sr-header.csv`, `/gcss-mc/export/sr-parts.csv`, `/gcss-mc/export/due-in.csv`) emit the synthetic dataset back out in the *real* GCSS-MC sanitized export shape — DD-MON-YY dates, hashed `OWNER_UNIT_<sha256-20>` UICs, `NN B-Label` priorities, defect codes that include the trailing-period dirty signal at ~2.5%. The 12-column SR-header schema is fixed by the real export.
-- **SENTRY GCSS ingest adapter** (`backend/integrations/sentry_gcss_adapter.py`): Parses real-format SR-header CSVs (own or third-party) into normalized SR records. Handles trailing-period defect codes, two-digit Oracle dates, and pre-hashed vs clear UIC inputs without dropping rows on first error.
-- **Schema fidelity tooling** (`dataset/scripts/`): `profile_gcss_real.py` and `profile_gcss_synth.py` produce field-distribution profiles; `build_gcss_dictionary.py` joins the sanitized dictionary CSVs with the real top-3 values and writes `dataset/data/gcss_dictionary.json`; `fidelity_report.py` writes the side-by-side `dataset/data/gcss_fidelity_report.md` (Jaccard + total-variation distance per field).
-- **Mission Clock and Scenario Timeline**: Process-wide singleton managing `running`, `rate`, anchor wall-clock, and an event registry. Decoupled from real wall time (1 wall-second = 1 scenario-minute at 1x).
-- **Reset-to-Clean-Demo**: Server-side endpoint (`POST /api/system/admin/reset-demo`) to return SPIRE to a known t=0 state without regenerating the full dataset, preserving determinism.
-- **Audit Logging**: Hash-chained SQLite audit table (`backend/persistence.py`) with a Security-Manager-only SOC-shaped view (`AuditView.tsx`) featuring filters, pagination, and export.
-- **Joint COP Export Adapters**: Read-only adapters for OMS-UCI and MIL-STD-6016 (Link 16) in `backend/routes/joint.py`, enforcing `SECRET` clearance for exports.
-- **DDIL Mode Dramatization**: Frontend-only simulation of SATCOM-denial drills (Limited, Intermittent, Disconnected states) using an API client interceptor in `frontend/src/api.ts`.
-- **Model Registry**: Hand-maintained JSON registry (`dataset/data/model_registry.json`) for AI/ML model supply chain transparency, exposed via dedicated backend routes and frontend views.
-- **Decision Bridge Polling**: Polling with backoff for various tiles (alerts 10s, audit 5s, mc-by-unit 60s, shortages 30s, mission 60s).
-- **Blood / Class VIII H+72 Vignette**: Data-driven scenario (`blood-h72.scenario.json`) with JSON loader, validator, and hook module for scenario ticker dispatch.
-- **In-app Pitch Deck**: `/pitch` route with slide chrome, keyboard navigation, and presenter mode for in-app presentations.
-- **Live-demo Failsafe**: Presenter-only escape hatch (`FailsafePlayer.tsx`) to swap live demo with a pre-recorded video, accessible via dedicated button or `F9` hotkey. Asset at `frontend/public/demo-failsafe.mp4` is a 60s motion-graphic stop-gap (5 title cards in SPIRE chrome) — recommend re-recording on demo hardware before stage.
-- **Hash-Redirect Safety Net**: Inline script in `frontend/index.html` rewrites bare `/pitch`, `/pitch/`, `/demo`, `/demo/` URLs to the hash form (`/#/pitch`, `/#/demo`) before React boots, since SPIRE uses HashRouter. Preserves search query and never blocks app boot on failure.
-- **In-app Identity Switcher**: `IdentityPill` dropdown in `TopBar.tsx` exposes a Switch Identity section with one-click swaps between the four mock CAC certs. Lazy-fetches the cert directory on first open, caches the full list (re-derives swap targets per render to stay correct after mid-demo switches), retries on transient fetch failure, and uses the mock backend's any-6-digit-PIN policy with `"000000"` for in-app swaps. Includes Presenter shortcuts (Open pitch deck, Open demo cockpit) and Sign out.
-- **Stable Session Secret**: `SPIRE_SESSION_SECRET` env var pins the HMAC key used by `backend/auth.py` to sign the `spire_session` cookie. Without it the key is regenerated on every backend restart, invalidating outstanding sessions and bouncing presenters back to `/auth`. Backend logs a hint to set the env var when falling back to an ephemeral key.
-- **Slider Debounce + AbortController**: Inference Economics slider in `InferenceEconomicsTab.tsx` wraps the extrapolation POST in a 180ms debounce and AbortController so fast drags can't race themselves into a transient 502. Expected `AbortError` on superseded requests is suppressed from the UI error state.
-- **PULSE Risk Board Drafts**: The Risk Board "Draft Action" CTA persists candidate actions to a real `pulse_drafts` SQLite table via `POST /api/pulse/draft-action` (writes a `pulse_draft_action` row to the hash-chained audit log). A `DraftsBadge` in `TopBar.tsx` (between `PushToJointButton` and `IdentityPill`, scoped to maintenance_chief / g4 / mef_commander) polls `GET /api/pulse/drafts` every 15 s and re-fetches on the `draftsRefreshTick` store nonce; its popover lists held drafts and dismisses via `POST /api/pulse/drafts/{id}/dismiss` (also audit-logged). Toast copy ("…held in Drafts (DRAFT-…)") is honest about the absence of an approval workflow — no more "awaiting approval" claims.
-- **Stage Live-Ingest Mode** (Task #183): `SPIRE_BOOT_EMPTY=1` env flag causes `backend.main.lifespan` to skip `load_dataset()` so SPIRE boots with an empty dataset singleton (`backend/state.py::init_empty_dataset`). DECISION BRIDGE then renders a drag-drop hero card (`StageIngestHero.tsx`) with three named slots (header / sr_parts / due_in); on submit it POSTs to `/api/system/stage-ingest` (RBAC-gated to `data_custodian` / `security_manager`, 60s wall-clock timeout, sanitization gate that flags un-hashed TAMCN / SR_NUMBER / SERIAL_NUMBER / OWNER_UNIT) and atomically swaps the singleton via `swap_dataset()`. While empty, BASTION / PULSE / SENTRY render the "Awaiting GCSS-MC ingest" placeholder (`AwaitingIngestEmpty.tsx`) instead of fetching populated data; their backend routes return an `{empty: true, message}` envelope (type-guarded by `isEmptyEnvelope` in `frontend/src/api.ts`). The `useDatasetStatus` hook polls `/api/system/dataset-status` every 5 s. **Shift+F8** is a capture-phase global failsafe that POSTs to `/api/system/admin/reset-demo` (extended to also rehydrate the dataset singleton from the seed-42 baseline) and toasts `Failsafe — restored seed-42 baseline`. Synthetic 6-row CSV stand-ins for CI live in `tests/fixtures/stage_ingest/`; the real sanitized GCSS-MC export is **never** committed. Operator runbook: `docs/stage-rehearsal.md`.
+## Deployment
 
-### System Design Choices
-- **Development Environment Setup**: Frontend (Vite dev server) listens on `0.0.0.0:5000` and proxies `/api/*` to the backend. Backend (FastAPI) listens on `127.0.0.1:8000`. Two Replit workflows run side by side: `Frontend` (webview, port 5000) and `Backend` (console, port 8000). `vite.config.ts` already sets `server.allowedHosts: true` so the proxied iframe origin is trusted.
-- **Production / Deploy**: `vm` deployment target; build step runs `npm install && npm run build` inside `frontend/`, and the run command starts `uvicorn backend.main:app --host 0.0.0.0 --port 5000` — FastAPI then serves `frontend/dist/` from `/` and the API from `/api/*` on the same origin.
-- **CORS Configuration**: Widened (`allow_origin_regex=".*"`, `allow_credentials=False`) for Replit's proxied iframe origin.
-- **Single Source of Truth**: Backend serves as the truth source for authentication, classification, and scenario state.
-- **Modularity**: Design system primitives for classification, dedicated modules for scenario management, and separate routes for different functionalities.
-- **Determinism**: Canonical seeded dataset ensures bit-identical content across boots; runtime artifacts are deterministic in structure but anchored to the H+0 pin moment.
-- **Security**: Strict role-based gating for sensitive actions and views, audit logging for all critical operations, and classification enforcement for data handling.
+- `Dockerfile` — multi-stage Node 24 + pnpm with two targets:
+  `marlog-api` (Express runtime, port 3000) and `marlog-web` (nginx serving
+  the Vite SPA and proxying `/api`, port 80). Build context is trimmed by
+  `.dockerignore`.
+- `docker-compose.yml` — local stand-up: `marlog-api`, `marlog-web`,
+  `marlog-db` (Postgres 16). UI on http://localhost:8080.
+- `deploy/nginx.conf` — baked into `marlog-web`. Upstream `marlog-api:3000`,
+  SPA history fallback, long cache for `/assets`, `/healthz` for orchestrators.
+- `fly.marlog.toml` — Fly.io companion to SPIRE's `fly.toml`. Two-app deploy
+  (`marlog-api` + `marlog-web`); see `deploy/FLY_DEPLOY.md` for the full
+  procedure.
+- `.github/workflows/ci.yml` — `pnpm install --frozen-lockfile` →
+  `pnpm run build`, then builds both Docker images. Vite build needs `PORT`
+  and `BASE_PATH` (set in workflow env and Dockerfile).
 
-## External Dependencies
+## Stack
 
-- **Vite**: Frontend build tool.
-- **Tailwind CSS**: Utility-first CSS framework.
-- **MapLibre**: Open-source library for interactive maps.
-- **Recharts**: Composable charting library built with React.
-- **Zustand**: Small, fast, and scalable bearbones state-management solution.
-- **React Router**: Declarative routing for React.
-- **Uvicorn**: ASGI server for FastAPI.
-- **GCSS-MC**: External logistics system integrated for data exchange (reference implementation only).
-- **OMS-UCI**: External system for Joint COP export.
-- **MIL-STD-6016 (Link 16)**: External standard for Joint COP export.
-- **Gemma 4 26B FP8**: Self-hosted LLM model (`copilot-llm`) as part of the model registry.
-- **Thornveil proprietary**: Proprietary model (`thermalhawk-detector`) listed in the model registry.
+- **Monorepo tool**: pnpm workspaces
+- **Node.js version**: 24
+- **Package manager**: pnpm
+- **TypeScript version**: 5.9
+- **API framework**: Express 5
+- **Database**: PostgreSQL + Drizzle ORM
+- **Validation**: Zod (`zod/v4`), `drizzle-zod`
+- **API codegen**: Orval (from OpenAPI spec)
+- **Build**: esbuild (CJS bundle)
+
+## Key Commands
+
+- `pnpm run typecheck` — full typecheck across all packages
+- `pnpm run build` — typecheck + build all packages
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- `pnpm --filter @workspace/api-server run dev` — run API server locally
+- `pnpm --filter @workspace/api-server run test` — run API unit + integration tests (vitest, hits the dev DB; `pnpm --filter @workspace/db run push` first if the schema is stale)
+
+See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.

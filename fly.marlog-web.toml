@@ -1,0 +1,42 @@
+# MARLOG — Fly.io deployment for the web (nginx) tier.
+#
+# Companion to fly.marlog.toml.  Deploys the Vite SPA behind nginx as a
+# separate Fly app so the API and web tiers can be released and scaled
+# independently.  The nginx container baked from the marlog-web Dockerfile
+# target proxies /api to the marlog-api app via Fly's internal DNS
+# (`marlog-api.internal`) — see deploy/nginx.conf for the upstream block
+# and deploy/FLY_DEPLOY.md for the rebuild step that swaps in the .internal
+# host on first deploy.
+
+app            = "marlog-web"
+primary_region = "iad"
+
+[build]
+  dockerfile   = "Dockerfile"
+  build-target = "marlog-web"
+
+[http_service]
+  internal_port       = 80
+  force_https         = true
+  auto_stop_machines  = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes           = ["app"]
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 400
+    hard_limit = 500
+
+  [[http_service.checks]]
+    interval     = "30s"
+    timeout      = "5s"
+    grace_period = "10s"
+    method       = "get"
+    path         = "/healthz"
+
+[[vm]]
+  size      = "shared-cpu-1x"
+  memory    = "256mb"
+  cpu_kind  = "shared"
+  cpus      = 1

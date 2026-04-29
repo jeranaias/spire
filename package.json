@@ -1,19 +1,17 @@
 {
   "name": "workspace",
-  "version": "1.0.0",
-  "description": "**Contested Logistics Operating System** — Marine Made. Sanitization, Prediction, Intelligence, Readiness Engine. Local Intelligence · No Cloud · IL5-Fit",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "version": "0.0.0",
+  "license": "SEE LICENSE IN LICENSE.md",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
+    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
+    "test": "pnpm -r --if-present run test"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "playwright": "^1.59.1",
-    "tsx": "^4.21.0"
+  "private": true,
+  "devDependencies": {
+    "prettier": "^3.8.1",
+    "typescript": "~5.9.2"
   }
 }

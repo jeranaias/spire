@@ -1,44 +1,34 @@
-# Keep the build context small — speeds up `fly deploy` + Docker builds.
+# Version control
 .git
 .gitignore
-.env
-.env.local
-.env.*.local
-.venv
-__pycache__/
-**/__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 
-# Frontend
-frontend/node_modules
-frontend/dist
-frontend/.vite
-frontend/coverage
+# Build artifacts (rebuilt in-image)
+**/dist
+**/.tsbuildinfo
+**/*.tsbuildinfo
 
-# Docs + scripts not shipped in image
-docs/
-scripts/
-tmp/
-.tmp/
-.tmp_e2e/
-ABLATION_*.md
-*.log
-backend.out.log
-backend.err.log
+# Dependencies (re-installed in deps stage)
+**/node_modules
 
-# IDE
-.vscode/
-.idea/
-.cursor/
-.devcontainer/
+# Replit / local tooling
+.replit
+.replitignore
+.replit-artifact
+.local
+.cache
+.config
+.agents
 
-# OS
+# IDEs
+.vscode
+.idea
+.cursor
+
+# Logs / OS
+**/*.log
 .DS_Store
 Thumbs.db
 
-# Models — never ship raw weights into the public image
-models/
+# Runtime/test scratch
+tmp
+coverage

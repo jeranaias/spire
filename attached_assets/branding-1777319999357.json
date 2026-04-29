@@ -1,0 +1,168 @@
+{
+  "colorScheme": "dark",
+  "fonts": [
+    {
+      "family": "JetBrains Mono",
+      "role": "monospace"
+    },
+    {
+      "family": "IBM Plex Mono",
+      "role": "monospace"
+    },
+    {
+      "family": "IBM Plex Sans",
+      "role": "body"
+    },
+    {
+      "family": "Inter",
+      "role": "body"
+    }
+  ],
+  "colors": {
+    "primary": "#3B82F6",
+    "secondary": "#1A273F",
+    "accent": "#3B82F6",
+    "background": "#0A0C13",
+    "textPrimary": "#0A0C13",
+    "link": "#9CA3AF"
+  },
+  "typography": {
+    "fontFamilies": {
+      "primary": "IBM Plex Sans",
+      "heading": "IBM Plex Sans"
+    },
+    "fontStacks": {
+      "heading": [
+        "IBM Plex Sans",
+        "Inter",
+        "ui-sans-serif",
+        "system-ui",
+        "-apple-system",
+        "Segoe UI",
+        "sans-serif"
+      ],
+      "body": [
+        "IBM Plex Sans",
+        "Inter",
+        "ui-sans-serif",
+        "system-ui",
+        "-apple-system",
+        "Segoe UI",
+        "sans-serif"
+      ],
+      "paragraph": [
+        "IBM Plex Sans",
+        "Inter",
+        "ui-sans-serif",
+        "system-ui",
+        "-apple-system",
+        "Segoe UI",
+        "sans-serif"
+      ]
+    },
+    "fontSizes": {
+      "h1": "16px",
+      "h2": "13px",
+      "body": "11px"
+    }
+  },
+  "spacing": {
+    "baseUnit": 10,
+    "borderRadius": "3px"
+  },
+  "components": {
+    "input": {
+      "background": "#171F30",
+      "textColor": "#3B82F6",
+      "borderColor": "#3B82F6",
+      "borderRadius": "4px",
+      "borderRadiusCorners": {
+        "topLeft": "4px",
+        "topRight": "4px",
+        "bottomRight": "4px",
+        "bottomLeft": "4px"
+      },
+      "shadow": "none"
+    },
+    "buttonPrimary": {
+      "background": "#3B82F6",
+      "textColor": "#FFFFFF",
+      "borderColor": "#3B82F6",
+      "borderRadius": "4px",
+      "borderRadiusCorners": {
+        "topLeft": "4px",
+        "topRight": "4px",
+        "bottomRight": "4px",
+        "bottomLeft": "4px"
+      },
+      "shadow": "none"
+    },
+    "buttonSecondary": {
+      "background": "#1A273F",
+      "textColor": "#3B82F6",
+      "borderColor": "#3B82F6",
+      "borderRadius": "4px",
+      "borderRadiusCorners": {
+        "topLeft": "4px",
+        "topRight": "4px",
+        "bottomRight": "4px",
+        "bottomLeft": "4px"
+      },
+      "shadow": "oklab(0.623066 -0.0332245 -0.185038 / 0.65) 0px 0px 0px 0px"
+    }
+  },
+  "images": {
+    "logo": "File saved at: attached_assets/logo.svg",
+    "favicon": "https://spire-mdm.fly.dev/favicon.svg",
+    "ogImage": "https://spire-mdm.fly.dev/og.png"
+  },
+  "__llm_logo_reasoning": {
+    "selectedIndex": 0,
+    "reasoning": "Selected #0 because it is the most prominent logo in the header area, matching the brand name 'SPIRE' from the page title and URL.",
+    "confidence": 0.9,
+    "source": "llm"
+  },
+  "__llm_button_reasoning": {
+    "primary": {
+      "index": 4,
+      "text": "Next",
+      "reasoning": "Button #4 has a vibrant blue background (#3B82F6), which is a strong indicator of a primary call-to-action. The text 'Next' suggests forward movement, aligning with typical primary actions."
+    },
+    "secondary": {
+      "index": 1,
+      "text": "Report Issue",
+      "reasoning": "Button #1 has a different background color (#1A273F) and serves a supportive function with the text 'Report Issue', making it suitable as a secondary button."
+    },
+    "confidence": 0.95
+  },
+  "personality": {
+    "tone": "professional",
+    "energy": "medium",
+    "targetAudience": "businesses and logistics professionals"
+  },
+  "designSystem": {
+    "framework": "tailwind",
+    "componentLibrary": ""
+  },
+  "confidence": {
+    "buttons": 0.95,
+    "colors": 0.9,
+    "overall": 0.925
+  },
+  "__llm_metadata": {
+    "logoSelection": {
+      "llmCalled": true,
+      "llmSucceeded": true,
+      "finalSource": "llm",
+      "rawLogoSelection": {
+        "selectedLogoIndex": 0,
+        "selectedLogoReasoning": "Selected #0 because it is the most prominent logo in the header area, matching the brand name 'SPIRE' from the page title and URL.",
+        "confidence": 0.9
+      }
+    },
+    "buttonClassification": {
+      "llmCalled": true,
+      "llmSucceeded": true
+    }
+  }
+}

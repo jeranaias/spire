@@ -1,0 +1,3736 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Marine Corps logistics calculator API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: units
+    description: Units (squad, platoon, company, etc.)
+  - name: missions
+    description: Missions / operations
+  - name: supply
+    description: Supply on-hand and consumption
+  - name: resupply
+    description: Resupply events and projections
+  - name: dashboard
+    description: Aggregated dashboard data
+  - name: catalog
+    description: Reference catalog (supply items, consumption rates)
+  - name: sync
+    description: External system sync
+  - name: spire-pr
+    description: Open GitHub pull requests against the SPIRE master-data repository
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /units:
+    get:
+      operationId: listUnits
+      tags: [units]
+      summary: List all units
+      responses:
+        "200":
+          description: List of units
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Unit"
+    post:
+      operationId: createUnit
+      tags: [units]
+      summary: Create a unit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnitInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Unit"
+
+  /units/{unitId}:
+    get:
+      operationId: getUnit
+      tags: [units]
+      summary: Get unit detail
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Unit detail with supply summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnitDetail"
+    patch:
+      operationId: updateUnit
+      tags: [units]
+      summary: Update a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnitInput"
+      responses:
+        "200":
+          description: Updated unit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Unit"
+    delete:
+      operationId: deleteUnit
+      tags: [units]
+      summary: Delete a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /units/{unitId}/supply/{itemId}:
+    patch:
+      operationId: updateUnitSupplyEntry
+      tags: [supply]
+      summary: Update on-hand quantity and/or required-quantity override for a single tracked supply row
+      description: Row-scoped, in-place update for a supply entry that is already tracked on this unit. Use this for everyday edits from the supply table — adjusting on-hand counts or setting/clearing the planner-set required override. To add a brand new tracked item (catalog pick or custom item), use POST /units/{unitId}/supply instead, which is the only path that creates rows.
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupplyEntryUpdate"
+      responses:
+        "200":
+          description: Updated supply entry with refreshed status and days-of-supply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyEntry"
+        "400":
+          description: Invalid payload (e.g. neither onHand nor requiredOverride provided)
+        "404":
+          description: Unit or supply entry not found
+    delete:
+      operationId: deleteUnitSupply
+      tags: [supply]
+      summary: Remove a supply item from a unit and cancel future resupply events for it
+      description: Removes the supply entry, cancels any future resupply events tied to this item on this unit, and (for unit-scoped custom items) deletes the catalog row outright. The response includes a short-lived restore token that can be passed to POST /units/{unitId}/supply/{itemId}/restore to undo the removal.
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Supply entry removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteUnitSupplyResult"
+        "404":
+          description: Unit or supply entry not found
+
+  /units/{unitId}/supply/{itemId}/restore:
+    post:
+      operationId: restoreUnitSupply
+      tags: [supply]
+      summary: Undo a recent unit supply removal
+      description: Restores the supply entry with its previous on-hand count, any future resupply events that were cancelled, and (for unit-scoped custom items) the catalog row that was deleted. Only valid within a short grace window after the delete (see restoreExpiresAt on DeleteUnitSupplyResult).
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Supply entry restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreUnitSupplyResult"
+        "404":
+          description: No restore record for this unit/item
+        "410":
+          description: Restore window has expired
+
+  /units/{unitId}/supply/{itemId}/custom-item:
+    patch:
+      operationId: updateCustomSupplyItem
+      tags: [supply]
+      summary: Edit the underlying custom catalog item for a tracked supply entry
+      description: Only allowed for custom items scoped to this unit. Standard catalog items cannot be edited.
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCustomItemInput"
+      responses:
+        "200":
+          description: Updated supply entry with refreshed item details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyEntry"
+        "400":
+          description: Item is not a custom item editable on this unit
+        "404":
+          description: Unit, supply entry, or catalog item not found
+
+  /units/{unitId}/supply/{itemId}/custom-item/promote:
+    post:
+      operationId: promoteCustomSupplyItem
+      tags: [supply]
+      summary: Promote a unit-scoped custom catalog item to the shared catalog
+      description: Clears the scopedUnitId on the custom catalog item so it appears in every unit's catalog picker. Only allowed for custom items currently scoped to this unit.
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Promoted catalog item (now global)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogItem"
+        "400":
+          description: Item is not a unit-scoped custom item
+        "404":
+          description: Unit, supply entry, or catalog item not found
+
+  /units/{unitId}/supply/copy-from:
+    post:
+      operationId: copySupplyFromUnit
+      tags: [supply]
+      summary: Copy supply items from another unit to this unit (new items only, added at 0 on-hand)
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyFromUnitInput"
+      responses:
+        "200":
+          description: Items added from source unit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopyFromUnitResult"
+        "404":
+          description: Unit or source unit not found
+
+  /units/{unitId}/supply:
+    get:
+      operationId: getUnitSupply
+      tags: [supply]
+      summary: Get on-hand supply for a unit, by class
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Supply entries with computed days-of-supply
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SupplyEntry"
+    post:
+      operationId: upsertUnitSupply
+      tags: [supply]
+      summary: Set or update an on-hand quantity for a supply item
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupplyEntryInput"
+      responses:
+        "200":
+          description: Upserted entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyEntry"
+
+  /units/{unitId}/weapons:
+    get:
+      operationId: listUnitWeapons
+      tags: [units]
+      summary: List weapon systems on a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of weapon entries for this unit
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UnitWeapon"
+    post:
+      operationId: addUnitWeapon
+      tags: [units]
+      summary: Add a weapon system to a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnitWeaponInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnitWeapon"
+
+  /units/{unitId}/weapons/{weaponEntryId}:
+    patch:
+      operationId: updateUnitWeapon
+      tags: [units]
+      summary: Update weapon quantity for a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: weaponEntryId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnitWeaponUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnitWeapon"
+    delete:
+      operationId: deleteUnitWeapon
+      tags: [units]
+      summary: Remove a weapon system from a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: weaponEntryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /weapon-systems:
+    get:
+      operationId: listWeaponSystems
+      tags: [units]
+      summary: List all available weapon systems
+      responses:
+        "200":
+          description: List of weapon systems
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WeaponSystem"
+
+  /weapon-systems/{weaponSystemId}/dodic-rates/{rateId}:
+    patch:
+      operationId: updateWeaponDodicRate
+      tags: [units]
+      summary: Edit doctrinal combat-load / assault / sustain rates for a weapon-DODIC pair
+      description: Allows planners to adjust doctrinal burn rates per weapon system without touching the database. Changes are immediately reflected in unit-level DOS calculations. The full rate matrix (weapon × DODIC × GCE/Non-GCE) is seeded once by `scripts/src/seed.ts`; only edits are exposed via the API. There is intentionally no list/create/delete endpoint for rate rows.
+      parameters:
+        - name: weaponSystemId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: rateId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WeaponDodicRateInput"
+      responses:
+        "200":
+          description: Updated rate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeaponDodicRate"
+        "400":
+          description: Invalid payload
+        "404":
+          description: Weapon system or rate not found
+
+  /units/{unitId}/calculate:
+    post:
+      operationId: calculateRequirements
+      tags: [supply]
+      summary: Calculate required supplies for a planning window
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalculationRequest"
+      responses:
+        "200":
+          description: Required quantities by class and item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalculationResult"
+
+  /units/{unitId}/resupply:
+    get:
+      operationId: listUnitResupply
+      tags: [resupply]
+      summary: List resupply events (planned and projected) for a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resupply events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ResupplyEvent"
+    post:
+      operationId: createResupplyEvent
+      tags: [resupply]
+      summary: Create a planned resupply event
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResupplyEventInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResupplyEvent"
+
+  /resupply/{eventId}:
+    patch:
+      operationId: updateResupplyEvent
+      tags: [resupply]
+      summary: Update resupply event status
+      description: >-
+        Status transitions (including cancellation via `status: "cancelled"`)
+        and assignment edits all go through this endpoint. There is intentionally
+        no `DELETE /resupply/{eventId}` — events are kept on the unit's resupply
+        timeline as a cancelled audit record rather than removed outright.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResupplyEventStatusInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResupplyEvent"
+
+  /catalog/items:
+    get:
+      operationId: listCatalogItems
+      tags: [catalog]
+      summary: List the supply item catalog (chow, water, batteries, fuel, ammo, medical)
+      description: Catalog rows are seeded by `scripts/src/seed.ts` or auto-created by the custom-item path of `POST /units/{unitId}/supply` (with `customItem` + optional `saveToCatalog`). There is intentionally no collection-level `POST /catalog/items` — adding new items always flows through a unit so the new row is immediately tracked somewhere.
+      responses:
+        "200":
+          description: Catalog items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CatalogItem"
+
+  /catalog/items/{itemId}:
+    patch:
+      operationId: updateCatalogItem
+      tags: [catalog]
+      summary: Rename or update a global custom catalog item
+      description: Only items that are custom and globally scoped (not unit-scoped) may be edited via this endpoint.
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CatalogItemUpdateInput"
+      responses:
+        "200":
+          description: Updated catalog item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogItem"
+        "400":
+          description: Invalid payload or item is not a global custom item
+        "404":
+          description: Catalog item not found
+    delete:
+      operationId: deleteCatalogItem
+      tags: [catalog]
+      summary: Delete a global custom catalog item (removes it from every unit's supply list)
+      description: Only items that are custom and globally scoped (not unit-scoped) may be deleted via this endpoint. Cascades to supply entries on every unit that tracks the item. The response includes a short-lived restore token that can be passed to POST /catalog/items/{itemId}/restore to undo the delete.
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Catalog item deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteCatalogItemResult"
+        "400":
+          description: Item is not a deletable global custom item
+        "404":
+          description: Catalog item not found
+
+  /catalog/items/{itemId}/restore:
+    post:
+      operationId: restoreCatalogItem
+      tags: [catalog]
+      summary: Undo a recent custom catalog item deletion
+      description: Restores a catalog item, its per-unit supply entries (with their previous on-hand counts), and any future resupply events that were cancelled by the delete. Only valid within a short grace window after the delete (see restoreExpiresAt on DeleteCatalogItemResult).
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Catalog item restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreCatalogItemResult"
+        "404":
+          description: No restore record for this item id
+        "410":
+          description: Restore window has expired
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Aggregate dashboard stats across all units
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/deficiencies:
+    get:
+      operationId: listDeficiencies
+      tags: [dashboard]
+      summary: All flagged supply deficiencies across units
+      responses:
+        "200":
+          description: Deficiencies list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Deficiency"
+
+  /dashboard/forecast:
+    get:
+      operationId: getResupplyForecast
+      tags: [dashboard]
+      summary: Projected resupply forecast (next 14 days) across units
+      responses:
+        "200":
+          description: Forecast entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ForecastEntry"
+
+  /dashboard/dodic-breakdown:
+    get:
+      operationId: getDodicBreakdown
+      tags: [dashboard]
+      summary: Regiment-wide Class V ammunition burn aggregated by DODIC
+      description: >-
+        Aggregates total on-hand and total daily requirement across every unit
+        for each DODIC product code in the catalog. Includes the contributing
+        units (with shortfall) for each DODIC so S-4/G-4 staff can see who is
+        bleeding ammo and who has surplus at a glance.
+      responses:
+        "200":
+          description: DODIC breakdown across all units
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DodicBreakdown"
+
+  /dashboard/class/{supplyClass}:
+    get:
+      operationId: getClassDetail
+      tags: [dashboard]
+      summary: Class-centric drill-down across all units for a single supply class
+      parameters:
+        - name: supplyClass
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/SupplyClass"
+      responses:
+        "200":
+          description: Per-class breakdown across all units
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassDetail"
+
+  /dashboard/distro-audit:
+    get:
+      operationId: getDistroAudit
+      tags: [dashboard]
+      summary: Units whose distribution-list addresses fail the email shape regex
+      description: >-
+        Aggregates every unit whose `distroEmails` / `distroCcEmails` /
+        `distroBccEmails` contain entries that fail the same shape regex used
+        by the API's `normalizeDistroEmails`, the unit edit screen, and the
+        mailto: pipeline. Lets planners triage dirty comms data from the main
+        dashboard instead of opening every unit or running the
+        `audit-distro-emails` script. Also returns the most recent
+        comms-hygiene digest run so planners can confirm a digest actually
+        went out (or see why it didn't).
+      responses:
+        "200":
+          description: Distribution-list audit results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DistroAudit"
+
+  /dashboard/distro-audit/send-digest:
+    post:
+      operationId: sendDistroAuditDigest
+      tags: [dashboard]
+      summary: Run the comms-hygiene audit and email the digest immediately
+      description: >-
+        Re-uses the same `runCommsHygieneOnce` path as the scheduled job, so
+        behavior matches exactly. The email is suppressed when no entries are
+        flagged. Lets planners confirm a freshly cleaned roster will produce a
+        clean digest, or push a digest ahead of a coordination meeting without
+        waiting for the next scheduled run.
+      responses:
+        "200":
+          description: Result of the on-demand digest run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DistroAuditDigestResult"
+
+  /dashboard/distro-audit/preview-digest:
+    post:
+      operationId: previewDistroAuditDigest
+      tags: [dashboard]
+      summary: Render the comms-hygiene digest without sending it
+      description: >-
+        Returns the same subject / text / html that
+        `sendDistroAuditDigest` would dispatch, without invoking the SMTP
+        transport. Lets planners inspect the next email before it goes out —
+        especially during pre-coordination windows where a false alarm
+        would be embarrassing. `suppressed` is true when no entries are
+        flagged (matching the live send's suppression behavior).
+      responses:
+        "200":
+          description: Rendered digest payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DistroAuditDigestPreview"
+
+  /dashboard/comms-hygiene-stats:
+    get:
+      operationId: getCommsHygieneStats
+      tags: [dashboard]
+      summary: Stored comms-hygiene run count and retention horizon
+      description: >-
+        Returns the total number of `comms_hygiene_runs` rows on file, the
+        oldest stored `ranAt`, the effective retention horizon (the
+        dashboard override when set, otherwise `COMMS_HYGIENE_RETENTION_DAYS`,
+        default 180), and the projected expiry of the oldest stored run.
+        Lets the dashboard surface a small footnote like "247 runs on
+        file · oldest expires Dec 12" so planners can see the prune policy
+        is working and nothing important silently disappeared.
+      responses:
+        "200":
+          description: Run-history stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommsHygieneStats"
+
+  /dashboard/comms-hygiene-settings:
+    get:
+      operationId: getCommsHygieneSettings
+      tags: [dashboard]
+      summary: Effective comms-hygiene retention setting and override status
+      description: >-
+        Returns the current effective retention window (in days) and
+        whether it comes from a dashboard-set override or the env-var
+        default. Used to power the in-app "Retention" control next to the
+        digest history footnote so admins can adjust how long
+        `comms_hygiene_runs` history is kept without restarting the API.
+      responses:
+        "200":
+          description: Effective retention settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommsHygieneSettings"
+    put:
+      operationId: updateCommsHygieneSettings
+      tags: [dashboard]
+      summary: Set or clear the comms-hygiene retention override
+      description: >-
+        Persist a new retention override (or clear it by passing `null`)
+        without restarting the server. The change is reflected immediately
+        in `getCommsHygieneStats` and on the next prune sweep tick. A row
+        is also written to the activity feed so the change is auditable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommsHygieneSettingsUpdate"
+      responses:
+        "200":
+          description: Updated effective retention settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommsHygieneSettings"
+        "400":
+          description: Invalid payload (e.g. negative or non-integer override)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                required: [error]
+
+  /dashboard/comms-hygiene-runs:
+    get:
+      operationId: listCommsHygieneRuns
+      tags: [dashboard]
+      summary: Recent comms-hygiene digest runs (audit trail for support / S-6)
+      description: >-
+        Each scheduler tick is recorded with the audit counts, the recipients
+        the digest was sent to, the outcome (sent / skipped / failed), and the
+        SMTP error if any. Returns the most recent runs first, capped at
+        `limit`. Intended for support and debugging — the dashboard surfaces
+        only the latest run inline via `/dashboard/distro-audit`.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Run history, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CommsHygieneRun"
+
+  /dashboard/activity:
+    get:
+      operationId: listRecentActivity
+      tags: [dashboard]
+      summary: Recent resupply / sync activity feed
+      responses:
+        "200":
+          description: Activity feed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEntry"
+
+  /sync/status:
+    get:
+      operationId: getSyncStatus
+      tags: [sync]
+      summary: Status of upstream logistics system sync
+      responses:
+        "200":
+          description: Sync status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncStatus"
+    post:
+      operationId: triggerSync
+      tags: [sync]
+      summary: Trigger an immediate sync with upstream system
+      responses:
+        "200":
+          description: Sync triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncStatus"
+
+  /sync/settings:
+    patch:
+      operationId: updateSyncSettings
+      tags: [sync]
+      summary: Update auto-sync configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncSettingsInput"
+      responses:
+        "200":
+          description: Updated sync status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncStatus"
+
+  /sync/outbox:
+    get:
+      operationId: getSyncOutbox
+      tags: [sync]
+      summary: List pending and failed outbox records waiting to be pushed to SPIRE
+      description: Returns the full payload of every pending and failed record. There is intentionally no row-scoped `GET /sync/outbox/{id}` — the list response already contains everything the UI needs. Per-record actions are limited to `DELETE /sync/outbox/{id}` (dismiss) and `POST /sync/outbox/{id}/retry`.
+      responses:
+        "200":
+          description: Pending and failed outbox items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SyncOutboxItem"
+
+  /sync/outbox/{id}:
+    delete:
+      operationId: dismissOutboxRecord
+      tags: [sync]
+      summary: Permanently remove a failed outbox record (dismiss it from the queue)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Dismissed
+        "404":
+          description: Record not found
+
+  /sync/outbox/{id}/retry:
+    post:
+      operationId: retryOutboxRecord
+      tags: [sync]
+      summary: Reset a failed outbox record back to pending so it re-syncs immediately
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Record queued for retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncOutboxItem"
+        "404":
+          description: Record not found
+
+  /sync/last-run:
+    get:
+      operationId: getSyncLastRun
+      tags: [sync]
+      summary: Details of the most recent SPIRE sync run
+      responses:
+        "200":
+          description: Last sync run details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncLastRun"
+        "204":
+          description: No sync run has been performed yet
+
+  /sync/runs:
+    get:
+      operationId: getSyncRuns
+      tags: [sync]
+      summary: Full history of past SPIRE sync runs, newest first
+      responses:
+        "200":
+          description: List of sync run summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SyncRunSummary"
+
+  /units/{unitId}/supply/history:
+    get:
+      operationId: getSupplyHistory
+      tags: [supply]
+      summary: Time-series on-hand history per item for a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+        - name: itemId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Supply history per item
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SupplyHistoryItem"
+
+  /units/{unitId}/baselines:
+    get:
+      operationId: listBaselines
+      tags: [supply]
+      summary: List all named baselines (Last Known Good) for a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of baselines
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SupplyBaseline"
+    post:
+      operationId: createBaseline
+      tags: [supply]
+      summary: Freeze current supply picture as a named baseline
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBaselineInput"
+      responses:
+        "201":
+          description: Created baseline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyBaseline"
+
+  /baselines/{baselineId}:
+    get:
+      operationId: getBaseline
+      tags: [supply]
+      summary: Get a single named baseline
+      description: Baselines are immutable "Last Known Good" snapshots used as the starting point for comms-denied projections. There is intentionally no `PATCH` or `DELETE` for a baseline — to replace one, create a new baseline via `POST /units/{unitId}/baselines`.
+      parameters:
+        - name: baselineId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Baseline detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyBaseline"
+
+  /units/{unitId}/comms-denied/forecast:
+    post:
+      operationId: getCommsDeniedForecast
+      tags: [supply]
+      summary: Project forward from a baseline and return forecast table
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommsDeniedForecastInput"
+      responses:
+        "200":
+          description: Forecast table
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommsDeniedForecast"
+
+  /units/{unitId}/comms-denied/publish:
+    post:
+      operationId: publishCommsDeniedSchedule
+      tags: [supply]
+      summary: Publish pre-coordinated resupply schedule for comms-denied window
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishScheduleInput"
+      responses:
+        "201":
+          description: Published schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishedSchedule"
+
+  /units/{unitId}/schedules:
+    get:
+      operationId: listUnitSchedules
+      tags: [supply]
+      summary: List pre-coordinated schedules for a unit
+      parameters:
+        - name: unitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of published schedules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PublishedSchedule"
+
+  /schedules/{scheduleId}:
+    get:
+      operationId: getSchedule
+      tags: [supply]
+      summary: Get a published schedule with its resupply events
+      description: Published schedules are append-only audit records of pre-coordinated comms-denied pushes. There is intentionally no `PATCH` or `DELETE` on the schedule itself — to retract distribution, revoke or rotate the share token via `POST /schedules/{scheduleId}/share/revoke` / `.../share/rotate`; to publish revised events, call `POST /units/{unitId}/comms-denied/publish` again.
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Schedule detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleDetail"
+
+  /schedules/{scheduleId}/share/revoke:
+    post:
+      operationId: revokeScheduleShareLink
+      tags: [supply]
+      summary: Revoke (null out) the share token for a published schedule
+      description: |
+        Clears the schedule's share_token so the previously distributed
+        frontend deep link (`/s/{shareToken}`, served by the SPA, which
+        calls `GET /api/schedules/share/{shareToken}` under the hood)
+        immediately returns 404. Use this when a link has been over-shared
+        or leaked. To re-issue distribution, follow with
+        `POST /schedules/{scheduleId}/share/rotate` to mint a fresh token.
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Share link revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareLinkRevokeResult"
+        "404":
+          description: Schedule not found
+
+  /schedules/{scheduleId}/share/rotate:
+    post:
+      operationId: rotateScheduleShareLink
+      tags: [supply]
+      summary: Issue a fresh share token for a published schedule
+      description: |
+        Generates a new share_token for the schedule and returns it. Any
+        previously distributed `/s/{oldToken}` deep link (a SPA route, not
+        an API path — it resolves to `GET /api/schedules/share/{shareToken}`)
+        stops working immediately. Safe to call whether the link is
+        currently active or already revoked.
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: New share token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareLinkRotateResult"
+        "404":
+          description: Schedule not found
+
+  /schedules/share/{shareToken}:
+    get:
+      operationId: getScheduleByShareToken
+      tags: [supply]
+      summary: Public read-only lookup of a published schedule by share token
+      description: |
+        Token-gated public endpoint that lets a receiving unit open a published
+        schedule from a share link without authentication. Returns 404 if the
+        token is missing or does not match a published schedule.
+      parameters:
+        - name: shareToken
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Schedule detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleDetail"
+        "404":
+          description: No schedule found for the supplied share token
+
+  /dashboard/opsec-pushes:
+    get:
+      operationId: getDashboardOpsecPushes
+      tags: [dashboard]
+      summary: List units with active pre-coordinated schedules (OPSEC pushes in flight)
+      responses:
+        "200":
+          description: OPSEC push tiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OpsecPushTile"
+
+  /spire-pr/config:
+    get:
+      operationId: getSpirePrConfig
+      tags: [spire-pr]
+      summary: Read the configured SPIRE GitHub repository coordinates
+      description: |
+        Returns whether the SPIRE GitHub repo is configured (via the
+        SPIRE_GITHUB_REPO_OWNER, SPIRE_GITHUB_REPO_NAME, and optional
+        SPIRE_GITHUB_BASE_BRANCH env vars) plus the resolved owner / name /
+        base branch when it is. Used by the UI to enable or disable the
+        "Push to SPIRE as PR" buttons.
+      responses:
+        "200":
+          description: Current SPIRE repo configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpirePrConfig"
+
+  /spire-pr:
+    get:
+      operationId: listSpirePrs
+      tags: [spire-pr]
+      summary: List MARLOG-opened pull requests against the SPIRE repo
+      parameters:
+        - name: sourceKind
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/SpirePrSourceKind"
+        - name: sourceId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - name: refresh
+          in: query
+          required: false
+          description: When true, re-poll GitHub for the state of any rows still marked open before returning.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: SPIRE PR rows, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SpirePr"
+    post:
+      operationId: createSpirePr
+      tags: [spire-pr]
+      summary: Open a new pull request against the SPIRE GitHub repository
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSpirePrBody"
+      responses:
+        "201":
+          description: Pull request opened
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpirePr"
+        "400":
+          description: Validation error in request body
+        "404":
+          description: Source unit or schedule not found
+        "412":
+          description: SPIRE repo or GitHub connector not configured
+        "502":
+          description: GitHub API error
+
+  /spire-pr/{id}/refresh:
+    post:
+      operationId: refreshSpirePr
+      tags: [spire-pr]
+      summary: Re-poll GitHub for the latest state of a single SPIRE PR row
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Refreshed PR row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpirePr"
+        "404":
+          description: PR row not found
+        "502":
+          description: GitHub API error
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required: [status]
+
+    Echelon:
+      type: string
+      enum: [fireteam, squad, section, platoon, company, battalion, regiment, battery, team]
+
+    UnitRole:
+      type: string
+      enum: [organic, attached, in_support]
+      description: Relationship of the unit to the regiment (organic subordinate, attached, or in direct support)
+
+    AmmoPosture:
+      type: string
+      enum: [combat_load, assault, sustain]
+      description: Doctrinal ammo planning posture. combat_load = initial issue quantity; assault = daily assault rate; sustain = daily sustain rate.
+
+    WeaponSystem:
+      type: object
+      properties:
+        id:
+          type: string
+        tamcn:
+          type: string
+          nullable: true
+        name:
+          type: string
+        isGce:
+          type: boolean
+          description: Whether this weapon system is a GCE (Ground Combat Element) system
+        notes:
+          type: string
+          nullable: true
+        dodics:
+          type: array
+          description: DODIC codes and rates for this weapon system
+          items:
+            $ref: "#/components/schemas/WeaponDodicRate"
+      required: [id, name, isGce, dodics]
+
+    WeaponDodicRate:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Stable identifier for this weapon-DODIC rate row
+        dodic:
+          type: string
+        nomenclature:
+          type: string
+        catalogItemId:
+          type: string
+        gceCombatLoad:
+          type: number
+          minimum: 0
+        gceAssaultRate:
+          type: number
+          minimum: 0
+        gceSustainRate:
+          type: number
+          minimum: 0
+        nonGceCombatLoad:
+          type: number
+          minimum: 0
+        nonGceAssaultRate:
+          type: number
+          minimum: 0
+        nonGceSustainRate:
+          type: number
+          minimum: 0
+      required:
+        - id
+        - dodic
+        - nomenclature
+        - catalogItemId
+        - gceCombatLoad
+        - gceAssaultRate
+        - gceSustainRate
+        - nonGceCombatLoad
+        - nonGceAssaultRate
+        - nonGceSustainRate
+
+    WeaponDodicRateInput:
+      type: object
+      description: Editable doctrinal rates for a weapon-DODIC pair. All fields optional; only provided fields are updated.
+      properties:
+        gceCombatLoad:
+          type: number
+          minimum: 0
+        gceAssaultRate:
+          type: number
+          minimum: 0
+        gceSustainRate:
+          type: number
+          minimum: 0
+        nonGceCombatLoad:
+          type: number
+          minimum: 0
+        nonGceAssaultRate:
+          type: number
+          minimum: 0
+        nonGceSustainRate:
+          type: number
+          minimum: 0
+
+    UnitWeapon:
+      type: object
+      properties:
+        id:
+          type: string
+        unitId:
+          type: string
+        weaponSystemId:
+          type: string
+        weaponName:
+          type: string
+        tamcn:
+          type: string
+          nullable: true
+        quantity:
+          type: integer
+          minimum: 1
+        isGce:
+          type: boolean
+      required: [id, unitId, weaponSystemId, weaponName, quantity, isGce]
+
+    UnitWeaponInput:
+      type: object
+      properties:
+        weaponSystemId:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+      required: [weaponSystemId, quantity]
+
+    UnitWeaponUpdate:
+      type: object
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+      required: [quantity]
+
+    Climate:
+      type: string
+      enum: [temperate, arid, tropical, arctic]
+
+    OpTempo:
+      type: string
+      enum: [garrison, sustained, high, combat]
+
+    SupplyClass:
+      type: string
+      description: Marine Corps Class of Supply
+      enum: ["I", "III", "V", "VIII", "IX"]
+
+    Unit:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        callsign:
+          type: string
+          nullable: true
+        echelon:
+          $ref: "#/components/schemas/Echelon"
+        personnel:
+          type: integer
+          minimum: 1
+        commander:
+          type: string
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        climate:
+          $ref: "#/components/schemas/Climate"
+        opTempo:
+          $ref: "#/components/schemas/OpTempo"
+        missionDays:
+          type: integer
+          minimum: 1
+          description: Planned mission duration in days
+        readiness:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Computed readiness percentage (0-100)
+        deficiencyCount:
+          type: integer
+          minimum: 0
+        role:
+          $ref: "#/components/schemas/UnitRole"
+        ammoPosture:
+          $ref: "#/components/schemas/AmmoPosture"
+        isGce:
+          type: boolean
+          description: True if this unit is a GCE (Ground Combat Element); affects which doctrinal ammo rates apply
+        distroEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: Distribution list of email addresses pre-filled when the unit's schedules are emailed (S-4, supporting battalion, logistics POCs, etc.)
+        distroCcEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: Optional CC distribution list pre-filled into the cc= field of the schedule email — used for visibility recipients (supporting battalion logistics, company commander, higher HQ) who are not action addressees.
+        distroBccEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: Optional BCC distribution list pre-filled into the bcc= field of the schedule email — used for silent recipients (operations watch officer, archive mailbox, COC liaison) who should not be visible to To or CC recipients.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - echelon
+        - personnel
+        - climate
+        - opTempo
+        - missionDays
+        - readiness
+        - deficiencyCount
+        - role
+        - ammoPosture
+        - isGce
+        - distroEmails
+        - distroCcEmails
+        - distroBccEmails
+        - createdAt
+        - updatedAt
+
+    UnitInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        callsign:
+          type: string
+          nullable: true
+        echelon:
+          $ref: "#/components/schemas/Echelon"
+        personnel:
+          type: integer
+          minimum: 1
+        commander:
+          type: string
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        climate:
+          $ref: "#/components/schemas/Climate"
+        opTempo:
+          $ref: "#/components/schemas/OpTempo"
+        missionDays:
+          type: integer
+          minimum: 1
+        role:
+          $ref: "#/components/schemas/UnitRole"
+        ammoPosture:
+          $ref: "#/components/schemas/AmmoPosture"
+        isGce:
+          type: boolean
+        distroEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: Distribution list of email addresses pre-filled when the unit's schedules are emailed
+        distroCcEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: Optional CC distribution list pre-filled into the cc= field of the schedule email
+        distroBccEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: Optional BCC distribution list pre-filled into the bcc= field of the schedule email — silent recipients (operations watch officer, archive mailbox, COC liaison) hidden from To and CC recipients
+      required: [name, echelon, personnel, climate, opTempo, missionDays]
+
+    CatalogItem:
+      type: object
+      properties:
+        id:
+          type: string
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        name:
+          type: string
+        nsn:
+          type: string
+          nullable: true
+          description: National Stock Number
+        unit:
+          type: string
+          description: Unit of issue (e.g. "MRE", "gal", "battery", "round", "L")
+        baseDailyRate:
+          type: number
+          description: Base consumption per Marine per day at temperate / sustained tempo
+        criticality:
+          type: string
+          enum: [low, medium, high, critical]
+        notes:
+          type: string
+          nullable: true
+        isCustom:
+          type: boolean
+          description: True if this item was added manually by a planner (not from the standard catalog)
+        createdAt:
+          type: string
+          format: date-time
+          description: When this catalog item was first created
+        updatedAt:
+          type: string
+          format: date-time
+          description: When this catalog item's details were last edited (equal to createdAt if never edited)
+        usedByUnitCount:
+          type: integer
+          minimum: 0
+          description: Number of units that currently track this catalog item on their supply list. Populated by listCatalogItems; may be omitted on other endpoints.
+        usedByUnits:
+          type: array
+          description: Units that currently track this catalog item, sorted by unit name. Populated by listCatalogItems; may be omitted on other endpoints.
+          items:
+            $ref: "#/components/schemas/CatalogItemUsageUnit"
+      required:
+        - id
+        - supplyClass
+        - name
+        - unit
+        - baseDailyRate
+        - criticality
+        - isCustom
+        - createdAt
+        - updatedAt
+
+    CatalogItemUsageUnit:
+      type: object
+      description: Minimal unit reference for catalog item usage lists
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required: [id, name]
+
+    CatalogItemUpdateInput:
+      type: object
+      description: Editable fields on a global custom catalog item
+      properties:
+        name:
+          type: string
+          minLength: 1
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        unit:
+          type: string
+          minLength: 1
+          description: Unit of issue (e.g. "ea", "gal", "round", "case")
+        nsn:
+          type: string
+          nullable: true
+          description: National Stock Number / DODIC. Send null to clear.
+        notes:
+          type: string
+          nullable: true
+        criticality:
+          type: string
+          enum: [low, medium, high, critical]
+        baseDailyRate:
+          type: number
+          minimum: 0
+          description: Base consumption per Marine per day. Set to 0 to make the item reference-only.
+      required: [name]
+
+    DeleteCatalogItemResult:
+      type: object
+      properties:
+        deletedItemId:
+          type: string
+        affectedUnits:
+          type: integer
+          description: Number of units that had this item on their supply list
+        removedSupplyEntries:
+          type: integer
+          description: Number of unit supply entries cascaded by the delete
+        cancelledResupplyEvents:
+          type: integer
+          description: Number of future resupply events cancelled by the delete
+        restoreToken:
+          type: string
+          description: Pass to POST /catalog/items/{itemId}/restore to undo the delete within the grace window. Equal to deletedItemId.
+        restoreExpiresAt:
+          type: string
+          format: date-time
+          description: ISO timestamp after which the restore endpoint will return 410 Gone for this item.
+      required:
+        - deletedItemId
+        - affectedUnits
+        - removedSupplyEntries
+        - cancelledResupplyEvents
+        - restoreToken
+        - restoreExpiresAt
+
+    RestoreCatalogItemResult:
+      type: object
+      properties:
+        restoredItem:
+          $ref: "#/components/schemas/CatalogItem"
+        restoredSupplyEntries:
+          type: integer
+          description: Number of unit supply entries re-created from the snapshot
+        restoredResupplyEvents:
+          type: integer
+          description: Number of future resupply events re-created from the snapshot
+      required: [restoredItem, restoredSupplyEntries, restoredResupplyEvents]
+
+    DeleteUnitSupplyResult:
+      type: object
+      properties:
+        unitId:
+          type: string
+        removedItemId:
+          type: string
+        removedItemName:
+          type: string
+          description: Name of the item at the time of removal, for use in the undo toast
+        hadOnHand:
+          type: number
+          description: On-hand count at the time of removal
+        cancelledResupplyEvents:
+          type: integer
+          description: Number of future resupply events cancelled by the delete
+        removedCatalogItem:
+          type: boolean
+          description: True if a unit-scoped custom catalog item was deleted alongside the supply entry
+        restoreExpiresAt:
+          type: string
+          format: date-time
+          description: ISO timestamp after which POST /units/{unitId}/supply/{itemId}/restore will return 410 Gone for this entry.
+      required:
+        - unitId
+        - removedItemId
+        - removedItemName
+        - hadOnHand
+        - cancelledResupplyEvents
+        - removedCatalogItem
+        - restoreExpiresAt
+
+    RestoreUnitSupplyResult:
+      type: object
+      properties:
+        restoredEntry:
+          $ref: "#/components/schemas/SupplyEntry"
+        restoredResupplyEvents:
+          type: integer
+          description: Number of future resupply events re-created from the snapshot
+        restoredCatalogItem:
+          type: boolean
+          description: True if a unit-scoped custom catalog item was also re-created
+      required:
+        - restoredEntry
+        - restoredResupplyEvents
+        - restoredCatalogItem
+
+    CustomItemInput:
+      type: object
+      description: Payload for manually adding a non-catalog item to a unit
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Item name
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        unit:
+          type: string
+          minLength: 1
+          description: Unit of issue (e.g. "ea", "gal", "round", "case")
+        nsn:
+          type: string
+          nullable: true
+          description: Optional NSN or DODIC
+        baseDailyRate:
+          type: number
+          nullable: true
+          minimum: 0
+          description: Optional base daily consumption per Marine per day. Must be >= 0. Omit or set to null for reference-only tracking (no DOS computed).
+        criticality:
+          type: string
+          enum: [low, medium, high, critical]
+          nullable: true
+          description: Optional criticality level; defaults to "low" when omitted
+        notes:
+          type: string
+          nullable: true
+      required:
+        - name
+        - supplyClass
+        - unit
+
+    UpdateCustomItemInput:
+      type: object
+      description: Payload for editing an existing custom (unit-scoped) catalog item. Only allowed for items where isCustom is true and the item is scoped to the unit.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Item name
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        unit:
+          type: string
+          minLength: 1
+          description: Unit of issue (e.g. "ea", "gal", "round", "case")
+        nsn:
+          type: string
+          nullable: true
+          description: Optional NSN or DODIC
+        baseDailyRate:
+          type: number
+          nullable: true
+          minimum: 0
+          description: Optional base daily consumption per Marine per day. Must be >= 0. Set to null for reference-only tracking (no DOS computed).
+        criticality:
+          type: string
+          enum: [low, medium, high, critical]
+          description: Criticality level
+        notes:
+          type: string
+          nullable: true
+      required:
+        - name
+        - supplyClass
+        - unit
+        - criticality
+
+    SupplyEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        unitId:
+          type: string
+        itemId:
+          type: string
+        item:
+          $ref: "#/components/schemas/CatalogItem"
+        onHand:
+          type: number
+          minimum: 0
+        dailyConsumption:
+          type: number
+          description: Adjusted daily consumption for this unit (climate / tempo / personnel)
+        daysOfSupply:
+          type: number
+          description: Computed days of supply remaining
+        required:
+          type: number
+          description: Effective required quantity (requiredOverride when set, otherwise auto-computed)
+        shortfall:
+          type: number
+          description: Required minus on-hand (>= 0)
+        status:
+          type: string
+          enum: [green, amber, red]
+        requiredOverride:
+          type: number
+          nullable: true
+          description: Planner-set required quantity for this item on this unit. Null means use the auto-computed value. Zero means not a requirement.
+        isRequirement:
+          type: boolean
+          description: False when requiredOverride is exactly 0 — item is tracked but not counted toward readiness or DOS.
+        burnBreakdown:
+          type: string
+          nullable: true
+          description: Human-readable description of how the burn rate was computed (weapon-driven for Class V)
+        combatLoadTarget:
+          type: number
+          nullable: true
+          description: Total combat load target quantity (weapon-driven Class V only)
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - unitId
+        - itemId
+        - item
+        - onHand
+        - dailyConsumption
+        - daysOfSupply
+        - required
+        - shortfall
+        - status
+        - isRequirement
+        - updatedAt
+
+    SupplyEntryUpdate:
+      type: object
+      description: In-place update for an existing supply row. Provide at least one of onHand or requiredOverride. Omitted fields are left unchanged.
+      properties:
+        onHand:
+          type: number
+          minimum: 0
+          description: New on-hand quantity. Omit to leave the current value unchanged.
+        requiredOverride:
+          type: number
+          nullable: true
+          minimum: 0
+          description: Planner-set required quantity. Null clears any existing override (returns to auto-computed). Zero means "not a requirement for this unit". Omit to leave the current override unchanged.
+
+    SupplyEntryInput:
+      type: object
+      description: Either provide itemId (catalog pick) or customItem (manual entry). Exactly one must be present.
+      properties:
+        itemId:
+          type: string
+          description: Existing catalog item ID. Omit when adding a custom item.
+        onHand:
+          type: number
+          minimum: 0
+        requiredOverride:
+          type: number
+          nullable: true
+          minimum: 0
+          description: Optional planner-set required quantity. Null clears any existing override (returns to auto-computed). Zero means "not a requirement for this unit".
+        customItem:
+          $ref: "#/components/schemas/CustomItemInput"
+        saveToCatalog:
+          type: boolean
+          description: When adding a custom item, also save it as a global catalog entry visible to all units.
+      required: [onHand]
+
+    CopyFromUnitInput:
+      type: object
+      properties:
+        sourceUnitId:
+          type: string
+          description: The ID of the unit to copy supply items from
+      required: [sourceUnitId]
+
+    CopyFromUnitResult:
+      type: object
+      properties:
+        added:
+          type: integer
+          minimum: 0
+          description: Number of new items added from the source unit
+        skipped:
+          type: integer
+          minimum: 0
+          description: Number of items already tracked on this unit (not duplicated)
+      required: [added, skipped]
+
+    UnitDetail:
+      type: object
+      properties:
+        unit:
+          $ref: "#/components/schemas/Unit"
+        supplyByClass:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClassSummary"
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupplyEntry"
+        upcomingResupply:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResupplyEvent"
+        weapons:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnitWeapon"
+      required: [unit, supplyByClass, entries, upcomingResupply, weapons]
+
+    ClassSummary:
+      type: object
+      properties:
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        label:
+          type: string
+        itemCount:
+          type: integer
+        worstDaysOfSupply:
+          type: number
+        status:
+          type: string
+          enum: [green, amber, red]
+      required: [supplyClass, label, itemCount, worstDaysOfSupply, status]
+
+    CalculationRequest:
+      type: object
+      properties:
+        days:
+          type: integer
+          minimum: 1
+        personnel:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Override personnel count for what-if calc
+        climate:
+          $ref: "#/components/schemas/Climate"
+        opTempo:
+          $ref: "#/components/schemas/OpTempo"
+      required: [days, climate, opTempo]
+
+    CalculationLine:
+      type: object
+      properties:
+        item:
+          $ref: "#/components/schemas/CatalogItem"
+        dailyConsumption:
+          type: number
+        totalRequired:
+          type: number
+      required: [item, dailyConsumption, totalRequired]
+
+    CalculationResult:
+      type: object
+      properties:
+        days:
+          type: integer
+        personnel:
+          type: integer
+        climate:
+          $ref: "#/components/schemas/Climate"
+        opTempo:
+          $ref: "#/components/schemas/OpTempo"
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/CalculationLine"
+      required: [days, personnel, climate, opTempo, lines]
+
+    ResupplyEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        unitId:
+          type: string
+        unitName:
+          type: string
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        itemId:
+          type: string
+          nullable: true
+        itemName:
+          type: string
+          nullable: true
+        quantity:
+          type: number
+        unit:
+          type: string
+        scheduledFor:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [projected, planned, in_transit, delivered, cancelled]
+        assignedTo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - unitId
+        - unitName
+        - supplyClass
+        - quantity
+        - unit
+        - scheduledFor
+        - status
+        - createdAt
+
+    ResupplyEventInput:
+      type: object
+      properties:
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        itemId:
+          type: string
+          nullable: true
+        quantity:
+          type: number
+          minimum: 0
+        unit:
+          type: string
+        scheduledFor:
+          type: string
+          format: date-time
+        assignedTo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      required: [supplyClass, quantity, unit, scheduledFor]
+
+    ResupplyEventStatusInput:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [projected, planned, in_transit, delivered, cancelled]
+        assignedTo:
+          type: string
+          nullable: true
+      required: [status]
+
+    DashboardSummary:
+      type: object
+      properties:
+        unitCount:
+          type: integer
+        personnelCount:
+          type: integer
+        readinessAvg:
+          type: number
+        deficiencyCount:
+          type: integer
+        criticalDeficiencyCount:
+          type: integer
+        upcomingResupplyCount:
+          type: integer
+        classBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClassBreakdown"
+      required:
+        - unitCount
+        - personnelCount
+        - readinessAvg
+        - deficiencyCount
+        - criticalDeficiencyCount
+        - upcomingResupplyCount
+        - classBreakdown
+
+    ClassBreakdown:
+      type: object
+      properties:
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        label:
+          type: string
+        green:
+          type: integer
+        amber:
+          type: integer
+        red:
+          type: integer
+      required: [supplyClass, label, green, amber, red]
+
+    ClassDetail:
+      type: object
+      properties:
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        label:
+          type: string
+        totals:
+          type: object
+          properties:
+            green:
+              type: integer
+            amber:
+              type: integer
+            red:
+              type: integer
+            unitsTracking:
+              type: integer
+            unitsAtRisk:
+              type: integer
+          required: [green, amber, red, unitsTracking, unitsAtRisk]
+        units:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClassUnitStatus"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClassItemEntry"
+      required: [supplyClass, label, totals, units, items]
+
+    ClassUnitStatus:
+      type: object
+      properties:
+        unitId:
+          type: string
+        unitName:
+          type: string
+        callsign:
+          type: string
+          nullable: true
+        echelon:
+          $ref: "#/components/schemas/Echelon"
+        personnel:
+          type: integer
+        location:
+          type: string
+          nullable: true
+        itemCount:
+          type: integer
+        greenCount:
+          type: integer
+        amberCount:
+          type: integer
+        redCount:
+          type: integer
+        worstStatus:
+          type: string
+          enum: [green, amber, red]
+        worstDaysOfSupply:
+          type: number
+      required:
+        - unitId
+        - unitName
+        - echelon
+        - personnel
+        - itemCount
+        - greenCount
+        - amberCount
+        - redCount
+        - worstStatus
+        - worstDaysOfSupply
+
+    ClassItemEntry:
+      type: object
+      properties:
+        entryId:
+          type: string
+        unitId:
+          type: string
+        unitName:
+          type: string
+        itemId:
+          type: string
+        itemName:
+          type: string
+        onHand:
+          type: number
+        required:
+          type: number
+        shortfall:
+          type: number
+        unit:
+          type: string
+        daysOfSupply:
+          type: number
+        status:
+          type: string
+          enum: [green, amber, red]
+        criticality:
+          type: string
+        burnBreakdown:
+          type: string
+          nullable: true
+        combatLoadTarget:
+          type: number
+          nullable: true
+        ammoPosture:
+          type: string
+          nullable: true
+      required:
+        - entryId
+        - unitId
+        - unitName
+        - itemId
+        - itemName
+        - onHand
+        - required
+        - shortfall
+        - unit
+        - daysOfSupply
+        - status
+        - criticality
+
+    DodicBreakdown:
+      type: object
+      properties:
+        totals:
+          type: object
+          properties:
+            dodicCount:
+              type: integer
+              description: Number of distinct DODICs tracked across the regiment
+            totalOnHand:
+              type: number
+              description: Sum of on-hand rounds across every DODIC
+            totalDailyRequired:
+              type: number
+              description: Sum of daily required rounds across every DODIC
+            totalShortfall:
+              type: number
+              description: Sum of mission shortfall rounds across every DODIC
+          required:
+            - dodicCount
+            - totalOnHand
+            - totalDailyRequired
+            - totalShortfall
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DodicBreakdownItem"
+      required: [totals, items]
+
+    DodicBreakdownItem:
+      type: object
+      properties:
+        dodic:
+          type: string
+          description: DODIC product code (e.g. A059). Empty string if no weapon mapping exists.
+        catalogItemId:
+          type: string
+        nomenclature:
+          type: string
+          description: Catalog item name used as the DODIC nomenclature
+        unit:
+          type: string
+          description: Unit of issue (e.g. "rd", "ea")
+        totalOnHand:
+          type: number
+        totalDailyRequired:
+          type: number
+        totalRequired:
+          type: number
+          description: Total rounds required across mission days for all contributing units
+        totalShortfall:
+          type: number
+        aggregateDaysOfSupply:
+          type: number
+          description: Aggregate DOS = totalOnHand / totalDailyRequired. 999 when daily required is zero.
+        status:
+          type: string
+          enum: [green, amber, red]
+        unitsTracking:
+          type: integer
+          description: Count of units carrying or burning this DODIC
+        unitsShort:
+          type: integer
+          description: Count of units with a mission shortfall on this DODIC
+        contributingUnits:
+          type: array
+          items:
+            $ref: "#/components/schemas/DodicContributingUnit"
+      required:
+        - dodic
+        - catalogItemId
+        - nomenclature
+        - unit
+        - totalOnHand
+        - totalDailyRequired
+        - totalRequired
+        - totalShortfall
+        - aggregateDaysOfSupply
+        - status
+        - unitsTracking
+        - unitsShort
+        - contributingUnits
+
+    DodicContributingUnit:
+      type: object
+      properties:
+        unitId:
+          type: string
+        unitName:
+          type: string
+        callsign:
+          type: string
+          nullable: true
+        echelon:
+          $ref: "#/components/schemas/Echelon"
+        onHand:
+          type: number
+        dailyRequired:
+          type: number
+        required:
+          type: number
+        shortfall:
+          type: number
+        daysOfSupply:
+          type: number
+        status:
+          type: string
+          enum: [green, amber, red]
+      required:
+        - unitId
+        - unitName
+        - echelon
+        - onHand
+        - dailyRequired
+        - required
+        - shortfall
+        - daysOfSupply
+        - status
+
+    Deficiency:
+      type: object
+      properties:
+        id:
+          type: string
+        unitId:
+          type: string
+        unitName:
+          type: string
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        itemName:
+          type: string
+        daysOfSupply:
+          type: number
+        shortfall:
+          type: number
+        unit:
+          type: string
+        severity:
+          type: string
+          enum: [amber, red]
+        flaggedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - unitId
+        - unitName
+        - supplyClass
+        - itemName
+        - daysOfSupply
+        - shortfall
+        - unit
+        - severity
+        - flaggedAt
+
+    ForecastEntry:
+      type: object
+      properties:
+        unitId:
+          type: string
+        unitName:
+          type: string
+        supplyClass:
+          $ref: "#/components/schemas/SupplyClass"
+        itemName:
+          type: string
+        projectedStockoutDate:
+          type: string
+          format: date-time
+        daysUntilStockout:
+          type: number
+        recommendedQuantity:
+          type: number
+        unit:
+          type: string
+      required:
+        - unitId
+        - unitName
+        - supplyClass
+        - itemName
+        - projectedStockoutDate
+        - daysUntilStockout
+        - recommendedQuantity
+        - unit
+
+    DistroAuditEntry:
+      type: object
+      properties:
+        bucket:
+          type: string
+          enum: [to, cc, bcc]
+          description: Which distribution-list bucket the malformed value lives in
+        value:
+          type: string
+          description: The literal stored value that failed the email shape regex
+      required: [bucket, value]
+
+    DistroAuditUnit:
+      type: object
+      properties:
+        unitId:
+          type: string
+        unitName:
+          type: string
+        echelon:
+          $ref: "#/components/schemas/Echelon"
+        callsign:
+          type: string
+          nullable: true
+        invalidEntries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DistroAuditEntry"
+        invalidCount:
+          type: integer
+          minimum: 1
+          description: Total number of malformed entries across all buckets for this unit
+      required: [unitId, unitName, echelon, callsign, invalidEntries, invalidCount]
+
+    DistroAudit:
+      type: object
+      properties:
+        scannedUnitCount:
+          type: integer
+          minimum: 0
+          description: Total number of units inspected
+        flaggedUnitCount:
+          type: integer
+          minimum: 0
+        invalidEntryCount:
+          type: integer
+          minimum: 0
+          description: Total number of malformed entries across all flagged units
+        units:
+          type: array
+          items:
+            $ref: "#/components/schemas/DistroAuditUnit"
+        lastRun:
+          allOf:
+            - $ref: "#/components/schemas/CommsHygieneRun"
+          nullable: true
+          description: >-
+            The most recent comms-hygiene digest run, regardless of outcome.
+            `null` until the scheduler has run at least once. Use `outcome`
+            to distinguish a successful send from a skipped/failed attempt.
+        lastSuccessfulSend:
+          allOf:
+            - $ref: "#/components/schemas/CommsHygieneRun"
+          nullable: true
+          description: >-
+            The most recent run whose outcome was `sent`, or `null` if no
+            digest has ever been delivered. Surfaced separately so planners
+            can see when the last digest actually went out even after a
+            recent failure.
+      required:
+        - scannedUnitCount
+        - flaggedUnitCount
+        - invalidEntryCount
+        - units
+        - lastRun
+        - lastSuccessfulSend
+
+    CommsHygieneOutcome:
+      type: string
+      enum:
+        - sent
+        - skipped_no_flags
+        - skipped_no_recipients
+        - skipped_no_smtp
+        - failed
+      description: >-
+        `sent` — digest was delivered to SMTP.
+        `skipped_no_flags` — audit found nothing to report so no email was sent.
+        `skipped_no_recipients` — flagged units exist but `COMMS_HYGIENE_TO` is empty.
+        `skipped_no_smtp` — SMTP not configured; digest preview was logged instead.
+        `failed` — SMTP rejected the send (see `errorMessage`).
+
+    CommsHygieneRun:
+      type: object
+      properties:
+        id:
+          type: string
+        ranAt:
+          type: string
+          format: date-time
+        auditedCount:
+          type: integer
+          minimum: 0
+          description: Number of units scanned during this run
+        flaggedCount:
+          type: integer
+          minimum: 0
+        invalidCount:
+          type: integer
+          minimum: 0
+        recipients:
+          type: array
+          items:
+            type: string
+          description: Recipient list the digest was (or would have been) sent to
+        cc:
+          type: array
+          items:
+            type: string
+        outcome:
+          $ref: "#/components/schemas/CommsHygieneOutcome"
+        errorMessage:
+          type: string
+          nullable: true
+          description: SMTP / runtime error message when `outcome` is `failed`
+      required:
+        - id
+        - ranAt
+        - auditedCount
+        - flaggedCount
+        - invalidCount
+        - recipients
+        - cc
+        - outcome
+        - errorMessage
+
+    CommsHygieneStats:
+      type: object
+      description: >-
+        Run-history stats for the dashboard footnote. Lets planners see how
+        many digest runs are stored and when older ones will fall off under
+        the active retention policy.
+      properties:
+        totalRuns:
+          type: integer
+          minimum: 0
+          description: Total number of `comms_hygiene_runs` rows currently stored.
+        oldestRanAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Timestamp of the oldest stored run, or `null` when the table
+            is empty.
+        retentionDays:
+          type: integer
+          minimum: 0
+          description: >-
+            Effective retention horizon in days. Equal to
+            `retentionDaysOverride` when an in-app override is active,
+            otherwise `retentionDaysDefault`. 0 means retention is disabled.
+        retentionDaysOverride:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: >-
+            Dashboard-set retention override in days, or `null` when no
+            override is active and the env-var default applies. Surfaced
+            so the footnote can flag when an admin has temporarily widened
+            (or disabled) retention.
+        retentionDaysDefault:
+          type: integer
+          minimum: 0
+          description: >-
+            Env-var (`COMMS_HYGIENE_RETENTION_DAYS`, default 180) used
+            when no override is active. Returned alongside the effective
+            value so the dashboard can label the source.
+        oldestExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the oldest stored run is expected to age out of the table
+            (oldest `ranAt` plus `retentionDays`). `null` when the table is
+            empty or retention is disabled.
+        nearExpiryWindowDays:
+          type: integer
+          minimum: 0
+          description: >-
+            Configured "expires soon" window in days
+            (`COMMS_HYGIENE_NEAR_EXPIRY_WINDOW_DAYS`, default 7). Rows whose
+            projected expiry falls within this window of "now" are considered
+            near-expiry. Always 0 when retention is disabled.
+        nearExpiryCount:
+          type: integer
+          minimum: 0
+          description: >-
+            Number of stored runs whose projected expiry (`ranAt` plus
+            `retentionDays`) is within `nearExpiryWindowDays` of the current
+            time, including any rows that have already passed their expiry
+            but have not yet been pruned. Always 0 when retention is
+            disabled.
+      required:
+        - totalRuns
+        - oldestRanAt
+        - retentionDays
+        - retentionDaysOverride
+        - retentionDaysDefault
+        - oldestExpiresAt
+        - nearExpiryWindowDays
+        - nearExpiryCount
+
+    CommsHygieneSettings:
+      type: object
+      description: >-
+        Effective comms-hygiene retention settings. The dashboard reads
+        this to render the in-app retention control (current value, the
+        env-var fallback, and the last time the override was changed).
+      properties:
+        retentionDays:
+          type: integer
+          minimum: 0
+          description: >-
+            Effective retention horizon in days that the prune sweep and
+            stats endpoint use right now. 0 means retention is disabled.
+        retentionDaysOverride:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: >-
+            Dashboard-set override; `null` when no override is active and
+            the env-var default applies.
+        retentionDaysDefault:
+          type: integer
+          minimum: 0
+          description: >-
+            Env-var (`COMMS_HYGIENE_RETENTION_DAYS`) value used when no
+            override is set. Lets the UI label the fallback alongside any
+            active override.
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Last time the settings row was written, or `null` if the
+            override has never been touched.
+      required:
+        - retentionDays
+        - retentionDaysOverride
+        - retentionDaysDefault
+        - updatedAt
+
+    CommsHygieneSettingsUpdate:
+      type: object
+      description: >-
+        Payload for `PUT /dashboard/comms-hygiene-settings`. Set
+        `retentionDaysOverride` to a non-negative integer (0 disables
+        pruning entirely) to install an override, or `null` to clear it
+        and fall back to the env-var default.
+      properties:
+        retentionDaysOverride:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          nullable: true
+          description: >-
+            New override in days, or `null` to clear the override. Capped
+            at 3650 days (~10 years) to keep the prune cutoff math sane.
+      required:
+        - retentionDaysOverride
+
+    DistroAuditDigestResult:
+      type: object
+      description: Outcome of an on-demand `runCommsHygieneOnce` invocation.
+      properties:
+        audited:
+          type: integer
+          minimum: 0
+          description: Number of units inspected during the run
+        flagged:
+          type: integer
+          minimum: 0
+          description: Number of units with at least one malformed entry
+        invalid:
+          type: integer
+          minimum: 0
+          description: Total number of malformed entries across all flagged units
+        emailSent:
+          type: boolean
+          description: True when an email was actually dispatched to recipients
+        reason:
+          type: string
+          enum:
+            - no_flagged_entries
+            - no_recipients
+            - smtp_not_configured
+          description: >-
+            When `emailSent` is false, why the email was not sent.
+            `no_flagged_entries` means the digest was suppressed because every
+            distro list is clean. `no_recipients` and `smtp_not_configured`
+            indicate a server-side configuration gap.
+      required: [audited, flagged, invalid, emailSent]
+
+    DistroAuditDigestPreview:
+      type: object
+      description: >-
+        Rendered digest payload (subject / text / html) that the live send
+        path would dispatch, returned without invoking SMTP.
+      properties:
+        audited:
+          type: integer
+          minimum: 0
+          description: Number of units inspected during the preview build
+        flagged:
+          type: integer
+          minimum: 0
+          description: Number of units with at least one malformed entry
+        invalid:
+          type: integer
+          minimum: 0
+          description: Total number of malformed entries across all flagged units
+        suppressed:
+          type: boolean
+          description: >-
+            True when no entries were flagged. The live send path suppresses
+            the email in this case; the preview still returns the rendered
+            payload so callers can confirm what would have been produced.
+        subject:
+          type: string
+          description: Email subject line that the live send would use
+        text:
+          type: string
+          description: Plain-text email body that the live send would use
+        html:
+          type: string
+          description: HTML email body that the live send would use
+      required: [audited, flagged, invalid, suppressed, subject, text, html]
+
+    ActivityEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [resupply_planned, resupply_delivered, deficiency_flagged, sync_completed, unit_created, supply_updated]
+        message:
+          type: string
+        unitId:
+          type: string
+          nullable: true
+        unitName:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+      required: [id, kind, message, timestamp]
+
+    SyncStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        upstreamSystem:
+          type: string
+        lastSyncAt:
+          type: string
+          format: date-time
+          nullable: true
+        pendingChanges:
+          type: integer
+        latencyMs:
+          type: integer
+          nullable: true
+        autoSyncEnabled:
+          type: boolean
+        autoSyncIntervalMinutes:
+          type: integer
+      required: [connected, upstreamSystem, pendingChanges, autoSyncEnabled, autoSyncIntervalMinutes]
+
+    SyncSettingsInput:
+      type: object
+      properties:
+        autoSyncEnabled:
+          type: boolean
+        autoSyncIntervalMinutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+
+    SyncOutboxItem:
+      type: object
+      properties:
+        id:
+          type: string
+        entityKind:
+          type: string
+        entityId:
+          type: string
+        unitId:
+          type: string
+          nullable: true
+        op:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+        lastError:
+          type: string
+          nullable: true
+        itemName:
+          type: string
+          nullable: true
+        unitName:
+          type: string
+          nullable: true
+      required: [id, entityKind, entityId, op, createdAt, status]
+
+    SyncPushResult:
+      type: object
+      properties:
+        outboxId:
+          type: string
+        entityKind:
+          type: string
+        entityId:
+          type: string
+        success:
+          type: boolean
+        error:
+          type: string
+          nullable: true
+        unitName:
+          type: string
+          nullable: true
+        itemName:
+          type: string
+          nullable: true
+      required: [outboxId, entityKind, entityId, success]
+
+    SyncLastRun:
+      type: object
+      properties:
+        id:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        pushedCount:
+          type: integer
+        failedCount:
+          type: integer
+        catalogMatched:
+          type: integer
+        catalogNew:
+          type: integer
+        catalogChanged:
+          type: integer
+        latencyMs:
+          type: integer
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncPushResult"
+      required: [id, startedAt, pushedCount, failedCount, catalogMatched, catalogNew, catalogChanged]
+
+    SyncRunSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        pushedCount:
+          type: integer
+        failedCount:
+          type: integer
+        catalogMatched:
+          type: integer
+        catalogNew:
+          type: integer
+        catalogChanged:
+          type: integer
+        latencyMs:
+          type: integer
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncPushResult"
+      required: [id, startedAt, pushedCount, failedCount, catalogMatched, catalogNew, catalogChanged]
+
+    SupplyHistoryPoint:
+      type: object
+      properties:
+        snapshotAt:
+          type: string
+          format: date-time
+        onHand:
+          type: number
+        source:
+          type: string
+        actorNote:
+          type: string
+          nullable: true
+      required: [snapshotAt, onHand, source]
+
+    SupplyHistoryItem:
+      type: object
+      properties:
+        itemId:
+          type: string
+        itemName:
+          type: string
+        supplyClass:
+          type: string
+        unit:
+          type: string
+        baseDailyRate:
+          type: number
+        criticality:
+          type: string
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupplyHistoryPoint"
+        observedBurnRate:
+          type: number
+          nullable: true
+        doctrinaRate:
+          type: number
+        burnRateDelta:
+          type: number
+          nullable: true
+        lastConfirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [itemId, itemName, supplyClass, unit, baseDailyRate, criticality, series, doctrinaRate]
+
+    BaselineSnapshotItem:
+      type: object
+      properties:
+        itemId:
+          type: string
+        itemName:
+          type: string
+        supplyClass:
+          type: string
+        unit:
+          type: string
+        onHand:
+          type: number
+        dailyConsumption:
+          type: number
+        daysOfSupply:
+          type: number
+        status:
+          type: string
+      required: [itemId, itemName, supplyClass, unit, onHand, dailyConsumption, daysOfSupply, status]
+
+    BaselineSnapshotData:
+      type: object
+      properties:
+        unitId:
+          type: string
+        unitName:
+          type: string
+        personnel:
+          type: integer
+        climate:
+          type: string
+        opTempo:
+          type: string
+        missionDays:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BaselineSnapshotItem"
+      required: [unitId, unitName, personnel, climate, opTempo, missionDays, items]
+
+    SupplyBaseline:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        unitId:
+          type: string
+          nullable: true
+        frozenAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        snapshotData:
+          $ref: "#/components/schemas/BaselineSnapshotData"
+      required: [id, label, frozenAt, createdAt, snapshotData]
+
+    CreateBaselineInput:
+      type: object
+      properties:
+        label:
+          type: string
+        notes:
+          type: string
+      required: [label]
+
+    CommsDeniedForecastInput:
+      type: object
+      properties:
+        baselineId:
+          type: string
+        horizonDays:
+          type: integer
+          default: 14
+        burnModel:
+          type: string
+          enum: [doctrinal, observed, worst-of-both]
+          default: worst-of-both
+        safetyMarginDays:
+          type: integer
+          default: 2
+        resupplyLeadDays:
+          type: integer
+          default: 2
+
+    ForecastLine:
+      type: object
+      properties:
+        itemId:
+          type: string
+        itemName:
+          type: string
+        supplyClass:
+          type: string
+        unit:
+          type: string
+        startingOnHand:
+          type: number
+        doctrinalDailyRate:
+          type: number
+        observedDailyRate:
+          type: number
+          nullable: true
+        effectiveDailyRate:
+          type: number
+        projectedDaysUntilStockout:
+          type: number
+        projectedStockoutDate:
+          type: string
+          format: date-time
+          nullable: true
+        needsResupply:
+          type: boolean
+        recommendedQuantity:
+          type: number
+        recommendedDeliveryDate:
+          type: string
+          format: date-time
+          nullable: true
+      required: [itemId, itemName, supplyClass, unit, startingOnHand, doctrinalDailyRate, effectiveDailyRate, projectedDaysUntilStockout, needsResupply, recommendedQuantity]
+
+    CommsDeniedForecast:
+      type: object
+      properties:
+        unitId:
+          type: string
+        unitName:
+          type: string
+        baselineId:
+          type: string
+          nullable: true
+        baselineLabel:
+          type: string
+          nullable: true
+        planningDate:
+          type: string
+          format: date-time
+        horizonDays:
+          type: integer
+        burnModel:
+          type: string
+        safetyMarginDays:
+          type: integer
+        resupplyLeadDays:
+          type: integer
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/ForecastLine"
+      required: [unitId, unitName, planningDate, horizonDays, burnModel, safetyMarginDays, resupplyLeadDays, lines]
+
+    PublishScheduleLineInput:
+      type: object
+      properties:
+        itemId:
+          type: string
+        itemName:
+          type: string
+        supplyClass:
+          type: string
+        unit:
+          type: string
+        recommendedQuantity:
+          type: number
+        recommendedDeliveryDate:
+          type: string
+          nullable: true
+      required: [itemId, itemName, supplyClass, unit, recommendedQuantity]
+
+    PublishScheduleInput:
+      type: object
+      properties:
+        label:
+          type: string
+        baselineId:
+          type: string
+        horizonDays:
+          type: integer
+          default: 14
+        burnModel:
+          type: string
+          enum: [doctrinal, observed, worst-of-both]
+        safetyMarginDays:
+          type: integer
+        resupplyLeadDays:
+          type: integer
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublishScheduleLineInput"
+      required: [label, lines]
+
+    PublishedSchedule:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        unitId:
+          type: string
+        baselineId:
+          type: string
+          nullable: true
+        horizonDays:
+          type: integer
+        burnModel:
+          type: string
+        safetyMarginDays:
+          type: integer
+        resupplyLeadDays:
+          type: integer
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        shareToken:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        eventsCreated:
+          type: integer
+      required: [id, label, unitId, horizonDays, burnModel, safetyMarginDays, resupplyLeadDays]
+
+    ScheduleEventItem:
+      type: object
+      properties:
+        id:
+          type: string
+        supplyClass:
+          type: string
+        itemId:
+          type: string
+          nullable: true
+        itemName:
+          type: string
+          nullable: true
+        quantity:
+          type: number
+        unit:
+          type: string
+        scheduledFor:
+          type: string
+          format: date-time
+        status:
+          type: string
+        assignedTo:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      required: [id, supplyClass, quantity, unit, scheduledFor, status]
+
+    ScheduleDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        unitId:
+          type: string
+        unitName:
+          type: string
+        unitEchelon:
+          type: string
+          nullable: true
+        unitLocation:
+          type: string
+          nullable: true
+        unitClimate:
+          type: string
+          nullable: true
+        unitOpTempo:
+          type: string
+          nullable: true
+        unitAmmoPosture:
+          type: string
+          nullable: true
+        unitDistroEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: Distribution list of email addresses copied from the receiving unit at request time, used to pre-fill the schedule email recipients. Pre-existing malformed entries are still possible for older units and are filtered out client-side before opening the mailto draft.
+        unitDistroCcEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: CC distribution list copied from the receiving unit at request time, used to pre-fill the cc= field of the schedule email. Pre-existing malformed entries are still possible for older units and are filtered out client-side before opening the mailto draft.
+        unitDistroBccEmails:
+          type: array
+          items:
+            type: string
+            format: email
+            pattern: '{{DISTRO_EMAIL_PATTERN}}'
+          description: BCC distribution list copied from the receiving unit at request time, used to pre-fill the bcc= field of the schedule email (silent recipients hidden from To/CC). Pre-existing malformed entries are still possible for older units and are filtered out client-side before opening the mailto draft.
+        baselineId:
+          type: string
+          nullable: true
+        horizonDays:
+          type: integer
+        burnModel:
+          type: string
+        safetyMarginDays:
+          type: integer
+        resupplyLeadDays:
+          type: integer
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        shareToken:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScheduleEventItem"
+      required: [id, label, unitId, unitName, horizonDays, burnModel, safetyMarginDays, resupplyLeadDays, events]
+
+    ShareLinkRevokeResult:
+      type: object
+      properties:
+        scheduleId:
+          type: string
+        shareToken:
+          type: string
+          nullable: true
+          description: Always null after a successful revoke.
+        revoked:
+          type: boolean
+      required: [scheduleId, shareToken, revoked]
+
+    ShareLinkRotateResult:
+      type: object
+      properties:
+        scheduleId:
+          type: string
+        shareToken:
+          type: string
+          description: The newly minted share token. Distribute this in place of the old one.
+      required: [scheduleId, shareToken]
+
+    OpsecPushTile:
+      type: object
+      properties:
+        scheduleId:
+          type: string
+        scheduleLabel:
+          type: string
+        unitId:
+          type: string
+        unitName:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        horizonDays:
+          type: integer
+        nextPushDate:
+          type: string
+          format: date-time
+          nullable: true
+        totalPushes:
+          type: integer
+        shareToken:
+          type: string
+          nullable: true
+      required: [scheduleId, scheduleLabel, unitId, unitName, horizonDays, totalPushes]
+
+    SpirePrSourceKind:
+      type: string
+      enum: [calculator, schedule, supply]
+      description: |
+        What MARLOG surface produced the proposal payload:
+        - calculator: ad-hoc requirements bill from the standalone calculator
+        - schedule: a published comms-denied schedule (resupply events)
+        - supply: a unit's current on-hand supply state (with overrides)
+
+    SpirePrConfig:
+      type: object
+      properties:
+        configured:
+          type: boolean
+        owner:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        baseBranch:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+      required: [configured]
+
+    CreateSpirePrBody:
+      type: object
+      properties:
+        sourceKind:
+          $ref: "#/components/schemas/SpirePrSourceKind"
+        sourceId:
+          type: string
+          description: Unit ID for calculator/supply, schedule ID for schedule.
+        scenario:
+          type: object
+          description: Calculator scenario inputs. Required when sourceKind=calculator.
+          properties:
+            personnel:
+              type: integer
+              minimum: 1
+            days:
+              type: integer
+              minimum: 1
+            climate:
+              $ref: "#/components/schemas/Climate"
+            opTempo:
+              $ref: "#/components/schemas/OpTempo"
+          required: [personnel, days, climate, opTempo]
+        title:
+          type: string
+          maxLength: 120
+          description: Custom PR title. Defaults to a MARLOG-generated title.
+        summary:
+          type: string
+          maxLength: 4000
+          description: Optional markdown body appended to the PR description.
+        createdBy:
+          type: string
+          maxLength: 120
+          description: Who is opening the PR (free-form, e.g. callsign).
+      required: [sourceKind]
+
+    SpirePr:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sourceKind:
+          $ref: "#/components/schemas/SpirePrSourceKind"
+        sourceId:
+          type: string
+          nullable: true
+        sourceLabel:
+          type: string
+        repoOwner:
+          type: string
+        repoName:
+          type: string
+        branch:
+          type: string
+        baseBranch:
+          type: string
+        filePath:
+          type: string
+        prNumber:
+          type: integer
+        prUrl:
+          type: string
+        title:
+          type: string
+        state:
+          type: string
+          description: open | closed | merged
+        mergedAt:
+          type: string
+          format: date-time
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        refreshedAt:
+          type: string
+          format: date-time
+        payloadSummary:
+          type: object
+          additionalProperties: true
+          nullable: true
+      required:
+        - id
+        - sourceKind
+        - sourceLabel
+        - repoOwner
+        - repoName
+        - branch
+        - baseBranch
+        - filePath
+        - prNumber
+        - prUrl
+        - title
+        - state
+        - createdAt
+        - refreshedAt

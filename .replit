@@ -1,12 +1,12 @@
-modules = ["nodejs-20", "python-3.12", "web"]
-[agent]
-expertMode = true
-stack = "BEST_EFFORT_FALLBACK"
-integrations = ["github:1.0.0"]
+modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
-[nix]
-channel = "stable-25_05"
-packages = ["cargo", "glibcLocales", "libiconv", "libxcrypt", "openssl", "pkg-config", "rustc"]
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
 
 [workflows]
 runButton = "Project"
@@ -18,50 +18,66 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Backend"
+args = "codegen-check"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Frontend"
+args = "test"
 
 [[workflows.workflow]]
-name = "Backend"
+name = "codegen-check"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "uvicorn backend.main:app --host 127.0.0.1 --port 8000"
-waitForPort = 8000
+args = "pnpm --filter @workspace/api-spec run codegen:check"
 
 [workflows.workflow.metadata]
-outputType = "console"
+isValidation = true
 
 [[workflows.workflow]]
-name = "Frontend"
+name = "test"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd frontend && npm run dev -- --host 0.0.0.0 --port 5000"
-waitForPort = 5000
+args = "pnpm run test"
 
 [workflows.workflow.metadata]
-outputType = "webview"
+isValidation = true
 
-[[ports]]
-localPort = 5000
-externalPort = 5000
-
-[[ports]]
-localPort = 8000
-externalPort = 8000
-exposeLocalhost = true
-
-[deployment]
-deploymentTarget = "vm"
-run = ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "5000"]
-build = ["bash", "-lc", "cd frontend && npm install && npm run build"]
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+integrations = ["github:1.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 180000
+timeoutMs = 20000
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[[ports]]
+localPort = 8082
+externalPort = 3001
+
+[[ports]]
+localPort = 8083
+externalPort = 3003
+
+[[ports]]
+localPort = 8765
+externalPort = 3002
+
+[[ports]]
+localPort = 24024
+externalPort = 3000
+
+[nix]
+channel = "stable-25_05"

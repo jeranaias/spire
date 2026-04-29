@@ -1,168 +1,182 @@
-# SPIRE on Fly.io — public deploy
+# MARLOG — Fly.io deployment
 
-You're going from `docker compose up` to `https://spire-mdm.fly.dev` in
-about 8 minutes. Fly was picked over the alternatives because:
-- Single-Dockerfile deploy (uses `Dockerfile.web` in repo root)
-- Free TLS at `*.fly.dev`, custom domain easy
-- Persistent volume for the SQLite + audit chain
-- `auto_stop_machines = "stop"` keeps cost near $0 when idle —
-  cold-starts on first request after sleep
-- Per-app secret store for `SPIRE_GITHUB_TOKEN` (way better than `.env`)
+This document covers MARLOG's slice of the SPIRE Fly.io deployment. SPIRE
+maintainers should read SPIRE's main `deploy/FLY_DEPLOY.md` first; the steps
+below add MARLOG alongside the existing SPIRE backend.
 
-Realistic monthly cost: **~$0–3** for the pilot's traffic, since the
-machine sleeps when idle and wakes on the first request (~1.5s cold
-start). 1GB volume is $0.15/mo. If usage stays this low you're inside
-the included free allowance.
+---
 
-## One-time setup
+## Layout
 
-### 1 · Install Fly CLI + log in
-```
-# Already installed at C:\Users\jesse\.fly\bin\fly.exe
-fly auth login   # opens browser, OAuth, done
-fly auth whoami  # confirm: jesse@thornveil.ai
-```
+| File                   | Purpose                                                        |
+|------------------------|----------------------------------------------------------------|
+| `Dockerfile`           | Multi-stage build with `marlog-api` and `marlog-web` targets.  |
+| `.dockerignore`        | Keeps build context lean (no `node_modules`, `dist`, `.git`).  |
+| `docker-compose.yml`   | Local stand-up: `marlog-api`, `marlog-web`, `marlog-db`.       |
+| `deploy/nginx.conf`    | nginx config baked into the `marlog-web` image.                |
+| `fly.marlog.toml`      | Fly.io config for the `marlog-api` app (companion to `fly.toml`). |
+| `fly.marlog-web.toml`  | Fly.io config for the `marlog-web` (nginx) app.                |
+| `.github/workflows/ci.yml` | Typechecks, builds, and builds both Docker images.         |
 
-### 2 · Pick the app name
-Fly app names are global. `spire-mdm` is what's wired into
-`fly.toml`. If it's taken, edit `fly.toml` and change `app = "..."`.
+The two Fly apps in this stack are:
 
-### 3 · Bootstrap from `D:\projects\spire`
-```
-cd D:/projects/spire
+- **`marlog-api`** — Node 24 Express API, port 3000, talks to Postgres.
+- **`marlog-web`** — nginx serving the Vite SPA, port 80, proxies `/api` to
+  `marlog-api`.
 
-# Creates the app on Fly without deploying yet (uses fly.toml as-is)
-fly launch --no-deploy --copy-config --name spire-mdm --region iad
+---
 
-# Persistent volume for SQLite + audit chain
-fly volume create spire_runtime --region iad --size 1 --yes
+## Prerequisites
 
-# Secrets — token + db passphrase + repo target
-fly secrets set \
-    SPIRE_GITHUB_TOKEN=$(grep ^SPIRE_GITHUB_TOKEN= .env | cut -d= -f2-) \
-    SPIRE_GITHUB_REPO=jeranaias/spire \
-    SPIRE_DB_PASSPHRASE=$(openssl rand -base64 32)
+- `flyctl` 0.3+ authenticated against the SPIRE org.
+- A Postgres cluster reachable from Fly. SPIRE's existing cluster can be
+  reused — MARLOG's tables are namespaced and do not collide with SPIRE's
+  schema.
+- Repo cloned with the MARLOG module at `marlog/` (this directory).
 
-# First deploy — builds the combined image, uploads, boots a machine
-fly deploy
-```
+---
 
-### 4 · Verify
-```
-fly status                     # machine state
-fly logs                       # tail combined nginx + uvicorn output
-curl https://spire-mdm.fly.dev/healthz
-curl https://spire-mdm.fly.dev/api/system/status | jq .dataset
-open https://spire-mdm.fly.dev
+## First-time deploy
+
+All commands run from `marlog/`.
+
+### 1. Create the API app
+
+```bash
+fly apps create marlog-api --org spire
+fly secrets set DATABASE_URL='postgres://USER:PASS@HOST:5432/marlog' \
+  --app marlog-api
+fly deploy --config fly.marlog.toml \
+           --app marlog-api \
+           --build-target marlog-api
 ```
 
-The first request after a long idle period takes ~1.5s while the machine
-wakes; subsequent requests are normal latency.
+### 2. Push the schema and seed reference data
 
-## Subsequent deploys
+Run once against the production database. The seed is idempotent and safe
+to re-run.
 
-```
-git pull && fly deploy
-```
-
-Fly does multi-stage Docker builds remotely on its builder VMs, so your
-laptop doesn't need to rebuild — just upload the source and Fly compiles
-the image in ~3 minutes.
-
-## What the pilot sees
-
-- **URL**: `https://spire-mdm.fly.dev` (or your custom domain — see below).
-- **No login gate**: SPIRE has role *switching* not auth. The data is
-  fully synthetic so a public URL is acceptable for the demo + pilot
-  cohort. If you want to gate it, layer Cloudflare Access in front (free,
-  Google login, ~5 min config) or add Caddy basic-auth on a sidecar.
-- **Issue filing**: works identically to local — Shift+F drawer creates
-  GitHub issues against `jeranaias/spire`.
-
-## Wire LLM-backed features (NL queries, Tier-2 SENTRY)
-
-The lean public image ships with rule-based fallbacks. To unlock the
-LLM-backed features without exposing your inference rig, join the Fly
-machine to the same Tailscale tailnet as the rig.
-
-### One-time
-
-1. **Rig side:** confirm the LLM proxy is reachable on the tailnet IP, not
-   just `127.0.0.1`. If it's localhost-only, rebind it to `0.0.0.0:8095`
-   — Tailscale ACLs will keep it private.
-2. **Tailscale admin:** define `tag:fly` and `tag:rigrun-llm` in the ACL
-   policy file, with a rule restricting `tag:fly` to `tag:rigrun-llm:8095`
-   only.
-3. **Auth key:** generate at
-   https://login.tailscale.com/admin/settings/keys — Reusable, Ephemeral,
-   Pre-approved, tagged `tag:fly`, 90-day expiration.
-4. **Fly secrets:**
-   ```
-   fly secrets set --app spire-mdm \
-       TS_AUTHKEY=tskey-auth-... \
-       TS_HOSTNAME=spire-mdm \
-       TS_TAGS=tag:fly \
-       SPIRE_LLM_PROXY=http://rigrun-llm.<tailnet>.ts.net:8095
-   ```
-5. `fly deploy --remote-only --ha=false --app spire-mdm`
-
-### Verify
-
-```
-curl https://spire-mdm.fly.dev/api/system/status | jq '.llm, .features.nl_queries'
-# expect: { reachable: true, model: "gemma4-…" }, true
+```bash
+DATABASE_URL='postgres://...' pnpm --filter @workspace/db run push
+DATABASE_URL='postgres://...' pnpm --filter @workspace/scripts run seed
 ```
 
-### How it works
+### 3. Create the web app
 
-- The image includes `tailscaled` running in **userspace mode** — no TUN
-  device, no NET_ADMIN, no privileged container.
-- A SOCKS5 proxy at `127.0.0.1:1055` and HTTP proxy at `127.0.0.1:1099`
-  route container traffic over the tailnet for tailnet-only hostnames.
-- `TS_AUTHKEY` unset → tailscale-up script exits cleanly, backend reverts
-  to rule-based fallback. Same as before this commit.
-- ACLs ensure even if the auth-key leaks, an attacker only gets access to
-  the rig's port 8095 — not SSH, not the rest of your tailnet.
+`fly.marlog-web.toml` is committed and ready to use.
 
-## Custom domain (optional)
-
-```
-fly certs add spire.thornveil.ai
-fly certs check spire.thornveil.ai     # shows DNS record to add
-# At your registrar: CNAME spire → spire-mdm.fly.dev
-fly certs check spire.thornveil.ai     # verify
+```bash
+fly apps create marlog-web --org spire
+fly deploy --config fly.marlog-web.toml --app marlog-web
 ```
 
-## Cost guardrails
+The web container uses the upstream `marlog-api:3000` defined in
+`deploy/nginx.conf` — that name resolves under docker-compose but not on
+Fly. Before the first Fly web deploy, edit `deploy/nginx.conf` to point at
+the API app's internal hostname:
 
-- `auto_stop_machines = "stop"` and `min_machines_running = 0` mean the
-  machine *sleeps* when nobody's using it. That's the line item.
-- Monitor with `fly dashboard metrics`.
-- Hard cap: `fly scale count 1 --max-per-region 1` keeps Fly from
-  scaling out under load.
-
-## Tearing down
-
+```nginx
+upstream marlog_api {
+    server marlog-api.internal:3000;
+}
 ```
-fly apps destroy spire-mdm   # also removes volumes, certs, secrets
+
+Then run the `fly deploy` command above so the change is baked into the
+image.
+
+---
+
+## Routine deploys
+
+```bash
+# API
+fly deploy --config fly.marlog.toml --app marlog-api
+
+# Web
+fly deploy --config fly.marlog-web.toml --app marlog-web
 ```
+
+Schema migrations (when `lib/db/src/schema/*` changes):
+
+```bash
+DATABASE_URL='postgres://...' pnpm --filter @workspace/db run push
+```
+
+---
+
+## docker-compose (local / staging mirror)
+
+```bash
+docker compose up --build
+# UI:  http://localhost:8080
+# API: http://localhost:8080/api  (proxied by marlog-web)
+```
+
+After first start, push schema and seed:
+
+```bash
+DATABASE_URL='postgres://marlog:marlog@localhost:5432/marlog' \
+  pnpm --filter @workspace/db run push
+DATABASE_URL='postgres://marlog:marlog@localhost:5432/marlog' \
+  pnpm --filter @workspace/scripts run seed
+```
+
+To wire MARLOG into SPIRE's existing compose stack, copy the `marlog-api`,
+`marlog-web`, and `marlog-db` services into SPIRE's `docker-compose.yml`
+and replace the `marlog-net` network with SPIRE's shared backend network
+(set `external: true` and the network's name).
+
+---
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+1. **`marlog`** — `pnpm install --frozen-lockfile` then `pnpm run build`
+   (typecheck + per-package build).
+2. **`docker`** — builds `marlog-api` and `marlog-web` images in parallel
+   with GitHub Actions cache.
+
+When integrating into SPIRE's main `.github/workflows/ci.yml`, copy the
+`marlog` and `docker` jobs into the SPIRE workflow and add:
+
+```yaml
+defaults:
+  run:
+    working-directory: marlog
+```
+
+so each step runs from the module root. Scope the path filter to MARLOG:
+
+```yaml
+on:
+  push:
+    paths: ["marlog/**", "!marlog/**/*.md"]
+  pull_request:
+    paths: ["marlog/**", "!marlog/**/*.md"]
+```
+
+---
+
+## Rollback
+
+```bash
+fly releases --app marlog-api
+fly releases rollback <version> --app marlog-api
+```
+
+Schema rollbacks are not automated. Drizzle pushes are forward-only; for
+breaking schema changes, deploy a backwards-compatible migration first,
+then deploy the application change.
+
+---
 
 ## Troubleshooting
 
-**Machine boots but `/api/system/status` 502s**
-→ Check `fly logs`. Likely the SQLite path isn't writable. Confirm the
-volume mounted: `fly machine list` and `fly ssh console -C "ls -la /opt/spire/runtime"`.
-
-**`fly deploy` hangs on push**
-→ Local Docker daemon issue. Set `fly deploy --remote-only` to skip
-local Docker entirely; Fly's builders handle everything.
-
-**Cold starts feel slow**
-→ Keep at least one machine warm: edit `fly.toml`, set
-`min_machines_running = 1`. That bumps cost to ~$3/mo for a 1gb
-shared-1x machine.
-
-**SPIRE_GITHUB_TOKEN didn't take**
-→ `fly secrets list` (shows existence + sha but not value). Re-set with
-`fly secrets set SPIRE_GITHUB_TOKEN=...`. The next request triggers a
-machine restart automatically.
+| Symptom                                      | Likely cause / fix                                                                 |
+|----------------------------------------------|------------------------------------------------------------------------------------|
+| `vite build` fails: PORT is required         | Build env missing — Dockerfile sets `PORT=3000` and `BASE_PATH=/`; CI sets both.   |
+| `marlog-api` exits with `DATABASE_URL must be set` | Set the secret: `fly secrets set DATABASE_URL='...' --app marlog-api`.             |
+| `marlog-web` 404s on /api routes             | nginx upstream points at the wrong host. Update `deploy/nginx.conf` and rebuild.   |
+| `marlog-web` 404s on a deep link             | History fallback misconfigured — verify `try_files $uri $uri/ /index.html;` is intact. |
+| Health check failing on `/api/healthz`       | API container not reachable on port 3000 — check `fly logs --app marlog-api`.      |

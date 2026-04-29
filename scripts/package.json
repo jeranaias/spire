@@ -1,0 +1,20 @@
+{
+  "name": "@workspace/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hello": "tsx ./src/hello.ts",
+    "seed": "tsx ./src/seed.ts",
+    "audit-distro-emails": "tsx ./src/audit-distro-emails.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workspace/db": "workspace:*",
+    "@workspace/distro-email": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "tsx": "catalog:"
+  }
+}
+

@@ -1,0 +1,61 @@
+# MARLOG — Fly.io deployment for the bundled API + web stack.
+#
+# This file is a companion to SPIRE's main `fly.toml`.  It deploys MARLOG as
+# a separate Fly app so it can be released, scaled, and rolled back
+# independently of SPIRE's primary backend, while still talking to the same
+# Postgres cluster (via DATABASE_URL).
+#
+# Two-app deployment.  Each tier has its own committed config:
+#
+#   # API
+#   fly deploy --config fly.marlog.toml --app marlog-api
+#
+#   # Web
+#   fly deploy --config fly.marlog-web.toml --app marlog-web
+#
+# DATABASE_URL must be set as a Fly secret before first deploy:
+#   fly secrets set DATABASE_URL='postgres://...' --app marlog-api
+#
+# Recommended primary region: iad (matches SPIRE's default).  Adjust to
+# match SPIRE's `primary_region` if it changes.
+
+app            = "marlog-api"
+primary_region = "iad"
+
+[build]
+  dockerfile   = "Dockerfile"
+  build-target = "marlog-api"
+
+[env]
+  NODE_ENV = "production"
+  PORT     = "3000"
+
+[http_service]
+  internal_port       = 3000
+  force_https         = true
+  auto_stop_machines  = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes           = ["app"]
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    interval     = "30s"
+    timeout      = "5s"
+    grace_period = "10s"
+    method       = "get"
+    path         = "/api/healthz"
+
+[[vm]]
+  size      = "shared-cpu-1x"
+  memory    = "512mb"
+  cpu_kind  = "shared"
+  cpus      = 1
+
+# See fly.marlog-web.toml for the web tier and deploy/FLY_DEPLOY.md for the
+# end-to-end procedure (including the deploy/nginx.conf upstream change to
+# `marlog-api.internal:3000` before the first Fly web deploy).

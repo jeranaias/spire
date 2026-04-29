@@ -1,71 +1,52 @@
-# Node / frontend
-node_modules/
-dist/
-build/
-.next/
-.vite/
+# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+
+# compiled output
+dist
+tmp
+out-tsc
 *.tsbuildinfo
+.expo
+.expo-shared
 
-# Python / dataset engine
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
+# dependencies
+node_modules
 
-# Environments
-.env
-.env.local
-.env.*.local
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
 
-# Model weights (reference copies live elsewhere — see models/README.md)
-models/**/*.pt
-models/**/*.pth
-models/**/*.onnx
-models/**/*.safetensors
-models/**/*.ckpt
-models/**/*.bin
-models/**/*.hef
-models/**/*.engine
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 
-# Generated datasets (regenerate from dataset/ engine)
-dataset/data/out/
-models/sentry_classifier/data/sentry_train*.jsonl
-models/sentry_classifier/data/sentry_train*.json
-models/*/runs/
-models/*/checkpoints/
+# misc
+/.sass-cache
+/connect.lock
+/coverage
+/libpeerconnection.log
+npm-debug.log
+yarn-error.log
+testem.log
+/typings
 
-# Local DB / runtime state
-*.sqlite
-*.sqlite-*
-*.db
-audit.log
-runtime/
-
-# Editor / OS
-.vscode/
-.idea/
+# System Files
 .DS_Store
 Thumbs.db
-*.swp
 
-# Local scratch — screenshots, Playwright outputs, debug artefacts
-tmp/
+.cursor/rules/nx-rules.mdc
+.github/instructions/nx.instructions.md
 
-# One-shot debug scripts — kept unversioned so the repo stays tidy
-scripts/forecast_debug*.py
-scripts/mgrs_test.py
+# Replit
+.cache/
+.local/
 
-# Local audit scratch — chrome-devtools driving screenshots
-walkthrough/
-
-# ThermalHawk live-feed assets — fetched via scripts/fetch_thermal_demo.sh.
-# Real thermal drone frames live outside the repo so the tree stays small;
-# the deploy box pulls them once. Trained model weights live elsewhere
-# (see models/README.md and SPIRE_THERMALHAWK_WEIGHTS env var).
-/data/thermal_demo/
-attached_assets/
-datasets/
+# Playwright test runtime artifacts
+test-results/

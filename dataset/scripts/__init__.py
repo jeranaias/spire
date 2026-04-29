@@ -1,1 +1,0 @@
-"""GCSS-MC scripts package."""

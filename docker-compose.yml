@@ -1,62 +1,80 @@
-# SPIRE — local + pilot deployment.
+# MARLOG — docker-compose for local stand-up.
 #
-#   docker compose up -d
-#   open http://localhost:8080
+# This file lives at the root of the marlog/ module.  When MARLOG is
+# bundled into the SPIRE repo, copy the `marlog-api`, `marlog-web`, and
+# `marlog-db` services (and the `marlog-net` network) into SPIRE's
+# top-level docker-compose.yml so they share the SPIRE backend network.
 #
-# The backend persists SQLite + audit chain to a named volume so a restart
-# preserves operator decisions, feedback, and queue state. The frontend is
-# nginx serving the Rolldown build with /api/* proxied to the backend.
+# Standalone usage:
+#   docker compose up --build
+#   # then browse to http://localhost:8080
 #
-# For an air-gap deploy: bundle this file + both Dockerfiles + the source
-# tree onto a USB. `docker compose build` once on the receive side, then
-# `up -d` brings the system online with no external pulls.
+# One-shot operations:
+#   docker compose run --rm marlog-api node ./dist/index.mjs   # start API
+#   docker compose exec marlog-db psql -U marlog -d marlog     # db shell
+#
+# DB schema/seed (run once after first start, against marlog-db):
+#   pnpm --filter @workspace/db run push
+#   pnpm --filter @workspace/scripts run seed
+
+name: marlog
 
 services:
-  backend:
+  marlog-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: marlog
+      POSTGRES_PASSWORD: marlog
+      POSTGRES_DB: marlog
+    volumes:
+      - marlog-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marlog -d marlog"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - marlog-net
+
+  marlog-api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: spire-backend
+      target: marlog-api
+    image: marlog-api:local
     restart: unless-stopped
     environment:
-      SPIRE_MODE: full
-      # Set SPIRE_DB_PASSPHRASE to enable AES-256 at-rest encryption of the
-      # SQLite audit chain. Leave unset for plaintext (dev-only).
-      # SPIRE_DB_PASSPHRASE: change-me-in-production
-      # GitHub issue creation for in-app feedback drawer. Both pulled from
-      # host env (or .env file alongside this compose file). Leave unset to
-      # keep feedback local-only.
-      SPIRE_GITHUB_TOKEN: ${SPIRE_GITHUB_TOKEN:-}
-      SPIRE_GITHUB_REPO:  ${SPIRE_GITHUB_REPO:-jeranaias/spire}
-    volumes:
-      - spire-runtime:/opt/spire/runtime
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8700/api/system/status"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://marlog:marlog@marlog-db:5432/marlog
+    depends_on:
+      marlog-db:
+        condition: service_healthy
     networks:
-      - spire
+      - marlog-net
+    expose:
+      - "3000"
 
-  frontend:
+  marlog-web:
     build:
-      context: ./frontend
+      context: .
       dockerfile: Dockerfile
-    container_name: spire-frontend
+      target: marlog-web
+    image: marlog-web:local
     restart: unless-stopped
     depends_on:
-      backend:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
+      - marlog-api
     networks:
-      - spire
+      - marlog-net
+    ports:
+      - "8080:80"
 
 volumes:
-  spire-runtime:
-    driver: local
+  marlog-db-data:
 
 networks:
-  spire:
+  marlog-net:
+    # In SPIRE: replace with `external: true` and the SPIRE backend network
+    # name so MARLOG can reach SPIRE's shared services.
     driver: bridge
