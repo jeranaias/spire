@@ -123,12 +123,12 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   }
 
   // The bundle classification is auto-inherited from the source records
-  // server-side. Until the operator runs an export we don't know what the
-  // bundle will mark; default to SECRET because canonical batches always
-  // contain at least one SECRET-tier record (the redaction report itself
-  // surfaces them). This is the gate the FE primitive renders against —
-  // the backend re-checks on every /export and /download call.
-  const expectedBundleClass = result?.classification ?? "SECRET";
+  // server-side. Until the operator runs an export the marking is unknown;
+  // default to UNCLASSIFIED so the FE doesn't pre-render a SECRET banner
+  // on a synthetic-only batch. The real marking flows through
+  // result.classification once the export runs; the backend re-checks
+  // on every /export and /download call.
+  const expectedBundleClass = result?.classification ?? "UNCLASSIFIED";
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">

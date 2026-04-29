@@ -182,8 +182,12 @@ export function JointPreviewView() {
       }}
     >
       <JointBanner
-        classification={s.data?.envelope.classification.marking ?? "SECRET"}
-        releasability={s.data?.envelope.classification.releasability ?? "REL TO USA, FVEY"}
+        // Default to UNCLASSIFIED // DEMO DATA when the envelope hasn't
+        // resolved — matches the rest of SPIRE's synthetic-only posture.
+        // Real classified marking flows through s.data.envelope when
+        // populated; the fallback only renders during the first poll.
+        classification={s.data?.envelope.classification.marking ?? "UNCLASSIFIED"}
+        releasability={s.data?.envelope.classification.releasability ?? "DEMO DATA"}
       />
       {isDisconnected && (
         <StaleStripe lastGoodAgeSec={lastGoodAgeSec} cachedAt={ddilLastCacheHit?.cachedAt ?? s.lastGoodPullAt ?? null} />

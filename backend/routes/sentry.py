@@ -592,7 +592,7 @@ async def demo_batch(limit: int = 500):
     return _public_batch(batch)
 
 
-UPLOAD_MAX_BYTES = 100 * 1024 * 1024  # 100 MB hard cap on uploads
+UPLOAD_MAX_BYTES = 1024 * 1024 * 1024  # 1 GB hard cap — real GCSS-MC exports run hundreds of MB
 
 
 def _looks_like_gcss_sr_header(raw: bytes) -> bool:

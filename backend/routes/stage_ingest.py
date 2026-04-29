@@ -44,7 +44,7 @@ router = APIRouter()
 # Mirrors the SENTRY upload gate.
 STAGE_INGEST_ROLES = frozenset({"data_custodian", "security_manager"})
 STAGE_INGEST_TIMEOUT_S = 60.0
-STAGE_INGEST_FILE_MAX_BYTES = 200 * 1024 * 1024
+STAGE_INGEST_FILE_MAX_BYTES = 1024 * 1024 * 1024
 
 
 @router.get("/dataset-status")

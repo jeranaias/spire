@@ -57,9 +57,10 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
 
   // 100 MB hard cap matches the backend `UPLOAD_MAX_BYTES` guard so the
   // user gets an immediate front-end rejection on oversized files instead
-  // of waiting for a 413 round-trip on the GCSS-MC sanitized SR header
-  // (~46 MB at 103,686 rows; with comfort headroom we cap at 100 MB).
-  const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+  // of waiting for a 413 round-trip on the GCSS-MC sanitized SR header.
+  // Bumped to 1 GB to match the backend (sentry.py + stage_ingest.py)
+  // and nginx.fly.conf — real GCSS-MC exports cleared 100 MB.
+  const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
   async function uploadFile(file: File) {
     if (!file) return;
