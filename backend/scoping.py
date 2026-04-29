@@ -36,7 +36,7 @@ from .state import CanonicalDataset
 # release, air-gap toggle, admin telemetry read) without waiting for it.
 SECURE_WIPE_ROLES        = frozenset({"security_manager"})
 AIRGAP_ROLES             = frozenset({"security_manager", "mef_commander"})
-COALITION_RELEASE_ROLES  = frozenset({"data_custodian", "security_manager"})
+COALITION_RELEASE_ROLES  = frozenset({"data_custodian", "security_manager", "mef_commander"})
 ADMIN_TELEMETRY_ROLES    = frozenset({"security_manager", "mef_commander"})
 AUDIT_READ_ROLES         = frozenset({"security_manager", "mef_commander"})
 # SENTRY Review Queue clearing authority. A maintenance chief can flag /
@@ -49,7 +49,7 @@ SENTRY_REVIEW_ROLES      = frozenset({"g4", "data_custodian", "security_manager"
 # operator/commander roles see the FE InsufficientPrivilege panel and the
 # backend mirrors that with `require_user_role` so a curl past the FE gate
 # returns 403 with `InsufficientRole` rather than a 2,306-record bundle.
-SENTRY_EXPORT_ROLES      = frozenset({"data_custodian", "security_manager"})
+SENTRY_EXPORT_ROLES      = frozenset({"data_custodian", "security_manager", "mef_commander"})
 # Mission-clock playback controls (B4). Operator-class roles only — the
 # clock is a piece of demo plumbing, not an analyst surface.
 SCENARIO_CONTROL_ROLES   = frozenset({"security_manager", "mef_commander", "g4"})

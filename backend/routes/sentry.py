@@ -1084,7 +1084,7 @@ def _parse_upload(raw: bytes, filename: str) -> tuple[list[dict], dict]:
     return records, schema_detected
 
 
-SENTRY_MARK_ROLES = frozenset({"data_custodian", "security_manager"})
+SENTRY_MARK_ROLES = frozenset({"data_custodian", "security_manager", "mef_commander"})
 SENTRY_MARK_ENGINE = "SENTRY Pattern Engine (rule-based)"
 SENTRY_MARK_ENGINE_VERSION = "v1"
 
