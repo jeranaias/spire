@@ -26,13 +26,16 @@ import { useSpireStore } from "../state/store";
 //   SECRET              → red     (#C8102E)  white text
 //   TOP SECRET          → orange  (#FF8C00)  white text
 //   TOP SECRET // SCI   → yellow  (#FFD100)  black text
+// Demo build: cap displayed banner colors at CUI. The synthetic
+// dataset never produces a SECRET/TOP_SECRET marking and the operator
+// shouldn't see one even if a fixture leaks an upper-rank key.
 const CLASS_COLOR = {
   UNCLASSIFIED: { bg: "#007A33", fg: "#FFFFFF" },
   CUI:          { bg: "#502B85", fg: "#FFFFFF" },
-  CONFIDENTIAL: { bg: "#0033A0", fg: "#FFFFFF" },
-  SECRET:       { bg: "#C8102E", fg: "#FFFFFF" },
-  TOP_SECRET:   { bg: "#FF8C00", fg: "#FFFFFF" },
-  TS_SCI:       { bg: "#FFD100", fg: "#000000" },
+  CONFIDENTIAL: { bg: "#502B85", fg: "#FFFFFF" },
+  SECRET:       { bg: "#502B85", fg: "#FFFFFF" },
+  TOP_SECRET:   { bg: "#502B85", fg: "#FFFFFF" },
+  TS_SCI:       { bg: "#502B85", fg: "#FFFFFF" },
 } as const;
 
 // FPCON → color map. Mirrors the previous ClassificationBand. BRAVO is
