@@ -55,19 +55,53 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
     if (!batch && !loading && !seedOff) loadCanonical();
   }, [ctx.batchId]);
 
-  // 100 MB hard cap matches the backend `UPLOAD_MAX_BYTES` guard so the
-  // user gets an immediate front-end rejection on oversized files instead
-  // of waiting for a 413 round-trip on the GCSS-MC sanitized SR header.
-  // Bumped to 1 GB to match the backend (sentry.py + stage_ingest.py)
-  // and nginx.fly.conf — real GCSS-MC exports cleared 100 MB.
+  // 1 GB hard cap matches the backend (sentry.py UPLOAD_MAX_BYTES,
+  // stage_ingest STAGE_INGEST_FILE_MAX_BYTES, nginx client_max_body_size).
+  // Real GCSS-MC exports run hundreds of MB; the prior 100 MB cap was
+  // bouncing real headers at the edge before they reached SENTRY.
   const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
-  async function uploadFile(file: File) {
+  // Auto-route a file to its bundle role by filename. Mirrors the
+  // server-side _detect_bundle_role() in backend/routes/sentry.py so
+  // the operator sees the same routing decision the backend makes.
+  type BundleRole = "header" | "sr_parts" | "due_in";
+  type FileRouting = {
+    file: File;
+    role: BundleRole | "skipped";
+    reason?: string;
+  };
+  function detectRole(filename: string): BundleRole | "skipped" {
+    const name = filename.toLowerCase();
+    // Data dictionaries (the *_dict.csv ridealongs from the GCSS export
+    // tarball) describe schema, not records — quietly skip.
+    if (/(_dict|data_dict)/i.test(name) || name.endsWith("dict.csv")) {
+      return "skipped";
+    }
+    if (name.includes("sr_parts") || name.includes("repair_part")) return "sr_parts";
+    if (name.includes("due_in") || name.includes("due-in")) return "due_in";
+    if (name.includes("header") || name.includes("sr_header")) return "header";
+    return "skipped";
+  }
+  function reasonForSkip(filename: string): string {
+    const name = filename.toLowerCase();
+    if (/_dict|data_dict|dict\.csv$/i.test(name)) {
+      return "data dictionary — describes columns, not records";
+    }
+    return "filename did not match header / sr_parts / due_in";
+  }
+
+  // Routing preview lives in component state so the operator sees what
+  // was sorted into which slot before they hit "Process Bundle".
+  const [routed, setRouted] = useState<FileRouting[]>([]);
+
+  // Single-file legacy path — keeps generic CSV/XLSX/JSON uploads
+  // working through the original /api/sentry/upload endpoint.
+  async function uploadSingle(file: File) {
     if (!file) return;
     if (file.size > MAX_UPLOAD_BYTES) {
       const mb = (file.size / (1024 * 1024)).toFixed(1);
       setError(
-        `${file.name} is ${mb} MB — over the 100 MB SENTRY ingest cap. Split the file or use the streaming GCSS-MC pull endpoint.`,
+        `${file.name} is ${mb} MB — over the 1 GB SENTRY ingest cap.`,
       );
       return;
     }
@@ -89,6 +123,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
       ctx.setBatch(b.batch_id);
       setProgress(1);
       setProgressLabel(`${file.name} · upload complete`);
+      setRouted([]);
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -96,17 +131,132 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
     }
   }
 
-  async function onDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setHovering(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) await uploadFile(file);
+  // Multi-file bundle path — fires the new /api/sentry/upload-bundle
+  // endpoint. Operator can ctrl+click the whole GCSS-MC pull folder; we
+  // sort into header / sr_parts / due_in and skip the data dictionaries.
+  async function uploadBundle(routing: FileRouting[]) {
+    setLoading(true);
+    setError(null);
+    setProgress(0);
+    setProgressLabel("");
+    try {
+      const ingestible = routing.filter(
+        (r) => r.role !== "skipped",
+      ) as { file: File; role: BundleRole }[];
+      if (ingestible.length === 0) {
+        setError("No ingestible files found. Drop the GCSS-MC SR header CSV.");
+        return;
+      }
+      const totalBytes = ingestible.reduce((acc, r) => acc + r.file.size, 0);
+      if (totalBytes > MAX_UPLOAD_BYTES * 3) {
+        setError(`Bundle total ${formatMb(totalBytes)} exceeds the 3 GB ingest budget.`);
+        return;
+      }
+      setProgressLabel(
+        `Uploading bundle · ${ingestible
+          .map((r) => `${r.role}=${r.file.name}`)
+          .join(" · ")}`,
+      );
+      const b = await uploadBundleWithProgress(
+        ingestible.map((r) => r.file),
+        (loaded, total) => {
+          const frac = total > 0 ? loaded / total : 0;
+          setProgress(frac);
+        },
+      );
+      setBatch(b);
+      ctx.setBatch(b.batch_id);
+      setProgress(1);
+      setProgressLabel(`Bundle ingested · batch ${b.batch_id}`);
+    } catch (e) {
+      setError(formatApiError(e));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (file) await uploadFile(file);
-    // Reset so picking the same file twice still fires onChange.
+  // Operator dropped or picked one or more files. Sort into routing
+  // preview; if exactly one file *and* it doesn't look like a GCSS
+  // bundle file, fall through to the single-file path.
+  function ingestFiles(fileList: FileList | File[] | null) {
+    if (!fileList) return;
+    const arr = Array.from(fileList);
+    if (arr.length === 0) return;
+
+    // Single non-bundle file → legacy single-file path. Lets operators
+    // drop a generic CSV / XLSX without seeing a bundle preview.
+    if (arr.length === 1) {
+      const role = detectRole(arr[0].name);
+      if (role === "skipped") {
+        // Could be a generic non-GCSS file — defer to legacy path.
+        void uploadSingle(arr[0]);
+        return;
+      }
+    }
+
+    const routing: FileRouting[] = arr.map((f) => {
+      const role = detectRole(f.name);
+      return role === "skipped"
+        ? { file: f, role, reason: reasonForSkip(f.name) }
+        : { file: f, role };
+    });
+    // De-dup roles: if two files claim the same role, keep the larger.
+    const byRole = new Map<BundleRole, FileRouting>();
+    const skipped: FileRouting[] = [];
+    for (const r of routing) {
+      if (r.role === "skipped") {
+        skipped.push(r);
+        continue;
+      }
+      const prev = byRole.get(r.role);
+      if (!prev || r.file.size > prev.file.size) {
+        if (prev) {
+          skipped.push({
+            file: prev.file,
+            role: "skipped",
+            reason: `superseded by larger ${r.role} file`,
+          });
+        }
+        byRole.set(r.role, r);
+      } else {
+        skipped.push({
+          file: r.file,
+          role: "skipped",
+          reason: `superseded by larger ${r.role} file`,
+        });
+      }
+    }
+    const final: FileRouting[] = [
+      ...Array.from(byRole.values()),
+      ...skipped,
+    ];
+    setRouted(final);
+    setError(null);
+  }
+
+  async function processBundle() {
+    if (routed.length === 0) return;
+    if (!routed.some((r) => r.role === "header")) {
+      setError("Bundle needs a SR header CSV (filename containing 'header').");
+      return;
+    }
+    await uploadBundle(routed);
+  }
+
+  function clearRouting() {
+    setRouted([]);
+    setError(null);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setHovering(false);
+    ingestFiles(e.dataTransfer.files);
+  }
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    ingestFiles(e.target.files);
+    // Reset so picking the same files again still fires onChange.
     e.target.value = "";
   }
 
@@ -130,19 +280,21 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
         onDragLeave={() => setHovering(false)}
         onDrop={onDrop}
         className={clsx(
-          "mb-6 flex h-44 flex-col items-center justify-center rounded-md border-2 border-dashed transition-colors",
+          "mb-6 flex flex-col items-center justify-center rounded-md border-2 border-dashed p-6 transition-colors",
           hovering
             ? "border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_15%,var(--color-surface))]"
             : "border-[var(--color-border-active)] bg-[var(--color-surface)]",
         )}
       >
         <div className="text-sm font-medium text-[var(--color-text)]">
-          Drop a file, or use the canonical dataset →
+          Drop the GCSS-MC export folder, or ctrl+click to pick all files at once
         </div>
-        <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-          Accepted: .csv, .xlsx, .json, .txt · 100 MB max · GCSS-MC SR header auto-detected
+        <div className="mt-1 max-w-2xl text-center text-xs text-[var(--color-text-muted)]">
+          SR header + repair-parts + due-in route into one review batch.
+          Data dictionaries (<code className="font-mono">*_dict.csv</code>)
+          skip automatically. Single-file ingest still works for non-GCSS exports.
         </div>
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
           <Button onClick={loadCanonical} disabled={loading} pending={loading} size="sm">
             Load canonical dataset
           </Button>
@@ -152,13 +304,14 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
               loading && "pointer-events-none opacity-50",
             )}
           >
-            Pick a file…
+            Pick files…
             <input
               type="file"
               accept=".csv,.xlsx,.xls,.json,.txt,.tsv"
               className="hidden"
               onChange={onPickFile}
               disabled={loading}
+              multiple
             />
           </label>
         </div>
@@ -168,6 +321,86 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
           </div>
         )}
       </div>
+
+      {routed.length > 0 && !batch && (
+        <section
+          data-testid="bundle-routing-preview"
+          className="mb-6 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+        >
+          <div className="mb-3 flex items-baseline justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Bundle routing · {routed.filter((r) => r.role !== "skipped").length} of {routed.length} files will ingest
+            </div>
+            <button
+              type="button"
+              onClick={clearRouting}
+              disabled={loading}
+              className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-40"
+            >
+              Clear
+            </button>
+          </div>
+          <ul className="flex flex-col gap-1.5">
+            {(["header", "sr_parts", "due_in"] as const).map((role) => {
+              const r = routed.find((x) => x.role === role);
+              return (
+                <li
+                  key={role}
+                  className={clsx(
+                    "flex items-center gap-3 rounded-sm border px-3 py-2 font-mono text-xs",
+                    r
+                      ? "border-[var(--color-success-muted)] bg-[color-mix(in_oklab,var(--color-success-muted)_18%,var(--color-surface))] text-[var(--color-text)]"
+                      : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-muted)]",
+                  )}
+                >
+                  <span className="w-24 shrink-0 uppercase tracking-widest">
+                    {role === "sr_parts" ? "SR PARTS" : role === "due_in" ? "DUE-IN" : "SR HEADER"}
+                  </span>
+                  {r ? (
+                    <>
+                      <span className="flex-1 truncate">{r.file.name}</span>
+                      <span className="shrink-0 tabular-nums text-[var(--color-text-muted)]">
+                        {formatMb(r.file.size)}
+                      </span>
+                      <span className="shrink-0 text-[var(--color-success)]">✓ ready</span>
+                    </>
+                  ) : (
+                    <span className="flex-1 italic">
+                      {role === "header" ? "required — drop a file with 'header' in its name" : "optional context"}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+            {routed.filter((r) => r.role === "skipped").length > 0 && (
+              <li className="mt-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[11px] text-[var(--color-text-muted)]">
+                <div className="mb-1 uppercase tracking-widest">Skipped</div>
+                <ul className="flex flex-col gap-0.5">
+                  {routed
+                    .filter((r) => r.role === "skipped")
+                    .map((r) => (
+                      <li key={r.file.name} className="flex items-center gap-2">
+                        <span className="truncate">{r.file.name}</span>
+                        <span className="text-[var(--color-text-muted)]">·</span>
+                        <span className="italic">{r.reason}</span>
+                      </li>
+                    ))}
+                </ul>
+              </li>
+            )}
+          </ul>
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+            <Button
+              onClick={processBundle}
+              disabled={loading || !routed.some((r) => r.role === "header")}
+              pending={loading}
+              size="sm"
+            >
+              Process Bundle
+            </Button>
+          </div>
+        </section>
+      )}
 
       {progressLabel && (
         <div
@@ -457,6 +690,54 @@ function uploadWithProgress(
     xhr.onabort = () => reject(new Error("Upload aborted."));
     const form = new FormData();
     form.append("file", file);
+    xhr.send(form);
+  });
+}
+
+/**
+ * Multi-file bundle variant — POSTs every file under the same `files`
+ * field name so FastAPI's `list[UploadFile]` parameter binds them as
+ * an array. Progress is reported as a single aggregate transfer; the
+ * UI surfaces filename × role mapping in the routing-preview card.
+ */
+function uploadBundleWithProgress(
+  files: File[],
+  onProgress: (loaded: number, total: number) => void,
+): Promise<SentryBatch> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/sentry/upload-bundle", true);
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded, e.total);
+    };
+    xhr.onload = () => {
+      const status = xhr.status;
+      const text = typeof xhr.response === "string" ? xhr.response : "";
+      if (status >= 200 && status < 300) {
+        try {
+          resolve(JSON.parse(text) as SentryBatch);
+        } catch (e) {
+          reject(new Error(`Malformed bundle response: ${(e as Error).message}`));
+        }
+        return;
+      }
+      let detail = `${status} ${xhr.statusText}`;
+      try {
+        const body = JSON.parse(text);
+        if (body && body.detail) detail = body.detail;
+      } catch {
+        /* keep status text */
+      }
+      reject(new Error(detail));
+    };
+    xhr.onerror = () =>
+      reject(new Error("Network error during bundle upload — check the link to SPIRE backend."));
+    xhr.onabort = () => reject(new Error("Upload aborted."));
+    const form = new FormData();
+    for (const f of files) {
+      form.append("files", f, f.name);
+    }
     xhr.send(form);
   });
 }
