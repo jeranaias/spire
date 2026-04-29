@@ -97,11 +97,9 @@ const JointIntegrationsView = lazyWithRecovery(() => import("./views/JointIntegr
 // + escape hatch for operators who prefer landing directly on their
 // scoped surface.
 const DecisionBridgeView = lazyWithRecovery(() => import("./views/DecisionBridge").then((m) => ({ default: m.DecisionBridgeView })));
-// W2 #38 — In-app pitch deck. Lives at `/pitch`. No role gate — any
-// authenticated identity can present (a g4 reviewing rehearsal, a
-// security_manager validating the security slide). The deck stays
-// inside the App shell so the ClassificationBannerStrip remains visible.
-const PitchView = lazyWithRecovery(() => import("./views/pitch/PitchView").then((m) => ({ default: m.PitchView })));
+// /pitch deck retired — the live SPIRE walkthrough IS the pitch.
+// PitchView source kept under views/pitch for git history; route
+// removed below.
 // W2 Task #37 — `/demo` scripted scenario cockpit. Lazy because the
 // surface is presenter-only; no operator ever has to download the chunk
 // during normal use.
@@ -352,12 +350,7 @@ createRoot(document.getElementById("root")!).render(
              * follow-on integrations (palantir, magtf-ii) without a
              * router change. */}
             <Route path="integrations/:system" element={<ViewSuspense><IntegrationsView /></ViewSuspense>} />
-            {/* W2 #38 — In-app pitch deck. `/pitch` (or `/pitch?slide=N`).
-             * Slide 4 hands off to `/demo` (lane A1) and back via the
-             * "Return to pitch — slide 5" affordance the demo player
-             * will deep-link to. Not in role-based nav; reachable via
-             * direct deep link or topbar nav once that lane lands. */}
-            <Route path="pitch" element={<ViewSuspense><PitchView /></ViewSuspense>} />
+            {/* /pitch retired — live walkthrough is the pitch. */}
             {/* W2 Task #37 — `/demo` presenter cockpit. Inside the App
              * shell so the scripted player can navigate to operator
              * surfaces without losing chrome. No ScopeGuard: the cockpit
