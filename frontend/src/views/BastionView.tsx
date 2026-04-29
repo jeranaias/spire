@@ -4,12 +4,12 @@ import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "..
 import { withRetry, pollWithBackoff, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { MapCanvas } from "../components/MapCanvas";
+import { OkinawaMapCanvas } from "../components/OkinawaMapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
 import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
 import { RefreshAge } from "../components/RefreshAge";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import { UseCaseStrip } from "../components/UseCaseStrip";
-import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import {
   Button,
@@ -590,19 +590,20 @@ export function BastionView() {
   }, [alerts, searchQuery, sevFilter]);
 
   if (datasetStatus?.empty) {
+    // Empty-state surface still shows the Nansei-Shoto COP planning
+    // map — operators can see the lay of the land + place markers
+    // before any GCSS-MC data lands. Once data ingests, the populated
+    // BASTION view below takes over.
     return (
       <div className="flex h-full flex-col">
         <UseCaseStrip
           number="11"
           title="BASTION"
-          subtitle="COMMON OPERATING PICTURE — INSTALLATION SCHEMATIC"
+          subtitle="COMMON OPERATING PICTURE — NANSEI SHOTO STAND-IN FORCES"
           accent="var(--color-warning)"
         />
         <div className="flex-1 overflow-hidden">
-          <AwaitingIngestEmpty
-            surface="BASTION"
-            description="The COP map renders unit positions, MC%, and threats from the live GCSS-MC export. Drop the three sanitized CSVs into DECISION BRIDGE to populate this view."
-          />
+          <OkinawaMapCanvas />
         </div>
       </div>
     );

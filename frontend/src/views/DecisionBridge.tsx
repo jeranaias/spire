@@ -1224,10 +1224,12 @@ export function DecisionBridgeView() {
   const fallbackPath = useMemo(() => ROLE_DEFAULT_VIEW[role] ?? "/bastion", [role]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[var(--color-bg)] p-3">
-      {/* Header strap — view title + escape hatch to the role-default surface. */}
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto bg-[var(--color-bg)] p-3">
+      {/* Header strap — view title + escape hatch to the role-default surface.
+       * Wraps to two rows on narrow viewports so the title doesn't squeeze
+       * the Skip-to button to the point of unreadability. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
           <h1 className="font-mono text-sm font-semibold uppercase tracking-[0.22em] text-[var(--color-text)]">
             Decision Bridge
           </h1>
@@ -1239,7 +1241,7 @@ export function DecisionBridgeView() {
           onClick={() => nav(fallbackPath)}
           aria-label={`Skip to my default view (${fallbackPath})`}
           block={false}
-          className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+          className="shrink-0 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
         >
           Skip to {fallbackPath.replace(/^\//, "").toUpperCase()} →
         </Pressable>
@@ -1263,24 +1265,33 @@ export function DecisionBridgeView() {
         />
       )}
 
-      {/* 6-col × 2-row hero grid. Sized so the whole thing fits a 1920×1080
-       * canvas without scrolling — tile bodies use min-h-0 + overflow so an
-       * occasional long entry truncates inside the tile rather than pushing
-       * the row off-screen. */}
-      <div className="grid min-h-0 flex-1 grid-cols-6 grid-rows-2 gap-3">
-        <div className="col-span-2 row-span-1 min-h-0">
+      {/* Hero tile grid — auto-fit responsive with generous breathing room.
+       * The grid packs as many 22rem-min tiles per row as fits, no
+       * breakpoints. Reflows smoothly from 320px (1 col) to 2560px+
+       * without code branches.
+       *
+       * Each tile is a @container so the tile's own internal layout
+       * adapts to its actual rendered width, not the viewport. */}
+      <div
+        className="grid flex-1 gap-4 sm:gap-5"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(22rem, 100%), 1fr))",
+          gridAutoRows: "minmax(15rem, auto)",
+        }}
+      >
+        <div className="@container min-h-0">
           <MissionTile mission={mission} error={missionErr} />
         </div>
-        <div className="col-span-2 row-span-1 min-h-0">
+        <div className="@container min-h-0">
           <AlertsTile data={alerts} cop={cop} error={alertsErr} />
         </div>
-        <div className="col-span-2 row-span-1 min-h-0">
+        <div className="@container min-h-0">
           <ShortagesTile data={shortages} error={shortagesErr} />
         </div>
-        <div className="col-span-3 row-span-1 min-h-0">
+        <div className="@container min-h-0">
           <McTile data={mc} error={mcErr} />
         </div>
-        <div className="col-span-3 row-span-1 min-h-0">
+        <div className="@container min-h-0">
           <AuditTile data={audit} error={auditErr} />
         </div>
       </div>

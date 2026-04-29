@@ -287,7 +287,7 @@ export function RiskBoardTab() {
       </div>
 
       {selected && (
-        <aside className="flex w-[420px] shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-bg)]">
+        <aside className="hidden w-[420px] shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-bg)] lg:flex">
           {detailLoading && <LoadingOverlay message="Loading asset history ..." />}
           {detail && (
             <AssetDeepDivePanel
@@ -643,22 +643,25 @@ function RiskRow({
     : "var(--color-border-active)";
 
   return (
+    // Risk-board row stacks below md so the asset header / sparkline /
+    // stats / draft-action button each get full width on narrow
+    // viewports. Above md the original 4-column row returns.
     <div
       className={clsx(
-        "group flex w-full items-center gap-4 rounded-md border bg-[var(--color-surface)] px-4 py-3 text-left transition-colors",
+        "group flex w-full flex-col gap-3 rounded-md border bg-[var(--color-surface)] px-4 py-3 text-left transition-colors md:flex-row md:items-center md:gap-4",
         selected
           ? "border-[var(--color-primary)] bg-[var(--color-surface-hover)]"
           : "border-[var(--color-border)] hover:border-[var(--color-border-active)] hover:bg-[var(--color-surface-hover)]",
       )}
     >
-      <Pressable onClick={onClick} className="flex-1">
-        <div className="flex items-baseline gap-3">
+      <Pressable onClick={onClick} className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="font-mono text-base font-semibold text-[var(--color-text)]">{asset.asset_id}</span>
-          <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+          <span className="min-w-0 truncate font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · SN {asset.serial_number}
           </span>
           <span
-            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-wider"
+            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-wider"
           >
             UNCLASSIFIED // SYNTHETIC
           </span>
