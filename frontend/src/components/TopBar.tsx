@@ -287,11 +287,12 @@ function MoreMenu() {
   // since those are presenter-room artifacts, not on-stage surfaces.
   // DHA RESCUE only appears here in operator mode (it's already a primary
   // tab in stage mode).
-  const items: { to: string; label: string; hide?: boolean }[] = [
+  const items: { to: string; label: string; hide?: boolean; external?: boolean }[] = [
     { to: "/", label: "Decision Bridge" },
     { to: "/dha-rescue", label: "DHA Rescue", hide: stageMode },
     { to: "/joint/preview", label: "Joint COP" },
     { to: "/integrations", label: "Integrations" },
+    { to: "https://marlog-mdm.fly.dev", label: "MARLOG · Logistics Calculator", external: true },
     { to: "/demo", label: "Demo cockpit", hide: stageMode },
     { to: "/about/team", label: "About / Team", hide: stageMode },
     { to: "/transition", label: "Transition" },
@@ -325,18 +326,36 @@ function MoreMenu() {
             More views
           </div>
           <ul className="flex flex-col py-1">
-            {items.map((item) => (
-              <li key={item.to}>
-                <Link
-                  to={item.to}
-                  onClick={() => setOpen(false)}
-                  role="menuitem"
-                  className="block min-h-[44px] truncate px-3 py-2.5 font-mono text-sm uppercase tracking-wider text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:bg-[var(--color-surface-hover)] focus-visible:text-[var(--color-text)] focus-visible:outline-none"
-                >
-                  {item.label}
-                </Link>
-              </li>
-            ))}
+            {items.map((item) => {
+              const className =
+                "block min-h-[44px] truncate px-3 py-2.5 font-mono text-sm uppercase tracking-wider text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:bg-[var(--color-surface-hover)] focus-visible:text-[var(--color-text)] focus-visible:outline-none";
+              return (
+                <li key={item.to}>
+                  {item.external ? (
+                    <a
+                      href={item.to}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setOpen(false)}
+                      role="menuitem"
+                      className={className}
+                    >
+                      {item.label}
+                      <span aria-hidden className="ml-1.5 text-[10px] text-[var(--color-text-muted)]">↗</span>
+                    </a>
+                  ) : (
+                    <Link
+                      to={item.to}
+                      onClick={() => setOpen(false)}
+                      role="menuitem"
+                      className={className}
+                    >
+                      {item.label}
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
