@@ -49,7 +49,11 @@ export function MarkTab() {
   // Walkthrough #3 — uncontrolled textarea so fast typing doesn't drop
   // characters through React's controlled-input round-trip.
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [textVersion, setTextVersion] = useState(0);
+  // textVersion was the textarea's `key` so explicit-clear flows could
+  // force a remount + reset to defaultValue="". Now retained only as the
+  // key, never bumped during sample loads (that was the bug — bumping
+  // here destroyed the value loadSample had just written).
+  const [textVersion] = useState(0);
   const [release, setRelease] = useState<Auth>("US_ONLY");
   const [result, setResult] = useState<MarkResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -107,10 +111,18 @@ export function MarkTab() {
   }, [release]);
 
   function loadSample(preset: string) {
+    // Bug: this used to bump `textVersion` after writing the value,
+    // which is the textarea's `key` prop — React unmounts the
+    // existing textarea and remounts it with `defaultValue=""`,
+    // wiping the value we just wrote. Sample badges then appeared
+    // to do nothing. Just write the value and schedule the mark
+    // against the existing textarea.
     if (textareaRef.current) {
       textareaRef.current.value = preset;
+      // Keep the latest-text ref in sync so the engine call uses the
+      // sample's text, not whatever was there before.
+      latestTextRef.current = preset;
     }
-    setTextVersion((v) => v + 1);
     scheduleMark(true);
   }
 
