@@ -87,11 +87,14 @@ export function ClassificationBannerStrip({
   // not a sentence.
   return (
     <div
-      className="flex w-full shrink-0 items-center justify-center gap-3 px-4 py-1 font-mono text-sm font-semibold uppercase tracking-widest"
+      className="flex w-full shrink-0 items-center justify-center gap-3 px-2 py-1 font-mono font-semibold uppercase tracking-wider sm:px-4 sm:tracking-widest"
       style={{
         background: cls.bg,
         color: cls.fg,
         minHeight: 24,
+        // Fluid font-size: 10px on a 320px phone, 14px on a 1024px+ laptop,
+        // never clips the marking text per DoDM 5200.01 visibility rule.
+        fontSize: "clamp(0.625rem, 1.25vw + 0.25rem, 0.875rem)",
       }}
       role="region"
       aria-label={
@@ -101,7 +104,7 @@ export function ClassificationBannerStrip({
       }
       data-classification-strip={position}
     >
-      <span className="whitespace-nowrap text-center leading-none">
+      <span className="text-center leading-none">
         {text}
       </span>
       {showFpcon && (

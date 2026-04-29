@@ -27,8 +27,14 @@ export function PulseView() {
   // of truth for PULSE empty-state; the per-tab fetches still defend
   // their typed state against {empty:true} envelopes for safety, but
   // they should never see one once this gate fires.
-  const datasetStatus = useDatasetStatus().status;
-  const isEmpty = datasetStatus?.empty === true;
+  // During the first poll cycle `status` is null and the previous
+  // `=== true` check evaluated to false, letting the tabs render and
+  // hit their fetches before the empty gate could fire. After a wipe
+  // those fetches return `{empty: true}` envelopes that the typed
+  // tabs choke on. Treat "still loading first status" as empty until
+  // proven populated; the second render flips it correctly.
+  const { status: datasetStatus, loading } = useDatasetStatus();
+  const isEmpty = datasetStatus?.empty !== false || (loading && !datasetStatus);
 
   return (
     <div className="flex h-full flex-col">
