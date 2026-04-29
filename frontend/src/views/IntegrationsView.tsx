@@ -1061,8 +1061,9 @@ function AtoSection() {
               </span>{" "}
               inherit the GCSS-MC enclave's IL-5 boundary and submit a
               tailored package for SPIRE's read-only adapter logic. The
-              path SPIRE intends to ask for is ATO-with-conditions (ATC)
-              for an SBIR pilot, full ATO at the MTA-RP transition.
+              standard pattern would be ATO-with-conditions for a
+              limited evaluation, then full ATO once a sponsoring
+              program office picks up the package.
               <span className="mt-2 block text-[10px] text-[var(--color-text-muted)] tracking-wider">
                 No package has been submitted, no AO has reviewed SPIRE,
                 and no ATC / ATO exists. The ATC-then-ATO sequence is
