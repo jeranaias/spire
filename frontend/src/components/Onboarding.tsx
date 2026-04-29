@@ -69,7 +69,7 @@ const ROLE_NEXT_ACTION: Record<Role, { surface: string; action: string }> = {
   },
   mef_commander: {
     surface: "BASTION Common Operating Picture",
-    action: "watch the ThermalHawk + PACS + SCADA fusion stream across all 10 units.",
+    action: "watch the multi-source fusion stream across all 10 units.",
   },
   data_custodian: {
     surface: "SENTRY Upload",
