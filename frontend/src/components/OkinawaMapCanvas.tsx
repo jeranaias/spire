@@ -297,14 +297,18 @@ export function OkinawaMapCanvas({
   }, [markers]);
 
   return (
-    // `absolute inset-0` makes the canvas fill any `relative` parent
-    // regardless of whether that parent's height is defined via
-    // flex-grow, percentage, or fixed pixels — eliminates the flexbox
-    // height-chain footgun where `h-full` collapses to 0 in a row
-    // layout (BASTION populated-state, observed 2026-04-29). Falls
-    // back to `h-full w-full` if the parent isn't `relative` since
-    // `inset-0` is then a no-op and the percentages take over.
-    <div className="absolute inset-0 flex h-full w-full flex-col">
+    // Bulletproof sizing — explicit `height: 100%` plus `min-height:
+    // 24rem` floor guarantees MapLibre always has a non-zero canvas to
+    // mount into, even when an ancestor's flexbox height-chain hasn't
+    // resolved yet. We dropped `absolute inset-0` after it interacted
+    // poorly with the parent's overflow-hidden in the populated path
+    // and left the map invisible despite no console errors. The
+    // min-height is a safety floor; in practice the map fills its
+    // container via h-full whenever the parent is constrained.
+    <div
+      className="flex w-full flex-col"
+      style={{ height: "100%", minHeight: "24rem" }}
+    >
       {showHeader && (
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
           <span className="font-mono text-xs uppercase tracking-widest text-[var(--color-text-muted)]">

@@ -772,10 +772,8 @@ export function BastionView() {
        * MapCanvas-driven props (cop.buildings, sim, selectedUnit,
        * flyToBuilding) are unused by the new component — restoring the
        * ThermalHawk sim hooks against the new map is a follow-up.
-       * Sized via min-w-0 + h-full + flex-col so MapLibre gets a
-       * definite container height inside the row layout (without
-       * h-full the cross-axis stretch leaves OkinawaMapCanvas's
-       * h-full at 0px and the map silently renders blank). */}
+       * h-full + flex-col + min-w-0 gives OkinawaMapCanvas a
+       * definite height context in the row layout. */}
       <div className="relative flex h-full min-w-0 flex-1 flex-col">
         <OkinawaMapCanvas />
 
