@@ -350,7 +350,11 @@ createRoot(document.getElementById("root")!).render(
              * follow-on integrations (palantir, magtf-ii) without a
              * router change. */}
             <Route path="integrations/:system" element={<ViewSuspense><IntegrationsView /></ViewSuspense>} />
-            {/* /pitch retired — live walkthrough is the pitch. */}
+            {/* /pitch retired — redirect to home so any old links / muscle
+             * memory routes back into Decision Bridge instead of rendering
+             * a blank Outlet. */}
+            <Route path="pitch" element={<Navigate to="/" replace />} />
+            <Route path="pitch/*" element={<Navigate to="/" replace />} />
             {/* W2 Task #37 — `/demo` presenter cockpit. Inside the App
              * shell so the scripted player can navigate to operator
              * surfaces without losing chrome. No ScopeGuard: the cockpit
