@@ -572,7 +572,8 @@ export function BastionView() {
     // Empty-state surface still shows the Nansei-Shoto COP planning
     // map — operators can see the lay of the land + place markers
     // before any GCSS-MC data lands. Once data ingests, the populated
-    // BASTION view below takes over.
+    // BASTION view below takes over. The map wrapper needs `relative`
+    // so the canvas's `absolute inset-0` has an anchor.
     return (
       <div className="flex h-full flex-col">
         <UseCaseStrip
@@ -581,7 +582,7 @@ export function BastionView() {
           subtitle="COMMON OPERATING PICTURE — NANSEI SHOTO STAND-IN FORCES"
           accent="var(--color-warning)"
         />
-        <div className="flex-1 overflow-hidden">
+        <div className="relative flex-1 overflow-hidden">
           <OkinawaMapCanvas />
         </div>
       </div>
@@ -770,8 +771,12 @@ export function BastionView() {
        * the contested-logistics scenario regardless of dataset state.
        * MapCanvas-driven props (cop.buildings, sim, selectedUnit,
        * flyToBuilding) are unused by the new component — restoring the
-       * ThermalHawk sim hooks against the new map is a follow-up. */}
-      <div className="relative flex-1">
+       * ThermalHawk sim hooks against the new map is a follow-up.
+       * Sized via min-w-0 + h-full + flex-col so MapLibre gets a
+       * definite container height inside the row layout (without
+       * h-full the cross-axis stretch leaves OkinawaMapCanvas's
+       * h-full at 0px and the map silently renders blank). */}
+      <div className="relative flex h-full min-w-0 flex-1 flex-col">
         <OkinawaMapCanvas />
 
         {/* Installation title badge — top-left. Metrics row uses chip-flow

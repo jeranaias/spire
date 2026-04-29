@@ -779,6 +779,232 @@ async def upload(file: UploadFile = File(...)):
     return _public_batch(batch)
 
 
+def _detect_bundle_role(filename: str) -> Optional[str]:
+    """Auto-route a multi-file SENTRY upload by filename.
+
+    Operators ctrl+click the GCSS-MC export folder and we sort the files
+    into the right bucket on the way in:
+      * `*header*`        -> SR header records (the records that drive review)
+      * `*sr_parts*`      -> repair-parts requisitions (context per SR)
+      * `*due_in*`        -> due-in / supply pipeline rows (context per SR)
+      * `*_dict*`         -> data-dictionary CSV; quietly skipped (it's docs,
+                             not records)
+    Returns ``None`` for "skip this file" — the caller surfaces the skip
+    in the response so the operator sees what happened.
+    """
+    name = filename.lower()
+    # Skip data-dictionary files outright. These ship alongside real GCSS-MC
+    # exports and describe the column shape; they aren't ingestible records.
+    if "_dict" in name or "data_dict" in name or name.endswith("dict.csv"):
+        return None
+    if "sr_parts" in name or "repair_part" in name:
+        return "sr_parts"
+    if "due_in" in name or "due-in" in name:
+        return "due_in"
+    if "header" in name or "sr_header" in name:
+        return "header"
+    return None
+
+
+@router.post("/upload-bundle")
+async def upload_bundle(files: list[UploadFile] = File(...)):
+    """Multi-file SENTRY ingest — drop a folder of GCSS-MC exports at once.
+
+    The operator ctrl+clicks (or drag-drops) every file from the GCSS-MC
+    pull at the same time. We auto-route by filename:
+
+      * The header CSV runs through the same GCSS-MC adapter +
+        sanitization gate as the single-file `/upload` route — same
+        review-queue contract, same hash-gate enforcement.
+      * The sr_parts and due_in CSVs ride along as **context** on the
+        same batch. The review queue surfaces them per-SR (open
+        requisitions, parts on order, real wait times) so a Marine
+        marking a record sees the supply-chain story behind it, not
+        just the bare SR row.
+      * Data-dictionary CSVs (`*_dict.csv`) are quietly skipped — they
+        describe the schema, not data.
+
+    The bundle stays a single review batch with one batch_id. Promotion
+    to live (the future "release" action) is what swaps the dataset
+    singleton; until then, every record sits in the review queue
+    exactly like the single-file upload path.
+    """
+    if not files:
+        raise HTTPException(
+            status_code=400,
+            detail="upload-bundle requires at least one file",
+        )
+
+    # Sort the dropped files into roles. We accept exactly one of each
+    # role; if the operator drops two `*header*` files we keep the larger
+    # one (heuristic: full export beats sample).
+    roles: dict[str, tuple[UploadFile, bytes]] = {}
+    skipped: list[dict] = []
+    for f in files:
+        filename = f.filename or "upload.bin"
+        role = _detect_bundle_role(filename)
+        raw = await f.read()
+        if len(raw) > UPLOAD_MAX_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Upload {filename} is {len(raw):,} bytes — over the "
+                    f"{UPLOAD_MAX_BYTES:,}-byte SENTRY ingest cap."
+                ),
+            )
+        if role is None:
+            skipped.append({
+                "filename": filename,
+                "reason": "filename did not match header / sr_parts / due_in (likely a data dictionary)",
+                "size_bytes": len(raw),
+            })
+            continue
+        prev = roles.get(role)
+        if prev is None or len(raw) > len(prev[1]):
+            roles[role] = (f, raw)
+
+    header_pair = roles.get("header")
+    if header_pair is None:
+        skipped_list = ", ".join(s["filename"] for s in skipped) or "none"
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "upload-bundle requires a SR header file (filename "
+                f"containing 'header'). Skipped: {skipped_list}"
+            ),
+        )
+
+    header_file, header_raw = header_pair
+    header_filename = header_file.filename or "header.csv"
+
+    # Header must look like the GCSS-MC sanitized export. The bundle
+    # path doesn't accept generic CSVs in the header slot — this is the
+    # SENTRY pitch (sanitization gate enforced).
+    if not _looks_like_gcss_sr_header(header_raw):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{header_filename} did not match the GCSS-MC SR header "
+                "schema (need ≥9 of the 12 canonical columns). Confirm "
+                "the file is the sanitized SR header export."
+            ),
+        )
+
+    try:
+        text = header_raw.decode("utf-8-sig", errors="replace")
+        report = ingest_sr_header_csv(text, cm_only=True)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400,
+            detail=f"GCSS-MC adapter failed on {header_filename}: {exc}",
+        )
+
+    # Same sanitization gate as `/upload`. Reject the entire bundle if
+    # any row carries an un-hashed sensitive field — defense in depth so
+    # a mis-routed un-sanitized export never lands in the review queue.
+    unsanitized = report.unsanitized_field_counts
+    if unsanitized:
+        offenders = ", ".join(
+            f"{k}={v}" for k, v in sorted(unsanitized.items()) if v
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Sanitization gate: rejected {header_filename}. "
+                f"Unsanitized rows by field: {offenders}. The "
+                "GCSS-MC sanitized export must ship SR_NUMBER, "
+                "SERIAL_NUMBER, TAMCN, and OWNER_UNIT_ADDRESS_CODE "
+                "pre-hashed."
+            ),
+        )
+
+    # Index the optional context CSVs by SR_NUMBER so the review queue
+    # can show "this SR has 4 parts on order, 2 backordered" without a
+    # second round-trip. We keep the raw bytes around for provenance +
+    # downstream replay; the per-SR projection is computed once here.
+    sr_parts_index: dict[str, list[dict]] = defaultdict(list)
+    sr_parts_raw: Optional[bytes] = None
+    sr_parts_rows = 0
+    if "sr_parts" in roles:
+        _, sr_parts_raw = roles["sr_parts"]
+        try:
+            sr_parts_text = sr_parts_raw.decode("utf-8-sig", errors="replace")
+            for row in csv.DictReader(io.StringIO(sr_parts_text)):
+                sr = (row.get("SR_NUMBER") or "").strip()
+                if sr:
+                    sr_parts_index[sr].append({k: v for k, v in row.items()})
+                    sr_parts_rows += 1
+        except Exception:  # noqa: BLE001
+            # Bad sr_parts file is non-fatal — we just don't attach context.
+            sr_parts_index.clear()
+            sr_parts_rows = 0
+
+    due_in_index: dict[str, list[dict]] = defaultdict(list)
+    due_in_raw: Optional[bytes] = None
+    due_in_rows = 0
+    if "due_in" in roles:
+        _, due_in_raw = roles["due_in"]
+        try:
+            due_in_text = due_in_raw.decode("utf-8-sig", errors="replace")
+            for row in csv.DictReader(io.StringIO(due_in_text)):
+                sr = (row.get("SR_NUMBER") or "").strip()
+                if sr:
+                    due_in_index[sr].append({k: v for k, v in row.items()})
+                    due_in_rows += 1
+        except Exception:  # noqa: BLE001
+            due_in_index.clear()
+            due_in_rows = 0
+
+    # Project header rows into SENTRY's canonical record shape, then
+    # attach the per-SR context so the review queue can render the
+    # supply-chain story alongside the SR.
+    records = _records_from_gcss_ingest(report)
+    for rec in records:
+        sr = rec.get("sr_number") or ""
+        parts = sr_parts_index.get(sr) or []
+        dues = due_in_index.get(sr) or []
+        if parts or dues:
+            rec["_bundle_context"] = {
+                "sr_parts": parts,
+                "due_in": dues,
+            }
+
+    detected_schema: dict[str, str] = {}
+    for canonical in CANONICAL_FIELDS:
+        detected_schema[canonical] = (
+            "mapped" if any(rec.get(canonical) for rec in records) else "missing"
+        )
+
+    ingest_summary = gcss_report_to_dict(report, include_rows=False)
+    ingest_summary["unique_sr_numbers"] = len({r.sr_number for r in report.rows})
+    ingest_summary["adapter"] = "sentry_gcss_adapter/v0.1.0"
+    ingest_summary["sanitization_gate"] = "enforced"
+    ingest_summary["bundle"] = {
+        "header": {"filename": header_filename, "rows_parsed": len(report.rows), "size_bytes": len(header_raw)},
+        "sr_parts": (
+            {"filename": roles["sr_parts"][0].filename or "sr_parts.csv", "rows_parsed": sr_parts_rows, "size_bytes": len(sr_parts_raw or b"")}
+            if "sr_parts" in roles else None
+        ),
+        "due_in": (
+            {"filename": roles["due_in"][0].filename or "due_in.csv", "rows_parsed": due_in_rows, "size_bytes": len(due_in_raw or b"")}
+            if "due_in" in roles else None
+        ),
+        "skipped": skipped,
+    }
+
+    bundle_label = "+".join(sorted(roles.keys()))
+    batch = _new_batch(
+        record_source=f"upload-bundle:{header_filename} ({bundle_label})",
+        records=records,
+        schema_override=detected_schema,
+    )
+    batch["gcss_ingest_report"] = ingest_summary
+    batch["provenance"] = "GCSS-MC sanitized export bundle"
+    _persist_batch(batch)
+    store_uploaded_batch(batch["batch_id"], header_filename, len(records), detected_schema, header_raw)
+    return _public_batch(batch)
+
+
 CANONICAL_FIELDS = {
     "sr_number": ("sr_number", "sr", "sr_num", "sr#", "service_request", "service request number", "work order", "work_order"),
     "asset_id":  ("asset_id", "asset", "equipment_id", "end_item"),

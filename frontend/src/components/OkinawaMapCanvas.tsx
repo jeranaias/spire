@@ -297,7 +297,14 @@ export function OkinawaMapCanvas({
   }, [markers]);
 
   return (
-    <div className="relative flex h-full w-full flex-col">
+    // `absolute inset-0` makes the canvas fill any `relative` parent
+    // regardless of whether that parent's height is defined via
+    // flex-grow, percentage, or fixed pixels — eliminates the flexbox
+    // height-chain footgun where `h-full` collapses to 0 in a row
+    // layout (BASTION populated-state, observed 2026-04-29). Falls
+    // back to `h-full w-full` if the parent isn't `relative` since
+    // `inset-0` is then a no-op and the percentages take over.
+    <div className="absolute inset-0 flex h-full w-full flex-col">
       {showHeader && (
         <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
           <span className="font-mono text-xs uppercase tracking-widest text-[var(--color-text-muted)]">
