@@ -403,6 +403,12 @@ async def force_empty_dataset(request: Request) -> dict:
     require_role(actor, RESET_DEMO_ROLES, "system.force_empty")
     from .. import state as _state_mod
     _state_mod.init_empty_dataset()
+    # Invalidate dataset-status cache so polling clients see the wipe.
+    try:
+        from .stage_ingest import _bust_dataset_status_cache
+        _bust_dataset_status_cache()
+    except ImportError:
+        pass
     return {
         "ok": True,
         "source": "force-empty",
@@ -489,6 +495,11 @@ async def reset_demo(request: Request):
             fresh, source="seed-42", ingested_by=actor or "failsafe"
         )
         dataset_rehydrated = True
+        try:
+            from .stage_ingest import _bust_dataset_status_cache
+            _bust_dataset_status_cache()
+        except ImportError:
+            pass
     except Exception as e:  # noqa: BLE001
         failed_steps.append({"step": "dataset_rehydrate", "error": str(e)[:160]})
 

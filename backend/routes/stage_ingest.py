@@ -47,9 +47,31 @@ STAGE_INGEST_TIMEOUT_S = 60.0
 STAGE_INGEST_FILE_MAX_BYTES = 1024 * 1024 * 1024
 
 
+# In-memory micro-cache for /dataset-status. Under 30-user load this
+# endpoint is the hottest poll target (every PULSE/BASTION/SENTRY/Decision
+# Bridge mount fires at least one). The underlying state.dataset_status()
+# walks the dataset singleton; with 3s TTL we coalesce burst polling
+# down to ~one real compute every 3s regardless of user count.
+_DATASET_STATUS_CACHE: dict = {"value": None, "ts": 0.0}
+_DATASET_STATUS_TTL = 3.0
+
+
+def _bust_dataset_status_cache() -> None:
+    _DATASET_STATUS_CACHE["value"] = None
+    _DATASET_STATUS_CACHE["ts"] = 0.0
+
+
 @router.get("/dataset-status")
 async def get_dataset_status() -> dict:
-    return dataset_status()
+    now = time.time()
+    cached = _DATASET_STATUS_CACHE.get("value")
+    cached_ts = _DATASET_STATUS_CACHE.get("ts", 0.0)
+    if cached is not None and (now - cached_ts) < _DATASET_STATUS_TTL:
+        return cached
+    fresh = dataset_status()
+    _DATASET_STATUS_CACHE["value"] = fresh
+    _DATASET_STATUS_CACHE["ts"] = now
+    return fresh
 
 
 def _hash_files(*payloads: bytes) -> str:
@@ -558,6 +580,9 @@ async def stage_ingest(
         ingested_by=actor_dodid or actor_role,
         ingest_hash=ingest_hash,
     )
+    # Bust the dataset-status micro-cache so polling clients see the
+    # ingest immediately instead of waiting up to 3s for TTL expiry.
+    _bust_dataset_status_cache()
 
     header_rows = _count_csv_rows(header_text)
     sr_parts_rows = _count_csv_rows(sr_parts_text)
