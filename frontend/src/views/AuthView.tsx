@@ -29,7 +29,19 @@ export function AuthView() {
     setUsersErr(null);
     setUsers(null);
     api.auth.users()
-      .then((r) => setUsers(r.users))
+      .then((r) => {
+        setUsers(r.users);
+        // Default-select MajGen Hayes (mef_commander) so a first-time
+        // visitor lands on the full-access identity without having to
+        // know the role matrix. Any 6-digit PIN works in the demo.
+        // Only auto-select if the operator hasn't already picked another
+        // cert (e.g. came back from a 401 redirect).
+        setSelectedDodid((prev) => {
+          if (prev) return prev;
+          const hayes = r.users.find((u) => /Hayes/i.test(u.name || ""));
+          return hayes?.dodid ?? null;
+        });
+      })
       .catch((e) => setUsersErr(String(e)));
   }
 
@@ -226,6 +238,7 @@ export function AuthView() {
               key={u.dodid}
               user={u}
               selected={selectedDodid === u.dodid}
+              recommended={/Hayes/i.test(u.name || "")}
               onPick={() => pickCert(u.dodid)}
             />
           ))}
@@ -278,7 +291,7 @@ export function AuthView() {
                   if (error) setError(null);
                 }}
                 onKeyDown={onPinKey}
-                placeholder={selectedDodid ? "••••••" : "Pick a cert above"}
+                placeholder={selectedDodid ? "Type any 6 digits" : "Pick a cert above"}
                 className={`w-full rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-2 font-mono text-2xl text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:outline-none disabled:opacity-50 ${selectedDodid ? "tracking-[0.5em]" : "tracking-normal"}`}
                 aria-describedby="pin-hint"
               />
@@ -329,10 +342,12 @@ export function AuthView() {
 function CertCard({
   user,
   selected,
+  recommended = false,
   onPick,
 }: {
   user: PublicAuthUser;
   selected: boolean;
+  recommended?: boolean;
   onPick: () => void;
 }) {
   // OPSEC: cert tile renders only the fields a real CAC reader surfaces
@@ -346,24 +361,45 @@ function CertCard({
     <Pressable
       onClick={onPick}
       aria-pressed={selected}
-      aria-label={`Select certificate for ${user.name}`}
+      aria-label={
+        recommended
+          ? `Select certificate for ${user.name} — recommended for full access demo`
+          : `Select certificate for ${user.name}`
+      }
       className="group !min-h-0 text-left transition-transform"
       style={{ transform: selected ? "translateY(-1px)" : undefined }}
     >
       <div
         className="relative flex h-full items-stretch gap-3 rounded-md border p-3 sm:gap-4 sm:p-4"
         style={{
-          borderColor: selected
+          borderColor: selected || recommended
             ? "var(--color-primary)"
             : "var(--color-border)",
           background: selected
             ? "color-mix(in oklab, var(--color-primary) 10%, var(--color-surface))"
+            : recommended
+            ? "color-mix(in oklab, var(--color-primary) 4%, var(--color-surface))"
             : "var(--color-surface)",
           boxShadow: selected
             ? "0 0 0 1px var(--color-primary), 0 8px 24px -16px color-mix(in oklab, var(--color-primary) 60%, transparent)"
+            : recommended
+            ? "0 0 0 1px color-mix(in oklab, var(--color-primary) 50%, transparent)"
             : undefined,
         }}
       >
+        {recommended && (
+          <span
+            className="pointer-events-none absolute -top-2.5 left-3 rounded-full px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-widest"
+            style={{
+              background: "var(--color-primary)",
+              color: "var(--color-bg)",
+              letterSpacing: "0.18em",
+            }}
+            aria-hidden
+          >
+            ★ Click here · full access
+          </span>
+        )}
         {/* Branch / avatar block — smaller on mobile so the cert text gets
          * room to breathe at <sm widths. */}
         <div
