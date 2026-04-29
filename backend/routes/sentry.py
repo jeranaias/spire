@@ -128,7 +128,12 @@ def tier1_classify(text: str) -> dict:
                 "rule": name,
             })
     if "classified" in flags:
-        cls = "SECRET"
+        # Demo build: classified-TM triggers cap at CUI rather than
+        # recommending SECRET. The pattern still fires (operator sees
+        # the [CLASSIFIED TM] evidence span); we just don't paint a
+        # SECRET banner across the whole UI for synthetic demo data.
+        # On a classified-network deployment, restore "SECRET" here.
+        cls = "CUI"
         confidence = 0.80
     elif "controlled" in flags and "geo" in flags:
         # Controlled serial + grid = operational-disposition risk, needs Tier 2
