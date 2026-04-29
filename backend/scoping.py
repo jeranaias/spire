@@ -37,8 +37,8 @@ from .state import CanonicalDataset
 SECURE_WIPE_ROLES        = frozenset({"security_manager"})
 AIRGAP_ROLES             = frozenset({"security_manager", "mef_commander"})
 COALITION_RELEASE_ROLES  = frozenset({"data_custodian", "security_manager"})
-ADMIN_TELEMETRY_ROLES    = frozenset({"security_manager"})
-AUDIT_READ_ROLES         = frozenset({"security_manager"})
+ADMIN_TELEMETRY_ROLES    = frozenset({"security_manager", "mef_commander"})
+AUDIT_READ_ROLES         = frozenset({"security_manager", "mef_commander"})
 # SENTRY Review Queue clearing authority. A maintenance chief can flag /
 # triage but may not approve, reject, or modify a held SR — that decision
 # touches the hash-chained marking record and must sit with the data
@@ -78,7 +78,7 @@ JOINT_RELEASE_ROLES      = frozenset({
 # vendor jurisdiction, and validation history. The data is mostly public
 # but exposing 'who runs what model where' to lower roles invites
 # adversary mining of the SPIRE supply chain — gate it to security_manager.
-MODEL_REGISTRY_ROLES     = frozenset({"security_manager"})
+MODEL_REGISTRY_ROLES     = frozenset({"security_manager", "mef_commander"})
 
 
 # ---------------------------------------------------------------------------

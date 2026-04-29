@@ -148,12 +148,12 @@ export function AuditView() {
   // show the hash-chained record, regardless of which mock identity
   // is currently signed in. Outside stage mode the wall is unchanged.
   const stageMode = useSpireStore((s) => s.stageMode);
-  if (role !== "security_manager" && !stageMode) {
+  if (role !== "security_manager" && role !== "mef_commander" && !stageMode) {
     return (
       <InsufficientPrivilege
         feature="Audit · SOC View"
-        requiredRoles={["security_manager"]}
-        description="Operator decision histories and source-IP correlations are restricted to Security Manager review per the audit posture."
+        requiredRoles={["security_manager", "mef_commander"]}
+        description="Operator decision histories and source-IP correlations are restricted to Security Manager and MEF Commander review per the audit posture."
       />
     );
   }

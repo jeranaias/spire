@@ -30,12 +30,12 @@ import { Link } from "react-router-dom";
 export function AdminView() {
   const role = useSpireStore((s) => s.role);
 
-  if (role !== "security_manager") {
+  if (role !== "security_manager" && role !== "mef_commander") {
     return (
       <InsufficientPrivilege
         feature="Admin · Training Flywheel"
-        requiredRoles={["security_manager"]}
-        description="Model telemetry and decision-outcome history are restricted to Security Manager review per the audit posture."
+        requiredRoles={["security_manager", "mef_commander"]}
+        description="Model telemetry and decision-outcome history are restricted to Security Manager and MEF Commander review per the audit posture."
       />
     );
   }
