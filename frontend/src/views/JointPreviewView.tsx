@@ -704,14 +704,14 @@ function ErrorPanel({ message, status }: { message: string; status: number | nul
         </div>
       ) : looksLikeClearance ? (
         <div style={{ color: "#ffd7d2", fontSize: 13, lineHeight: 1.5 }}>
-          The signed-in operator does not hold the clearance to release a SECRET//REL bundle to
-          a partner. Any SECRET-cleared SPIRE operator (G-4, Maintenance Chief, MEF Commander,
+          The signed-in operator does not have release authority for the partner bundle.
+          Any release-authorized SPIRE operator (G-4, Maintenance Chief, MEF Commander,
           Security Manager) can pull — sign in as one and re-try.
         </div>
       ) : (
         <div style={{ color: "#ffd7d2", fontSize: 13, lineHeight: 1.5 }}>
           The OMS/UCI subscription endpoint did not return a payload. Check the SPIRE backend or
-          the comms-state switch above; if SPIRE is up and the operator holds SECRET, re-pull.
+          the comms-state switch above; if SPIRE is up and the operator has release authority, re-pull.
         </div>
       )}
     </div>
