@@ -10,7 +10,6 @@ import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
 import { RefreshAge } from "../components/RefreshAge";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import { UseCaseStrip } from "../components/UseCaseStrip";
-import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
 import {
   Button,
