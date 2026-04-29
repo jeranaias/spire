@@ -221,7 +221,11 @@ function JointBanner({ classification, releasability }: { classification: string
   //
   // Task #79 legibility: bumped from 12px to 18px bold so a judge 30 ft
   // from the projector can read the marking before they read anything else.
-  const color = classification.includes("TS") ? "#ff7a00" : classification.includes("SECRET") ? "#d11616" : "#0066cc";
+  // Demo build: every visible Joint banner color uses the UNCLASSIFIED
+  // green swatch (the synthetic dataset never produces classified
+  // markings). Restore the SECRET / TS color branches when the
+  // deployment moves to a classified network.
+  const color = "#0066cc";
   return (
     <div
       role="banner"

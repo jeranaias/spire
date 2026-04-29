@@ -27,9 +27,12 @@ type ReleasePreview = "US_ONLY" | "FVEY" | "NATO";
 // backend/routes/sentry.py — records whose detected (or source) classification
 // outranks the ceiling are not releasable to that partner posture and the
 // preview surfaces them as BLOCKED rather than redacted-but-shipped.
+// Demo build: every ceiling caps at CUI to match the visible posture
+// of the synthetic dataset. Real ceilings (TS//SCI for US_ONLY, SECRET
+// for FVEY) return when this is deployed on a classified network.
 const RELEASE_CEILING: Record<ReleasePreview, Classification> = {
-  US_ONLY: "TS_SCI",
-  FVEY: "SECRET",
+  US_ONLY: "CUI",
+  FVEY: "CUI",
   NATO: "CUI",
 };
 
@@ -569,13 +572,11 @@ function ProcessingBanner({
   // standard ClassificationBadge centered. Reusing the badge primitive keeps
   // the color/labelling logic in one place — adding a new caveat upstream
   // automatically reflows here.
+  // Demo build: every classification at or above CUI uses the CUI
+  // purple swatch so no SECRET/TOP_SECRET color leaks. UNCLASSIFIED
+  // keeps the green DoDM banner color.
   const bg = `color-mix(in oklab, ${
-    classification === "UNCLASSIFIED" ? "#007A33" :
-    classification === "CUI" ? "#502B85" :
-    classification === "CONFIDENTIAL" ? "#0033A0" :
-    classification === "SECRET" ? "#C8102E" :
-    classification === "TOP_SECRET" ? "#FF8C00" :
-    "#FFD100"
+    classification === "UNCLASSIFIED" ? "#007A33" : "#502B85"
   } 18%, var(--color-surface))`;
   return (
     <div

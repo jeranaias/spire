@@ -45,11 +45,15 @@ const FLAG_COLOR: Record<string, string> = {
   controlled: "#fb923c",
 };
 
+// Demo build: collapse the SECRET / TOP_SECRET swatches into the CUI
+// warning color so the queue never paints a danger-red row. Synthetic
+// dataset only emits UNCLASSIFIED + CUI today.
 const CLASS_COLOR: Record<string, string> = {
   UNCLASSIFIED: "var(--color-success)",
   CUI: "var(--color-warning)",
-  SECRET: "var(--color-danger)",
-  TOP_SECRET: "var(--color-danger)",
+  CONFIDENTIAL: "var(--color-warning)",
+  SECRET: "var(--color-warning)",
+  TOP_SECRET: "var(--color-warning)",
 };
 
 // Walkthrough #11 — describe each Held reason so badges have hover detail
