@@ -96,7 +96,27 @@ export function MissionClock({ compact = false }: { compact?: boolean } = {}) {
         }
       } finally {
         if (alive) {
-          const intervalMs = (running && rate >= 4) ? 250 : 1000;
+          // Polling cadence:
+          //   * Running 4×/16×  — 250 ms (4 Hz) so the clock keeps up with
+          //                       compressed scenario time.
+          //   * Running 1×      — 1000 ms (1 Hz) so the H+HHH:MM display
+          //                       advances visibly each tick.
+          //   * Paused / idle   — 10 s. The backend offset doesn't move
+          //                       while paused, so 1 Hz polling was
+          //                       wasted load. With 30+ concurrent users
+          //                       this single change drops scenario-state
+          //                       traffic from ~30 req/s to ~3 req/s.
+          //                       Operator-driven state flips (play, seek,
+          //                       reset) come through the dispatched
+          //                       `spire:scenario-event` channel + the
+          //                       running/rate dependency below
+          //                       re-tightens the loop the moment Play
+          //                       fires.
+          const intervalMs = !running
+            ? 10_000
+            : rate >= 4
+              ? 250
+              : 1000;
           timer = window.setTimeout(tick, intervalMs);
         }
       }
