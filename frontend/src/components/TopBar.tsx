@@ -291,7 +291,7 @@ function MoreMenu() {
     { to: "/", label: "Decision Bridge" },
     { to: "/dha-rescue", label: "DHA Rescue", hide: stageMode },
     { to: "/joint/preview", label: "Joint COP" },
-    { to: "/integrations", label: "Integrations" },
+    { to: "/integrations/gcss-mc", label: "Integrations" },
     { to: "https://marlog-mdm.fly.dev", label: "MARLOG · Logistics Calculator", external: true },
     { to: "/demo", label: "Demo cockpit", hide: stageMode },
     { to: "/about/team", label: "About / Team", hide: stageMode },

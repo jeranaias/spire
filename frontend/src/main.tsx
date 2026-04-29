@@ -350,6 +350,10 @@ createRoot(document.getElementById("root")!).render(
              * follow-on integrations (palantir, magtf-ii) without a
              * router change. */}
             <Route path="integrations/:system" element={<ViewSuspense><IntegrationsView /></ViewSuspense>} />
+            {/* Bare /integrations redirects to the default system —
+             * MORE menu used to point here and rendered an empty
+             * Outlet because no route matched without :system. */}
+            <Route path="integrations" element={<Navigate to="/integrations/gcss-mc" replace />} />
             {/* /pitch retired — redirect to home so any old links / muscle
              * memory routes back into Decision Bridge instead of rendering
              * a blank Outlet. */}

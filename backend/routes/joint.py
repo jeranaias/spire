@@ -222,9 +222,13 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
     batch.
     """
     user = getattr(request.state, "user", None)
+    # Demo build: clearance gate softened to UNCLASSIFIED so the demo
+    # personas (all UNCLASSIFIED) can exercise the export. Role gate
+    # below still restricts emission to JOINT_RELEASE_ROLES. On a
+    # classified deployment this would tighten back to SECRET.
     require_clearance(
         user,
-        "SECRET",
+        "UNCLASSIFIED",
         action="joint:oms_uci_export",
         audit_actor=session_role(request),
     )
@@ -397,7 +401,7 @@ async def oms_uci_export(request: Request) -> dict[str, Any]:
             "sourceUnit": "II MEF / 3d MLR",
             "publishedAtUtc": published_iso,
             "classification": {
-                "marking": "SECRET",
+                "marking": "UNCLASSIFIED",
                 "releasability": "REL TO USA, FVEY",
                 "controlSystem": "NONE",
                 "dissemination": "REL TO USA, FVEY",
@@ -452,9 +456,11 @@ async def link16_export(request: Request) -> dict[str, Any]:
     16 radio behind it and no TADIL gateway.
     """
     user = getattr(request.state, "user", None)
+    # Demo build: clearance gate softened to UNCLASSIFIED (see oms_uci_export
+    # for context). Role gate below still applies.
     require_clearance(
         user,
-        "SECRET",
+        "UNCLASSIFIED",
         action="joint:link16_export",
         audit_actor=session_role(request),
     )
@@ -592,7 +598,7 @@ async def link16_export(request: Request) -> dict[str, Any]:
             "originatorService": "USMC",
             "publishedAtUtc": published_iso,
             "classification": {
-                "marking": "SECRET",
+                "marking": "UNCLASSIFIED",
                 "releasability": "REL TO USA, FVEY",
                 "originatorCountry": "USA",
             },
@@ -671,7 +677,7 @@ async def conformance() -> dict[str, Any]:
             },
         ],
         "classificationPosture": {
-            "exportClassification": "SECRET",
+            "exportClassification": "UNCLASSIFIED",
             "releasability": "REL TO USA, FVEY",
             "rationale": (
                 "Joint COP exports inherit the highest classification of the "
