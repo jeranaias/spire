@@ -292,7 +292,6 @@ function MoreMenu() {
     { to: "/dha-rescue", label: "DHA Rescue", hide: stageMode },
     { to: "/joint/preview", label: "Joint COP" },
     { to: "/integrations", label: "Integrations" },
-    { to: "/pitch", label: "Pitch deck", hide: stageMode },
     { to: "/demo", label: "Demo cockpit", hide: stageMode },
     { to: "/about/team", label: "About / Team", hide: stageMode },
     { to: "/transition", label: "Transition" },
@@ -862,30 +861,13 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
             </div>
           )}
 
-          {/* Presenter shortcuts — the canonical way to reach /pitch and
-           * /demo from inside the app. Avoids the typed-URL footgun
-           * caught in walkthrough Run C: a bare /pitch (no hash) loads
-           * the SPA index and falls through to the Decision Bridge. The
-           * index.html safety-net script catches that case in the URL
-           * bar; these menu items are the in-app, one-click entry.
-           *
-           * MDM 2026 stage-pivot — suppressed in stage mode. The four
-           * hero use-case tabs are the only nav surface during the 8-min
-           * stage demo; /pitch and /demo are operator/dev affordances
-           * that would muddy the on-stage choice surface. */}
+          {/* Presenter shortcut — Demo cockpit only (pitch deck retired
+           * since the live walkthrough IS the pitch). Suppressed in
+           * stage mode where the 4 hero tabs own the nav surface. */}
           {!stageMode && <div className="border-b border-[var(--color-border)] py-1">
             <div className="px-4 pt-2 pb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
               Presenter
             </div>
-            <Pressable
-              role="menuitem"
-              onClick={() => openPresenterRoute("/pitch")}
-              aria-label="Open the SPIRE pitch deck"
-              className="flex w-full items-center justify-between gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,transparent)] hover:text-[var(--color-text)]"
-            >
-              <span>Open pitch deck</span>
-              <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">/#/pitch</span>
-            </Pressable>
             <Pressable
               role="menuitem"
               onClick={() => openPresenterRoute("/demo")}
