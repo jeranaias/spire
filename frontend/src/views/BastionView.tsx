@@ -72,14 +72,10 @@ type SeverityFilter = "ALL" | "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "INFO";
 // Walkthrough audit: a hardcoded unit -> building lookup used to live
 // here. The mapping is now data — each cop.units[].home_building carries
 // the canonical value from `dataset/data/unit_structure.json`. The
-// helper below resolves an arbitrary unit name to its home building id
-// off the live cop payload, so adding/renaming a unit doesn't require
-// touching this file.
-function resolveHomeBuilding(cop: BastionCOP | null, unitName: string | null | undefined): string | null {
-  if (!cop || !unitName) return null;
-  const u = cop.units.find((x) => x.unit === unitName);
-  return u?.home_building ?? null;
-}
+// resolveHomeBuilding helper retired with the MapCanvas swap — only
+// consumer was the simTargetBuilding useMemo. If we restore the
+// populated COP overlays on top of OkinawaMapCanvas later, lift this
+// from `git log` rather than re-deriving.
 
 export function BastionView() {
   // Task #183 — stage live-ingest mode. While the dataset is empty
@@ -92,12 +88,11 @@ export function BastionView() {
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAlertSeverityCounts = useSpireStore((s) => s.setAlertSeverityCounts);
   const setSelectedUnitIdGlobal = useSpireStore((s) => s.setSelectedUnitId);
-  const selectedBuildingIdGlobal = useSpireStore((s) => s.selectedBuildingId);
   const setSelectedBuildingIdGlobal = useSpireStore((s) => s.setSelectedBuildingId);
   const [cop, setCop] = useState<BastionCOP | null>(null);
   const [alerts, setAlerts] = useState<BastionAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<BastionAlert | null>(null);
-  const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
+  const [_selectedUnit, setSelectedUnit] = useState<string | null>(null);
   const [sim, setSim] = useState<ThermalHawkSim | null>(null);
   const [copError, setCopError] = useState<string | null>(null);
   // Alert stream filter strip. `ALL` shows every severity; otherwise filter.
@@ -119,7 +114,7 @@ export function BastionView() {
   // already drop because `simActive` flips false). resetViewSignal: refit
   // bounds to all units / ECPs (fired by the in-map Reset View button —
   // see MapCanvas — and from any future "go back to wide picture" affordance).
-  const [simResolveSignal, setSimResolveSignal] = useState(0);
+  const [_simResolveSignal, setSimResolveSignal] = useState(0);
   // Confirmation modal for "Resolve sim · drop FPCON". Reviewer caught
   // the action being a single click — even in sim, the operator should
   // be reminded that resolving drops FPCON BRAVO and clears cordon state.
@@ -515,14 +510,10 @@ export function BastionView() {
     });
   }, [pushToast, setSelectedUnitIdGlobal]);
 
-  function onUnitClick(unitName: string) {
-    setSelectedUnit(unitName);
-    setSelectedUnitIdGlobal(unitName);
-    // Promote the most relevant alert for that unit, if any
-    const unitAlerts = alerts.filter((a) => a.unit === unitName);
-    if (unitAlerts.length > 0) setSelectedAlert(unitAlerts[0]);
-  }
-
+  // The old `onUnitClick` callback (only used by MapCanvas) was removed
+  // when the populated BASTION map swapped to OkinawaMapCanvas — alert
+  // rows already call setSelectedUnit / setSelectedAlert directly.
+  //
   // Drill-from-alert. Run the deterministic alert→building resolver so
   // every alert lands the operator on a real building, not a silent
   // no-op. Precedence (see resolveAlertTarget):
@@ -547,19 +538,8 @@ export function BastionView() {
     setSelectedBuildingIdGlobal(target.buildingId);
   }
 
-  const simTargetBuilding = useMemo(() => {
-    if (!sim) return undefined;
-    return resolveHomeBuilding(cop, sim.alert.unit) ?? undefined;
-  }, [sim, cop]);
-
-  // When an alert is selected, derive a "fly to" target building via the
-  // shared resolver (unit_home → exact grid → nearest in same 1km square).
-  // Closes the existing TODO around the "nearest named building" fallback
-  // so a grid-only alert no longer silently no-ops on the map.
-  const flyToBuilding = useMemo(() => {
-    if (!selectedAlert) return null;
-    return resolveAlertTarget(selectedAlert, cop).buildingId;
-  }, [selectedAlert, cop]);
+  // simTargetBuilding + flyToBuilding useMemos retired with the
+  // MapCanvas swap — they were only consumed as MapCanvas props.
 
   // Active vs acknowledged partition + filter strip + free-text search.
   // Acked alerts move below to a collapsed group; resolved already drop
