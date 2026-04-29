@@ -19,13 +19,15 @@ export type Classification =
   | "TOP_SECRET"
   | "TS_SCI";
 
+// Demo build: cap visible options at CUI. The full classification rank
+// model (SECRET / TOP_SECRET / TS_SCI) stays in the type union because
+// downstream Joint exports / SENTRY release pipelines reference those
+// keys, but no UI surface should offer them as a selectable option in
+// a public demo. Move to all-six only when the deployment is on a
+// classified network.
 export const CLASS_ORDER: Classification[] = [
   "UNCLASSIFIED",
   "CUI",
-  "CONFIDENTIAL",
-  "SECRET",
-  "TOP_SECRET",
-  "TS_SCI",
 ];
 
 export const CLASS_RANK: Record<Classification, number> = {

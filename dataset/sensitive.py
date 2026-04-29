@@ -244,10 +244,13 @@ def derive_classification(flags: List[str], fault_event) -> str:
       non-PII narrative CUI patterns   -> CUI (Tier-2 LLM target)
       none                             -> UNCLASSIFIED
     """
-    if "classified" in flags:
-        return "SECRET"
-    if fault_event.component in ("fire_control", "weapon_system") and "classified" not in flags:
-        return "CONFIDENTIAL"
+    # Demo-build cap: classifications never exceed CUI in the synthetic
+    # dataset. The "DEMO DATA · NOT FOR OPERATIONAL USE" banner means we
+    # keep zero SECRET/CONFIDENTIAL labels on screen even on simulated
+    # records — operators viewing a 30-user pilot shouldn't see a single
+    # SECRET marking anywhere in the UI chrome.
+    if "classified" in flags or fault_event.component in ("fire_control", "weapon_system"):
+        return "CUI"
     if any(f in flags for f in ("geo", "comms", "pii", "controlled", "non_pii_cui")):
         return "CUI"
     return "UNCLASSIFIED"
