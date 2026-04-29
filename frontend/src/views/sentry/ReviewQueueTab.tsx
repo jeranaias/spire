@@ -1187,9 +1187,10 @@ function InspectorPane({
             </span>
             {/* W1 #30 — cross-link from the SENTRY classifier surface to
              * the canonical model card. The supply-chain page is gated
-             * to security_manager, so render the link only for that role
-             * to avoid sending other operators to InsufficientPrivilege. */}
-            {role === "security_manager" && (
+             * to security_manager + mef_commander; render the link for
+             * the roles that can actually reach it (others would land
+             * on InsufficientPrivilege). */}
+            {(role === "security_manager" || role === "mef_commander") && (
               <a
                 href="#/admin/models/sentry-classifier"
                 className="font-mono text-xs uppercase tracking-widest text-[var(--color-primary)] hover:underline"
