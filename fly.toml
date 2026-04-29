@@ -14,14 +14,17 @@
 app = "spire-mdm"
 primary_region = "iad"
 
-# Bluegreen deploy strategy: the new machine has to pass its health
-# checks before traffic switches. Eliminates the ~30s window during
-# rolling deploys where the old machine is draining and the new one
-# isn't ready yet — that window surfaced as a 502 to operators mid-
-# demo. The trade-off is ~30s longer deploys; not deploy-in-the-last-
-# 30-min-before-stage is the operator-side mitigation.
+# Rolling deploy strategy. Bluegreen would be nicer (no 502 window
+# while the old machine drains) but it requires a separate volume
+# per machine — Fly volumes are single-attach and the bluegreen
+# spin-up tripped "volume already claimed by machine …" against the
+# still-running blue, blocking every push to master since the
+# scenario pivot landed. To upgrade back to bluegreen, provision a
+# second volume and attach it to the green machine. Until then:
+# rolling. Operator-side mitigation: don't deploy in the last 30 min
+# before stage.
 [deploy]
-  strategy = "bluegreen"
+  strategy = "rolling"
 
 [build]
   dockerfile = "Dockerfile.web"
