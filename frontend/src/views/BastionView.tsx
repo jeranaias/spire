@@ -83,7 +83,14 @@ export function BastionView() {
   // of the COP map, since /api/bastion/cop returns ``{empty: true}``
   // and there is no fleet geometry to render. The hook polls so the
   // view auto-flips after the operator hydrates from DECISION BRIDGE.
-  const datasetStatus = useDatasetStatus().status;
+  // Mirrors the PulseView gate: treat "still loading first status" as
+  // empty so the page doesn't fall into the populated branch (which
+  // tries to fetch /bastion/cop, gets back {empty: true} after a wipe,
+  // and silently sticks on LoadingState forever). Once the first poll
+  // resolves, datasetStatus.empty drives the actual decision.
+  const { status: datasetStatus, loading: datasetStatusLoading } = useDatasetStatus();
+  const datasetIsEmpty =
+    datasetStatus?.empty !== false || (datasetStatusLoading && !datasetStatus);
   const role = useSpireStore((s) => s.role);
   const setAlertCount = useSpireStore((s) => s.setAlertCount);
   const setAlertSeverityCounts = useSpireStore((s) => s.setAlertSeverityCounts);
@@ -149,7 +156,7 @@ export function BastionView() {
     // route returns ``{empty: true}`` and downstream code (MapCanvas,
     // resolveAlertTarget) cannot consume it. The early return at the
     // top of BastionView handles render; we just avoid the wasted call.
-    if (datasetStatus?.empty) return;
+    if (datasetIsEmpty) return;
     let cancelled = false;
     (async () => {
       try {
@@ -183,7 +190,7 @@ export function BastionView() {
     return () => {
       cancelled = true;
     };
-  }, [role, datasetStatus?.empty]);
+  }, [role, datasetIsEmpty]);
 
   // Walkthrough audit: '/' focuses the alert search box (vim/Slack/Linear
   // convention). Only fires when focus isn't already in a field, so a
@@ -568,12 +575,11 @@ export function BastionView() {
     return { activeAlerts: active, ackedAlerts: acked };
   }, [alerts, searchQuery, sevFilter]);
 
-  if (datasetStatus?.empty) {
+  if (datasetIsEmpty) {
     // Empty-state surface still shows the Nansei-Shoto COP planning
     // map — operators can see the lay of the land + place markers
     // before any GCSS-MC data lands. Once data ingests, the populated
-    // BASTION view below takes over. The map wrapper needs `relative`
-    // so the canvas's `absolute inset-0` has an anchor.
+    // BASTION view below takes over.
     return (
       <div className="flex h-full flex-col">
         <UseCaseStrip
