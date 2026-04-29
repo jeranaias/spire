@@ -41,22 +41,31 @@ export const CLASS_RANK: Record<Classification, number> = {
 
 // CAPCO color — same palette as the global ClassificationBannerStrip. Solid color
 // blocks, no decorative gradient. Matches DoDM 5200.01 / ICS 700-1 swatches.
+// Demo build: cap colors at CUI purple. See CLASS_LABEL above for the
+// rationale — anything above CUI in the rank model collapses to CUI
+// rendering so no red/orange/yellow CAPCO swatch ever appears on
+// screen.
 export const CLASS_COLOR: Record<Classification, { bg: string; fg: string }> = {
   UNCLASSIFIED: { bg: "#007A33", fg: "#FFFFFF" },
   CUI:          { bg: "#502B85", fg: "#FFFFFF" },
-  CONFIDENTIAL: { bg: "#0033A0", fg: "#FFFFFF" },
-  SECRET:       { bg: "#C8102E", fg: "#FFFFFF" },
-  TOP_SECRET:   { bg: "#FF8C00", fg: "#FFFFFF" },
-  TS_SCI:       { bg: "#FFD100", fg: "#000000" },
+  CONFIDENTIAL: { bg: "#502B85", fg: "#FFFFFF" },
+  SECRET:       { bg: "#502B85", fg: "#FFFFFF" },
+  TOP_SECRET:   { bg: "#502B85", fg: "#FFFFFF" },
+  TS_SCI:       { bg: "#502B85", fg: "#FFFFFF" },
 };
 
+// Demo build: ANY classification at or above CONFIDENTIAL renders as
+// "CUI" so no SECRET / TOP SECRET text ever leaks to the screen, even
+// if a stale fixture or upstream call hands us one of the higher keys.
+// The full label set returns when the deployment is on a classified
+// network — flip these back via a build-time toggle then.
 export const CLASS_LABEL: Record<Classification, string> = {
   UNCLASSIFIED: "UNCLASSIFIED",
   CUI:          "CUI",
-  CONFIDENTIAL: "CONFIDENTIAL",
-  SECRET:       "SECRET",
-  TOP_SECRET:   "TOP SECRET",
-  TS_SCI:       "TOP SECRET // SCI",
+  CONFIDENTIAL: "CUI",
+  SECRET:       "CUI",
+  TOP_SECRET:   "CUI",
+  TS_SCI:       "CUI",
 };
 
 // Normalize an arbitrary string to one of the canonical Classification keys.

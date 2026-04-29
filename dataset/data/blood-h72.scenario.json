@@ -346,7 +346,7 @@
       "phase": "Sustainment crisis",
       "title": "H+48 — BASTION shows secured corridor; mission accepted",
       "view": "bastion.mission",
-      "classification": "SECRET",
+      "classification": "CUI",
       "overlay": {
         "highlight": "Kadena → 3d MLR objective transit corridor · KC-130J 7Z42 mission accepted",
         "callouts": [
