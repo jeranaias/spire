@@ -621,7 +621,7 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
               Process batch
             </Button>
             <span className="text-xs text-[var(--color-text-muted)]">
-              Tier-1 pattern engine runs first; ambiguous records escalate to the language-model gate.
+              Rule-based pattern engine runs every record. LLM gate is wired but unloaded in this build (rule-based fallback labelled honestly in the footer).
             </span>
           </div>
         </div>
