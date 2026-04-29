@@ -3,7 +3,6 @@ import clsx from "clsx";
 import { api, type BastionAlert, type BastionCOP, type ThermalHawkSim } from "../api";
 import { withRetry, pollWithBackoff, formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
-import { MapCanvas } from "../components/MapCanvas";
 import { OkinawaMapCanvas } from "../components/OkinawaMapCanvas";
 import { FusedThreatsPanel } from "../components/FusedThreatsPanel";
 import { ThermalHawkFeed } from "../components/ThermalHawkFeed";
@@ -785,26 +784,15 @@ export function BastionView() {
       )}
       </aside>
 
-      {/* Center: schematic */}
+      {/* Center: COP planning surface — Okinawa Honto + Miyako + Ishigaki
+       * three-island layout with milsymbol markers. Replaces the
+       * Camp Henderson MapCanvas so the populated-state BASTION shows
+       * the contested-logistics scenario regardless of dataset state.
+       * MapCanvas-driven props (cop.buildings, sim, selectedUnit,
+       * flyToBuilding) are unused by the new component — restoring the
+       * ThermalHawk sim hooks against the new map is a follow-up. */}
       <div className="relative flex-1">
-        <MapCanvas
-          buildings={cop.buildings}
-          units={cop.units}
-          ecps={cop.ecps}
-          rallyPoints={cop.rally_points}
-          centerLat={cop.center.lat}
-          centerLon={cop.center.lon}
-          selectedUnit={selectedUnit}
-          onUnitClick={onUnitClick}
-          flyToBuilding={flyToBuilding}
-          selectedBuildingId={selectedBuildingIdGlobal}
-          onBuildingClick={(id) => setSelectedBuildingIdGlobal(id)}
-          simActive={!!sim}
-          simTargetBuilding={simTargetBuilding}
-          simCordons={sim?.cordon_zones}
-          drawerOpen={!!selectedAlert && !mapFocusMode}
-          simResolveSignal={simResolveSignal}
-        />
+        <OkinawaMapCanvas />
 
         {/* Installation title badge — top-left. Metrics row uses chip-flow
          * so when the response drawer narrows the map column the chips wrap
