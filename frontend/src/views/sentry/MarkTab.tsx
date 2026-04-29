@@ -59,12 +59,12 @@ export function MarkTab() {
   const debounceRef = useRef<number | null>(null);
   const latestTextRef = useRef<string>("");
 
-  if (role !== "data_custodian" && role !== "security_manager") {
+  if (role !== "data_custodian" && role !== "security_manager" && role !== "mef_commander") {
     return (
       <InsufficientPrivilege
         feature="Mark Draft"
-        requiredRoles={["data_custodian", "security_manager"]}
-        description="Classification-marking recommendations alter records' authoritative marking and require Data Custodian or Security Manager privileges per DoDM 5200.01."
+        requiredRoles={["data_custodian", "security_manager", "mef_commander"]}
+        description="Classification-marking recommendations alter records' authoritative marking and require Data Custodian, Security Manager, or MEF Commander privileges per DoDM 5200.01."
       />
     );
   }
@@ -252,6 +252,11 @@ export function MarkTab() {
             <section className="mb-4">
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
                 Evidence ({result.evidence.length} rule match{result.evidence.length === 1 ? "" : "es"})
+                {result.evidence.length > 0 && (
+                  <span className="ml-2 font-normal normal-case tracking-wide text-[var(--color-text-muted)]">
+                    — click any row to highlight it in the input
+                  </span>
+                )}
               </h4>
               {result.evidence.length === 0 && (
                 <div className="text-xs text-[var(--color-text-muted)]">
@@ -260,7 +265,32 @@ export function MarkTab() {
               )}
               <div className="flex flex-col gap-2">
                 {result.evidence.map((e, i) => (
-                  <div key={i} className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs">
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      // Click an evidence row → scroll the input textarea to
+                      // the matched span and select it. Closes the loop
+                      // between "engine flagged this" and "this is what it
+                      // saw." If the substring isn't found (e.g. the input
+                      // changed since the recommendation came back), fall
+                      // back to focusing the textarea.
+                      const ta = textareaRef.current;
+                      if (!ta) return;
+                      const text = ta.value;
+                      const idx = text.indexOf(e.evidence);
+                      ta.focus();
+                      if (idx < 0) return;
+                      ta.setSelectionRange(idx, idx + e.evidence.length);
+                      // Approximate scroll-into-view: scrollTop proportional
+                      // to the line containing the match.
+                      const lineNum = text.slice(0, idx).split("\n").length;
+                      const lineHeight = 22; // matches font-mono leading-relaxed
+                      ta.scrollTop = Math.max(0, (lineNum - 3) * lineHeight);
+                    }}
+                    className="text-left rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-xs transition-colors hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+                    aria-label={`Highlight matched span "${e.evidence}" in input`}
+                  >
                     <div className="flex items-baseline gap-2">
                       <span
                         className="rounded-sm px-1.5 py-0.5 text-xs font-mono uppercase"
@@ -272,9 +302,14 @@ export function MarkTab() {
                         {e.flag}
                       </span>
                       <span className="text-xs font-mono text-[var(--color-text-muted)]">rule: {e.rule}</span>
+                      <span className="ml-auto text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                        ↩ jump to span
+                      </span>
                     </div>
-                    <div className="mt-1 font-mono text-[var(--color-text)]">"{e.evidence}"</div>
-                  </div>
+                    <div className="mt-1 font-mono text-[var(--color-text)] break-words">
+                      "{e.evidence}"
+                    </div>
+                  </button>
                 ))}
               </div>
             </section>

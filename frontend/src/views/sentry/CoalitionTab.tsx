@@ -29,12 +29,12 @@ export function CoalitionTab() {
   const role = useSpireStore((s) => s.role);
   const pushToast = useSpireStore((s) => s.pushToast);
 
-  if (role !== "data_custodian" && role !== "security_manager") {
+  if (role !== "data_custodian" && role !== "security_manager" && role !== "mef_commander") {
     return (
       <InsufficientPrivilege
         feature="Coalition Release Mode"
-        requiredRoles={["data_custodian", "security_manager"]}
-        description="Coalition release packaging touches partner-nation classification authority and is restricted to Data Custodian or Security Manager."
+        requiredRoles={["data_custodian", "security_manager", "mef_commander"]}
+        description="Coalition release packaging touches partner-nation classification authority and is restricted to Data Custodian, Security Manager, or MEF Commander."
       />
     );
   }

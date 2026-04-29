@@ -42,12 +42,12 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   } | null>(null);
   const pushToast = useSpireStore((s) => s.pushToast);
 
-  if (role !== "data_custodian" && role !== "security_manager") {
+  if (role !== "data_custodian" && role !== "security_manager" && role !== "mef_commander") {
     return (
       <InsufficientPrivilege
         feature="Sanitized Export"
-        requiredRoles={["data_custodian", "security_manager"]}
-        description="Release packaging of sanitized records requires Data Custodian or Security Manager authorization."
+        requiredRoles={["data_custodian", "security_manager", "mef_commander"]}
+        description="Release packaging of sanitized records requires Data Custodian, Security Manager, or MEF Commander authorization."
       />
     );
   }
