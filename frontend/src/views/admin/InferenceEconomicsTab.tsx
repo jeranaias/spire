@@ -443,7 +443,7 @@ function DefendCostPanel({ observedMix }: { observedMix: Record<string, number> 
     <div className="rounded-md border-2 border-[var(--color-warning)] bg-[var(--color-surface)] p-4">
       <div className="mb-3 flex items-baseline justify-between">
         <div className="font-mono text-xs uppercase tracking-widest" style={{ color: "var(--color-warning)" }}>
-          ◢◤ Defend the Cost · 180,000-Marine extrapolation
+          ◢◤ Cost-at-scale projection · back-of-envelope, not a deployment plan
         </div>
         <button
           onClick={useObserved}

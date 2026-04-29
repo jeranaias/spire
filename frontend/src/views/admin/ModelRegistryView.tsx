@@ -67,8 +67,11 @@ export function ModelRegistryView() {
             Admin · Model Supply Chain
           </h1>
           <div className="mt-1 spire-body-muted">
-            Every model SPIRE uses, with provenance, hosting target, vendor jurisdiction, and validation history.
-            Answers J2's question: "What happens when the vendor pivots or gets acquired by a foreign adversary in 18 months?"
+            Reference design for the model-supply-chain surface SPIRE
+            would maintain in production — provenance, hosting target,
+            vendor jurisdiction, validation history. One model is
+            populated today (the SENTRY classifier); a real deployment
+            would expand this registry to every model in the call graph.
           </div>
           <div className="mt-1 font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             Registry version {data.registry_version ?? "unknown"} · maintained by {data.owner ?? "SPIRE Engineering"}
