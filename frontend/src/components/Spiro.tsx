@@ -131,10 +131,31 @@ export function Spiro() {
     return null;
   }
 
+  // Project the message log into the OpenAI-shape {role, content} pairs
+  // SPIRO's planner expects. Only user prompts and assistant answers
+  // count — plan/result/error rows are operator-facing chrome that
+  // wouldn't help the model. Cap to the most recent 10 turns to bound
+  // the token cost; the backend re-clips to the same length defensively.
+  function historyForPlanner(): { role: "user" | "assistant"; content: string }[] {
+    const turns: { role: "user" | "assistant"; content: string }[] = [];
+    for (const m of messages) {
+      if (m.kind === "user") {
+        turns.push({ role: "user", content: m.text });
+      } else if (m.kind === "answer") {
+        turns.push({ role: "assistant", content: m.text });
+      }
+    }
+    return turns.slice(-10);
+  }
+
   async function send(overrideText?: string) {
     const t = (overrideText ?? text).trim();
     if (!t || pending) return;
     const userMsg: ChatMessage = { id: uid(), kind: "user", text: t, at: Date.now() };
+    // Snapshot history BEFORE the new user message lands in state so we
+    // don't double-count the current prompt — the backend takes
+    // `history` (prior turns) and `text` (current) as separate inputs.
+    const priorHistory = historyForPlanner();
     setMessages((m) => [...m, userMsg]);
     if (!overrideText) setText("");
     setPending("plan");
@@ -147,6 +168,7 @@ export function Spiro() {
           role,
           view: location.pathname,
           prior_proposal: lastUnexecutedProposal(),
+          history: priorHistory,
         }),
       });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
