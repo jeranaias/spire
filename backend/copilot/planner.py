@@ -88,6 +88,32 @@ Output style:
   number, the specific asset id, the specific unit. No "consider" or
   "you might."
 - Refuse fluff. Marines have a checklist; you reduce clicks.
+
+CONVERSATION MEMORY — non-negotiable:
+- The conversation history below the system messages is the operator's
+  prior turns and your prior answers. Treat it as state. If the operator
+  says "and CLB-6?" right after asking about CLB-1, the operator is
+  asking the same question against CLB-6 — don't re-ask, don't reset.
+- "do that one too", "now the next", "same for unit X" → repeat your
+  most recent action against the new target. No clarifying questions
+  unless the reference is genuinely ambiguous.
+- "what did I just ask?" / "what did you say?" → quote your prior turn
+  in one sentence.
+
+DECISIVENESS — non-negotiable:
+- Always end with a recommended next move. Either propose tool calls,
+  or answer the question + name the next action in one sentence:
+  "Recommend: cannib match → expedite. Approve?"
+- Never "you could also consider..." or "would you like me to...".
+  State the next action as the recommendation. The operator either
+  approves it, redirects, or moves on. You make the call; they
+  confirm.
+- If the operator's request is ambiguous, pick the most likely
+  reading and say "Reading this as <X>. Wrong target?" — don't ask
+  "what do you mean?"
+- If there's a clear blocker (no data, missing role, dataset empty),
+  state the blocker in one sentence and propose the unblock action.
+  "Dataset empty — recommend: ingest via Decision Bridge."
 """
 
 
@@ -97,6 +123,7 @@ async def plan(
     view: str = "",
     current_data: Optional[dict] = None,
     prior_proposal: Optional[list] = None,
+    history: Optional[list] = None,
 ) -> dict:
     """Ask Gemma 4 for a plan in response to the operator's text.
 
@@ -166,6 +193,31 @@ async def plan(
                 f"{json.dumps(prior_proposal)[:1200]}"
             ),
         })
+
+    # Conversation memory — replay the last N turns so SPIRO can resolve
+    # follow-up references ("and the second one?", "what about CLB-6?",
+    # "do that one too"). Token cost is bounded: at most 10 turns and
+    # ~1.6 KB of text per turn after truncation.
+    if history:
+        try:
+            clipped: list[dict] = []
+            # Keep the most-recent 10 turns. The frontend already filters
+            # to user/answer/error roles before sending; we sanitize again
+            # in case the payload was synthesized by some other client.
+            for h in history[-10:]:
+                if not isinstance(h, dict):
+                    continue
+                role_field = h.get("role")
+                content = (h.get("content") or "")[:1600]
+                if role_field not in ("user", "assistant") or not content.strip():
+                    continue
+                clipped.append({"role": role_field, "content": content})
+            messages.extend(clipped)
+        except Exception:
+            # Memory injection is best-effort. A malformed history
+            # payload should never block the current request.
+            pass
+
     messages.append(
         {"role": "user", "content": f"Role: {role} · View: {view or 'unspecified'}\n\n{text}"},
     )

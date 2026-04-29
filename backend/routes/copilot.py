@@ -39,6 +39,12 @@ async def make_plan(request: Request, payload: dict = Body(default={})):
     # — the frontend forwards it so an operator's "go" consents to the
     # proposal we just made instead of forcing the planner to re-decide.
     prior_proposal = payload.get("prior_proposal")
+    # `history` is the last N user/assistant turns (oldest first) so
+    # SPIRO has continuity — follow-ups like "and CLB-6?" or "what
+    # about the second one?" resolve against the prior conversation
+    # instead of starting from scratch every send. Validated/clipped
+    # downstream in copilot_plan to bound token cost.
+    history = payload.get("history") or []
     if not text:
         raise HTTPException(status_code=400, detail="text required")
     return await copilot_plan(
@@ -47,6 +53,7 @@ async def make_plan(request: Request, payload: dict = Body(default={})):
         view=view,
         current_data=current_data,
         prior_proposal=prior_proposal,
+        history=history,
     )
 
 
