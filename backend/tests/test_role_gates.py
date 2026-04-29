@@ -52,9 +52,9 @@ EXPECTED_VIEW_SCOPE: dict[str, frozenset[str]] = {
     "/sentry":       frozenset({"data_custodian", "security_manager", "mef_commander"}),
     "/pulse":        frozenset({"maintenance_chief", "g4", "mef_commander"}),
     "/bastion":      frozenset({"mef_commander", "g4", "security_manager", "maintenance_chief"}),
-    "/admin":        frozenset({"security_manager"}),
-    "/admin/audit":  frozenset({"security_manager"}),
-    "/admin/models": frozenset({"security_manager"}),
+    "/admin":        frozenset({"security_manager", "mef_commander"}),
+    "/admin/audit":  frozenset({"security_manager", "mef_commander"}),
+    "/admin/models": frozenset({"security_manager", "mef_commander"}),
 }
 
 

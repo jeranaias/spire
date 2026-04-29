@@ -243,12 +243,15 @@ export const VIEW_SCOPE: Record<string, Role[]> = {
   "/sentry":  ["data_custodian", "security_manager", "mef_commander"],
   "/pulse":   ["maintenance_chief", "g4", "mef_commander"],
   "/bastion": ["mef_commander", "g4", "security_manager", "maintenance_chief"],
-  "/admin":   ["security_manager"],
-  "/admin/audit": ["security_manager"],
+  // mef_commander added so MajGen Hayes can drive the full SENTRY → PULSE
+  // → BASTION → ADMIN walk-through in one identity (was security_manager-
+  // only before). Audit + model-registry follow the same pattern.
+  "/admin":   ["security_manager", "mef_commander"],
+  "/admin/audit": ["security_manager", "mef_commander"],
   // W1 #30 — Model supply-chain page lives under the admin role gate.
   // Sub-routes inherit the same scope so a deep-linked /admin/models/:id
   // hits the same overlay as bare /admin for non-security_manager.
-  "/admin/models": ["security_manager"],
+  "/admin/models": ["security_manager", "mef_commander"],
 };
 
 function uid(): string {
