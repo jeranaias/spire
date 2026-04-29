@@ -39,5 +39,7 @@ def test_classification_distribution(canonical):
     srs = [s for s in canonical["srs"] if not s.is_pmcs]
     classes = Counter(s.detected_classification for s in srs)
     assert classes.get("UNCLASSIFIED", 0) > 500
+    # Demo build caps at CUI; expect a healthy CUI population from
+    # weapons/radar/FCS sensitive content. SECRET line removed because
+    # synthetic dataset never produces SECRET in the demo build.
     assert classes.get("CUI", 0) > 300
-    assert classes.get("SECRET", 0) >= 10
