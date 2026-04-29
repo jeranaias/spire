@@ -24,12 +24,12 @@ export function ModelDetailView() {
   const role = useSpireStore((s) => s.role);
   const { modelId = "" } = useParams<{ modelId: string }>();
 
-  if (role !== "security_manager") {
+  if (role !== "security_manager" && role !== "mef_commander") {
     return (
       <InsufficientPrivilege
         feature="Admin · Model Detail"
-        requiredRoles={["security_manager"]}
-        description="Per-model provenance, vendor jurisdiction, and validation history are gated to Security Manager."
+        requiredRoles={["security_manager", "mef_commander"]}
+        description="Per-model provenance, vendor jurisdiction, and validation history are gated to Security Manager and MEF Commander."
       />
     );
   }

@@ -26,12 +26,12 @@ import { DdilFreshnessBanner, FreshnessHeader, RegistryLoadErrorTile } from "./R
 
 export function ModelRegistryView() {
   const role = useSpireStore((s) => s.role);
-  if (role !== "security_manager") {
+  if (role !== "security_manager" && role !== "mef_commander") {
     return (
       <InsufficientPrivilege
         feature="Admin · Model Supply Chain"
-        requiredRoles={["security_manager"]}
-        description="The per-model card surface (provenance, hosting target, FedRAMP status, vendor jurisdiction) is gated to Security Manager because the aggregate exposes the SPIRE supply chain in one place."
+        requiredRoles={["security_manager", "mef_commander"]}
+        description="The per-model card surface (provenance, hosting target, FedRAMP status, vendor jurisdiction) is gated to Security Manager and MEF Commander because the aggregate exposes the SPIRE supply chain in one place."
       />
     );
   }

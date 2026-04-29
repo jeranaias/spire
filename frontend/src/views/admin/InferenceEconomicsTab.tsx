@@ -29,12 +29,12 @@ import { AdminTabs } from "../AdminView";
 
 export function InferenceEconomicsView() {
   const role = useSpireStore((s) => s.role);
-  if (role !== "security_manager") {
+  if (role !== "security_manager" && role !== "mef_commander") {
     return (
       <InsufficientPrivilege
         feature="Admin · Inference Economics"
-        requiredRoles={["security_manager"]}
-        description="Per-call LLM cost telemetry and the 180k-Marine extrapolation panel are restricted to Security Manager review per the audit posture."
+        requiredRoles={["security_manager", "mef_commander"]}
+        description="Per-call LLM cost telemetry and the 180k-Marine extrapolation panel are restricted to Security Manager and MEF Commander review per the audit posture."
       />
     );
   }
