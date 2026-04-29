@@ -505,7 +505,7 @@ function JointTopBar({
             JLTC · JOINT LOGISTICS &amp; TRACKS CONSOLE
           </div>
           <div style={{ fontSize: 11, color: "#7e94a8", letterSpacing: "0.12em", textTransform: "uppercase", marginTop: 2 }}>
-            Sister-service viewer · OMS/UCI subscriber
+            Sister-service viewer · OMS/UCI export shape
           </div>
         </div>
       </div>
@@ -732,7 +732,7 @@ function LoadingPanel() {
         textTransform: "uppercase",
       }}
     >
-      Subscribing to SPIRE OMS/UCI feed…
+      Loading OMS/UCI export-shaped preview…
     </div>
   );
 }
