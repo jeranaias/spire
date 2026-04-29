@@ -494,8 +494,11 @@ export function CannibalizationTab() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <section className="flex w-5/12 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
+    // Cannibalization three-column flow stacks vertically below lg so each
+    // pane (Needs / Donors / Completed Matches) gets full width on mobile
+    // and small laptops. Above lg the original 5/3/4 split returns.
+    <div className="flex h-full flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+      <section className="flex w-full min-h-[24rem] flex-col overflow-y-auto border-b border-[var(--color-border)] p-4 lg:w-5/12 lg:min-h-0 lg:border-b-0 lg:border-r">
         <div className="mb-3">
           <h3
             className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
@@ -627,7 +630,7 @@ export function CannibalizationTab() {
         </div>
       </section>
 
-      <section className="flex w-3/12 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
+      <section className="flex w-full min-h-[24rem] flex-col overflow-y-auto border-b border-[var(--color-border)] p-4 lg:w-3/12 lg:min-h-0 lg:border-b-0 lg:border-r">
         <div className="mb-3">
           <h3
             className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
@@ -712,7 +715,7 @@ export function CannibalizationTab() {
         </div>
       </section>
 
-      <section className="flex w-4/12 flex-col overflow-y-auto p-4">
+      <section className="flex w-full min-h-[24rem] flex-col overflow-y-auto p-4 lg:w-4/12 lg:min-h-0">
         <div className="mb-3">
           <h3
             className="font-mono text-base font-semibold uppercase text-[var(--color-text)] tracking-widest"
@@ -1071,7 +1074,7 @@ function ConfirmProposeModal({
         <div className="mb-3 font-mono text-lg font-semibold text-[var(--color-text)] tracking-wide">
           Cross-level {need.needed_part.nomenclature}
         </div>
-        <div className="mb-3 grid grid-cols-2 gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+        <div className="mb-3 grid grid-cols-1 gap-3 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 sm:grid-cols-2">
           <div>
             <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
               Recipient

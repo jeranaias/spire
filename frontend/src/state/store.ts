@@ -236,7 +236,11 @@ export const ROLE_DEFAULT_VIEW: Record<Role, string> = {
 // overlay's role-scope panel didn't list it as a view at all (the row
 // for ADMIN never rendered, even for the role that owns it).
 export const VIEW_SCOPE: Record<string, Role[]> = {
-  "/sentry":  ["data_custodian", "security_manager"],
+  // mef_commander added so the Okinawa walk-through can run as a single
+  // role: the commander reviews the SENTRY release queue, then PULSE,
+  // then BASTION. The data_custodian still owns upload; the security
+  // manager still owns release/export (export role gate untouched).
+  "/sentry":  ["data_custodian", "security_manager", "mef_commander"],
   "/pulse":   ["maintenance_chief", "g4", "mef_commander"],
   "/bastion": ["mef_commander", "g4", "security_manager", "maintenance_chief"],
   "/admin":   ["security_manager"],

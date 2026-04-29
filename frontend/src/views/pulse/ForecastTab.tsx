@@ -464,7 +464,10 @@ export function ForecastTab() {
 
       {/* Cross-probability + spaghetti paths panel — gap from parent flex
        * gap-4 spaces this from the chart above so we don't double-margin. */}
-      <div className="grid grid-cols-3 gap-3">
+      <div
+        className="grid gap-4"
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(16rem, 100%), 1fr))" }}
+      >
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
           <div className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest">
             Projected · Horizon End

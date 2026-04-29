@@ -43,7 +43,15 @@ export function FleetOverviewTab() {
     // to unpack it as a populated FleetOverview.
     if (datasetStatus?.empty) return;
     withRetry(() => api.pulse.fleetOverview())
-      .then(setData)
+      .then((res) => {
+        // Same envelope guard as the BASTION COP fetch below — the
+        // fleet-overview endpoint also returns `{empty: true}` while
+        // the dataset is being swapped in. Stuffing that envelope
+        // into setData() lets the downstream useMemo crash on
+        // `equipment_types.filter` because the field is missing.
+        if ((res as unknown as { empty?: boolean }).empty) return;
+        setData(res);
+      })
       .catch((e) => {
         const raw = String(e);
         // If the upstream is HTML (502/504 from nginx), don't surface
@@ -133,7 +141,10 @@ export function FleetOverviewTab() {
       {/* Walkthrough #14 — outer container scrolls so KPI + narrative + heatmap
        * all stay reachable. Inner heatmap retains its own scroll for cols. */}
       <div className="flex flex-1 flex-col overflow-y-auto p-4">
-        <div className="mb-4 grid grid-cols-4 gap-3">
+        <div
+          className="mb-4 grid gap-4"
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(14rem, 100%), 1fr))" }}
+        >
           {/* Walkthrough #26 — tooltip explains the 7d delta. */}
           {/* Walkthrough #29 — KPI labels bumped via component default. */}
           {/* Walkthrough #30 — consistent severity-by-threshold tone across all 4. */}
@@ -236,7 +247,10 @@ export function FleetOverviewTab() {
         {view === "map" && <ConusMap data={data} canonicalMc={canonicalMc} />}
       </div>
 
-      <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+      {/* Alert Feed sidebar — hidden below lg so the main content gets full
+       * width on mobile/tablet. Mobile users open the alert feed via the
+       * "Alerts" button in the main content header (see CollapsibleAlertsButton). */}
+      <aside className="hidden w-80 shrink-0 flex-col overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-bg)] p-3 lg:flex">
         <div className="mb-2 flex items-center justify-between">
           <h3
             className="font-mono text-xs font-semibold uppercase text-[var(--color-text)] tracking-widest"
@@ -681,7 +695,10 @@ function FleetSkeleton() {
   return (
     <div className="flex h-full">
       <div className="flex flex-1 flex-col overflow-y-auto p-4">
-        <div className="mb-4 grid grid-cols-4 gap-3">
+        <div
+          className="mb-4 grid gap-4"
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(14rem, 100%), 1fr))" }}
+        >
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}

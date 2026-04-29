@@ -124,7 +124,7 @@ export function TopBar() {
                       key={tab.to}
                       aria-disabled="true"
                       title={`Out of scope · authorized: ${allowedRoles.map((r) => ROLE_LABELS[r]).join(", ")}`}
-                      className="group relative cursor-not-allowed select-none px-3 py-2 font-mono text-sm font-semibold uppercase tracking-widest text-[var(--color-text-muted)] opacity-50"
+                      className="group relative cursor-not-allowed select-none px-2 py-2 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)] opacity-50 sm:px-3 sm:text-sm"
                     >
                       {/* Tab numerals removed in TopBar declutter — the
                        * "01/02/03" prefix added decoration that the spec
@@ -151,7 +151,7 @@ export function TopBar() {
                     to={tab.to}
                     className={({ isActive }) =>
                       clsx(
-                        "group relative px-3 py-2 font-mono text-sm font-semibold uppercase transition-colors tracking-widest",
+                        "group relative px-2 py-2 font-mono text-xs font-semibold uppercase transition-colors tracking-widest sm:px-3 sm:text-sm",
                         isActive
                           ? "text-[var(--color-text)]"
                           : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
@@ -179,6 +179,7 @@ export function TopBar() {
                   </NavLink>
                 );
               })}
+            <MoreMenu />
           </nav>
         </div>
 
@@ -198,22 +199,41 @@ export function TopBar() {
          * Stage mode replaces operator chrome with StageCluster (Failsafe
          * + Reset + Audit) and keeps the AlertBadge backstop so a stage
          * presenter sees the alert count even with the dropdown closed. */}
-        <div className="flex min-w-0 shrink items-center gap-2 overflow-hidden">
+        {/* No `overflow-hidden` here — the IdentityPill (and others) render
+         * absolute-positioned dropdowns that the right-cluster wrapper would
+         * otherwise clip, leaving the menu present in the DOM but invisible
+         * on screen. Each child handles its own truncation via min-w-0 +
+         * truncate; we don't need a clipping ancestor. */}
+        <div className="flex min-w-0 shrink items-center gap-2">
           {/* CompactMissionClock for the cramped 1024–1279 (md/lg) range.
-           * The full centred MissionClock renders at xl+. At sm the
-           * compact chip is hidden — the System chip dropdown's
+           * The full centred MissionClock renders at xl+. Below md the
+           * compact chip is hidden — the IdentityPill dropdown's
            * "Mission timeline" row is the fallback access path. */}
           <span className="hidden md:inline-flex xl:hidden">
             <MissionClock compact />
           </span>
-          {/* SystemStatusChip is part of the stable spine — present in
-           * both operator and stage modes so the sync/gcss/mode/timeline
-           * dropdown is always one click away (and at sm it's the only
-           * way to reach the mission timeline). */}
-          <SystemStatusChip />
-          <CommsControl />
-          {!stageMode && <PushToJointButton role={role} />}
-          {!stageMode && <NotificationsChip />}
+          {/* SystemStatusChip / CommsControl / Push-to-Joint / Notifications
+           * collapse to icon-only or hide entirely below sm — everything
+           * is reachable through the IdentityPill account-menu drawer
+           * which renders fullscreen on mobile. The IdentityPill itself
+           * stays visible on every viewport because it's the operator's
+           * primary identity + escape hatch. */}
+          <span className="hidden sm:inline-flex">
+            <SystemStatusChip />
+          </span>
+          <span className="hidden sm:inline-flex">
+            <CommsControl />
+          </span>
+          {!stageMode && (
+            <span className="hidden md:inline-flex">
+              <PushToJointButton role={role} />
+            </span>
+          )}
+          {!stageMode && (
+            <span className="hidden sm:inline-flex">
+              <NotificationsChip />
+            </span>
+          )}
           {/* StageCluster is stage-only — the operator chrome stays
            * decluttered (System + Notif + Comms + Identity). Operator
            * access to Reset (g4) and Failsafe (when scenario loaded)
@@ -233,6 +253,95 @@ export function TopBar() {
         </div>
       </div>
     </header>
+  );
+}
+
+// MoreMenu — dropdown next to the primary nav giving one-click access to
+// every secondary surface from any view. Closes the discoverability gap
+// where DHA RESCUE / Joint / Pitch / Demo / About / Transition /
+// Integrations had no path from chrome and required URL typing.
+function MoreMenu() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const { role, stageMode } = useSpireStore();
+
+  // Close on outside click or Escape.
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Surface list — every page reachable with one click. Stage mode hides
+  // the operator-only chrome (Pitch / Demo cockpit / About / Transition)
+  // since those are presenter-room artifacts, not on-stage surfaces.
+  // DHA RESCUE only appears here in operator mode (it's already a primary
+  // tab in stage mode).
+  const items: { to: string; label: string; hide?: boolean }[] = [
+    { to: "/", label: "Decision Bridge" },
+    { to: "/dha-rescue", label: "DHA Rescue", hide: stageMode },
+    { to: "/joint/preview", label: "Joint COP" },
+    { to: "/integrations", label: "Integrations" },
+    { to: "/pitch", label: "Pitch deck", hide: stageMode },
+    { to: "/demo", label: "Demo cockpit", hide: stageMode },
+    { to: "/about/team", label: "About / Team", hide: stageMode },
+    { to: "/transition", label: "Transition" },
+  ].filter((i) => !i.hide);
+
+  // Admin hides for non-security_manager. The primary nav already shows
+  // ADMIN for security_manager, but list it here too as a fallback path.
+  if (role === "security_manager") {
+    items.push({ to: "/admin", label: "Admin · Audit SOC" });
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Open more views"
+        onClick={() => setOpen((v) => !v)}
+        className="group relative inline-flex h-11 items-center gap-1 rounded-sm px-2 py-2 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-selected)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface)] sm:px-3 sm:text-sm"
+      >
+        More
+        <span aria-hidden className={clsx("text-[10px] transition-transform", open && "rotate-180")}>▾</span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 top-full z-[70] mt-1 min-w-[14rem] overflow-hidden rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface-raised)] shadow-2xl"
+        >
+          <div className="border-b border-[var(--color-border)] px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            More views
+          </div>
+          <ul className="flex flex-col py-1">
+            {items.map((item) => (
+              <li key={item.to}>
+                <Link
+                  to={item.to}
+                  onClick={() => setOpen(false)}
+                  role="menuitem"
+                  className="block min-h-[44px] truncate px-3 py-2.5 font-mono text-sm uppercase tracking-wider text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:bg-[var(--color-surface-hover)] focus-visible:text-[var(--color-text)] focus-visible:outline-none"
+                >
+                  {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -617,7 +726,10 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
         >
           {user.initials}
         </span>
-        <span className="flex min-w-0 flex-col items-start leading-tight">
+        {/* Name + role hidden below sm — the avatar (initials) is the
+         * mobile-tier identity affordance, with full name + role visible
+         * inside the dropdown menu. */}
+        <span className="hidden min-w-0 flex-col items-start leading-tight sm:flex">
           <span className="max-w-[9.5rem] truncate text-[12px] font-semibold tracking-wider">
             {user.rank} {user.last_name}
           </span>

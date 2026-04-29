@@ -1224,7 +1224,7 @@ export function DecisionBridgeView() {
   const fallbackPath = useMemo(() => ROLE_DEFAULT_VIEW[role] ?? "/bastion", [role]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto bg-[var(--color-bg)] p-3 xl:overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto bg-[var(--color-bg)] p-3">
       {/* Header strap — view title + escape hatch to the role-default surface.
        * Wraps to two rows on narrow viewports so the title doesn't squeeze
        * the Skip-to button to the point of unreadability. */}
@@ -1265,29 +1265,33 @@ export function DecisionBridgeView() {
         />
       )}
 
-      {/* Hero tile grid — fluid responsive 1024–2560+ and degrades cleanly
-       * to mobile (<sm).
-       *   xl+ (1280+):  6-col × 2-row (Mission/Alerts/Shortages, MC/Audit)
-       *   md  (768+):   2-col flow — pairs of tiles per row
-       *   sm  (640+):   2-col but allow tiles to grow vertically
-       *   <sm:          1-col, all tiles full-width stacked, scrollable
+      {/* Hero tile grid — auto-fit responsive with generous breathing room.
+       * The grid packs as many 22rem-min tiles per row as fits, no
+       * breakpoints. Reflows smoothly from 320px (1 col) to 2560px+
+       * without code branches.
        *
-       * Tile bodies use min-h-0 + overflow so long entries truncate inside
-       * the tile rather than pushing the row off-screen at any viewport. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6 xl:grid-rows-2">
-        <div className="min-h-[14rem] xl:col-span-2 xl:row-span-1 xl:min-h-0">
+       * Each tile is a @container so the tile's own internal layout
+       * adapts to its actual rendered width, not the viewport. */}
+      <div
+        className="grid flex-1 gap-4 sm:gap-5"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(min(22rem, 100%), 1fr))",
+          gridAutoRows: "minmax(15rem, auto)",
+        }}
+      >
+        <div className="@container min-h-0">
           <MissionTile mission={mission} error={missionErr} />
         </div>
-        <div className="min-h-[14rem] xl:col-span-2 xl:row-span-1 xl:min-h-0">
+        <div className="@container min-h-0">
           <AlertsTile data={alerts} cop={cop} error={alertsErr} />
         </div>
-        <div className="min-h-[14rem] xl:col-span-2 xl:row-span-1 xl:min-h-0">
+        <div className="@container min-h-0">
           <ShortagesTile data={shortages} error={shortagesErr} />
         </div>
-        <div className="min-h-[14rem] xl:col-span-3 xl:row-span-1 xl:min-h-0">
+        <div className="@container min-h-0">
           <McTile data={mc} error={mcErr} />
         </div>
-        <div className="min-h-[14rem] md:col-span-2 xl:col-span-3 xl:row-span-1 xl:min-h-0">
+        <div className="@container min-h-0">
           <AuditTile data={audit} error={auditErr} />
         </div>
       </div>

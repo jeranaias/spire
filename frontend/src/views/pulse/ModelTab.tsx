@@ -79,7 +79,7 @@ export function ModelTab() {
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 p-4">
         <Header card={card} />
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(20rem, 100%), 1fr))" }}>
           <Panel title="What we optimize · loss function">
             <div className="font-mono text-sm leading-relaxed text-[var(--color-text)]">
               {card.loss_function.headline}
@@ -126,7 +126,7 @@ export function ModelTab() {
           </div>
         </Panel>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(20rem, 100%), 1fr))" }}>
           <Panel title="Train / val / test split">
             <SplitTable card={card} />
             <div className="mt-3 spire-body-muted">
