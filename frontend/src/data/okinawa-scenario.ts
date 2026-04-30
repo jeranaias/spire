@@ -58,116 +58,133 @@ export type ScenarioMarker = {
 // on Okinawa Honto carry the standard friendly USMC posture.
 
 export const OKINAWA_SCENARIO: ScenarioMarker[] = [
-  // ─── OKINAWA HONTO — MEF-scale dispersion ────────────────────────────
-  // III MEF HQ, Camp Foster
+  // ─── OKINAWA HONTO — PULSE units, posture for the III MEF logistics force ─
+  //
+  // The 10 PULSE-fixture units are the COP's USMC ground truth: each
+  // gets exactly one marker, label = pulseUnit (1:1), so a click on a
+  // marker pulls real readiness from PULSE and a "Show on map" deeplink
+  // from PULSE lands deterministically. 8 are positioned on Okinawa
+  // Honto across realistic camps; 2 are forward-deployed (2d LAAD on
+  // Miyako, 2/14 Marines on Ishigaki) to visualize the dispersed
+  // stand-in-forces concept the doctrine pitches.
+  //
+  // The marker IDs use the `okn-pulse-<unit>` slug so duplicate-alias
+  // bugs (the III MEF / Henoko collision we fixed earlier) cannot
+  // recur — slug derives from the unit, no two markers share a unit.
   {
-    id: "okn-mef-hq",
-    sidc: "SFGPUH----H----",
+    id: "okn-pulse-clb6",
+    sidc: "SFGPUSS---H----",
+    coords: [127.6817, 26.2542],
+    label: "CLB-6",
+    parent: "Camp Kinser",
+    island: "okinawa",
+    echelon: "Battalion",
+    additionalInfo: "Combat Log Bn",
+    pulseUnit: "CLB-6",
+  },
+  {
+    id: "okn-pulse-clb1",
+    sidc: "SFGPUSS---H----",
     coords: [127.7544, 26.2742],
-    label: "III MEF",
+    label: "CLB-1",
     parent: "Camp Foster",
     island: "okinawa",
-    echelon: "Corps",
-    additionalInfo: "MEF HQ",
-    pulseUnit: null,
+    echelon: "Battalion",
+    additionalInfo: "Combat Log Bn",
+    pulseUnit: "CLB-1",
   },
-  // 3rd Marine Division HQ, Camp Courtney
   {
-    id: "okn-3mardiv",
-    sidc: "SFGPUCI---H----",
-    coords: [127.8406, 26.4036],
-    label: "3 MARDIV",
-    parent: "Camp Courtney",
+    id: "okn-pulse-3dmaint",
+    sidc: "SFGPUSM---H----",
+    coords: [127.7616, 26.2810],
+    label: "3d Maint Bn",
+    parent: "Camp Foster",
     island: "okinawa",
-    echelon: "Division",
-    additionalInfo: "Inf Div HQ",
+    echelon: "Battalion",
+    additionalInfo: "Maintenance",
     pulseUnit: "3d Maint Bn",
   },
-  // 4th Marines (infantry regiment), Camp Schwab
   {
-    id: "okn-4mar",
-    sidc: "SFGPUCI--------",
+    id: "okn-pulse-mals31",
+    sidc: "SFAPMF---------",
+    coords: [127.7686, 26.3559],
+    label: "MALS-31",
+    parent: "Kadena AB",
+    island: "okinawa",
+    echelon: "Squadron",
+    additionalInfo: "Avn Logistics",
+    pulseUnit: "MALS-31",
+  },
+  {
+    id: "okn-pulse-mwss271",
+    sidc: "SFAPMHR--------",
+    coords: [127.7561, 26.2710],
+    label: "MWSS-271",
+    parent: "MCAS Futenma",
+    island: "okinawa",
+    echelon: "Squadron",
+    additionalInfo: "Wing Support",
+    pulseUnit: "MWSS-271",
+  },
+  {
+    id: "okn-pulse-7esb",
+    sidc: "SFGPUCE---H----",
+    coords: [127.8917, 26.4612],
+    label: "7th ESB",
+    parent: "Camp Hansen",
+    island: "okinawa",
+    echelon: "Battalion",
+    additionalInfo: "Engineer Spt",
+    pulseUnit: "7th ESB",
+  },
+  {
+    id: "okn-pulse-3-6mar",
+    sidc: "SFGPUCI---H----",
     coords: [128.0500, 26.5167],
-    label: "4 MAR",
+    label: "3/6 Marines",
     parent: "Camp Schwab",
     island: "okinawa",
-    echelon: "Regiment",
+    echelon: "Battalion",
     additionalInfo: "Infantry",
     pulseUnit: "3/6 Marines",
   },
-  // 12th Marine Regiment (artillery / HIMARS), Camp Hansen
   {
-    id: "okn-12mar",
-    sidc: "SFGPUCF--------",
-    coords: [127.8814, 26.4503],
-    label: "12 MAR",
-    parent: "Camp Hansen",
-    island: "okinawa",
-    echelon: "Regiment",
-    additionalInfo: "HIMARS / Arty",
-    pulseUnit: "2d LAR Bn",
-  },
-  // 3rd Reconnaissance Battalion, Camp Schwab
-  {
-    id: "okn-3recon",
-    sidc: "SFGPUCRR-------",
+    id: "okn-pulse-2dlar",
+    sidc: "SFGPUCRR--H----",
     coords: [128.0322, 26.5061],
-    label: "3 RECON",
+    label: "2d LAR Bn",
     parent: "Camp Schwab",
     island: "okinawa",
     echelon: "Battalion",
-    additionalInfo: "LRR",
+    additionalInfo: "Light Armd Recon",
+    pulseUnit: "2d LAR Bn",
+  },
+  // Forward-deployed: 2d LAAD on Miyako (air defense for the stand-in posture).
+  {
+    id: "okn-pulse-2dlaad",
+    sidc: "SFGPUCDA--H----",
+    coords: [125.3450, 24.7950],
+    label: "2d LAAD Bn",
+    parent: "Miyako AD Site",
+    island: "miyako",
+    echelon: "Battalion",
+    additionalInfo: "Air Defense",
+    pulseUnit: "2d LAAD Bn",
+  },
+  // Forward-deployed: 2/14 Marines on Ishigaki (HIMARS/arty forward).
+  {
+    id: "okn-pulse-2-14mar",
+    sidc: "SFGPUCF---H----",
+    coords: [124.1750, 24.4150],
+    label: "2/14 Marines",
+    parent: "Ishigaki Fires Site",
+    island: "ishigaki",
+    echelon: "Battalion",
+    additionalInfo: "HIMARS / Arty",
     pulseUnit: "2/14 Marines",
   },
-  // 9th Engineer Support Battalion, Camp Hansen
-  {
-    id: "okn-9esb",
-    sidc: "SFGPUCE--------",
-    coords: [127.8917, 26.4612],
-    label: "9 ESB",
-    parent: "Camp Hansen",
-    island: "okinawa",
-    echelon: "Battalion",
-    additionalInfo: "Engineer",
-    pulseUnit: "7th ESB",
-  },
-  // MAG-36, MCAS Futenma — rotary
-  {
-    id: "okn-mag36",
-    sidc: "SFAPMHR--------",
-    coords: [127.7561, 26.2710],
-    label: "MAG-36",
-    parent: "MCAS Futenma",
-    island: "okinawa",
-    echelon: "Group",
-    additionalInfo: "Rotary",
-    pulseUnit: "MWSS-271",
-  },
-  // 1st MAW HQ, Kadena
-  {
-    id: "okn-1maw",
-    sidc: "SFAPMF---------",
-    coords: [127.7686, 26.3559],
-    label: "1 MAW",
-    parent: "Kadena AB",
-    island: "okinawa",
-    echelon: "Wing",
-    additionalInfo: "Fixed Wing",
-    pulseUnit: "MALS-31",
-  },
-  // CLR-37 Combat Logistics Regiment, Camp Kinser
-  {
-    id: "okn-clr37",
-    sidc: "SFGPUSS--------",
-    coords: [127.6817, 26.2542],
-    label: "CLR-37",
-    parent: "Camp Kinser",
-    island: "okinawa",
-    echelon: "Regiment",
-    additionalInfo: "CSS / Log",
-    pulseUnit: "CLB-1",
-  },
-  // Class III/V fuel point, Tengan Pier
+
+  // ─── Site markers (no PULSE backing — these are facilities, not units) ─
   {
     id: "okn-fuel-tengan",
     sidc: "SFGPISP-OS-----",
@@ -178,7 +195,6 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     additionalInfo: "Class III",
     pulseUnit: null,
   },
-  // Ammo / Class V depot, Henoko
   {
     id: "okn-ammo-henoko",
     sidc: "SFGPISP-A------",
@@ -187,9 +203,8 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Henoko Munitions",
     island: "okinawa",
     additionalInfo: "Ammo Depot",
-    pulseUnit: "CLB-6",
+    pulseUnit: null,
   },
-  // Long-range surveillance radar, Yaedake (north Okinawa highlands)
   {
     id: "okn-radar-yaedake",
     sidc: "SFGPESR--------",
@@ -198,9 +213,8 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Yaedake Radar",
     island: "okinawa",
     additionalInfo: "G/ATOR",
-    pulseUnit: "2d LAAD Bn",
+    pulseUnit: null,
   },
-  // ECP / Main Gate, Camp Hansen
   {
     id: "okn-ecp-hansen",
     sidc: "SFGPSPA--------",
@@ -209,7 +223,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Hansen Main Gate",
     island: "okinawa",
     additionalInfo: "Checkpoint",
-    pulseUnit: "2d LAR Bn",
+    pulseUnit: null,
   },
 
   // ─── MIYAKO — JGSDF SSM regiment, ground troops ───────────────────────
