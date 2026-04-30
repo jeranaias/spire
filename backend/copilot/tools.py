@@ -163,19 +163,43 @@ async def _tool_predict_failures(unit: Optional[str] = None, role: str = "mef_co
 
     `unit` is optional — when omitted, falls back to whole-scope.
 
-    Earlier versions called `predict_failures` (an async handler) without
-    await and read `.predictions` off the coroutine, which always returned
-    `[]`. Same bug as `_tool_recommend_actions`; fixed alongside it.
+    Live walkthrough audit 2026-04-30: prior shape read `result.predictions`
+    but the route actually returns `assets: [{asset_id, unit_name,
+    equipment_type, predictions: [...]}, ...]`. So the runner shipped
+    silently empty for every call. Now flattens to a ranked list of
+    component-level predictions tagged with their owning asset, sorted
+    by probability descending. Threshold dropped from 0.4 to 0.2 — the
+    rule-based engine outputs sparse high-probability hits at 0.4 even
+    when the dataset has plenty of medium-risk assets, leaving SPIRO
+    with nothing to surface; 0.2 lets the realistic mid-band through.
     """
     from ..routes.pulse import predict_failures
     try:
-        result = await predict_failures(unit=unit, asset_id=None, horizon_days=horizon_days, threshold=0.4, role=role)
+        result = await predict_failures(unit=unit, asset_id=None, horizon_days=horizon_days, threshold=0.2, role=role)
         if not isinstance(result, dict):
             return {"predictions": [], "horizon_days": horizon_days,
                     "warning": "handler returned unexpected type"}
+        assets = result.get("assets", [])
+        flat: list[dict] = []
+        for blk in assets:
+            for pred in blk.get("predictions", []) or []:
+                flat.append({
+                    "asset_id":            blk.get("asset_id"),
+                    "unit_name":           blk.get("unit_name"),
+                    "equipment_type":      blk.get("equipment_type"),
+                    "component":           pred.get("component"),
+                    "probability":         pred.get("probability"),
+                    "predicted_window_days": pred.get("predicted_window_days"),
+                    "confidence":          pred.get("confidence"),
+                    "criticality":         pred.get("criticality"),
+                    "common_failure_modes": pred.get("common_failure_modes") or [],
+                })
+        flat.sort(key=lambda p: -(p.get("probability") or 0))
         return {
-            "predictions": result.get("predictions", []),
+            "predictions": flat[:30],
+            "asset_count": len(assets),
             "horizon_days": horizon_days,
+            "engine": result.get("engine", "rule-based"),
         }
     except Exception as e:  # noqa: BLE001
         return {"error": f"predict_failures failed: {type(e).__name__}: {e}"}
