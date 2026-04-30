@@ -29,20 +29,33 @@ you are and what's happening.
 
 ## The three views
 
-- **SENTRY** — classification-aware data sanitization. Tier-1 regex +
-  Tier-2 LLM gate clear ~70% automatically; aggregation-risk heatmap
-  catches Secret-by-aggregation cases humans miss. Coalition release
-  scoping for FVEY / JPN / AUS / PHL with redactions in real time.
+- **SENTRY** — classification-aware data sanitization. Tier-1 rule
+  engine flags PII / geo / comms / classified-TM / controlled-serial
+  spans with evidence; **Tier-2 grounded explainer** calls Gemma 4
+  26B FP8 on demand to write a paragraph-length grounded
+  explanation + a redacted-phrasing suggestion. Bulk Mark Draft
+  classifies a CSV in one shot. Coalition release scoping for
+  **FVEY / JPN / AUS / PHL** produces a real downloadable ZIP
+  (scoped+redacted CSV+JSON, manifest with SHA-256, audit chain
+  snapshot) — not a toast. Aggregation-risk heatmap catches
+  Secret-by-aggregation cases humans miss; one click re-marks every
+  matching SR in a single audit row.
 - **PULSE** — fleet readiness + predictive risk. Real Monte Carlo
   forecast (200 forward paths, p10/p90 envelope, cross-probability),
   auto-replenishment recommendations (cannib / expedite / cross-level
   ranked by impact-per-dollar-per-day), GC-3 predicted failures with
-  draftable requisitions.
-- **BASTION** — Common Operating Picture. Real MapLibre vector tiles
-  with MIL-STD-2525C-lite unit symbology, ECP gate glyphs, rally
-  points, building polygons. ThermalHawk UAS sim with auto-correlated
-  cordons + QRF dot animation. Multi-sensor threat fusion correlates
-  PACS + ThermalHawk + SCADA + weather into composite threats.
+  draftable requisitions. Every unit has a "📍 On Map" deeplink that
+  flies the BASTION camera deterministically to that unit's marker.
+- **BASTION** — Common Operating Picture rendered on real MapLibre
+  vector tiles. **10 PULSE units mapped 1:1** as MIL-STD-2525D
+  symbols across Camp Foster / Kinser / Hansen / Schwab / Kadena /
+  Futenma, with two forward-deployed (2d LAAD Bn → Miyako, 2/14
+  Marines → Ishigaki) for the dispersed-stand-in-forces posture.
+  Click any marker → drawer pulls live MC% from the readiness
+  endpoint. Plus 12 JGSDF coalition partner markers, threat-rings
+  overlay (DF-21D 1500km / YJ-12 400km centered on Taipei),
+  ThermalHawk UAS sim with auto-correlated cordons + QRF dot, and
+  multi-sensor threat fusion (PACS + ThermalHawk + SCADA + weather).
 
 ## The 7 game-changers (all shipped in v1.0.0-rc1)
 
@@ -55,6 +68,23 @@ you are and what's happening.
 | GC-5 | Coalition interoperability | SENTRY → Coalition tab → partner picker |
 | GC-6 | Training data flywheel | TopBar → Admin (Security Manager only) |
 | GC-7 | Air-gap deployment mode | TopBar → AIR-GAP toggle |
+
+## SPIRO — operator AI assistant
+
+A right-edge chat surface (Ctrl+/) that wraps Gemma 4 26B FP8 with
+**16 grounded tools**: status_summary, forecast_unit, walk_unit,
+list_alerts, mark_text, find_asset, search_assets,
+find_cannibalization_match, recommend_actions, predict_failures,
+get_coalition_view, plus 4 client-side map controls (map_fly_to,
+map_select_marker, map_list_markers, map_query_within_radius).
+Operator types in plain English; SPIRO returns a proposed plan
+("Here are the steps · approve to run"); operator approves;
+results render in the transcript with per-call cost+latency.
+
+Routes to Gemma 4 26B FP8 over the licensed proxy (RigRun on-prem
+via Tailscale). When the proxy is degraded, the deterministic
+intent-router covers the same 16 tools so the operator never sees
+"language model unavailable."
 
 ## Five operator roles
 
@@ -97,22 +127,29 @@ backend/         FastAPI + canonical dataset engine + audit chain
   sync.py        GC-2 vector-clock primitives
   persistence.py SQLite + SHA-256 hash-chained audit log
   scoping.py     Role-based access control
-dataset/         Synthetic dataset engine (10 units, 350 assets, 6,332 SRs)
+dataset/         Synthetic dataset engine (10 units, 352 assets, 6,320 SRs, 128k snapshots, 100 incidents, 7 cannib events)
   data/          MTBF table, replenishment rates, coalition profiles, installation map
   *.py           Engine modules (lifecycle, supply, faults, consistency, etc.)
 frontend/
   src/views/     SENTRY · PULSE · BASTION · Admin
+  src/views/sentry/
+    MarkTab.tsx                  Tier-1 mark + Tier-2 Gemma explainer + bulk-CSV drop + recent attestations
+    ReviewQueueTab.tsx           Filter chips + reveal-sensitive toggle + clickable aggregation cells
+    ProcessingTab.tsx            Animated replay of the synchronous engine pass
+    ExportTab.tsx                Manifest preview + sanitized bundle ZIP
+    CoalitionTab.tsx             GC-5 partner-scoped view + real release ZIP
   src/components/
-    MapCanvas.tsx          MapLibre BASTION map
-    RecommendPanel.tsx     GC-1 ranked actions
-    PredictedFailurePanel  GC-3 failure surface
-    FusedThreatsPanel.tsx  GC-4 correlation chains
-    CoalitionTab.tsx       GC-5 partner-scoped view (in views/sentry/)
-    NodeStatus.tsx         GC-2 sync state + conflict drawer
-    FeedbackDrawer.tsx     Pilot in-app issue filing
-    HelpOverlay.tsx        ? key keyboard shortcut reference
-    ClassificationBand.tsx FPCON-aware banner
-    StatusFooter.tsx       Live telemetry ticker
+    OkinawaMapCanvas.tsx         BASTION COP — MapLibre + 26 markers, 10 PULSE-mapped 1:1
+    Spiro.tsx                    Right-edge AI assistant (Ctrl+/), 16 tools
+    state/mapBridge.ts           Module-scope handle that connects SPIRO to the map
+    RecommendPanel.tsx           GC-1 ranked actions
+    PredictedFailurePanel.tsx    GC-3 failure surface
+    FusedThreatsPanel.tsx        GC-4 correlation chains
+    NodeStatus.tsx               GC-2 sync state + conflict drawer
+    FeedbackDrawer.tsx           Pilot in-app issue filing → audit + GitHub issue
+    HelpOverlay.tsx              ? key keyboard shortcut reference
+    classification/              FPCON-aware classification banner strip
+    StatusFooter.tsx             Live telemetry ticker (LLM up/down, audit chain head, etc.)
 docs/            ARCHITECTURE, USER_GUIDE, RUNBOOK, BUG_BASH (pilot first-week checklist)
 scripts/         Playwright screenshot harness, MGRS lat/lon baker, smoke tests
 .github/         Issue templates, PR template, CI workflow
@@ -141,7 +178,17 @@ LICENSE.md          USMC vs Thornveil IP split
 
 - v1.0.0-mvp · 2026-04-24 · pre-game-changer baseline (tagged)
 - v1.0.0-rc1 · 2026-04-25 · all 7 game-changers shipped, pilot-ready
+- 2026-04-29 → 04-30 · adversarial polish pass: SPIRO Tier-2 wired
+  to live Gemma 4 26B FP8 (real `--enable-auto-tool-choice` agentic
+  mode, not a stubbed label); SENTRY Tier-2 grounded explainer,
+  bulk Mark CSV, real coalition release ZIP, manifest preview,
+  Review Queue filter chips, "Reveal sensitive (audit logged)"
+  toggle, clickable aggregation matrix; BASTION map markers
+  rewritten 1:1 with PULSE units (deterministic deeplink); 16
+  audit-chain entry kinds verified end-to-end live.
 - Repo: https://github.com/jeranaias/spire (private during pilot)
+- Live: <https://spire-mdm.fly.dev> · Gemma proxy on RigRun
+  (RTX PRO 6000) over Tailscale
 
 ## Filing issues
 
