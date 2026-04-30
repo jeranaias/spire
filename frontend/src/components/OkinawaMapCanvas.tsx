@@ -632,7 +632,12 @@ export function OkinawaMapCanvas({
         </div>
       )}
       <div className="relative flex-1 min-h-0 w-full">
-        <div ref={containerRef} className="absolute inset-0" />
+        {/* h-full w-full not `absolute inset-0` — MapLibre's CSS sets
+         * .maplibregl-map { position: relative } which beats the Tailwind
+         * `absolute` class and collapses the wrapper to h:0. Filling the
+         * parent via flex height is the path that survives MapLibre's
+         * stylesheet without !important hacks. */}
+        <div ref={containerRef} className="h-full w-full" />
         {selectedMarker && (
           <MarkerDrawer
             marker={selectedMarker}

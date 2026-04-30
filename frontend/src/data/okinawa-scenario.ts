@@ -69,7 +69,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Corps",
     additionalInfo: "MEF HQ",
-    pulseUnit: "CLB-6",
+    pulseUnit: null,
   },
   // 3rd Marine Division HQ, Camp Courtney
   {
@@ -176,7 +176,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Tengan Pier",
     island: "okinawa",
     additionalInfo: "Class III",
-    pulseUnit: "CLB-1",
+    pulseUnit: null,
   },
   // Ammo / Class V depot, Henoko
   {
