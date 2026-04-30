@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
-import { api, type SentryReviewQueue } from "../../api";
+import { api, type SentryReviewQueue, type MarkExplainResult } from "../../api";
 import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
 import { useSpireStore } from "../../state/store";
@@ -33,6 +33,28 @@ const BULK_TYPED_CONFIRM_THRESHOLD = 50;
 // (USA/USMC serials) is operationally sensitive but not PII per se. The
 // presenter "REDACTED for projection" toggle masks all categories regardless.
 const PII_MASK_CATEGORIES = new Set(["pii", "geo"]);
+
+// Pull highlight rows defensively — the field is loosely typed (any[]) on
+// SentryReviewQueue; this normaliser keeps the inspector reveal-state path
+// simple.
+function highlightsRaw(record: any): { start: number; end: number; category: string }[] {
+  return Array.isArray(record?.highlights) ? record.highlights : [];
+}
+
+// Format the reveal-audit timestamp for the helper line. Backend returns ISO
+// 8601 (UTC); we render HH:MM UTC so the operator can cross-reference the
+// audit log without parsing seconds + timezone.
+function formatRevealTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${hh}:${mm} UTC`;
+  } catch {
+    return iso;
+  }
+}
 
 type Column = "auto_cleared" | "flagged" | "held";
 type Action = "approve" | "reject";
@@ -82,6 +104,21 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
   const role = useSpireStore((s) => s.role) as Role;
   const pushToast = useSpireStore((s) => s.pushToast);
 
+  // Client-side filter chips. Multi-select within a category (OR), AND across
+  // categories. `clsFilter` of "ALL" means no classification narrowing; the
+  // others use Sets so toggles add/remove cleanly.
+  const [clsFilter, setClsFilter] = useState<"ALL" | "UNCLASSIFIED" | "CUI">("ALL");
+  const [flagFilter, setFlagFilter] = useState<Set<string>>(new Set());
+  const [unitFilter, setUnitFilter] = useState<Set<string>>(new Set());
+  const [reasonFilter, setReasonFilter] = useState<Set<string>>(new Set());
+
+  // Aggregation matrix re-mark state — which (unit, equipment) pairs the
+  // operator has already remarked in this session, plus the pending
+  // confirmation modal target.
+  const [remarkConfirm, setRemarkConfirm] = useState<{ unit: string; equipment: string; count: number } | null>(null);
+  const [remarkRunning, setRemarkRunning] = useState(false);
+  const [remarkedPairs, setRemarkedPairs] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (!ctx.batchId) return;
     let cancelled = false;
@@ -105,21 +142,130 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
     // request rejected by the backend's role-scoping filter.
   }, [ctx.batchId, role, retryCount]);
 
-  const filteredQueue = useMemo(() => {
+  // Reset the remark visual state whenever the operator switches batches —
+  // a remarked CLB-6/MTVR pair from one batch should not paint as remarked
+  // in another. Resolved-records map clears too so the optimistic-removal
+  // path doesn't carry across batches.
+  useEffect(() => {
+    setRemarkedPairs(new Set());
+    setResolved({});
+  }, [ctx.batchId]);
+
+  // Step 1 — strip resolved records, then build the merged "all visible
+  // records" pool that the chip-derivation code reads. Step 2 — apply chip
+  // filters. We keep the unfiltered counts for the chip count badges so a
+  // chip's badge shows the total pre-filter pool, not the current filtered
+  // intersection (otherwise the badge zeroes out and the chip becomes
+  // un-toggleable).
+  const queueAfterResolved = useMemo(() => {
     if (!queue) return null;
     const cut = (xs: any[]) => xs.filter((r) => !resolved[r.sr_number]);
     return {
-      ...queue,
       auto_cleared: cut(queue.auto_cleared),
       flagged: cut(queue.flagged),
       held: cut(queue.held),
-      counts: {
-        auto_cleared: cut(queue.auto_cleared).length,
-        flagged: cut(queue.flagged).length,
-        held: cut(queue.held).length,
-      },
     };
   }, [queue, resolved]);
+
+  const filterFacets = useMemo(() => {
+    if (!queueAfterResolved) {
+      return { units: [] as Array<{ name: string; count: number }>, flags: [] as Array<{ name: string; count: number }>, reasons: [] as Array<{ name: string; count: number }> };
+    }
+    const all = [
+      ...queueAfterResolved.auto_cleared,
+      ...queueAfterResolved.flagged,
+      ...queueAfterResolved.held,
+    ];
+    const flagCounts = new Map<string, number>();
+    const unitCounts = new Map<string, number>();
+    const reasonCounts = new Map<string, number>();
+    for (const r of all) {
+      for (const f of r.flags || []) flagCounts.set(f, (flagCounts.get(f) ?? 0) + 1);
+      const unit = r.unit_name ?? "(unknown)";
+      unitCounts.set(unit, (unitCounts.get(unit) ?? 0) + 1);
+      for (const reason of r.held_reasons || []) reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+    }
+    const flags = Array.from(flagCounts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+    // Top 10 units by record count, alphabetised within the slice.
+    const units = Array.from(unitCounts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const reasons = Array.from(reasonCounts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+    return { flags, units, reasons };
+  }, [queueAfterResolved]);
+
+  const recordMatchesFilters = useCallback(
+    (r: any) => {
+      if (clsFilter !== "ALL") {
+        const norm = normalizeClassification(
+          String(r.detected_classification ?? r.source_classification ?? "UNCLASSIFIED"),
+        );
+        if (norm !== clsFilter) return false;
+      }
+      if (flagFilter.size > 0) {
+        const recFlags: string[] = r.flags || [];
+        if (!recFlags.some((f) => flagFilter.has(f))) return false;
+      }
+      if (unitFilter.size > 0) {
+        if (!unitFilter.has(r.unit_name ?? "(unknown)")) return false;
+      }
+      if (reasonFilter.size > 0) {
+        const recReasons: string[] = r.held_reasons || [];
+        if (!recReasons.some((rs) => reasonFilter.has(rs))) return false;
+      }
+      return true;
+    },
+    [clsFilter, flagFilter, unitFilter, reasonFilter],
+  );
+
+  const filteredQueue = useMemo(() => {
+    if (!queue || !queueAfterResolved) return null;
+    const auto_cleared = queueAfterResolved.auto_cleared.filter(recordMatchesFilters);
+    const flagged = queueAfterResolved.flagged.filter(recordMatchesFilters);
+    const held = queueAfterResolved.held.filter(recordMatchesFilters);
+    return {
+      ...queue,
+      auto_cleared,
+      flagged,
+      held,
+      counts: {
+        auto_cleared: auto_cleared.length,
+        flagged: flagged.length,
+        held: held.length,
+      },
+    };
+  }, [queue, queueAfterResolved, recordMatchesFilters]);
+
+  const filtersActive =
+    clsFilter !== "ALL" || flagFilter.size > 0 || unitFilter.size > 0 || reasonFilter.size > 0;
+  const totalAfterResolved = queueAfterResolved
+    ? queueAfterResolved.auto_cleared.length + queueAfterResolved.flagged.length + queueAfterResolved.held.length
+    : 0;
+  const totalFiltered = filteredQueue
+    ? filteredQueue.auto_cleared.length + filteredQueue.flagged.length + filteredQueue.held.length
+    : 0;
+  const clearAllFilters = useCallback(() => {
+    setClsFilter("ALL");
+    setFlagFilter(new Set());
+    setUnitFilter(new Set());
+    setReasonFilter(new Set());
+  }, []);
+  const toggleSetMember = (
+    setter: React.Dispatch<React.SetStateAction<Set<string>>>,
+    value: string,
+  ) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return next;
+    });
 
   // Wrapped in fireIdempotent — triple-tapping Approve on the same SR
   // emits exactly one /review request. Keyed per (sr, action) so a
@@ -237,6 +383,48 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
       setBulkConfirm({ col, action, count: items.length });
     },
     [filteredQueue],
+  );
+
+  // Aggregation matrix — server-side batch elevation. We POST the
+  // {batch_id, unit, equipment, target_classification: "CUI"} payload to
+  // /sentry/aggregation/remark, then re-fetch the queue so the affected
+  // SRs paint with their elevated classification. The cell's "remarked"
+  // visual state lives in remarkedPairs and is preserved across the
+  // refetch (cleared only on batch swap).
+  const runAggregationRemark = useCallback(
+    async (unit: string, equipment: string) => {
+      if (!ctx.batchId || remarkRunning) return;
+      setRemarkRunning(true);
+      try {
+        const res = await api.sentry.aggregationRemark({
+          batch_id: ctx.batchId,
+          unit,
+          equipment,
+          target_classification: "CUI",
+          note: "operator-initiated aggregation re-mark",
+        });
+        const count = res?.matched_sr_count ?? 0;
+        pushToast({
+          tone: "ok",
+          text: `Re-marked ${count} SR${count === 1 ? "" : "s"} as CUI · audit logged`,
+        });
+        setRemarkedPairs((prev) => {
+          const next = new Set(prev);
+          next.add(`${unit}::${equipment}`);
+          return next;
+        });
+        // Force a queue refetch so the elevated classifications surface.
+        setRetryCount((n) => n + 1);
+      } catch (err) {
+        pushToast({
+          tone: "error",
+          text: `Aggregation re-mark failed: ${formatApiError(err)}`,
+        });
+      } finally {
+        setRemarkRunning(false);
+      }
+    },
+    [ctx.batchId, remarkRunning, pushToast],
   );
 
   // Keyboard: ↑/↓ moves within the currently-selected column; A approves, R rejects
@@ -402,13 +590,38 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
         )}
       </div>
 
+      {/* Filter chips — client-side narrowing of the loaded queue. Multi
+          select within a category (OR), AND across categories. */}
+      <FilterChipsBar
+        clsFilter={clsFilter}
+        onClsFilter={setClsFilter}
+        flagFilter={flagFilter}
+        onToggleFlag={(name) => toggleSetMember(setFlagFilter, name)}
+        unitFilter={unitFilter}
+        onToggleUnit={(name) => toggleSetMember(setUnitFilter, name)}
+        reasonFilter={reasonFilter}
+        onToggleReason={(name) => toggleSetMember(setReasonFilter, name)}
+        facets={filterFacets}
+        filtersActive={filtersActive}
+        onClear={clearAllFilters}
+        showing={totalFiltered}
+        total={totalAfterResolved}
+      />
+
       <div className="flex flex-1 overflow-hidden tracking-wider">
         {/* Walkthrough #36 — when aggregation_risks fire, the matrix lives
             in the left rail of the queue (always-on, judge-visible) instead
             of being hidden behind a button a 12-second Marine will not
             click. The detail prose panel still toggles below. */}
         {queue && queue.aggregation_risks.length > 0 && (
-          <AggregationRiskRail risks={queue.aggregation_risks} />
+          <AggregationRiskRail
+            risks={queue.aggregation_risks}
+            remarkedPairs={remarkedPairs}
+            remarkRunning={remarkRunning}
+            onCellClick={(unit, equipment, count) =>
+              setRemarkConfirm({ unit, equipment, count })
+            }
+          />
         )}
         <div className={clsx("flex flex-1 overflow-hidden", selectedRecord && "pr-0")}>
           <ReviewColumn
@@ -459,7 +672,15 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
       {/* Walkthrough #20 — aggregation matrix renders matrix-first, prose
           below, anchored at the bottom of the queue. */}
       {showAggregation && queue && (
-        <AggregationRiskPanel risks={queue.aggregation_risks} onClose={() => setShowAggregation(false)} />
+        <AggregationRiskPanel
+          risks={queue.aggregation_risks}
+          onClose={() => setShowAggregation(false)}
+          remarkedPairs={remarkedPairs}
+          remarkRunning={remarkRunning}
+          onCellClick={(unit, equipment, count) =>
+            setRemarkConfirm({ unit, equipment, count })
+          }
+        />
       )}
 
       {/* Walkthrough #35 — bottom sticky classification banner. */}
@@ -476,6 +697,22 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
             const c = bulkConfirm;
             setBulkConfirm(null);
             void runBulk(c.col, c.action);
+          }}
+        />
+      )}
+
+      {/* Aggregation re-mark confirmation modal. */}
+      {remarkConfirm && (
+        <AggregationRemarkConfirmModal
+          unit={remarkConfirm.unit}
+          equipment={remarkConfirm.equipment}
+          count={remarkConfirm.count}
+          running={remarkRunning}
+          onCancel={() => setRemarkConfirm(null)}
+          onConfirm={() => {
+            const c = remarkConfirm;
+            setRemarkConfirm(null);
+            void runAggregationRemark(c.unit, c.equipment);
           }}
         />
       )}
@@ -522,7 +759,17 @@ function ClassificationStripe({
 // equipment_type matrix the same way `AggregationRiskPanel` does, but
 // docked into the queue layout so it is visible the moment the page loads
 // rather than gated behind a button.
-function AggregationRiskRail({ risks }: { risks: any[] }) {
+function AggregationRiskRail({
+  risks,
+  remarkedPairs,
+  remarkRunning,
+  onCellClick,
+}: {
+  risks: any[];
+  remarkedPairs: Set<string>;
+  remarkRunning: boolean;
+  onCellClick: (unit: string, equipment: string, count: number) => void;
+}) {
   const units = useMemo(() => Array.from(new Set(risks.map((r) => r.unit))).sort(), [risks]);
   const equipTypes = useMemo(
     () => Array.from(new Set(risks.map((r) => r.equipment_type))).sort(),
@@ -595,18 +842,61 @@ function AggregationRiskRail({ risks }: { risks: any[] }) {
                       />
                     );
                   }
+                  const pairKey = `${u}::${e}`;
+                  const remarked = remarkedPairs.has(pairKey);
+                  const cannibCount = r.cannib_count ?? r.count ?? r.sr_count ?? 0;
+                  const tid = `rq-agg-cell-${u}-${e}`.replace(/\s+/g, "-");
                   return (
                     <td
                       key={e}
-                      title={r.warning}
-                      className="cursor-help border border-[color-mix(in_oklab,var(--color-warning)_40%,var(--color-border))]"
+                      title={
+                        remarked
+                          ? `${r.warning} · re-marked CUI`
+                          : `${r.warning} · click to re-mark CUI`
+                      }
+                      data-testid={tid}
+                      role="button"
+                      aria-label={`Re-mark ${u} / ${e} batch as CUI`}
+                      tabIndex={0}
+                      onClick={() => {
+                        if (remarkRunning) return;
+                        onCellClick(u, e, cannibCount);
+                      }}
+                      onKeyDown={(ev) => {
+                        if (remarkRunning) return;
+                        if (ev.key === "Enter" || ev.key === " ") {
+                          ev.preventDefault();
+                          onCellClick(u, e, cannibCount);
+                        }
+                      }}
+                      className={clsx(
+                        "relative border",
+                        remarkRunning ? "cursor-progress" : "cursor-pointer",
+                        remarked
+                          ? "border-[var(--color-success)]"
+                          : "border-[color-mix(in_oklab,var(--color-warning)_40%,var(--color-border))]",
+                      )}
                       style={{
                         height: 14,
                         width: 14,
-                        background: "color-mix(in oklab, var(--color-danger) 50%, var(--color-bg))",
-                        boxShadow: "inset 0 0 4px color-mix(in oklab, var(--color-danger) 40%, transparent)",
+                        background: remarked
+                          ? "color-mix(in oklab, var(--color-success) 55%, var(--color-bg))"
+                          : "color-mix(in oklab, var(--color-danger) 50%, var(--color-bg))",
+                        boxShadow: remarked
+                          ? "inset 0 0 4px color-mix(in oklab, var(--color-success) 50%, transparent)"
+                          : "inset 0 0 4px color-mix(in oklab, var(--color-danger) 40%, transparent)",
                       }}
-                    />
+                    >
+                      {remarked && (
+                        <span
+                          aria-hidden
+                          className="pointer-events-none absolute inset-0 flex items-center justify-center text-[8px] font-bold text-[var(--color-success)]"
+                          style={{ textShadow: "0 0 2px var(--color-bg)" }}
+                        >
+                          ✓
+                        </span>
+                      )}
+                    </td>
                   );
                 })}
               </tr>
@@ -939,12 +1229,104 @@ function InspectorPane({
   const canRevealPII = clearance.can(recordClass);
   const [projectionMode, setProjectionMode] = useState(false);
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
+  // Whole-record reveal — POSTs /sentry/reveal-sensitive once and unmasks
+  // every PII span on this record, vs the per-span click-to-reveal flow.
+  const [recordRevealed, setRecordRevealed] = useState(false);
+  const [revealAuditIndex, setRevealAuditIndex] = useState<number | null>(null);
+  const [revealTimestamp, setRevealTimestamp] = useState<string | null>(null);
+  const [revealError, setRevealError] = useState<string | null>(null);
+  const [revealRunning, setRevealRunning] = useState(false);
+  // Tier-2 grounded-explainer (Gemma) — opt-in. Not auto-fired on every
+  // record change; the operator clicks "Explain with Gemma" to spend
+  // one tier-2 call. Server-side caches per (input-hash, classification)
+  // so repeat clicks on the same record don't double-bill.
+  const [explain, setExplain] = useState<MarkExplainResult | null>(null);
+  const [explaining, setExplaining] = useState(false);
+  const [explainError, setExplainError] = useState<string | null>(null);
   // Reset reveal-state on record change so revealed spans from one record
   // never carry over visually to another. Projection mode is preserved on
   // purpose — the presenter sets it once for the demo and it should stick.
   useEffect(() => {
     setRevealed(new Set());
+    setRecordRevealed(false);
+    setRevealAuditIndex(null);
+    setRevealTimestamp(null);
+    setRevealError(null);
+    setExplain(null);
+    setExplainError(null);
   }, [record.sr_number]);
+
+  // Distinct flag categories present on this record — passed to the audit
+  // payload so the chain entry says exactly which categories were unmasked.
+  const recordFlags: string[] = useMemo(() => {
+    const set = new Set<string>();
+    for (const h of highlightsRaw(record)) set.add(h.category);
+    return Array.from(set);
+  }, [record]);
+
+  const handleToggleRecordReveal = useCallback(async () => {
+    if (revealRunning) return;
+    if (recordRevealed) {
+      // Re-collapse — no audit row, no network call.
+      setRecordRevealed(false);
+      return;
+    }
+    if (!canRevealPII || projectionMode) return;
+    setRevealError(null);
+    setRevealRunning(true);
+    try {
+      const res = await api.sentry.revealSensitive(
+        record.sr_number,
+        "record",
+        recordFlags,
+      );
+      if (!res?.ok) throw new Error("reveal denied by backend");
+      setRecordRevealed(true);
+      setRevealAuditIndex(res.audit?.chain_index ?? null);
+      setRevealTimestamp(res.audit?.timestamp ?? null);
+    } catch (err) {
+      setRevealError(formatApiError(err));
+    } finally {
+      setRevealRunning(false);
+    }
+  }, [
+    revealRunning,
+    recordRevealed,
+    canRevealPII,
+    projectionMode,
+    record.sr_number,
+    recordFlags,
+  ]);
+  // Tier-2 explainer — Gemma 4 grounded paragraph + suggested redacted
+  // phrasing for the active record. The explainer ignores the masked
+  // display state on the inspector — it always sends the full remark
+  // text to the backend (which carries it on the wire anyway), and
+  // the audit chain captures the explain event by input hash.
+  const runExplain = useCallback(async () => {
+    if (explaining) return;
+    const text = (record.remark || "").trim();
+    if (!text) return;
+    setExplaining(true);
+    setExplainError(null);
+    try {
+      const r = await api.sentry.explain(text, {
+        classification: record.detected_classification,
+        flags: recordFlags,
+        highlights: (record.highlights || []).map((h: any) => ({
+          category: h.category,
+          rule: h.rule,
+          text: text.slice(h.start ?? 0, h.end ?? 0),
+          start: h.start,
+          end: h.end,
+        })),
+      });
+      setExplain(r);
+    } catch (err) {
+      setExplainError(formatApiError(err));
+    } finally {
+      setExplaining(false);
+    }
+  }, [explaining, record, recordFlags]);
   const highlights: { start: number; end: number; category: string }[] = record.highlights || [];
   const remark: string = record.remark || "";
   const segments: { text: string; category?: string; idx: number }[] = [];
@@ -1008,6 +1390,83 @@ function InspectorPane({
             {projectionMode ? "REDACTED ✓" : "REDACT for projection"}
           </button>
         </div>
+
+        {/* Whole-record reveal — POSTs /sentry/reveal-sensitive and unmasks
+            every PII span on this record at once. Audit chain index from
+            the response is surfaced in the helper text. Re-collapsing is
+            local-only (no audit row needed for hiding). */}
+        {recordFlags.length > 0 && (
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1">
+            <div className="min-w-0 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+              {recordRevealed ? (
+                <span className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{
+                      background: "var(--color-warning)",
+                      boxShadow: "0 0 5px var(--color-warning)",
+                    }}
+                  />
+                  <span className="text-[var(--color-warning)]">Sensitive content visible</span>
+                  {revealAuditIndex !== null && (
+                    <span className="ml-1 text-[var(--color-text-muted)]">
+                      · Revealed at #{revealAuditIndex}
+                      {revealTimestamp ? ` · ${formatRevealTime(revealTimestamp)}` : ""}
+                    </span>
+                  )}
+                </span>
+              ) : revealError ? (
+                <span className="text-[var(--color-danger)]">
+                  Reveal failed · {revealError.slice(0, 80)}
+                </span>
+              ) : projectionMode ? (
+                <span>Projection mode active · record reveal blocked</span>
+              ) : canRevealPII ? (
+                <span>Reveal whole record · audit logged on POST</span>
+              ) : (
+                <span>{recordClass} clearance required to reveal record</span>
+              )}
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={recordRevealed}
+              aria-label="Reveal sensitive content for entire record (audit logged)"
+              data-testid="rq-reveal-sensitive"
+              disabled={revealRunning || projectionMode || !canRevealPII}
+              onClick={handleToggleRecordReveal}
+              className={clsx(
+                "rounded-sm border px-2 py-[2px] font-mono text-[10px] font-semibold uppercase tracking-widest transition-colors",
+                recordRevealed
+                  ? "border-[var(--color-warning)] bg-[var(--color-warning)] text-black"
+                  : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-warning)]",
+                (revealRunning || projectionMode || !canRevealPII) &&
+                  "cursor-not-allowed opacity-60",
+              )}
+            >
+              {revealRunning
+                ? "Revealing…"
+                : recordRevealed
+                  ? "Revealed ✓"
+                  : "Reveal sensitive (audit)"}
+            </button>
+            <button
+              type="button"
+              data-testid="rq-explain-gemma"
+              disabled={explaining}
+              onClick={runExplain}
+              title="Spend one Gemma 4 call to ground this record's marking + suggest a redacted phrasing"
+              className={clsx(
+                "rounded-sm border px-2 py-[2px] font-mono text-[10px] font-semibold uppercase tracking-widest transition-colors",
+                "border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_12%,var(--color-surface))] text-[var(--color-text)] hover:bg-[color-mix(in_oklab,var(--color-primary)_24%,var(--color-surface))]",
+                explaining && "cursor-wait opacity-70",
+              )}
+            >
+              {explaining ? "Calling Gemma…" : explain ? "Re-explain" : "Explain w/ Gemma"}
+            </button>
+          </div>
+        )}
       </div>
       <div className="flex flex-col gap-4 p-4">
         {/* Classification banner */}
@@ -1025,6 +1484,68 @@ function InspectorPane({
           )}
         </div>
 
+        {/* Tier-2 grounded explainer (Gemma 4) — opt-in. Shows the
+            paragraph + suggested redacted phrasing for the active
+            record. Empty state is hidden so the inspector doesn't
+            advertise the surface until the operator clicks. */}
+        {(explain || explaining || explainError) && (
+          <section
+            data-testid="rq-explain-panel"
+            className="rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-bg))] p-3"
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs uppercase tracking-widest text-[var(--color-text-muted)]">
+                Tier-2 · Gemma 4 grounding
+              </span>
+              {explain?.economics && (
+                <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                  {explain.economics.tier} · ${explain.economics.cost_usd.toFixed(4)} ·{" "}
+                  {Math.round(explain.economics.latency_ms)}ms
+                  {explain.cached && (
+                    <span className="ml-1 text-[var(--color-success)]">cached</span>
+                  )}
+                </span>
+              )}
+            </div>
+            {explainError && (
+              <div className="mt-2 text-xs text-[var(--color-danger)]">{explainError}</div>
+            )}
+            {explaining && !explain && (
+              <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)]">
+                Asking Gemma to ground the marking…
+              </div>
+            )}
+            {explain && (
+              <div className="mt-2 space-y-2">
+                <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm leading-relaxed text-[var(--color-text)]">
+                  {explain.explanation || "(no explanation returned)"}
+                </div>
+                {explain.suggested_redaction && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+                      Suggested redacted phrasing
+                    </summary>
+                    <pre
+                      data-testid="rq-explain-redaction"
+                      className="mt-1 overflow-x-auto whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-2 font-mono text-xs leading-relaxed text-[var(--color-text)]"
+                    >
+                      {explain.suggested_redaction}
+                    </pre>
+                  </details>
+                )}
+                <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                  Engine: {explain.engine} · Capped at CUI per build policy.
+                  {!explain.grounded_in_evidence && (
+                    <span className="ml-2 text-[var(--color-warning)]">
+                      ⚠ Grounding flag not set — review carefully.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         {/* Remark with colored highlights */}
         <section>
           <div
@@ -1036,8 +1557,12 @@ function InspectorPane({
             {segments.map((s, i) => {
               if (!s.category) return <span key={i}>{s.text}</span>;
               const isPii = PII_MASK_CATEGORIES.has(s.category);
+              // Whole-record reveal short-circuits the per-span flag — when
+              // the operator has flipped the record-level toggle (and the
+              // POST audit row has been written), every PII span on this
+              // record is treated as revealed. Projection mode still wins.
               const shouldMask =
-                projectionMode || (isPii && !revealed.has(s.idx));
+                projectionMode || (isPii && !revealed.has(s.idx) && !recordRevealed);
               const flagColor = FLAG_COLOR[s.category] || "#fff";
               if (shouldMask) {
                 // Black-block redaction. Width matches the underlying token
@@ -1382,9 +1907,15 @@ function AuditChainModal({ subjectId, onClose }: { subjectId: string; onClose: (
 function AggregationRiskPanel({
   risks,
   onClose,
+  remarkedPairs,
+  remarkRunning,
+  onCellClick,
 }: {
   risks: any[];
   onClose: () => void;
+  remarkedPairs: Set<string>;
+  remarkRunning: boolean;
+  onCellClick: (unit: string, equipment: string, count: number) => void;
 }) {
   // Matrix unit × equipment_type — a cell exists when an aggregation risk is
   // flagged for that pair. Visual clustering makes the pattern jump out at a
@@ -1437,18 +1968,61 @@ function AggregationRiskPanel({
                       <td key={e} className="border border-[var(--color-border)] bg-[var(--color-bg)] p-0" style={{ height: 22, width: 22 }} />
                     );
                   }
+                  const pairKey = `${u}::${e}`;
+                  const remarked = remarkedPairs.has(pairKey);
+                  const cannibCount = r.cannib_count ?? r.count ?? r.sr_count ?? 0;
+                  const tid = `rq-agg-cell-${u}-${e}`.replace(/\s+/g, "-");
                   return (
                     <td
                       key={e}
-                      title={r.warning}
-                      className="cursor-help border border-[color-mix(in_oklab,var(--color-warning)_40%,var(--color-border))]"
+                      title={
+                        remarked
+                          ? `${r.warning} · re-marked CUI`
+                          : `${r.warning} · click to re-mark CUI`
+                      }
+                      data-testid={tid}
+                      role="button"
+                      aria-label={`Re-mark ${u} / ${e} batch as CUI`}
+                      tabIndex={0}
+                      onClick={() => {
+                        if (remarkRunning) return;
+                        onCellClick(u, e, cannibCount);
+                      }}
+                      onKeyDown={(ev) => {
+                        if (remarkRunning) return;
+                        if (ev.key === "Enter" || ev.key === " ") {
+                          ev.preventDefault();
+                          onCellClick(u, e, cannibCount);
+                        }
+                      }}
+                      className={clsx(
+                        "relative border",
+                        remarkRunning ? "cursor-progress" : "cursor-pointer",
+                        remarked
+                          ? "border-[var(--color-success)]"
+                          : "border-[color-mix(in_oklab,var(--color-warning)_40%,var(--color-border))]",
+                      )}
                       style={{
                         height: 22,
                         width: 22,
-                        background: "color-mix(in oklab, var(--color-warning) 40%, var(--color-bg))",
-                        boxShadow: "inset 0 0 4px color-mix(in oklab, var(--color-warning) 30%, transparent)",
+                        background: remarked
+                          ? "color-mix(in oklab, var(--color-success) 50%, var(--color-bg))"
+                          : "color-mix(in oklab, var(--color-warning) 40%, var(--color-bg))",
+                        boxShadow: remarked
+                          ? "inset 0 0 4px color-mix(in oklab, var(--color-success) 50%, transparent)"
+                          : "inset 0 0 4px color-mix(in oklab, var(--color-warning) 30%, transparent)",
                       }}
-                    />
+                    >
+                      {remarked && (
+                        <span
+                          aria-hidden
+                          className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] font-bold text-[var(--color-success)]"
+                          style={{ textShadow: "0 0 2px var(--color-bg)" }}
+                        >
+                          ✓
+                        </span>
+                      )}
+                    </td>
                   );
                 })}
               </tr>
@@ -1470,3 +2044,304 @@ function AggregationRiskPanel({
   );
 }
 
+// Filter chips row above the three columns. Classification is a single-select
+// (radio-style) chip group; flag/unit/reason are multi-select. Counts shown
+// next to multi-select chips reflect the pre-filter pool — they would zero out
+// otherwise and the chip becomes un-toggleable.
+function FilterChipsBar({
+  clsFilter,
+  onClsFilter,
+  flagFilter,
+  onToggleFlag,
+  unitFilter,
+  onToggleUnit,
+  reasonFilter,
+  onToggleReason,
+  facets,
+  filtersActive,
+  onClear,
+  showing,
+  total,
+}: {
+  clsFilter: "ALL" | "UNCLASSIFIED" | "CUI";
+  onClsFilter: (v: "ALL" | "UNCLASSIFIED" | "CUI") => void;
+  flagFilter: Set<string>;
+  onToggleFlag: (name: string) => void;
+  unitFilter: Set<string>;
+  onToggleUnit: (name: string) => void;
+  reasonFilter: Set<string>;
+  onToggleReason: (name: string) => void;
+  facets: {
+    flags: Array<{ name: string; count: number }>;
+    units: Array<{ name: string; count: number }>;
+    reasons: Array<{ name: string; count: number }>;
+  };
+  filtersActive: boolean;
+  onClear: () => void;
+  showing: number;
+  total: number;
+}) {
+  const classifications: Array<"ALL" | "UNCLASSIFIED" | "CUI"> = ["ALL", "UNCLASSIFIED", "CUI"];
+  return (
+    <div
+      className="flex flex-col gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-xs tracking-wider"
+      data-testid="rq-filter-chips"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="uppercase text-[var(--color-text-muted)]">Class:</span>
+        {classifications.map((c) => {
+          const active = clsFilter === c;
+          return (
+            <button
+              key={c}
+              type="button"
+              data-testid={`rq-filter-cls-${c}`}
+              aria-pressed={active}
+              onClick={() => onClsFilter(c)}
+              className={clsx(
+                "rounded-full border px-2 py-[2px] uppercase tracking-wider transition-colors",
+                active
+                  ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
+                  : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]",
+              )}
+            >
+              {c === "ALL" ? "All" : c}
+            </button>
+          );
+        })}
+
+        {facets.flags.length > 0 && (
+          <>
+            <span className="ml-3 uppercase text-[var(--color-text-muted)]">Flag:</span>
+            <button
+              type="button"
+              data-testid="rq-filter-flag-All"
+              aria-pressed={flagFilter.size === 0}
+              onClick={() => {
+                // Clearing the flag set is "All". If already empty, this is a no-op.
+                if (flagFilter.size === 0) return;
+                for (const name of Array.from(flagFilter)) onToggleFlag(name);
+              }}
+              className={clsx(
+                "rounded-full border px-2 py-[2px] uppercase tracking-wider transition-colors",
+                flagFilter.size === 0
+                  ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
+                  : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]",
+              )}
+            >
+              All
+            </button>
+            {facets.flags.map(({ name, count }) => {
+              const active = flagFilter.has(name);
+              const color = FLAG_COLOR[name] || "var(--color-text-muted)";
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  data-testid={`rq-filter-flag-${name}`}
+                  aria-pressed={active}
+                  onClick={() => onToggleFlag(name)}
+                  className={clsx(
+                    "rounded-full border px-2 py-[2px] uppercase tracking-wider transition-colors",
+                  )}
+                  style={{
+                    color: active ? "#fff" : color,
+                    background: active ? color : `color-mix(in oklab, ${color} 12%, transparent)`,
+                    borderColor: active
+                      ? color
+                      : `color-mix(in oklab, ${color} 40%, var(--color-border))`,
+                  }}
+                >
+                  {name}{" "}
+                  <span className="tabular-nums opacity-80">({count})</span>
+                </button>
+              );
+            })}
+          </>
+        )}
+      </div>
+
+      {(facets.units.length > 0 || facets.reasons.length > 0) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {facets.units.length > 0 && (
+            <>
+              <span className="uppercase text-[var(--color-text-muted)]">Unit:</span>
+              <button
+                type="button"
+                data-testid="rq-filter-unit-All"
+                aria-pressed={unitFilter.size === 0}
+                onClick={() => {
+                  if (unitFilter.size === 0) return;
+                  for (const name of Array.from(unitFilter)) onToggleUnit(name);
+                }}
+                className={clsx(
+                  "rounded-full border px-2 py-[2px] uppercase tracking-wider transition-colors",
+                  unitFilter.size === 0
+                    ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
+                    : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]",
+                )}
+              >
+                All
+              </button>
+              {facets.units.map(({ name, count }) => {
+                const active = unitFilter.has(name);
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    data-testid={`rq-filter-unit-${name.replace(/\s+/g, "-")}`}
+                    aria-pressed={active}
+                    onClick={() => onToggleUnit(name)}
+                    className={clsx(
+                      "rounded-full border px-2 py-[2px] uppercase tracking-wider transition-colors",
+                      active
+                        ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
+                        : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]",
+                    )}
+                  >
+                    {name} <span className="tabular-nums opacity-80">({count})</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+
+          {facets.reasons.length > 0 && (
+            <>
+              <span className="ml-3 uppercase text-[var(--color-text-muted)]">Held reason:</span>
+              <button
+                type="button"
+                data-testid="rq-filter-reason-All"
+                aria-pressed={reasonFilter.size === 0}
+                onClick={() => {
+                  if (reasonFilter.size === 0) return;
+                  for (const name of Array.from(reasonFilter)) onToggleReason(name);
+                }}
+                className={clsx(
+                  "rounded-full border px-2 py-[2px] uppercase tracking-wider transition-colors",
+                  reasonFilter.size === 0
+                    ? "border-[var(--color-primary)] bg-[var(--color-primary)] text-white"
+                    : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]",
+                )}
+              >
+                All
+              </button>
+              {facets.reasons.map(({ name, count }) => {
+                const active = reasonFilter.has(name);
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    data-testid={`rq-filter-reason-${name}`}
+                    aria-pressed={active}
+                    title={HELD_REASON_DESCRIPTION[name] ?? name}
+                    onClick={() => onToggleReason(name)}
+                    className={clsx(
+                      "rounded-full border px-2 py-[2px] uppercase tracking-wider transition-colors",
+                      active
+                        ? "border-[var(--color-danger)] bg-[var(--color-danger)] text-white"
+                        : "border-[color-mix(in_oklab,var(--color-danger)_40%,var(--color-border))] bg-[var(--color-bg)] text-[var(--color-danger)] hover:border-[var(--color-danger)]",
+                    )}
+                  >
+                    {name.replace(/_/g, " ")}{" "}
+                    <span className="tabular-nums opacity-80">({count})</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 text-[10px] uppercase text-[var(--color-text-muted)]">
+        <span data-testid="rq-filter-count">
+          Showing <span className="tabular-nums text-[var(--color-text)]">{showing}</span> of{" "}
+          <span className="tabular-nums">{total}</span>
+        </span>
+        {filtersActive && (
+          <button
+            type="button"
+            data-testid="rq-filter-clear"
+            onClick={onClear}
+            className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[1px] uppercase tracking-wider text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+          >
+            Clear filters ✕
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Aggregation re-mark confirmation. The matrix cell-click stages this; on
+// confirm the parent fires POST /sentry/aggregation/remark and re-fetches the
+// queue. Repeat clicks on an already-remarked pair re-confirm here too — the
+// backend treats it as idempotent.
+function AggregationRemarkConfirmModal({
+  unit,
+  equipment,
+  count,
+  running,
+  onCancel,
+  onConfirm,
+}: {
+  unit: string;
+  equipment: string;
+  count: number;
+  running: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[8500] flex items-center justify-center bg-black/60 p-6"
+      role="dialog"
+      aria-modal="true"
+      onClick={onCancel}
+      data-testid="rq-agg-confirm-modal"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
+      >
+        <div className="font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-warning)]">
+          Confirm Aggregation Re-mark
+        </div>
+        <div className="mt-2 spire-body text-sm">
+          Re-mark all{" "}
+          {count > 0 ? (
+            <strong>{count.toLocaleString("en-US")}</strong>
+          ) : (
+            <strong>matching</strong>
+          )}{" "}
+          SRs in{" "}
+          <span className="font-mono text-[var(--color-text)]">{unit}</span>
+          {" / "}
+          <span className="font-mono text-[var(--color-text)]">{equipment}</span>{" "}
+          as <span className="font-mono text-[var(--color-warning)]">CUI//FOUO</span>?
+        </div>
+        <div className="mt-2 font-mono text-xs tracking-wider text-[var(--color-text-muted)]">
+          One <span className="text-[var(--color-text)]">sentry_aggregation_remark</span> entry
+          covering every matched SR will be appended to the SHA-256 chained
+          audit log. The queue will refresh after the elevation completes.
+        </div>
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <Button onClick={onCancel} variant="secondary" size="sm" disabled={running}>
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            variant="primary"
+            size="sm"
+            pending={running}
+            disabled={running}
+            data-testid="rq-agg-confirm-submit"
+            className="border-[var(--color-warning)] bg-[var(--color-warning)] text-black hover:brightness-110"
+          >
+            Re-mark as CUI
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

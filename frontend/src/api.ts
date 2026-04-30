@@ -618,6 +618,67 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ text, release_authority }),
       }),
+    // Tier-2 grounded explainer — Gemma writes a paragraph anchored on
+    // the Tier-1 evidence spans + a redacted phrasing suggestion. Caps
+    // at CUI by policy; cached server-side per input hash so repeat
+    // clicks on the same draft don't double-bill.
+    explain: (text: string, tier1?: unknown) =>
+      jsonFetch<MarkExplainResult>("/sentry/explain", {
+        method: "POST",
+        body: JSON.stringify({ text, tier1 }),
+      }),
+    // Bulk Mark Draft — drag-drop CSV → batch tier-1 classification.
+    // Each row gets {classification, confidence, flags, needs_review};
+    // the server ranks "needs human eye" first so the operator sees
+    // the highest-risk rows up top.
+    markBulk: (rows: Array<{ id: string; text: string }>) =>
+      jsonFetch<SentryBulkMarkResult>("/sentry/mark/bulk", {
+        method: "POST",
+        body: JSON.stringify({ rows }),
+      }),
+    // Aggregation-batch remarking — operator clicks an aggregation-risk
+    // cell ("14 cannib events on MTVRs in CLB-6 in 7d") and elevates
+    // every matching SR's marking with one audit row instead of N.
+    aggregationRemark: (params: {
+      batch_id: string;
+      unit: string;
+      equipment: string;
+      target_classification?: "UNCLASSIFIED" | "CUI";
+      note?: string;
+    }) =>
+      jsonFetch<{
+        ok: boolean;
+        matched_sr_count: number;
+        matched_sr_ids: string[];
+        target_classification: string;
+        audit_logged: boolean;
+      }>("/sentry/aggregation/remark", {
+        method: "POST",
+        body: JSON.stringify(params),
+      }),
+    // Audit-log a sensitive-content reveal action.
+    revealSensitive: (sr_number: string, scope: "record" | "span" = "record", flags: string[] = []) =>
+      jsonFetch<{
+        ok: boolean;
+        sr_number: string;
+        scope: string;
+        audit: { chain_index: number; timestamp: string };
+      }>("/sentry/reveal-sensitive", {
+        method: "POST",
+        body: JSON.stringify({ sr_number, scope, flags }),
+      }),
+    // Manifest preview — same record selection as /export but no ZIP
+    // build. Returns {counts, sr_records, estimated_bytes} so the
+    // operator can verify scope before committing to the download.
+    exportManifest: (release = "US_ONLY", batchId?: string | null) =>
+      jsonFetch<SentryExportManifest>("/sentry/export-manifest", {
+        method: "POST",
+        body: JSON.stringify({
+          release_authority: release,
+          batch_id: batchId ?? null,
+          include_audit: true,
+        }),
+      }),
     // Walkthrough #6 — pass batch_id so the export covers the same batch
     // the operator just processed (was: server fell through to canonical
     // 2,251 records when batch_id was absent).
@@ -1568,6 +1629,99 @@ export interface CoalitionReleaseResult {
   record_count: number;
   /** Inherited classification ceiling stamped onto the audit row. */
   classification?: string;
+  /** Number of source records the partner profile blocked (added F14). */
+  blocked_count?: number;
+  /** SHA-256 over the bytes of the assembled release ZIP. */
+  bundle_sha256?: string;
+  /** Size in bytes of the assembled release ZIP. */
+  bundle_bytes?: number;
+  /** Suggested filename for the download (echoes the bundle's classification). */
+  filename?: string;
+  /** Server-relative URL — GET /api/sentry/coalition-download/{release_id}. */
+  download_url?: string;
+}
+
+/** Tier-2 grounded-explainer response from POST /api/sentry/explain.
+ *  - `explanation`: short paragraph anchored on the Tier-1 evidence spans.
+ *  - `suggested_redaction`: the operator's draft with sensitive spans
+ *    replaced by neutralized tokens, preserving operational meaning.
+ *  - `economics`: per-call tier/cost/latency so the FE can show the
+ *    same "$0.0008 · 480ms" breadcrumb as other Gemma surfaces.
+ */
+export interface MarkExplainResult {
+  classification: string;
+  explanation: string;
+  suggested_redaction: string;
+  ceiling_respected: boolean;
+  grounded_in_evidence: boolean;
+  engine: string;
+  input_hash: string;
+  cached?: boolean;
+  evidence: Array<{ flag: string | null; evidence: string | null; rule: string | null }>;
+  economics?: {
+    tier: string;
+    model: string;
+    cost_usd: number;
+    latency_ms: number;
+    input_tokens: number;
+    output_tokens: number;
+  };
+}
+
+/** Bulk Mark result row: tier-1 classification + needs-review band. */
+export interface SentryBulkMarkRow {
+  id: string;
+  classification?: string;
+  confidence?: number;
+  flags?: string[];
+  evidence_count?: number;
+  needs_review?: boolean;
+  preview?: string;
+  skipped?: boolean;
+  reason?: string;
+}
+
+export interface SentryBulkMarkResult {
+  ok: boolean;
+  row_count: number;
+  counts: {
+    UNCLASSIFIED?: number;
+    CUI?: number;
+    needs_review: number;
+    auto_clear: number;
+  };
+  results: SentryBulkMarkRow[];
+  engine: string;
+}
+
+/** Manifest preview — what /export would ship without building the ZIP. */
+export interface SentryExportManifest {
+  ok: boolean;
+  batch_source: string;
+  release_authority: string;
+  classification: string;
+  release_blocked: boolean;
+  release_compatibility: { status: string; issues: string[] };
+  counts: {
+    records_input: number;
+    records_in_bundle: number;
+    records_rejected: number;
+    by_classification: Record<string, number>;
+    by_unit: Record<string, number>;
+    by_flag: Record<string, number>;
+  };
+  sr_records: Array<{
+    sr_number: string;
+    unit: string;
+    equipment_type: string;
+    classification: string;
+    flags: string[];
+  }>;
+  sr_total: number;
+  estimated_bytes: number;
+  estimated_files_in_zip: number;
+  preview_truncated: boolean;
+  as_of: string;
 }
 
 export interface FailurePrediction {
