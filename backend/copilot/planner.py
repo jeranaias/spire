@@ -467,6 +467,10 @@ _TOOL_PROSE = {
     "find_cannibalization_match": "Find a cannibalization donor",
     "get_coalition_view":         "Preview the coalition release view",
     "parse_tmr":                  "Parse the TMR text",
+    "mark_text":                  "Run the SENTRY classifier on the draft text",
+    "forecast_unit":              "Run the readiness forecast",
+    "list_alerts":                "Pull the active alerts in scope",
+    "walk_unit":                  "Walk the unit's readiness picture",
 }
 
 
@@ -694,6 +698,14 @@ def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
     unit = _extract_unit(text, role)
     profile = _extract_profile(text)
 
+    # Pull the first quoted span (single or double) for tools that act on
+    # operator-supplied prose — mark_text especially. Longest-quote wins
+    # so 'is "<long stuff>" CUI?' captures the long stuff.
+    quoted: Optional[str] = None
+    qm = _re.findall(r'"([^"]{4,})"|“([^”]{4,})”|‘([^’]{4,})’', text)
+    if qm:
+        quoted = max((q for tup in qm for q in tup if q), key=len, default=None)
+
     if "cannib" in lower or "donor" in lower:
         if asset_id:
             steps = [{"tool": "find_cannibalization_match", "args": {"recipient_asset_id": asset_id}}]
@@ -712,6 +724,39 @@ def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
         steps = [{"tool": "status_summary", "args": {}}, {"tool": "recommend_actions", "args": rec_args}]
     elif profile is not None:
         steps = [{"tool": "get_coalition_view", "args": {"profile": profile}}]
+    elif (
+        "is this cui" in lower or "mark this" in lower or "mark draft" in lower
+        or "classify this" in lower or "should this be classified" in lower
+        or " cui?" in lower or "marking for" in lower
+    ) and quoted:
+        steps = [{"tool": "mark_text", "args": {"text": quoted}}]
+    elif (
+        "forecast" in lower or "what will" in lower or "going to drop" in lower
+        or "headed on readiness" in lower or "where are we headed" in lower
+        or "look like in" in lower or "monte carlo" in lower
+    ):
+        f_args: dict = {"horizon_days": 14}
+        if unit:
+            f_args["unit"] = unit
+        steps = [{"tool": "forecast_unit", "args": f_args}]
+    elif (
+        "blowing up" in lower or "what's critical" in lower or "whats critical" in lower
+        or "show me alerts" in lower or "show me the alerts" in lower
+        or "any alerts" in lower or "active alerts" in lower
+        or ("alerts" in lower and ("right now" in lower or "open" in lower or "active" in lower))
+    ):
+        l_args: dict = {"limit": 10}
+        if "critical" in lower:
+            l_args["severity"] = "CRITICAL"
+        elif "high" in lower:
+            l_args["severity"] = "HIGH"
+        steps = [{"tool": "list_alerts", "args": l_args}]
+    elif (
+        "tell me about" in lower or "walk me through" in lower
+        or "walk through" in lower or "everything about" in lower
+        or "the picture on" in lower
+    ) and unit:
+        steps = [{"tool": "walk_unit", "args": {"unit": unit}}]
     elif "where do i start" in lower or "summary" in lower or "status" in lower:
         steps = [{"tool": "status_summary", "args": {}}]
     elif "worst" in lower or "highest risk" in lower or "highest-risk" in lower or "riskiest" in lower:
@@ -720,7 +765,7 @@ def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
             {"tool": "predict_failures", "args": {"horizon_days": 14, **({"unit": unit} if unit else {})}},
         ]
     else:
-        answer = "Language-model gate is degraded right now. Try a structured query — 'find a cannib donor for M21670-MTVR_CARGO-006', 'predict failures in CLB-6', 'what should I do about my fleet', 'what does Japan see'."
+        answer = "Language-model gate is degraded right now. Try a structured query — 'find a cannib donor for M21670-MTVR_CARGO-006', 'predict failures in CLB-6', 'what should I do about my fleet', 'what does Japan see', 'forecast CLB-1', 'tell me about CLB-6', 'show me the alerts', or 'is this CUI: <text>'."
 
     return {
         "plan_id": plan_id,
