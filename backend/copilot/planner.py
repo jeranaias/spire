@@ -64,7 +64,12 @@ Tool selection guidance:
 - "what should I do about my fleet?" → status_summary then recommend_actions
 - "what's the worst thing right now?" → status_summary then predict_failures
 - "is this going to fail?" → predict_failures(unit)
-- "what does Japan see?" → get_coalition_view("JPN")
+- "what does Japan see?" / "what does JSDF see?" → get_coalition_view("JPN")
+  ⚠ Disambiguation: "what's on Miyako", "list markers on Miyako",
+  "show me what's on Ishigaki" are MAP queries about geography, not
+  coalition release. Route those to map_list_markers(island=...).
+  get_coalition_view is only for partner-release previews ("what does
+  Japan SEE", "what does Australia see", "FVEY release").
 - "where do I start?" → status_summary
 - "is this CUI?" / "mark this" / "classify this <text>" → mark_text(text)
 - "what will CLB-X look like in 14d?" / "is X going to drop?" → forecast_unit(unit, horizon_days)
@@ -74,6 +79,11 @@ Tool selection guidance:
 - "tell me about CLB-X" / "walk me through X" → walk_unit(unit), then optionally
   pair with map_select_marker(pulse_unit=X) + map_fly_to(pulse_unit=X) for a
   full demo beat
+- "fly to / show me / go to / zoom to <X>" → map_fly_to (use island=okinawa|miyako|ishigaki
+  for islands, pulse_unit=<unit> for PULSE units, label=<marker_label> otherwise)
+- "select / highlight / focus <X> on the map" → map_select_marker
+- "what's on Miyako" / "list markers" / "what's in the picture" → map_list_markers(island=...)
+- "what's within 100km of X" / "closest to X" → map_query_within_radius
 - TMR submission ("move 5 MTVRs from Lejeune to Geiger") → handle outside;
   do not call a tool for it. The TMR parser handles it directly.
 
@@ -757,6 +767,60 @@ def _rule_based_plan(text: str, role: str, plan_id: str, error: str) -> dict:
         or "the picture on" in lower
     ) and unit:
         steps = [{"tool": "walk_unit", "args": {"unit": unit}}]
+    elif _re.search(r"\b(fly|zoom|pan|move|center|go|jump|navigate)\b.*\b(to|on)\b", lower) or "show me" in lower or "show on map" in lower or "on the map" in lower:
+        # Map fly_to / select. Pull an island name first; fall back to a
+        # PULSE unit; fall back to a quoted label.
+        island = None
+        for k in ("okinawa", "miyako", "ishigaki"):
+            if k in lower:
+                island = k
+                break
+        if island:
+            steps = [{"tool": "map_fly_to", "args": {"island": island}}]
+        elif unit:
+            steps = [
+                {"tool": "map_select_marker", "args": {"pulse_unit": unit}},
+                {"tool": "map_fly_to", "args": {"pulse_unit": unit}},
+            ]
+        elif quoted:
+            steps = [{"tool": "map_fly_to", "args": {"label": quoted}}]
+        else:
+            answer = "Tell me where — an island (Okinawa / Miyako / Ishigaki), a unit (CLB-1, CLB-6), or a marker label."
+    elif (
+        "list markers" in lower or "list everything" in lower
+        or "what's on miyako" in lower or "whats on miyako" in lower
+        or "what's on ishigaki" in lower or "whats on ishigaki" in lower
+        or ("markers" in lower and ("miyako" in lower or "ishigaki" in lower or "okinawa" in lower))
+        or "what's in the picture" in lower or "whats in the picture" in lower
+    ):
+        island = None
+        for k in ("okinawa", "miyako", "ishigaki"):
+            if k in lower:
+                island = k
+                break
+        args2 = {"island": island} if island else {}
+        steps = [{"tool": "map_list_markers", "args": args2}]
+    elif (
+        "within" in lower and "km" in lower
+    ) or "closest" in lower or "nearest" in lower:
+        # Try unit/label/island as center.
+        center_args: dict = {"radius_km": 100}
+        # Pull a number with unit km
+        m_km = _re.search(r"(\d+)\s*km", lower)
+        if m_km:
+            center_args["radius_km"] = int(m_km.group(1))
+        if unit:
+            mk = None  # client side resolves; pass label for now
+            # Use a label heuristic: pulse_unit isn't on map_query_within_radius schema,
+            # but a marker_id could be. Simplest path: tell the operator we need
+            # an explicit center if no quoted label was provided.
+            center_args["label"] = unit
+        elif quoted:
+            center_args["label"] = quoted
+        else:
+            answer = "Tell me the center — a unit, a quoted marker label, or lng/lat."
+        if "label" in center_args:
+            steps = [{"tool": "map_query_within_radius", "args": center_args}]
     elif "where do i start" in lower or "summary" in lower or "status" in lower:
         steps = [{"tool": "status_summary", "args": {}}]
     elif "worst" in lower or "highest risk" in lower or "highest-risk" in lower or "riskiest" in lower:
