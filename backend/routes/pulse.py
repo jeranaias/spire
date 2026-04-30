@@ -1381,9 +1381,9 @@ async def dismiss_draft(request: Request, draft_id: str):
 
 @router.get("/forecast")
 async def forecast(
-    request: Request,
     unit: Optional[str] = None,
     window: int = Query(14, ge=7, le=30),
+    role: Optional[str] = None,
 ):
     """Monte Carlo readiness projection.
 
@@ -1407,7 +1407,6 @@ async def forecast(
     import math
 
     ds = get_dataset()
-    role = session_role(request)
     allowed = allowed_units(ds, role)
 
     if unit and allowed is not None and unit not in allowed:

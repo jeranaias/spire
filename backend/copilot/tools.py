@@ -251,6 +251,177 @@ async def _tool_get_coalition_view(profile: str, role: str = "data_custodian") -
         return {"error": f"coalition_view failed: {type(e).__name__}: {e}"}
 
 
+async def _tool_mark_text(text: str, role: str, release_authority: str = "US_ONLY") -> dict:
+    """Run the SENTRY classifier on an arbitrary draft remark and return
+    the recommended marking + caveats + evidence spans. Lets SPIRO
+    answer 'is this CUI?' without forcing the operator into the
+    SENTRY Mark Draft tab. Mirrors POST /api/sentry/mark exactly.
+    """
+    from ..routes.sentry import tier1_classify, _select_distribution, SENTRY_MARK_ROLES
+    from ..scoping import require_role
+    require_role(role, SENTRY_MARK_ROLES, "sentry.mark.via_spiro")
+    if not text or not text.strip():
+        return {"error": "empty_text"}
+    tier1 = tier1_classify(text.strip())
+    cls = tier1["classification"]
+    flags = tier1["flags"]
+    distribution_letter, distribution_text = _select_distribution(cls, flags)
+    return {
+        "recommended_classification": cls,
+        "confidence": tier1.get("confidence", 0.0),
+        "flags": flags,
+        "evidence": [
+            {"flag": h.get("category"), "evidence": h.get("text"), "rule": h.get("rule")}
+            for h in tier1.get("highlights", [])
+        ],
+        "distribution_statement": {"letter": distribution_letter, "text": distribution_text},
+        "release_authority_requested": release_authority,
+        "engine": "SENTRY pattern engine (rule-based)",
+    }
+
+
+async def _tool_forecast_unit(unit: Optional[str], role: str, horizon_days: int = 14) -> dict:
+    """Monte Carlo readiness forecast — calls /api/pulse/forecast under
+    the hood and returns the headline percentile bands + crossing
+    probability so the operator gets the answer in chat without
+    opening the Forecast tab.
+
+    The full forecast payload includes 200 sample paths + per-day bands;
+    we surface only the start/end of the projection envelope and the
+    threshold-cross probability so the chat row stays scannable.
+    """
+    from ..routes.pulse import forecast as pulse_forecast
+    try:
+        result = await pulse_forecast(window=horizon_days, unit=unit, role=role)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"forecast_failed: {str(e)[:200]}"}
+    if not isinstance(result, dict):
+        return {"error": "forecast handler returned unexpected type"}
+
+    history = result.get("history") or []
+    proj = result.get("projection") or []
+    threshold = result.get("threshold")
+    cross_date = result.get("threshold_cross_date")
+    cross_dir = result.get("cross_direction")
+
+    def pct(x):
+        return round(float(x) * 100, 1) if x is not None else None
+
+    current_mc = pct(history[-1]["mc_rate"]) if history else None
+    if proj:
+        end = proj[-1]
+        start = proj[0]
+        projected_mean = pct(end["projected_mc_rate"])
+        p10 = pct(end["p10"])
+        p90 = pct(end["p90"])
+        # Probability of crossing the threshold in the window — max
+        # cross_probability across the projection days.
+        p_cross = max((p["cross_probability"] for p in proj), default=0.0)
+        first_cross_days = None
+        if cross_date and start.get("date"):
+            try:
+                from datetime import date
+                d0 = date.fromisoformat(start["date"])
+                d1 = date.fromisoformat(cross_date)
+                first_cross_days = (d1 - d0).days
+            except Exception:  # noqa: BLE001
+                first_cross_days = None
+    else:
+        projected_mean = p10 = p90 = first_cross_days = None
+        p_cross = 0.0
+
+    return {
+        "unit": result.get("unit") or unit or "fleet",
+        "horizon_days": horizon_days,
+        "current_mc_pct": current_mc,
+        "projected_mean_pct": projected_mean,
+        "p10_pct": p10,
+        "p90_pct": p90,
+        "threshold_pct": pct(threshold) if threshold is not None else None,
+        "cross_direction": cross_dir,
+        "first_cross_days": first_cross_days,
+        "p_cross_in_window": round(float(p_cross), 3),
+        "as_of": result.get("as_of"),
+    }
+
+
+async def _tool_list_alerts(role: str, severity: Optional[str] = None, limit: int = 10) -> dict:
+    """Return the top N active BASTION alerts in role scope, optionally
+    filtered by severity. Lets SPIRO answer 'anything blowing up?' or
+    'show me the criticals' without leaving the chat. Mirrors GET
+    /api/bastion/alerts so an operator gets the same list they'd see on
+    the COP.
+    """
+    from ..routes.bastion import alerts as bastion_alerts
+    try:
+        result = await bastion_alerts(limit=30, role=role)
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"alerts_failed: {type(e).__name__}: {e}"}
+    records = result.get("alerts", []) if isinstance(result, dict) else []
+    sev = (severity or "").upper().strip()
+    if sev and sev != "ALL":
+        records = [r for r in records if (r.get("severity") or "").upper() == sev]
+    rank = {"CRITICAL": 4, "HIGH": 3, "MODERATE": 2, "LOW": 1, "INFO": 0}
+    records.sort(key=lambda r: -rank.get((r.get("severity") or "").upper(), 0))
+    out = []
+    for r in records[: max(1, min(limit, 30))]:
+        out.append({
+            "id": r.get("id"),
+            "severity": r.get("severity"),
+            "title": r.get("title") or r.get("message"),
+            "unit": r.get("unit"),
+            "kind": r.get("kind"),
+            "ts": r.get("ts") or r.get("created_at"),
+        })
+    return {
+        "count": len(out),
+        "alerts": out,
+        "severity_counts": result.get("severity_counts", {}) if isinstance(result, dict) else {},
+    }
+
+
+def _tool_walk_unit(unit: str, role: str) -> dict:
+    """Composite walk: status + recommend + predict for one unit. The
+    'tell me everything about CLB-1' button. SPIRO can pair this with
+    map_select_marker(pulse_unit=...) and map_fly_to(pulse_unit=...)
+    in the same plan to drive the full audience-facing demo beat.
+    """
+    from collections import Counter
+    from ..state import last_day_snapshots
+    ds = get_dataset()
+    allowed = allowed_units(ds, role)
+    last = last_day_snapshots(ds)
+    if allowed is not None and unit not in allowed:
+        return {"error": f"out_of_scope: {unit}"}
+    snaps = [s for s in last if s.unit_name == unit]
+    if not snaps:
+        return {"error": f"no_snapshots_for: {unit}"}
+    c = Counter(s.readiness_code for s in snaps)
+    total = sum(c.values())
+    mc = c.get("MC", 0)
+    nmcm = c.get("NMCM", 0)
+    nmcs = c.get("NMCS", 0)
+    pmc = c.get("PMC", 0)
+    deadlined_examples = [
+        {"asset_id": s.asset_id, "equipment": s.equipment_type, "status": s.readiness_code}
+        for s in snaps if s.readiness_code in ("NMCM", "NMCS")
+    ][:5]
+    return {
+        "unit": unit,
+        "snapshot": {
+            "total": total,
+            "mc": mc, "pmc": pmc, "nmcm": nmcm, "nmcs": nmcs,
+            "mc_pct": round((mc / total) * 100, 1) if total else 100,
+            "deadlined": nmcm + nmcs,
+        },
+        "deadlined_examples": deadlined_examples,
+        "recommend": (
+            f"Run recommend_actions(unit='{unit}') for ranked cannib/expedite/cross-level options, "
+            f"and predict_failures(unit='{unit}', horizon_days=14) for the next-two-week risk band."
+        ),
+    }
+
+
 def _tool_status_summary(role: str) -> dict:
     """High-level system status for context — uses the canonical end-of-day
     readiness snapshot (MC / PMC / NMCM / NMCS) so SPIRO's answers can never
@@ -434,6 +605,75 @@ TOOL_REGISTRY: dict[str, dict] = {
             },
         },
         "runner": _tool_status_summary,
+    },
+    "mark_text": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "mark_text",
+                "description": "Run the SENTRY classifier on a draft remark/message and return the recommended classification (UNCLASSIFIED or CUI), confidence, evidence spans, and the matching distribution statement. Use when the operator asks 'is this CUI?', 'mark this', 'classify this', or pastes draft text and asks for a marking. Caps at CUI by policy.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "Draft remark or message text to classify."},
+                        "release_authority": {"type": "string", "description": "Release authority (default US_ONLY)"},
+                    },
+                    "required": ["text"],
+                },
+            },
+        },
+        "runner": _tool_mark_text,
+    },
+    "forecast_unit": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "forecast_unit",
+                "description": "Monte Carlo readiness forecast for a unit (or fleet) over a horizon. Returns current MC%, projected mean MC%, p10/p90 bands, and the probability of crossing the readiness threshold in the window. Use when the operator asks 'what will CLB-X look like in 14 days?', 'is CLB-1 going to drop?', or 'where are we headed on readiness?'",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "unit": {"type": "string", "description": "Unit name (e.g. 'CLB-1'). Omit for fleet-wide forecast."},
+                        "horizon_days": {"type": "integer", "description": "Forecast window in days (default 14)"},
+                    },
+                },
+            },
+        },
+        "runner": _tool_forecast_unit,
+    },
+    "list_alerts": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "list_alerts",
+                "description": "Return the top N active BASTION alerts in the operator's role scope, sorted by severity (CRITICAL > HIGH > MODERATE > LOW). Use when the operator asks 'anything blowing up?', 'what's critical?', 'show me the alerts', or 'what's happening on the COP?'",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "severity": {"type": "string", "enum": ["CRITICAL", "HIGH", "MODERATE", "LOW", "INFO", "ALL"], "description": "Filter to a severity (default ALL)"},
+                        "limit": {"type": "integer", "description": "Max alerts to return (default 10, max 30)"},
+                    },
+                },
+            },
+        },
+        "runner": _tool_list_alerts,
+    },
+    "walk_unit": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "walk_unit",
+                "description": "Composite snapshot for one unit: MC/PMC/NMCM/NMCS counts, MC%, deadlined examples, and a hint to follow up with recommend_actions / predict_failures. Use when the operator asks 'tell me about CLB-1', 'walk me through CLB-6', or 'what's the picture on 3d Maint Bn?' Pair with map_select_marker(pulse_unit=...) to focus the COP.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "unit": {"type": "string", "description": "Unit name (e.g. 'CLB-1', 'CLB-6')"},
+                    },
+                    "required": ["unit"],
+                },
+            },
+        },
+        "runner": _tool_walk_unit,
     },
     # ─────────────────────────────────────────────────────────────────
     # Map-control tools — runner is a stub because these execute

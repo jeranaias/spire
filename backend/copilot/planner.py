@@ -66,6 +66,14 @@ Tool selection guidance:
 - "is this going to fail?" → predict_failures(unit)
 - "what does Japan see?" → get_coalition_view("JPN")
 - "where do I start?" → status_summary
+- "is this CUI?" / "mark this" / "classify this <text>" → mark_text(text)
+- "what will CLB-X look like in 14d?" / "is X going to drop?" → forecast_unit(unit, horizon_days)
+- "anything blowing up?" / "what's critical?" / "show me alerts" → list_alerts(severity)
+- "cannibalize X for Y" / approving a cannib recommendation → recommend_actions(unit)
+  surfaces the ranked cannib options; the operator approves via the Cannib tab.
+- "tell me about CLB-X" / "walk me through X" → walk_unit(unit), then optionally
+  pair with map_select_marker(pulse_unit=X) + map_fly_to(pulse_unit=X) for a
+  full demo beat
 - TMR submission ("move 5 MTVRs from Lejeune to Geiger") → handle outside;
   do not call a tool for it. The TMR parser handles it directly.
 
