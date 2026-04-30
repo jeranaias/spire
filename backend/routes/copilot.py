@@ -45,6 +45,11 @@ async def make_plan(request: Request, payload: dict = Body(default={})):
     # instead of starting from scratch every send. Validated/clipped
     # downstream in copilot_plan to bound token cost.
     history = payload.get("history") or []
+    # `map_selection` carries the marker the operator currently has
+    # focused on the BASTION map, so SPIRO can answer "what about this
+    # one?" without re-asking. The planner injects it as a system
+    # message; downstream tool calls don't read it directly.
+    map_selection = payload.get("map_selection")
     if not text:
         raise HTTPException(status_code=400, detail="text required")
     return await copilot_plan(
@@ -54,6 +59,7 @@ async def make_plan(request: Request, payload: dict = Body(default={})):
         current_data=current_data,
         prior_proposal=prior_proposal,
         history=history,
+        map_selection=map_selection,
     )
 
 

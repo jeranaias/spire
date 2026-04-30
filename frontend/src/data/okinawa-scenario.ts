@@ -41,6 +41,16 @@ export type ScenarioMarker = {
   // Optional one-line additional text rendered under the icon. Keep
   // short — milsymbol clips at ~12 chars.
   additionalInfo?: string;
+  // Bridge to PULSE: the synthetic-fixture unit name this marker
+  // represents for readiness lookup purposes. The Okinawa scenario uses
+  // doctrinal unit names (12 MAR, III MEF, etc.) but the PULSE risk
+  // board / cannib matcher / forecast engine all key on the synthetic
+  // fixture units (CLB-6, CLB-1, MALS-31, ...). The alias lets a
+  // marker-click drawer pull live readiness from /api/bastion/cop and
+  // a SPIRO answer ground-truth itself. JGSDF markers leave this null
+  // (they have no PULSE backing) and the drawer falls back to "no
+  // readiness data — synthetic dataset is US-only."
+  pulseUnit?: string | null;
 };
 
 // Two islands SW of Okinawa Honto host JGSDF stand-in forces — those
@@ -59,6 +69,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Corps",
     additionalInfo: "MEF HQ",
+    pulseUnit: "CLB-6",
   },
   // 3rd Marine Division HQ, Camp Courtney
   {
@@ -70,6 +81,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Division",
     additionalInfo: "Inf Div HQ",
+    pulseUnit: "3d Maint Bn",
   },
   // 4th Marines (infantry regiment), Camp Schwab
   {
@@ -81,6 +93,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Regiment",
     additionalInfo: "Infantry",
+    pulseUnit: "3/6 Marines",
   },
   // 12th Marine Regiment (artillery / HIMARS), Camp Hansen
   {
@@ -92,6 +105,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Regiment",
     additionalInfo: "HIMARS / Arty",
+    pulseUnit: "2d LAR Bn",
   },
   // 3rd Reconnaissance Battalion, Camp Schwab
   {
@@ -103,6 +117,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Battalion",
     additionalInfo: "LRR",
+    pulseUnit: "2/14 Marines",
   },
   // 9th Engineer Support Battalion, Camp Hansen
   {
@@ -114,6 +129,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Battalion",
     additionalInfo: "Engineer",
+    pulseUnit: "7th ESB",
   },
   // MAG-36, MCAS Futenma — rotary
   {
@@ -125,6 +141,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Group",
     additionalInfo: "Rotary",
+    pulseUnit: "MWSS-271",
   },
   // 1st MAW HQ, Kadena
   {
@@ -136,6 +153,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Wing",
     additionalInfo: "Fixed Wing",
+    pulseUnit: "MALS-31",
   },
   // CLR-37 Combat Logistics Regiment, Camp Kinser
   {
@@ -147,6 +165,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "okinawa",
     echelon: "Regiment",
     additionalInfo: "CSS / Log",
+    pulseUnit: "CLB-1",
   },
   // Class III/V fuel point, Tengan Pier
   {
@@ -157,6 +176,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Tengan Pier",
     island: "okinawa",
     additionalInfo: "Class III",
+    pulseUnit: "CLB-1",
   },
   // Ammo / Class V depot, Henoko
   {
@@ -167,6 +187,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Henoko Munitions",
     island: "okinawa",
     additionalInfo: "Ammo Depot",
+    pulseUnit: "CLB-6",
   },
   // Long-range surveillance radar, Yaedake (north Okinawa highlands)
   {
@@ -177,6 +198,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Yaedake Radar",
     island: "okinawa",
     additionalInfo: "G/ATOR",
+    pulseUnit: "2d LAAD Bn",
   },
   // ECP / Main Gate, Camp Hansen
   {
@@ -187,6 +209,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Hansen Main Gate",
     island: "okinawa",
     additionalInfo: "Checkpoint",
+    pulseUnit: "2d LAR Bn",
   },
 
   // ─── MIYAKO — JGSDF SSM regiment, ground troops ───────────────────────
@@ -200,6 +223,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "miyako",
     echelon: "Brigade",
     additionalInfo: "Garrison HQ",
+    pulseUnit: null,
   },
   // 7th Anti-Ship Missile Regiment — battery position alpha (north)
   {
@@ -211,6 +235,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "miyako",
     echelon: "Battery",
     additionalInfo: "Type-12",
+    pulseUnit: null,
   },
   // 7th SSM — battery position bravo (south, dispersed)
   {
@@ -222,6 +247,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "miyako",
     echelon: "Battery",
     additionalInfo: "Type-12",
+    pulseUnit: null,
   },
   // Coastal surveillance / radar
   {
@@ -232,6 +258,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "JGSDF Miyako",
     island: "miyako",
     additionalInfo: "FPS-7",
+    pulseUnit: null,
   },
   // Combined fuel + ammo cache (CSS)
   {
@@ -243,6 +270,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "miyako",
     echelon: "Company",
     additionalInfo: "POL/Class V",
+    pulseUnit: null,
   },
   // Hirara Port checkpoint
   {
@@ -253,6 +281,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Hirara Port",
     island: "miyako",
     additionalInfo: "Sea ECP",
+    pulseUnit: null,
   },
 
   // ─── ISHIGAKI — JGSDF SSM regiment, ground troops ─────────────────────
@@ -266,6 +295,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "ishigaki",
     echelon: "Brigade",
     additionalInfo: "Garrison HQ",
+    pulseUnit: null,
   },
   // 5th Anti-Ship Missile Regiment — battery position alpha (north)
   {
@@ -277,6 +307,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "ishigaki",
     echelon: "Battery",
     additionalInfo: "Type-12",
+    pulseUnit: null,
   },
   // 5th SSM — battery position bravo (south, dispersed)
   {
@@ -288,6 +319,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "ishigaki",
     echelon: "Battery",
     additionalInfo: "Type-12",
+    pulseUnit: null,
   },
   // Coastal surveillance / radar (north tip)
   {
@@ -298,6 +330,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "JGSDF Ishigaki",
     island: "ishigaki",
     additionalInfo: "FPS-7",
+    pulseUnit: null,
   },
   // CSS / sustainment
   {
@@ -309,6 +342,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     island: "ishigaki",
     echelon: "Company",
     additionalInfo: "POL/Class V",
+    pulseUnit: null,
   },
   // Ishigaki Port ECP
   {
@@ -319,6 +353,7 @@ export const OKINAWA_SCENARIO: ScenarioMarker[] = [
     parent: "Ishigaki Port",
     island: "ishigaki",
     additionalInfo: "Sea ECP",
+    pulseUnit: null,
   },
 ];
 

@@ -18,8 +18,33 @@ import { useMarkersStore, type Marker } from "../state/markers";
 import {
   ISLAND_PRESETS,
   OKINAWA_VIEW,
+  OKINAWA_SCENARIO,
 } from "../data/okinawa-scenario";
 import { useSpireStore } from "../state/store";
+import { registerMapBridge } from "../state/mapBridge";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { api, type BastionCOPUnit } from "../api";
+
+// PLA anti-ship missile coverage rings — doctrinal published ranges,
+// drawn from the published CSIS / DoD AMR open-source assessments. The
+// rings are toggled by the operator from the header; off by default
+// because they steal visual attention from the markers themselves.
+const PLA_THREAT_RINGS = [
+  {
+    name: "DF-21D · ASBM",
+    rangeKm: 1500,
+    centerLngLat: [121.66, 25.04] as [number, number], // Taipei vicinity
+    color: "#C8102E",
+    opacity: 0.10,
+  },
+  {
+    name: "YJ-12 · ASCM",
+    rangeKm: 400,
+    centerLngLat: [121.66, 25.04] as [number, number],
+    color: "#FF8C00",
+    opacity: 0.14,
+  },
+];
 
 // CartoDB Dark Matter — free vector tile style, no key, IL5-OK as a
 // public-internet base for the demo. Production swap target is a
@@ -74,6 +99,33 @@ function renderSymbolHTML(m: Marker): HTMLElement {
   }
   wrap.appendChild(inner);
   return wrap;
+}
+
+/**
+ * Build a 64-vertex GeoJSON Polygon approximating a circle of the given
+ * radius (km) around a [lng, lat] center. Fine enough resolution that
+ * the visible curve doesn't read as a polygon at any normal zoom level
+ * but cheap enough to keep on the layer at all times. Latitude
+ * correction handles the lng→km scaling at the ring's actual
+ * latitude.
+ */
+function makeCircleGeoJSON(
+  center: [number, number],
+  radiusKm: number,
+  steps = 64,
+): { type: "Polygon"; coordinates: [number, number][][] } {
+  const [lng, lat] = center;
+  const latRad = (lat * Math.PI) / 180;
+  const kmPerDegLat = 111.32;
+  const kmPerDegLng = 111.32 * Math.cos(latRad);
+  const ring: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const theta = (i * 2 * Math.PI) / steps;
+    const dLng = (radiusKm * Math.cos(theta)) / kmPerDegLng;
+    const dLat = (radiusKm * Math.sin(theta)) / kmPerDegLat;
+    ring.push([lng + dLng, lat + dLat]);
+  }
+  return { type: "Polygon", coordinates: [ring] };
 }
 
 /**
@@ -139,6 +191,86 @@ export function OkinawaMapCanvas({
   const setLocked = useMarkersStore((s) => s.setLocked);
 
   const currentUser = useSpireStore((s) => s.currentUser);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Selected marker — clicking a marker pops a side drawer that pulls
+  // live readiness from /api/bastion/cop for the marker's pulseUnit
+  // alias. Selection state also feeds SPIRO's planner via the
+  // selectedMarker context the chat panel reads from this store.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Ref mirror so the bridge's getSelectedMarker callback (registered
+  // once at mount) reads current state without stale-closure pain.
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    // Also publish on the SPIRE store so the chat panel can include
+    // it in the planner request without prop-drilling.
+    try {
+      window.dispatchEvent(
+        new CustomEvent("spire:map-selection", {
+          detail: { markerId: selectedId },
+        }),
+      );
+    } catch { /* tolerant */ }
+  }, [selectedId]);
+  const selectedMarker: Marker | null = useMemo(
+    () => markers.find((m) => m.id === selectedId) ?? null,
+    [markers, selectedId],
+  );
+
+  // Threat-rings toggle. Off by default; visible distractor when on.
+  const [showThreatRings, setShowThreatRings] = useState(false);
+
+  // Deep-link from PULSE Risk Board: /bastion?unit=CLB-1 selects the
+  // marker aliased to that PULSE unit and flies the camera to it. We
+  // wait for `ready` so the bridge is registered + map is initialized.
+  const queryUnit = searchParams.get("unit");
+  useEffect(() => {
+    if (!ready || !queryUnit) return;
+    const m = OKINAWA_SCENARIO.find(
+      (x) => (x.pulseUnit ?? "").toLowerCase() === queryUnit.toLowerCase(),
+    );
+    if (!m) return;
+    setSelectedId(m.id);
+    const map = mapRef.current;
+    if (map) map.flyTo({ center: m.coords, zoom: 12, duration: 1100 });
+  }, [ready, queryUnit]);
+
+  // Live readiness fetch for the selected marker's pulseUnit. The
+  // /bastion/cop response carries every populated unit's MC% +
+  // counts; we filter to the one we care about. Falls back gracefully
+  // when the dataset is empty (drawer just shows marker metadata).
+  const [pulseReadiness, setPulseReadiness] = useState<BastionCOPUnit | null>(null);
+  const [pulseLoading, setPulseLoading] = useState(false);
+  useEffect(() => {
+    if (!selectedMarker?.pulseUnit) {
+      setPulseReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    setPulseLoading(true);
+    api.bastion
+      .cop()
+      .then((c) => {
+        if (cancelled) return;
+        if ((c as unknown as { empty?: boolean }).empty) {
+          setPulseReadiness(null);
+          return;
+        }
+        const u = c.units.find((x) => x.unit === selectedMarker.pulseUnit);
+        setPulseReadiness(u ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setPulseReadiness(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPulseLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMarker?.pulseUnit]);
 
   // Initial-mount: build the map once, attach controls.
   useEffect(() => {
@@ -169,7 +301,29 @@ export function OkinawaMapCanvas({
     map.on("zoomend", onZoom);
 
     mapRef.current = map;
+
+    // Register the SPIRO bridge so map_fly_to / map_select_marker tool
+    // calls reach the live map. Cleared on unmount; if the operator
+    // navigates off BASTION the bridge resolves to null and SPIRO
+    // tools fall back to text-only answers.
+    registerMapBridge({
+      flyTo: (lng, lat, zoom) => {
+        const m = mapRef.current;
+        if (!m) return;
+        m.flyTo({
+          center: [lng, lat],
+          zoom: zoom ?? 11,
+          duration: 1100,
+        });
+      },
+      selectMarker: (id) => setSelectedId(id),
+      getSelectedMarker: () =>
+        OKINAWA_SCENARIO.find((x) => x.id === (selectedIdRef.current ?? "")) ??
+        null,
+    });
+
     return () => {
+      registerMapBridge(null);
       mapRef.current?.remove();
       mapRef.current = null;
       markerRefs.current.clear();
@@ -209,14 +363,17 @@ export function OkinawaMapCanvas({
         anchor: "center",
       })
         .setLngLat(m.coords)
-        .setPopup(
-          new maplibregl.Popup({ offset: 20, closeButton: true }).setHTML(
-            popupHTML(m),
-          ),
-        )
         .addTo(map);
 
       el.style.cursor = locked ? "pointer" : "grab";
+
+      // Click → open the right drawer with live PULSE readiness. We
+      // suppress the default popup so the operator gets a richer side
+      // panel instead of the inline white box.
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        setSelectedId(m.id);
+      });
 
       marker.on("dragstart", () => {
         el.style.cursor = "grabbing";
@@ -257,6 +414,61 @@ export function OkinawaMapCanvas({
       if (el) el.style.cursor = locked ? "pointer" : "grab";
     });
   }, [locked, ready]);
+
+  // PLA threat-ring overlay. We add the GeoJSON source + circle layer
+  // once on map ready; visibility is toggled via setLayoutProperty so
+  // the source doesn't re-fetch every time the operator hides/shows.
+  useEffect(() => {
+    if (!ready) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const sourceId = "spire-threat-rings";
+    const layerId = "spire-threat-rings-fill";
+    const lineLayerId = "spire-threat-rings-line";
+
+    if (!map.getSource(sourceId)) {
+      const features = PLA_THREAT_RINGS.map((r) => ({
+        type: "Feature" as const,
+        properties: {
+          name: r.name,
+          color: r.color,
+          opacity: r.opacity,
+          rangeKm: r.rangeKm,
+        },
+        geometry: makeCircleGeoJSON(r.centerLngLat, r.rangeKm),
+      }));
+      map.addSource(sourceId, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features },
+      });
+      map.addLayer({
+        id: layerId,
+        type: "fill",
+        source: sourceId,
+        paint: {
+          "fill-color": ["get", "color"],
+          "fill-opacity": ["get", "opacity"],
+        },
+        layout: { visibility: "none" },
+      });
+      map.addLayer({
+        id: lineLayerId,
+        type: "line",
+        source: sourceId,
+        paint: {
+          "line-color": ["get", "color"],
+          "line-width": 1.4,
+          "line-opacity": 0.7,
+          "line-dasharray": [2, 3],
+        },
+        layout: { visibility: "none" },
+      });
+    }
+
+    const vis = showThreatRings ? "visible" : "none";
+    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", vis);
+    if (map.getLayer(lineLayerId)) map.setLayoutProperty(lineLayerId, "visibility", vis);
+  }, [ready, showThreatRings]);
 
   function flyToIsland(island: keyof typeof ISLAND_PRESETS) {
     const map = mapRef.current;
@@ -348,6 +560,27 @@ export function OkinawaMapCanvas({
           <span className="ml-auto font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
             MIL-STD-2525D
           </span>
+          {/* PLA threat-rings toggle — overlays doctrinal ASBM/ASCM
+           * coverage so the contested-logistics narrative is visible
+           * at a glance. Off by default; visual distractor when on. */}
+          <button
+            type="button"
+            onClick={() => setShowThreatRings((v) => !v)}
+            className={
+              "rounded-sm border px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition-colors " +
+              (showThreatRings
+                ? "border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_25%,var(--color-surface))] text-[var(--color-danger)]"
+                : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]")
+            }
+            aria-pressed={showThreatRings}
+            title={
+              showThreatRings
+                ? "Hide PLA ASBM/ASCM coverage rings"
+                : "Show PLA ASBM/ASCM coverage rings (doctrinal range)"
+            }
+          >
+            {showThreatRings ? "⚠ Threats" : "Threats"}
+          </button>
           {/* 3D pitch toggle — equivalent to the 3D affordance on the
            * previous BASTION map. */}
           <button
@@ -398,30 +631,207 @@ export function OkinawaMapCanvas({
           )}
         </div>
       )}
-      <div ref={containerRef} className="flex-1 min-h-0 w-full" />
+      <div className="relative flex-1 min-h-0 w-full">
+        <div ref={containerRef} className="absolute inset-0" />
+        {selectedMarker && (
+          <MarkerDrawer
+            marker={selectedMarker}
+            readiness={pulseReadiness}
+            loading={pulseLoading}
+            onClose={() => setSelectedId(null)}
+            onOpenInPulse={() => {
+              if (selectedMarker.pulseUnit) {
+                navigate(`/pulse/risk?unit=${encodeURIComponent(selectedMarker.pulseUnit)}`);
+              } else {
+                navigate("/pulse");
+              }
+            }}
+            onAskSpiro={() => {
+              try {
+                window.dispatchEvent(
+                  new CustomEvent("spire:open-spiro", {
+                    detail: {
+                      prompt: `What's the readiness picture for ${selectedMarker.label} (${selectedMarker.parent})?`,
+                    },
+                  }),
+                );
+              } catch { /* tolerant */ }
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function popupHTML(m: Marker): string {
-  const lng = m.coords[0].toFixed(5);
-  const lat = m.coords[1].toFixed(5);
-  const moves = m.history?.length ?? 0;
-  return `
-    <div style="font-family: var(--font-mono, monospace); font-size: 11px; color: #111;">
-      <div style="font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;">${escapeHtml(m.label)}</div>
-      <div style="opacity: 0.8;">${escapeHtml(m.parent)}</div>
-      <div style="margin-top: 6px; opacity: 0.7;">SIDC: ${escapeHtml(m.sidc)}</div>
-      <div style="opacity: 0.7;">${lat}°N, ${lng}°E</div>
-      ${moves > 0 ? `<div style="margin-top: 4px; opacity: 0.7;">moved ${moves}×</div>` : ""}
+// Right-edge slide-in drawer that opens when an operator clicks a
+// marker. Surfaces the marker's metadata + live readiness from PULSE
+// (when the marker has a pulseUnit alias and the dataset is populated).
+function MarkerDrawer({
+  marker,
+  readiness,
+  loading,
+  onClose,
+  onOpenInPulse,
+  onAskSpiro,
+}: {
+  marker: Marker;
+  readiness: BastionCOPUnit | null;
+  loading: boolean;
+  onClose: () => void;
+  onOpenInPulse: () => void;
+  onAskSpiro: () => void;
+}) {
+  const moves = marker.history?.length ?? 0;
+  const mc = readiness?.mc_rate;
+  const tone =
+    mc == null
+      ? "var(--color-text-muted)"
+      : mc >= 0.85
+        ? "var(--color-success)"
+        : mc >= 0.55
+          ? "var(--color-warning)"
+          : "var(--color-danger)";
+  return (
+    <div
+      role="dialog"
+      aria-label={`Marker details: ${marker.label}`}
+      className="absolute right-0 top-0 bottom-0 z-10 flex w-80 flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl"
+      style={{ minWidth: "20rem" }}
+    >
+      <div className="flex items-start justify-between border-b border-[var(--color-border)] px-4 py-3">
+        <div className="min-w-0">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            Marker · {marker.island.toUpperCase()}
+          </div>
+          <div className="mt-1 truncate font-mono text-base font-semibold tracking-wide text-[var(--color-text)]">
+            {marker.label}
+          </div>
+          <div className="truncate font-mono text-xs text-[var(--color-text-secondary)]">
+            {marker.parent}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close marker drawer"
+          className="font-mono text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+        <section>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            Symbology
+          </div>
+          <div className="mt-1 font-mono text-[11px] text-[var(--color-text)] break-all">
+            SIDC {marker.sidc}
+          </div>
+          {marker.echelon && (
+            <div className="mt-0.5 font-mono text-[11px] text-[var(--color-text-secondary)]">
+              Echelon · {marker.echelon}
+            </div>
+          )}
+          {marker.additionalInfo && (
+            <div className="mt-0.5 font-mono text-[11px] text-[var(--color-text-secondary)]">
+              {marker.additionalInfo}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            Position
+          </div>
+          <div className="mt-1 font-mono text-[11px] text-[var(--color-text)]">
+            {marker.coords[1].toFixed(5)}°N, {marker.coords[0].toFixed(5)}°E
+          </div>
+          {moves > 0 && (
+            <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+              moved {moves}× since seed
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            Readiness · PULSE
+          </div>
+          {!marker.pulseUnit ? (
+            <div className="mt-1 font-mono text-[11px] italic text-[var(--color-text-muted)]">
+              No PULSE backing (JGSDF / installation marker).
+            </div>
+          ) : loading ? (
+            <div className="mt-1 font-mono text-[11px] text-[var(--color-text-muted)]">
+              Loading {marker.pulseUnit}…
+            </div>
+          ) : !readiness ? (
+            <div className="mt-1 font-mono text-[11px] italic text-[var(--color-text-muted)]">
+              Aliased to {marker.pulseUnit} · readiness unavailable (dataset empty?).
+            </div>
+          ) : (
+            <div className="mt-1">
+              <div className="flex items-baseline justify-between">
+                <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
+                  {readiness.unit}
+                </span>
+                <span
+                  className="font-mono text-base font-semibold tabular-nums"
+                  style={{ color: tone }}
+                >
+                  {((readiness.mc_rate ?? 0) * 100).toFixed(1)}% MC
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-sm bg-[var(--color-bg)]">
+                <div
+                  className="h-full"
+                  style={{
+                    width: `${Math.min(100, Math.max(0, (readiness.mc_rate ?? 0) * 100))}%`,
+                    background: tone,
+                  }}
+                />
+              </div>
+              <dl className="mt-2 grid grid-cols-3 gap-2 font-mono text-[10px] tabular-nums text-[var(--color-text-secondary)]">
+                <div>
+                  <dt className="text-[var(--color-text-muted)]">Assets</dt>
+                  <dd className="text-[var(--color-text)]">{readiness.total_equipment ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-[var(--color-text-muted)]">NMCS</dt>
+                  <dd className="text-[var(--color-text)]">{readiness.nmcs_count ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-[var(--color-text-muted)]">PMC</dt>
+                  <dd className="text-[var(--color-text)]">{readiness.pmc_count ?? "—"}</dd>
+                </div>
+              </dl>
+            </div>
+          )}
+        </section>
+      </div>
+      <div className="grid grid-cols-2 gap-2 border-t border-[var(--color-border)] p-3">
+        <button
+          type="button"
+          onClick={onOpenInPulse}
+          disabled={!marker.pulseUnit}
+          className="rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_12%,var(--color-surface))] px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_22%,var(--color-surface))] disabled:cursor-not-allowed disabled:opacity-40"
+          title={marker.pulseUnit ? `Open PULSE Risk Board for ${marker.pulseUnit}` : "No PULSE unit aliased"}
+        >
+          Open in PULSE
+        </button>
+        <button
+          type="button"
+          onClick={onAskSpiro}
+          className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text)] hover:border-[var(--color-primary)]"
+          title="Open SPIRO with this marker pre-selected"
+        >
+          ◆ Ask SPIRO
+        </button>
+      </div>
     </div>
-  `;
+  );
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+// popupHTML + escapeHtml retired with the marker click → drawer flow.
+// React's text rendering escapes for us inside the drawer.
