@@ -435,6 +435,91 @@ TOOL_REGISTRY: dict[str, dict] = {
         },
         "runner": _tool_status_summary,
     },
+    # ─────────────────────────────────────────────────────────────────
+    # Map-control tools — runner is a stub because these execute
+    # client-side in Spiro.tsx via the MapBridge. The planner surface
+    # still needs the schema so Gemma can route map intents
+    # ("show me Miyako", "what's within 50km of CLB-1") through these
+    # tools. The frontend partitions map_* steps out before /execute
+    # and runs them locally; result rows merge into the transcript so
+    # the audit trail looks identical to backend tools.
+    # ─────────────────────────────────────────────────────────────────
+    "map_fly_to": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "map_fly_to",
+                "description": "Fly the BASTION map camera to a location. Accepts an island name (okinawa/miyako/ishigaki), a marker id, a pulse_unit name (e.g. 'CLB-1'), a marker label (e.g. '12 MAR'), or explicit lng/lat/zoom. Use this when the operator asks 'show me X', 'go to X', 'fly to X'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "island":     {"type": "string", "enum": ["okinawa", "miyako", "ishigaki"]},
+                        "marker_id":  {"type": "string"},
+                        "pulse_unit": {"type": "string", "description": "PULSE fixture unit name like 'CLB-1', 'CLB-6', '3d Maint Bn'"},
+                        "label":      {"type": "string", "description": "Marker label like '12 MAR' or 'III MEF'"},
+                        "lng":        {"type": "number"},
+                        "lat":        {"type": "number"},
+                        "zoom":       {"type": "number"},
+                    },
+                },
+            },
+        },
+        "runner": _tool_status_summary,  # client-side; never reached server-side
+    },
+    "map_select_marker": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "map_select_marker",
+                "description": "Select + highlight a marker on the BASTION map and open its detail drawer. Use this to focus the operator on a specific unit you're discussing. Pair with map_fly_to to also move the camera. Accepts marker_id, label, or pulse_unit.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "marker_id":  {"type": "string"},
+                        "label":      {"type": "string"},
+                        "pulse_unit": {"type": "string"},
+                    },
+                },
+            },
+        },
+        "runner": _tool_status_summary,  # client-side
+    },
+    "map_list_markers": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "map_list_markers",
+                "description": "Return the list of map markers, optionally filtered to one island. Use this when the operator asks 'what's on Miyako', 'list everything in the picture', etc.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "island": {"type": "string", "enum": ["okinawa", "miyako", "ishigaki"]},
+                    },
+                },
+            },
+        },
+        "runner": _tool_status_summary,  # client-side
+    },
+    "map_query_within_radius": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "map_query_within_radius",
+                "description": "Find every marker within a given distance (km) of a center point. Center can be a marker_id, label, or explicit lng/lat. Use this for spatial questions like 'what's within 100km of Miyako' or 'closest fuel point to CLB-1'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "marker_id": {"type": "string"},
+                        "label":     {"type": "string"},
+                        "lng":       {"type": "number"},
+                        "lat":       {"type": "number"},
+                        "radius_km": {"type": "number", "description": "Search radius in km (default 100)"},
+                    },
+                },
+            },
+        },
+        "runner": _tool_status_summary,  # client-side
+    },
 }
 
 

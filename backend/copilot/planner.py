@@ -124,6 +124,7 @@ async def plan(
     current_data: Optional[dict] = None,
     prior_proposal: Optional[list] = None,
     history: Optional[list] = None,
+    map_selection: Optional[dict] = None,
 ) -> dict:
     """Ask Gemma 4 for a plan in response to the operator's text.
 
@@ -193,6 +194,26 @@ async def plan(
                 f"{json.dumps(prior_proposal)[:1200]}"
             ),
         })
+
+    # MAP_SELECTION — when the operator has clicked a marker on the
+    # BASTION map, that marker becomes the implicit subject of the
+    # next turn. Follow-ups like "and this one?" / "tell me about
+    # it" should resolve here instead of asking the operator to
+    # name the unit again.
+    if map_selection:
+        try:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "MAP_SELECTION — operator has this marker selected on "
+                    "the BASTION map. Resolve referential follow-ups "
+                    "('this one', 'that unit', 'it', 'and CLB-1?') "
+                    "against this context unless the operator names a "
+                    f"different target:\n{json.dumps(map_selection)[:600]}"
+                ),
+            })
+        except Exception:
+            pass
 
     # Conversation memory — replay the last N turns so SPIRO can resolve
     # follow-up references ("and the second one?", "what about CLB-6?",

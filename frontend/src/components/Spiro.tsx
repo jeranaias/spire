@@ -21,6 +21,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useSpireStore } from "../state/store";
 import { Button, IconButton, Pressable } from "./ui";
+import {
+  getMapBridge,
+  findMarkerById,
+  findMarkerByLabel,
+  findMarkerByPulseUnit,
+  haversineKm,
+} from "../state/mapBridge";
+import { OKINAWA_SCENARIO } from "../data/okinawa-scenario";
 
 interface PlanStep { tool: string; args: Record<string, any>; id?: string; }
 interface SpiroPlanEconomics {
@@ -108,6 +116,34 @@ export function Spiro() {
     el.scrollTop = el.scrollHeight;
   }, [messages, pending]);
 
+  // Map-selection bridge — the BASTION map's MarkerDrawer dispatches
+  // `spire:map-selection` whenever a marker is selected/cleared. We
+  // capture the marker id so the next planner request can include the
+  // selection context, and we listen for `spire:open-spiro` (fired by
+  // the drawer's "Ask SPIRO" button) to open the panel + pre-fill.
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+  useEffect(() => {
+    function onSelection(ev: Event) {
+      const detail = (ev as CustomEvent).detail || {};
+      setSelectedMarkerId(detail.markerId ?? null);
+    }
+    function onOpen(ev: Event) {
+      const detail = (ev as CustomEvent).detail || {};
+      setOpen(true);
+      if (typeof detail.prompt === "string") {
+        setText(detail.prompt);
+        // Defer focus until after the panel transition.
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
+    }
+    window.addEventListener("spire:map-selection", onSelection);
+    window.addEventListener("spire:open-spiro", onOpen);
+    return () => {
+      window.removeEventListener("spire:map-selection", onSelection);
+      window.removeEventListener("spire:open-spiro", onOpen);
+    };
+  }, []);
+
   // Focus the input whenever the panel opens.
   useEffect(() => {
     if (open) requestAnimationFrame(() => inputRef.current?.focus());
@@ -160,6 +196,21 @@ export function Spiro() {
     if (!overrideText) setText("");
     setPending("plan");
     try {
+      // Map-selection context: when an operator clicks a marker on the
+      // BASTION map, the next SPIRO turn carries that marker as
+      // explicit context so follow-ups like "and how about this one?"
+      // resolve against the on-screen selection.
+      const sel = selectedMarkerId ? findMarkerById(selectedMarkerId) : null;
+      const map_selection = sel
+        ? {
+            id: sel.id,
+            label: sel.label,
+            parent: sel.parent,
+            island: sel.island,
+            pulse_unit: sel.pulseUnit ?? null,
+            coords: sel.coords,
+          }
+        : null;
       const r = await fetch("/api/copilot/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -169,6 +220,7 @@ export function Spiro() {
           view: location.pathname,
           prior_proposal: lastUnexecutedProposal(),
           history: priorHistory,
+          map_selection,
         }),
       });
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -201,6 +253,121 @@ export function Spiro() {
     }
   }
 
+  // Run a map_* tool against the live MapBridge. Returns the
+  // step_results-shaped record the chat transcript expects.
+  function runMapStep(step: PlanStep, idx: number): {
+    step: number;
+    tool: string;
+    args: Record<string, any>;
+    result: any;
+    had_error: boolean;
+  } {
+    const bridge = getMapBridge();
+    try {
+      switch (step.tool) {
+        case "map_fly_to": {
+          // Accept either {island}, {marker_id}, {pulse_unit}, {label},
+          // or {lng,lat,zoom}. Resolve to coordinates and fly.
+          const a = step.args || {};
+          let coords: [number, number] | null = null;
+          let zoom: number | undefined = a.zoom;
+          if (typeof a.lng === "number" && typeof a.lat === "number") {
+            coords = [a.lng, a.lat];
+          } else if (typeof a.island === "string") {
+            const presets: Record<string, { center: [number, number]; zoom: number }> = {
+              okinawa: { center: [127.85, 26.45], zoom: 9 },
+              miyako: { center: [125.31, 24.79], zoom: 11 },
+              ishigaki: { center: [124.16, 24.4], zoom: 11 },
+            };
+            const p = presets[a.island.toLowerCase()];
+            if (p) { coords = p.center; zoom = zoom ?? p.zoom; }
+          } else if (typeof a.marker_id === "string") {
+            const m = findMarkerById(a.marker_id);
+            if (m) { coords = m.coords; zoom = zoom ?? 12; }
+          } else if (typeof a.pulse_unit === "string") {
+            const m = findMarkerByPulseUnit(a.pulse_unit);
+            if (m) { coords = m.coords; zoom = zoom ?? 12; }
+          } else if (typeof a.label === "string") {
+            const m = findMarkerByLabel(a.label);
+            if (m) { coords = m.coords; zoom = zoom ?? 12; }
+          }
+          if (!coords) {
+            return { step: idx, tool: step.tool, args: a, had_error: true,
+              result: { error: "could_not_resolve_target" } };
+          }
+          if (bridge) bridge.flyTo(coords[0], coords[1], zoom);
+          return { step: idx, tool: step.tool, args: a, had_error: false,
+            result: { coords, zoom: zoom ?? null, bridge_attached: !!bridge } };
+        }
+        case "map_select_marker": {
+          const a = step.args || {};
+          let id: string | null = null;
+          if (typeof a.marker_id === "string") id = a.marker_id;
+          else if (typeof a.label === "string") {
+            const m = findMarkerByLabel(a.label);
+            id = m?.id ?? null;
+          } else if (typeof a.pulse_unit === "string") {
+            const m = findMarkerByPulseUnit(a.pulse_unit);
+            id = m?.id ?? null;
+          }
+          if (!id) return { step: idx, tool: step.tool, args: a, had_error: true,
+            result: { error: "could_not_resolve_target" } };
+          if (bridge) {
+            bridge.selectMarker(id);
+            const m = findMarkerById(id);
+            if (m) bridge.flyTo(m.coords[0], m.coords[1], 12);
+          }
+          return { step: idx, tool: step.tool, args: a, had_error: false,
+            result: { selected_id: id, bridge_attached: !!bridge } };
+        }
+        case "map_list_markers": {
+          const a = step.args || {};
+          const filter = (a.island || "").toLowerCase();
+          const list = OKINAWA_SCENARIO
+            .filter((m) => !filter || m.island === filter)
+            .map((m) => ({
+              id: m.id, label: m.label, parent: m.parent,
+              island: m.island, pulse_unit: m.pulseUnit ?? null,
+              coords: m.coords,
+            }));
+          return { step: idx, tool: step.tool, args: a, had_error: false,
+            result: { count: list.length, markers: list } };
+        }
+        case "map_query_within_radius": {
+          const a = step.args || {};
+          const km = Number(a.radius_km) || 100;
+          let center: [number, number] | null = null;
+          if (typeof a.lng === "number" && typeof a.lat === "number") {
+            center = [a.lng, a.lat];
+          } else if (typeof a.marker_id === "string") {
+            center = findMarkerById(a.marker_id)?.coords ?? null;
+          } else if (typeof a.label === "string") {
+            center = findMarkerByLabel(a.label)?.coords ?? null;
+          }
+          if (!center) return { step: idx, tool: step.tool, args: a, had_error: true,
+            result: { error: "could_not_resolve_center" } };
+          const within = OKINAWA_SCENARIO
+            .map((m) => ({ marker: m, km: haversineKm(center!, m.coords) }))
+            .filter((x) => x.km <= km)
+            .sort((a, b) => a.km - b.km)
+            .map((x) => ({
+              id: x.marker.id, label: x.marker.label, parent: x.marker.parent,
+              island: x.marker.island, pulse_unit: x.marker.pulseUnit ?? null,
+              distance_km: Math.round(x.km * 10) / 10,
+            }));
+          return { step: idx, tool: step.tool, args: a, had_error: false,
+            result: { center, radius_km: km, count: within.length, matches: within } };
+        }
+        default:
+          return { step: idx, tool: step.tool, args: step.args || {}, had_error: true,
+            result: { error: `unknown_map_tool: ${step.tool}` } };
+      }
+    } catch (e: any) {
+      return { step: idx, tool: step.tool, args: step.args || {}, had_error: true,
+        result: { error: String(e).slice(0, 200) } };
+    }
+  }
+
   async function approve(planMsgId: string, plan: SpiroPlan) {
     if (pending) return;
     setPending("execute");
@@ -208,14 +375,38 @@ export function Spiro() {
       m.map((x) => (x.id === planMsgId && x.kind === "plan" ? { ...x, status: "approved" } : x)),
     );
     try {
-      const r = await fetch("/api/copilot/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan_id: plan.plan_id, steps: plan.steps, role }),
-      });
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-      const j = (await r.json()) as SpiroResult;
-      setMessages((m) => [...m, { id: uid(), kind: "result", result: j, at: Date.now() }]);
+      // Partition: map_* steps run client-side via the MapBridge; the
+      // rest go to the backend tool registry. Both flows feed into a
+      // single SpiroResult so the transcript reads as one approval.
+      const mapSteps = plan.steps.filter((s) => s.tool.startsWith("map_"));
+      const backendSteps = plan.steps.filter((s) => !s.tool.startsWith("map_"));
+      const stepResults: any[] = mapSteps.map((s, i) => runMapStep(s, i));
+      let backendResult: SpiroResult | null = null;
+      if (backendSteps.length > 0) {
+        const r = await fetch("/api/copilot/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan_id: plan.plan_id, steps: backendSteps, role }),
+        });
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        backendResult = (await r.json()) as SpiroResult;
+        // Renumber backend step indices so they line up after the map
+        // steps in the merged transcript.
+        const offset = mapSteps.length;
+        for (const sr of backendResult.step_results) {
+          stepResults.push({ ...sr, step: sr.step + offset });
+        }
+      }
+      const ok_count = stepResults.filter((s) => !s.had_error).length;
+      const error_count = stepResults.length - ok_count;
+      const merged: SpiroResult = {
+        plan_id: plan.plan_id,
+        executed_at: backendResult?.executed_at ?? new Date().toISOString(),
+        step_results: stepResults,
+        ok_count,
+        error_count,
+      };
+      setMessages((m) => [...m, { id: uid(), kind: "result", result: merged, at: Date.now() }]);
     } catch (e: any) {
       setMessages((m) => [
         ...m,

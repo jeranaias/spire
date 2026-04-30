@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { findMarkerByPulseUnit } from "../../state/mapBridge";
 import clsx from "clsx";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { api, type RiskBoard, type RiskBoardAsset, type AssetDeepDive } from "../../api";
@@ -705,19 +706,51 @@ function RiskRow({
         <Stat label="Miles" value={asset.current_miles?.toLocaleString("en-US") ?? "—"} />
         <Stat label="Days Maint" value={asset.days_since_maintenance ?? "—"} />
       </div>
-      {/* Walkthrough #20, #37 — Draft Action button. Top row gets filled
-       * primary; others get severity-outlined. */}
-      {onDraftAction && (
-        <Button
-          onClick={(e) => { e.stopPropagation(); onDraftAction(); }}
-          variant={isTop ? "primary" : "secondary"}
-          size="sm"
-          style={isTop ? undefined : { borderColor: ctaBorder, color: ctaBorder }}
-        >
-          Draft Action
-        </Button>
-      )}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center">
+        {/* Show on map — flies BASTION's camera to the marker that
+         * represents this asset's parent unit. The Okinawa map's
+         * pulseUnit alias is what binds PULSE units (CLB-6, etc.) to
+         * the Okinawa-scenario markers (12 MAR, III MEF, etc.). */}
+        <ShowOnMapButton unitName={asset.unit_name} />
+        {/* Walkthrough #20, #37 — Draft Action button. Top row gets filled
+         * primary; others get severity-outlined. */}
+        {onDraftAction && (
+          <Button
+            onClick={(e) => { e.stopPropagation(); onDraftAction(); }}
+            variant={isTop ? "primary" : "secondary"}
+            size="sm"
+            style={isTop ? undefined : { borderColor: ctaBorder, color: ctaBorder }}
+          >
+            Draft Action
+          </Button>
+        )}
+      </div>
     </div>
+  );
+}
+
+// Small button that flies BASTION's map camera to the marker aliased to
+// the given PULSE unit. Disabled when no marker aliases that unit (e.g.
+// JGSDF positions or non-aligned synthetic units).
+function ShowOnMapButton({ unitName }: { unitName: string }) {
+  const navigate = useNavigate();
+  // Compile-time import would be cleaner but the OKINAWA_SCENARIO seed
+  // is local to the bridge module which already exports findMarkerByPulseUnit.
+  const has = unitName ? !!findMarkerByPulseUnit(unitName) : false;
+  return (
+    <button
+      type="button"
+      disabled={!has}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!has) return;
+        navigate(`/bastion?unit=${encodeURIComponent(unitName)}`);
+      }}
+      title={has ? `Show ${unitName} on the BASTION map` : `${unitName} has no map marker yet`}
+      className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      📍 On Map
+    </button>
   );
 }
 
