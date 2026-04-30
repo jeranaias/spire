@@ -47,12 +47,24 @@ export function findMarkerById(id: string): ScenarioMarker | undefined {
 
 export function findMarkerByLabel(label: string): ScenarioMarker | undefined {
   const target = label.trim().toLowerCase();
-  return OKINAWA_SCENARIO.find(
-    (m) =>
-      m.label.toLowerCase() === target ||
-      m.parent.toLowerCase() === target ||
-      m.label.toLowerCase().includes(target),
+  if (!target) return undefined;
+  // Pass 1: exact label match. This is the path SPIRO should hit on
+  // a clean call (Gemma passes the canonical PULSE name verbatim).
+  const exactLabel = OKINAWA_SCENARIO.find(
+    (m) => m.label.toLowerCase() === target,
   );
+  if (exactLabel) return exactLabel;
+  // Pass 2: exact parent match (e.g. "Camp Kinser" → CLB-6).
+  const exactParent = OKINAWA_SCENARIO.find(
+    (m) => m.parent.toLowerCase() === target,
+  );
+  if (exactParent) return exactParent;
+  // Pass 3: substring fallback. Only fires when no exact match exists,
+  // and only for queries ≥4 chars to avoid runaway matches like "MAR"
+  // catching every Marines unit. Earlier this was unconditional and
+  // routinely returned the wrong marker on truncated queries.
+  if (target.length < 4) return undefined;
+  return OKINAWA_SCENARIO.find((m) => m.label.toLowerCase().includes(target));
 }
 
 export function findMarkerByPulseUnit(unit: string): ScenarioMarker | undefined {
