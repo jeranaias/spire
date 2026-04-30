@@ -1657,6 +1657,12 @@ export interface MarkExplainResult {
   engine: string;
   input_hash: string;
   cached?: boolean;
+  /** True when the upstream classification gate refused to release
+   * Gemma's response (e.g. it echoed a classification marking). The
+   * `explanation` field still carries an operator-readable note in
+   * that case; `suggested_redaction` will be empty. */
+  unavailable?: boolean;
+  block_reason?: string;
   evidence: Array<{ flag: string | null; evidence: string | null; rule: string | null }>;
   economics?: {
     tier: string;

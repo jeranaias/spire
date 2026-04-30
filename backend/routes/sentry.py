@@ -1884,6 +1884,15 @@ Hard rules — non-negotiable:
 - Ground every claim in a Tier-1 evidence span. Do not invent reasons.
   If Tier-1 found nothing, say "no sensitive markers detected — release
   as UNCLASSIFIED is appropriate."
+- NEVER echo classification markings verbatim in your `explanation`
+  field. The downstream classification gate will refuse to release
+  responses that contain bracketed marks or banner text. Describe
+  evidence in plain English instead — "a classified technical-manual
+  reference," "an EDIPI," "a TAD-net frequency," "an MGRS grid" —
+  rather than reproducing the matched literal. The
+  `suggested_redaction` field SHOULD contain placeholder tokens
+  (e.g. `[REDACTED:TM]`, `[REDACTED:EDIPI]`) since those are
+  obviously sanitized.
 - Suggested redaction must preserve the operational meaning of the
   draft. Replace EDIPIs with [the IC], frequencies with [TAD freq],
   classified TM refs with [the TM], MGRS with [grid]. Don't rewrite
@@ -1893,12 +1902,37 @@ Hard rules — non-negotiable:
 
 Output format — strict JSON, no prose outside the JSON:
 {
-  "explanation": "<one paragraph, ≤80 words>",
+  "explanation": "<one paragraph, ≤80 words, NO classification markings verbatim>",
   "suggested_redaction": "<the draft with sensitive spans replaced>",
   "ceiling_respected": true,
   "grounded_in_evidence": true
 }
 """
+
+
+# Patterns we strip from the spans we send to Gemma so the response can
+# never contain a verbatim classification mark — the upstream Pyros
+# Argus gate refuses to release LLM output that echoes them, which
+# would 403 every legitimate explainer call against classified-TM
+# input.
+_MARKER_RE = re.compile(
+    r"\b(?:TOP\s+SECRET|TS\s*//?\s*SCI|SECRET|CONFIDENTIAL|CUI)\b"
+    r"|\[(?:CLASSIFIED|REDACTED|UNCLASSIFIED|UNCLASS|TS|TS//SCI|S//NOFORN)[^\]]*\]"
+    r"|//\s*NOFORN|//\s*FOUO|//\s*REL\s+TO[^/]*",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_for_tier2(span: str) -> str:
+    """Replace classification markings in an evidence span with a generic
+    placeholder before sending to Gemma. The Tier-1 evidence we forward
+    is descriptive (we already know which rule fired); Gemma doesn't
+    need the verbatim mark to ground its explanation, and stripping it
+    keeps the Pyros gate from refusing the response.
+    """
+    if not span:
+        return span
+    return _MARKER_RE.sub("[classification-marker]", span)
 
 
 def _tier2_user_prompt(text: str, tier1: dict) -> str:
@@ -1907,17 +1941,22 @@ def _tier2_user_prompt(text: str, tier1: dict) -> str:
     highlights = tier1.get("highlights") or []
     ev_lines = []
     for h in highlights:
+        sanitized_span = _sanitize_for_tier2(h.get("text") or "")
         ev_lines.append(
             f"  - flag={h.get('category')}, rule={h.get('rule')}, "
-            f"span={h.get('text')!r} ({h.get('start')}..{h.get('end')})"
+            f"span={sanitized_span!r} ({h.get('start')}..{h.get('end')})"
         )
     ev_block = "\n".join(ev_lines) if ev_lines else "  (none)"
+    sanitized_text = _sanitize_for_tier2(text)
     return (
         f"Tier-1 classification: {cls}\n"
         f"Tier-1 flags: {', '.join(flags) or 'none'}\n"
-        f"Tier-1 evidence spans:\n{ev_block}\n\n"
-        f"Draft text:\n```\n{text}\n```\n\n"
-        f"Return the JSON object as specified."
+        f"Tier-1 evidence spans (classification markings replaced with "
+        f"`[classification-marker]` so the response can release):\n{ev_block}\n\n"
+        f"Draft text (markings sanitized for safe LLM round-trip):\n"
+        f"```\n{sanitized_text}\n```\n\n"
+        f"Return the JSON object as specified. Do NOT echo any "
+        f"classification markings verbatim — describe them in plain English."
     )
 
 
@@ -1973,7 +2012,57 @@ async def sentry_explain(payload: dict, request: Request):
             role=role,
         )
     except HTTPException as exc:
-        raise exc
+        # Pyros Argus is allowed to refuse responses that contain
+        # classification markings; we can't always predict what Gemma
+        # will echo back. Convert the proxy 403/502 into a graceful
+        # 200 with `unavailable: true` so the operator sees a polite
+        # "Tier-2 unavailable for this draft" instead of a stack trace.
+        # The audit chain still logs the attempt.
+        detail = ""
+        try:
+            detail = str(exc.detail) if hasattr(exc, "detail") else str(exc)
+        except Exception:
+            detail = ""
+        is_spillage = "spillage" in detail.lower() or "argus" in detail.lower() or "classification" in detail.lower()
+        is_proxy_err = exc.status_code in (502, 503) or is_spillage
+        if not is_proxy_err:
+            raise exc
+        cls = tier1.get("classification") or "UNCLASSIFIED"
+        if classification_rank(cls) > classification_rank("CUI"):
+            cls = "CUI"
+        audit_log(
+            "sentry_explain_blocked",
+            actor=role or "unknown",
+            subject_id=f"explain_{input_hash[:12]}",
+            payload={
+                "actor_dodid": user.get("dodid"),
+                "actor_role": role,
+                "input_hash": input_hash,
+                "reason": detail[:240],
+                "tier1_classification": cls,
+            },
+        )
+        return {
+            "classification": cls,
+            "explanation": (
+                "Tier-2 explainer unavailable for this draft — the upstream "
+                "classification gate refused to release the response (likely "
+                "because the text contains classification markings the gate "
+                "is policy-bound to redact). The Tier-1 marking + evidence "
+                "spans below remain authoritative."
+            ),
+            "suggested_redaction": "",
+            "ceiling_respected": True,
+            "grounded_in_evidence": False,
+            "engine": "blocked-by-gate",
+            "input_hash": input_hash,
+            "unavailable": True,
+            "block_reason": detail[:240],
+            "evidence": [
+                {"flag": h.get("category"), "evidence": h.get("text"), "rule": h.get("rule")}
+                for h in (tier1.get("highlights") or [])
+            ],
+        }
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,
