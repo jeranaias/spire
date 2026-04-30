@@ -12,7 +12,14 @@ import { create } from "zustand";
 import type { ScenarioMarker } from "../data/okinawa-scenario";
 import { OKINAWA_SCENARIO } from "../data/okinawa-scenario";
 
-const STORAGE_KEY = "spire.markers.v1";
+// v2 — bumped 2026-04-30 when the Okinawa scenario was rewritten so
+// every PULSE unit maps 1:1 to a marker. v1 snapshots in browsers
+// that visited the site before the rewrite hold the stale 13-marker
+// set (III MEF / 4 MAR / etc.) and would shadow the new seed. Bumping
+// the key forces a clean reseed on next load. Drag positions in the
+// old snapshot are sacrificed; that's expected for a scenario-shape
+// change. To roll forward again, bump to v3.
+const STORAGE_KEY = "spire.markers.v2";
 
 // Drag history — the precursor to the audit-chain row. Each entry
 // records the move so we can show "moved 3 min ago by RH" on hover.
