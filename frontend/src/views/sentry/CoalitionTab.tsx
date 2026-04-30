@@ -60,6 +60,18 @@ export function CoalitionTab() {
      * "—" so the operator can tell which rows pre-date the audit fix. */
     manifest_sha256?: string;
     record_count?: number;
+    /** F15 — real ZIP bundle metadata. download_url is the server-relative
+     *  GET endpoint that streams the bytes; bundle_sha256 lets the operator
+     *  verify the file they downloaded matches what the audit row covers;
+     *  filename echoes the bundle's classification so the file ends up named
+     *  predictably on disk; bundle_bytes is the size in bytes for sanity-
+     *  check before a click. Older cached entries (pre-F15) won't carry
+     *  these — the row falls back to "no bundle on file" gracefully. */
+    download_url?: string;
+    filename?: string;
+    bundle_sha256?: string;
+    bundle_bytes?: number;
+    blocked_count?: number;
   }[]>(() => {
     try {
       const raw = window.localStorage.getItem("spire.sentry.recent_releases");
@@ -118,6 +130,11 @@ export function CoalitionTab() {
               created_at: r.created_at,
               manifest_sha256: r.manifest_sha256,
               record_count: r.record_count,
+              download_url: r.download_url,
+              filename: r.filename,
+              bundle_sha256: r.bundle_sha256,
+              bundle_bytes: r.bundle_bytes,
+              blocked_count: r.blocked_count,
             },
           ].slice(-10);
           try {
@@ -127,10 +144,43 @@ export function CoalitionTab() {
           }
           return next;
         });
+        // F15 — actually fetch the bundle. Backend now writes a real ZIP
+        // and returns a server-relative download_url; trigger the download
+        // synchronously via a hidden anchor so the operator gets the bytes
+        // they just authorized. Fire the success toast only after the
+        // download has been initiated, so the toast text reflects reality
+        // (filename + bundle SHA prefix + blocked count) instead of
+        // promising something we never delivered.
+        const filename =
+          r.filename ?? `coalition_release_${r.release_id}.zip`;
+        if (r.download_url) {
+          try {
+            const a = document.createElement("a");
+            a.href = r.download_url;
+            a.download = filename;
+            a.rel = "noopener";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          } catch {
+            /* tolerant — still surface the toast so the operator can
+             * retry from the Recent Releases panel. */
+          }
+        }
+        const shaPrefix = r.bundle_sha256
+          ? r.bundle_sha256.slice(0, 8)
+          : r.manifest_sha256.slice(0, 8);
+        const blockedFragment =
+          r.blocked_count && r.blocked_count > 0
+            ? ` · ${r.blocked_count} record${r.blocked_count === 1 ? "" : "s"} blocked by partner profile`
+            : "";
+        const toastText = r.download_url
+          ? `Release bundle downloaded · ${filename} · ${shaPrefix}…${blockedFragment}`
+          : `✓ Release ${r.release_id} · ${r.record_count} records · manifest ${r.manifest_sha256.slice(0, 12)}… · audit logged${blockedFragment}`;
         pushToast({
           tone: "ok",
-          text: `✓ Release ${r.release_id} · ${r.record_count} records · manifest ${r.manifest_sha256.slice(0, 12)}… · audit logged`,
-          ttlMs: 6000,
+          text: toastText,
+          ttlMs: 7000,
         });
       } catch (e) {
         pushToast({ tone: "error", text: `Release failed: ${formatApiError(e)}` });
@@ -138,6 +188,56 @@ export function CoalitionTab() {
         setReleasing(false);
       }
     }, 500);
+  }
+
+  // F15 — re-download a previously-prepared bundle from the Recent
+  // Releases panel. The backend keeps prepared bundles in memory keyed by
+  // release_id; if the server has been bounced since the release was
+  // prepared, the GET will 404 and we surface a graceful toast instead of
+  // pretending the file is on its way. Server is same-origin so a HEAD
+  // probe avoids spawning a download tab on the failure path.
+  async function downloadExistingRelease(r: {
+    release_id: string;
+    download_url?: string;
+    filename?: string;
+  }) {
+    if (!r.download_url) {
+      pushToast({
+        tone: "error",
+        text: `No bundle on file for ${r.release_id}. This release predates the bundle-on-disk fix; re-generate to get a downloadable ZIP.`,
+      });
+      return;
+    }
+    try {
+      const probe = await fetch(r.download_url, { method: "HEAD", credentials: "include" });
+      if (!probe.ok) {
+        if (probe.status === 404) {
+          pushToast({
+            tone: "error",
+            text: `Bundle ${r.release_id} no longer cached on the server (404). Re-generate the release to recreate the ZIP.`,
+          });
+        } else {
+          pushToast({
+            tone: "error",
+            text: `Bundle fetch failed (${probe.status}). Try re-generating the release.`,
+          });
+        }
+        return;
+      }
+    } catch (e) {
+      pushToast({
+        tone: "error",
+        text: `Bundle fetch failed: ${formatApiError(e)}`,
+      });
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = r.download_url;
+    a.download = r.filename ?? `coalition_release_${r.release_id}.zip`;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   const profileOptions = useMemo(
@@ -554,6 +654,34 @@ export function CoalitionTab() {
                     manifest —
                   </span>
                 )}
+                {/* F15 — bundle SHA-256 + size let the operator verify
+                    the downloaded ZIP locally (e.g. shasum -a 256 on the
+                    file) against the manifest the audit row references. */}
+                {r.bundle_sha256 && (
+                  <span
+                    data-testid="coalition-recent-bundle"
+                    className="rounded-sm border border-[var(--color-info-muted)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-info)] tracking-wider"
+                    title={`Bundle SHA-256: ${r.bundle_sha256}\nVerify the ZIP locally with: shasum -a 256 ${r.filename ?? r.release_id + ".zip"}`}
+                  >
+                    bundle {r.bundle_sha256.slice(0, 12)}…
+                  </span>
+                )}
+                {typeof r.bundle_bytes === "number" && r.bundle_bytes > 0 && (
+                  <span
+                    className="text-xs text-[var(--color-text-muted)] tracking-wider"
+                    title={`${r.bundle_bytes.toLocaleString("en-US")} bytes`}
+                  >
+                    {formatBytes(r.bundle_bytes)}
+                  </span>
+                )}
+                {typeof r.blocked_count === "number" && r.blocked_count > 0 && (
+                  <span
+                    className="rounded-sm border border-[var(--color-warning-muted)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-warning)] tracking-wider"
+                    title={`${r.blocked_count} record(s) were blocked by the partner profile during release.`}
+                  >
+                    {r.blocked_count} blocked
+                  </span>
+                )}
                 {/* Walkthrough #9 — render UTC timestamp consistently with
                     the release_id (which embeds UTC). Mixing local time +
                     UTC release_id produced two valid times for one event. */}
@@ -576,11 +704,27 @@ export function CoalitionTab() {
                 <span className="rounded-sm border border-[var(--color-success-muted)] px-1.5 py-[1px] text-xs uppercase text-[var(--color-success)] tracking-wider">
                   audit logged
                 </span>
+                {/* F15 — re-fetch the prepared ZIP. Hidden when the row
+                    has no download_url (pre-F15 cached entries) so the
+                    operator doesn't get a button that always errors. */}
+                {r.download_url && (
+                  <Button
+                    onClick={() => {
+                      void downloadExistingRelease(r);
+                    }}
+                    variant="secondary"
+                    size="sm"
+                    data-testid="coalition-recent-download"
+                  >
+                    Download
+                  </Button>
+                )}
               </div>
             ))}
           </div>
           <div className="mt-2 font-mono text-xs italic text-[var(--color-text-muted)] tracking-wider">
             Each release_id is preserved in the SHA-256 chained audit log; downstream packagers consume the same ids.
+            Bundle SHA-256 lets the operator verify a downloaded ZIP locally against the manifest.
           </div>
         </div>
       )}
@@ -763,6 +907,15 @@ function CoalitionReleaseConfirmModal({
       </div>
     </div>
   );
+}
+
+// F15 — compact byte formatter for the Recent Releases panel. Most
+// coalition bundles in the demo dataset land between 30 KB and 8 MB, so
+// the operator just needs a quick "is this the size I expect" glance.
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 function ScopeStat({

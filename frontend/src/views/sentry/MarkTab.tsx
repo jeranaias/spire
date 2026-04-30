@@ -1,12 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
-import { api, type MarkResult } from "../../api";
+import { api, type MarkResult, type MarkExplainResult, type SentryBulkMarkRow } from "../../api";
 import { formatApiError } from "../../api-retry";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Pressable } from "../../components/ui";
 import { ClassifiedExport } from "../../components/classification";
+
+// Recent attestations — cap is intentionally small. The localStorage
+// payload holds enough to re-render the row + show the JSON the
+// operator already downloaded; full audit history lives server-side.
+const ATTESTATION_STORE_KEY = "spire.markdraft.attestations.v1";
+const ATTESTATION_CAP = 10;
+
+interface AttestationRecord {
+  ts: number;
+  classification: string;
+  recommended_marking: string;
+  caveats: string[];
+  input_hash: string;
+  chain_index: number | null;
+  attestation: any;
+}
+
+function loadAttestations(): AttestationRecord[] {
+  try {
+    const raw = window.localStorage.getItem(ATTESTATION_STORE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAttestation(rec: AttestationRecord) {
+  const list = [rec, ...loadAttestations()].slice(0, ATTESTATION_CAP);
+  try {
+    window.localStorage.setItem(ATTESTATION_STORE_KEY, JSON.stringify(list));
+  } catch {
+    // localStorage may be full or unavailable; swallow — the audit chain
+    // already persisted server-side.
+  }
+}
 
 const RELEASE_AUTHS = [
   { value: "US_ONLY", label: "U.S." },
@@ -63,6 +100,31 @@ export function MarkTab() {
   const debounceRef = useRef<number | null>(null);
   const latestTextRef = useRef<string>("");
 
+  // Tier-2 grounded-explainer (Gemma) state — opt-in. Not auto-fired
+  // on every keystroke so /mark stays cheap; the operator clicks
+  // "Explain with Gemma" to spend a tier-2 call.
+  const [explain, setExplain] = useState<MarkExplainResult | null>(null);
+  const [explaining, setExplaining] = useState(false);
+  const [explainError, setExplainError] = useState<string | null>(null);
+
+  // Bulk Mark Draft (CSV) state — drops a CSV with a `text` column,
+  // gets back tier-1 marks ranked by needs-review.
+  const [bulkRows, setBulkRows] = useState<SentryBulkMarkRow[] | null>(null);
+  const [bulkCounts, setBulkCounts] = useState<{
+    needs_review: number;
+    auto_clear: number;
+    UNCLASSIFIED?: number;
+    CUI?: number;
+  } | null>(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkSourceName, setBulkSourceName] = useState<string | null>(null);
+
+  // Recent attestations — replay from localStorage so the operator can
+  // see what they downloaded earlier without re-running the engine.
+  const [attestations, setAttestations] = useState<AttestationRecord[]>(() => loadAttestations());
+  const [attestationView, setAttestationView] = useState<AttestationRecord | null>(null);
+
   if (role !== "data_custodian" && role !== "security_manager" && role !== "mef_commander") {
     return (
       <InsufficientPrivilege
@@ -82,8 +144,15 @@ export function MarkTab() {
     latestTextRef.current = text;
     if (!text) {
       setResult(null);
+      setExplain(null);
+      setExplainError(null);
       return;
     }
+    // Tier-2 explanation is anchored on the previous text+result; if
+    // the text changes the cached explanation no longer applies. Clear
+    // it here so a stale paragraph doesn't render under fresh evidence.
+    setExplain(null);
+    setExplainError(null);
     const ms = immediate ? 0 : 250;
     debounceRef.current = window.setTimeout(async () => {
       setLoading(true);
@@ -100,6 +169,66 @@ export function MarkTab() {
         setLoading(false);
       }
     }, ms);
+  }
+
+  // Tier-2 grounded-explainer — Gemma writes a paragraph anchored on
+  // the Tier-1 evidence spans + a redacted phrasing the operator can
+  // copy. Opt-in to keep /mark cheap; this is one Gemma call per click.
+  async function runExplain() {
+    const text = (textareaRef.current?.value ?? "").trim();
+    if (!text || !result) return;
+    setExplaining(true);
+    setExplainError(null);
+    try {
+      const r = await api.sentry.explain(text, {
+        classification: result.recommended_classification,
+        flags: result.flags,
+        highlights: result.evidence.map((e) => ({
+          category: e.flag,
+          rule: e.rule,
+          text: e.evidence,
+          // start/end aren't returned on /mark's evidence shape today;
+          // /explain accepts a tier1 *summary* and re-runs tier1 on
+          // the server side if highlights lack offsets, so passing the
+          // text-only triple is fine.
+        })),
+      });
+      setExplain(r);
+    } catch (e) {
+      setExplainError(formatApiError(e));
+    } finally {
+      setExplaining(false);
+    }
+  }
+
+  // Bulk Mark Draft — drag a CSV with a `text` column (or any single
+  // column treated as text). Server returns tier-1 results ranked by
+  // needs-review so the highest-risk rows surface first.
+  async function handleBulkCsv(file: File) {
+    setBulkLoading(true);
+    setBulkError(null);
+    setBulkRows(null);
+    setBulkCounts(null);
+    setBulkSourceName(file.name);
+    try {
+      const text = await file.text();
+      const rows = parseCsvForBulk(text);
+      if (rows.length === 0) {
+        setBulkError("No text rows detected — first column should hold the draft remark, or include a `text` column.");
+        return;
+      }
+      const r = await api.sentry.markBulk(rows);
+      setBulkRows(r.results);
+      setBulkCounts(r.counts);
+      pushToast({
+        tone: "ok",
+        text: `Bulk mark: ${r.row_count} rows · ${r.counts.needs_review} need review`,
+      });
+    } catch (e) {
+      setBulkError(formatApiError(e));
+    } finally {
+      setBulkLoading(false);
+    }
   }
 
   // Walkthrough #3 — release-authority change re-fires the engine.
@@ -128,6 +257,20 @@ export function MarkTab() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {attestationView && (
+        <AttestationViewerModal
+          rec={attestationView}
+          onClose={() => setAttestationView(null)}
+          onCopy={() => {
+            try {
+              navigator.clipboard?.writeText(JSON.stringify(attestationView.attestation, null, 2));
+              pushToast({ tone: "ok", text: "Attestation JSON copied to clipboard" });
+            } catch {
+              pushToast({ tone: "warn", text: "Clipboard unavailable — copy manually" });
+            }
+          }}
+        />
+      )}
       <div className="flex w-1/2 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
         <h2 className="mb-1 text-sm font-semibold">Upstream marking — recommend before release</h2>
         <div className="mb-4 text-xs text-[var(--color-text-muted)]">
@@ -177,6 +320,52 @@ export function MarkTab() {
           </span>
           {error && <span className="text-xs text-[var(--color-danger)]">{error}</span>}
         </div>
+
+        {/* Bulk Mark Draft (CSV drop). Real action: POSTs every row to
+            /sentry/mark/bulk and renders the ranked queue. SSgts who
+            keep their remarks in spreadsheets can pre-clear the queue
+            here instead of pasting one at a time. */}
+        <BulkMarkDropzone
+          onFile={handleBulkCsv}
+          loading={bulkLoading}
+          error={bulkError}
+          rows={bulkRows}
+          counts={bulkCounts}
+          sourceName={bulkSourceName}
+          onClear={() => {
+            setBulkRows(null);
+            setBulkCounts(null);
+            setBulkError(null);
+            setBulkSourceName(null);
+          }}
+          onPickRow={(row) => {
+            // Send the row's preview to the live Mark Draft pane so
+            // the operator can drill into it. The bulk endpoint stops
+            // at preview text (120 chars); for full re-mark the row's
+            // preview is sufficient since the engine already classified
+            // the full row server-side.
+            if (textareaRef.current && row.preview) {
+              textareaRef.current.value = row.preview;
+              latestTextRef.current = row.preview;
+              scheduleMark(true);
+            }
+          }}
+        />
+
+        {/* Recent attestations — local-storage backed, shows what was
+            downloaded earlier so the operator can re-open the JSON
+            without re-running the engine. The audit chain stays the
+            permanent record server-side. */}
+        <RecentAttestationsPanel
+          items={attestations}
+          onView={(rec) => setAttestationView(rec)}
+          onClear={() => {
+            try {
+              window.localStorage.removeItem(ATTESTATION_STORE_KEY);
+            } catch {}
+            setAttestations([]);
+          }}
+        />
       </div>
 
       <div className="flex w-1/2 flex-col overflow-y-auto p-4">
@@ -201,7 +390,18 @@ export function MarkTab() {
 
             <div className="mb-4 flex items-center gap-3">
               <div className="font-mono text-sm text-[var(--color-text-secondary)] tracking-wide">
-                Confidence <span className="tabular-nums text-[var(--color-text)]">{(result.confidence * 100).toFixed(0)}%</span>
+                {/* Honesty pass — `confidence` is a heuristic from the
+                 * Tier-1 rule engine, not an AI confidence. Labelled
+                 * accordingly so an operator doesn't read "78%" as the
+                 * model's certainty. The tier-2 explainer (Gemma)
+                 * surfaces a separate grounded read in its own panel. */}
+                Rule confidence{" "}
+                <span
+                  className="tabular-nums text-[var(--color-text)]"
+                  title="Tier-1 rule-engine heuristic — not a model probability"
+                >
+                  {(result.confidence * 100).toFixed(0)}%
+                </span>
                 <span className="mx-2 text-[var(--color-border-active)]">│</span>
                 Release: <span className="text-[var(--color-text)]">{result.release_authority_requested}</span>
               </div>
@@ -252,6 +452,21 @@ export function MarkTab() {
                       a.download = `spire_${safeCls}_mark_attestation_${Date.now()}.json`;
                       a.click();
                       URL.revokeObjectURL(url);
+                      // Persist a recent-attestation row so the operator
+                      // can re-open what was downloaded without re-running
+                      // the engine. Cap at 10; the audit chain is the
+                      // permanent source of truth, this is just UX recall.
+                      const rec: AttestationRecord = {
+                        ts: Date.now(),
+                        classification: cls,
+                        recommended_marking: result.recommended_classification,
+                        caveats: result.caveats_recommended,
+                        input_hash: attest.input_hash,
+                        chain_index: result.audit?.chain_index ?? null,
+                        attestation: attest,
+                      };
+                      saveAttestation(rec);
+                      setAttestations(loadAttestations());
                       pushToast({ tone: "ok", text: `Attestation downloaded · ${banner}` });
                     } finally {
                       setDownloading(false);
@@ -260,6 +475,87 @@ export function MarkTab() {
                 />
               </div>
             </div>
+
+            {/* Tier-2 grounded explainer (Gemma) — opt-in, one call per
+             * click. Renders the paragraph + the suggested redacted
+             * phrasing the operator can copy back into the textarea. */}
+            <section className="mb-4 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                  Tier-2 · Gemma 4 grounding
+                </h4>
+                {explain?.economics && (
+                  <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                    {explain.economics.tier} · ${explain.economics.cost_usd.toFixed(4)} ·{" "}
+                    {Math.round(explain.economics.latency_ms)}ms
+                    {explain.cached && (
+                      <span className="ml-2 text-[var(--color-success)]">cached</span>
+                    )}
+                  </span>
+                )}
+                <Pressable
+                  block={false}
+                  disabled={explaining}
+                  onClick={() => runExplain()}
+                  className="ml-auto rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_12%,var(--color-surface))] px-3 py-1 font-mono text-xs uppercase tracking-widest text-[var(--color-text)] hover:bg-[color-mix(in_oklab,var(--color-primary)_24%,var(--color-surface))] disabled:opacity-50"
+                >
+                  {explaining ? "Calling Gemma…" : explain ? "Re-run with Gemma" : "Explain with Gemma"}
+                </Pressable>
+              </div>
+              {explainError && (
+                <div className="mt-2 text-xs text-[var(--color-danger)]">{explainError}</div>
+              )}
+              {!explain && !explainError && (
+                <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+                  Tier-1 already classified this draft. Click to spend one Gemma call for a
+                  paragraph-length grounded explanation + a suggested redacted phrasing.
+                </div>
+              )}
+              {explain && (
+                <div className="mt-3 space-y-3">
+                  <div className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-sm leading-relaxed text-[var(--color-text)]">
+                    {explain.explanation || "(no explanation returned)"}
+                  </div>
+                  {explain.suggested_redaction && (
+                    <div>
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                          Suggested redacted phrasing
+                        </span>
+                        <Pressable
+                          block={false}
+                          onClick={() => {
+                            if (textareaRef.current) {
+                              textareaRef.current.value = explain.suggested_redaction;
+                              latestTextRef.current = explain.suggested_redaction;
+                              scheduleMark(true);
+                              pushToast({
+                                tone: "ok",
+                                text: "Suggested phrasing applied — re-run mark to verify",
+                              });
+                            }
+                          }}
+                          className="rounded-sm border border-[var(--color-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+                        >
+                          ↩ Apply to draft
+                        </Pressable>
+                      </div>
+                      <pre className="overflow-x-auto whitespace-pre-wrap rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-xs leading-relaxed text-[var(--color-text)]">
+                        {explain.suggested_redaction}
+                      </pre>
+                    </div>
+                  )}
+                  <div className="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                    Engine: {explain.engine} · Capped at CUI per build policy.
+                    {!explain.grounded_in_evidence && (
+                      <span className="ml-2 text-[var(--color-warning)]">
+                        ⚠ Grounding flag not set — review carefully.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
 
             <section className="mb-4">
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
@@ -545,4 +841,317 @@ async function sha256(text: string): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+// Lightweight CSV parser tuned for the Mark-bulk shape. We accept
+// either {text}-column CSVs or single-column files; quote-balancing
+// is handled but we don't try to be a full RFC-4180 parser. The
+// server caps at 500 rows, so the FE doesn't need to scale.
+function parseCsvForBulk(raw: string): Array<{ id: string; text: string }> {
+  const lines = raw.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length === 0) return [];
+  const splitRow = (line: string): string[] => {
+    const cells: string[] = [];
+    let current = "";
+    let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuote) {
+        if (ch === '"') {
+          if (line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuote = false;
+          }
+        } else {
+          current += ch;
+        }
+      } else if (ch === '"') {
+        inQuote = true;
+      } else if (ch === ",") {
+        cells.push(current);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    cells.push(current);
+    return cells;
+  };
+  const header = splitRow(lines[0]).map((c) => c.trim().toLowerCase());
+  let textIdx = header.indexOf("text");
+  if (textIdx === -1) textIdx = header.indexOf("remark");
+  if (textIdx === -1) textIdx = header.indexOf("draft");
+  let idIdx = header.indexOf("id");
+  if (idIdx === -1) idIdx = header.indexOf("sr_number");
+  // If no recognised header, treat every line (including the first)
+  // as a text-only row.
+  let rows: Array<{ id: string; text: string }>;
+  if (textIdx === -1) {
+    rows = lines.map((l, i) => ({ id: `row-${i + 1}`, text: l.trim() }));
+  } else {
+    rows = lines.slice(1).map((line, i) => {
+      const cells = splitRow(line);
+      const idCell = idIdx >= 0 ? (cells[idIdx] ?? "").trim() : "";
+      const textCell = (cells[textIdx] ?? "").trim();
+      return { id: idCell || `row-${i + 1}`, text: textCell };
+    });
+  }
+  return rows.filter((r) => r.text.length > 0).slice(0, 500);
+}
+
+function BulkMarkDropzone({
+  onFile,
+  loading,
+  error,
+  rows,
+  counts,
+  sourceName,
+  onClear,
+  onPickRow,
+}: {
+  onFile: (file: File) => void;
+  loading: boolean;
+  error: string | null;
+  rows: SentryBulkMarkRow[] | null;
+  counts: { needs_review: number; auto_clear: number; UNCLASSIFIED?: number; CUI?: number } | null;
+  sourceName: string | null;
+  onClear: () => void;
+  onPickRow: (row: SentryBulkMarkRow) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  return (
+    <div className="mt-4 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-xs uppercase tracking-widest text-[var(--color-text-muted)]">
+          Bulk Mark · CSV
+        </span>
+        <span className="text-[10px] text-[var(--color-text-muted)]">
+          drop a `.csv` with a `text`/`remark`/`draft` column · ≤500 rows · Tier-1 only
+        </span>
+        {rows && (
+          <Pressable
+            block={false}
+            onClick={onClear}
+            className="ml-auto rounded-sm border border-[var(--color-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+          >
+            Clear
+          </Pressable>
+        )}
+      </div>
+      {!rows && (
+        <div
+          className={clsx(
+            "mt-2 rounded-sm border-2 border-dashed p-3 text-center font-mono text-xs uppercase tracking-widest transition-colors",
+            isDragging
+              ? "border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))] text-[var(--color-text)]"
+              : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-border-active)]",
+          )}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragging(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragging(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsDragging(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) onFile(file);
+          }}
+        >
+          {loading ? (
+            <span>Classifying rows…</span>
+          ) : (
+            <>
+              <div>Drop CSV here</div>
+              <div className="mt-1 normal-case tracking-wide text-[10px] text-[var(--color-text-muted)]">
+                or{" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-[var(--color-text)]"
+                  onClick={() => inputRef.current?.click()}
+                >
+                  pick a file
+                </button>
+              </div>
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) onFile(file);
+                  e.currentTarget.value = "";
+                }}
+              />
+            </>
+          )}
+        </div>
+      )}
+      {error && (
+        <div className="mt-2 text-xs text-[var(--color-danger)]">{error}</div>
+      )}
+      {rows && counts && (
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-3 font-mono text-xs">
+            <span className="text-[var(--color-text-muted)]">{sourceName ?? "(uploaded)"}</span>
+            <span className="text-[var(--color-text)]">
+              {rows.length} rows · {counts.needs_review} need review · {counts.auto_clear} auto-clear
+            </span>
+            <span className="text-[var(--color-text-muted)]">
+              {Object.entries(counts)
+                .filter(([k]) => k === "UNCLASSIFIED" || k === "CUI")
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(" · ")}
+            </span>
+          </div>
+          <div className="max-h-48 overflow-y-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
+            {rows.slice(0, 60).map((r, i) => (
+              <button
+                type="button"
+                key={r.id ?? i}
+                onClick={() => onPickRow(r)}
+                className="flex w-full items-baseline gap-2 border-b border-[var(--color-border)] px-2 py-1 text-left font-mono text-xs hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-surface))]"
+              >
+                <span
+                  className={clsx(
+                    "shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] uppercase tracking-widest",
+                    r.classification === "CUI"
+                      ? "bg-[color-mix(in_oklab,var(--color-warning)_25%,var(--color-surface))] text-[var(--color-warning)]"
+                      : "bg-[color-mix(in_oklab,var(--color-success)_15%,var(--color-surface))] text-[var(--color-success)]",
+                  )}
+                >
+                  {r.classification ?? "—"}
+                </span>
+                <span className="shrink-0 text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                  {r.needs_review ? "review" : "clear"}
+                </span>
+                <span className="shrink-0 tabular-nums text-[var(--color-text-muted)]">
+                  {((r.confidence ?? 0) * 100).toFixed(0)}%
+                </span>
+                <span className="truncate text-[var(--color-text)]">{r.preview ?? r.id}</span>
+              </button>
+            ))}
+            {rows.length > 60 && (
+              <div className="px-2 py-1 text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                … {rows.length - 60} more rows; refine your CSV or drill in via Review Queue
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttestationViewerModal({
+  rec,
+  onClose,
+  onCopy,
+}: {
+  rec: AttestationRecord;
+  onClose: () => void;
+  onCopy: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-2">
+          <span className="font-mono text-xs uppercase tracking-widest text-[var(--color-text-muted)]">
+            Attestation · {new Date(rec.ts).toLocaleString()}
+          </span>
+          <span className="rounded-sm bg-[color-mix(in_oklab,var(--color-warning)_25%,var(--color-surface))] px-2 py-0.5 font-mono text-[10px] uppercase text-[var(--color-warning)]">
+            {rec.classification.replace("_", " ")}
+          </span>
+          <Pressable
+            block={false}
+            onClick={onCopy}
+            className="ml-auto rounded-sm border border-[var(--color-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+          >
+            Copy JSON
+          </Pressable>
+          <Pressable
+            block={false}
+            onClick={onClose}
+            className="rounded-sm border border-[var(--color-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+          >
+            Close ✕
+          </Pressable>
+        </div>
+        <pre className="max-h-[68vh] overflow-auto p-3 font-mono text-xs leading-relaxed text-[var(--color-text)]">
+{JSON.stringify(rec.attestation, null, 2)}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+function RecentAttestationsPanel({
+  items,
+  onView,
+  onClear,
+}: {
+  items: AttestationRecord[];
+  onView: (rec: AttestationRecord) => void;
+  onClear: () => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-4 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-xs uppercase tracking-widest text-[var(--color-text-muted)]">
+          Recent attestations · {items.length}
+        </span>
+        <span className="text-[10px] text-[var(--color-text-muted)]">
+          stored locally · audit chain is the permanent record
+        </span>
+        <Pressable
+          block={false}
+          onClick={onClear}
+          className="ml-auto rounded-sm border border-[var(--color-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+        >
+          Clear local
+        </Pressable>
+      </div>
+      <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+        {items.map((rec, i) => (
+          <li key={`${rec.input_hash}-${rec.ts}-${i}`}>
+            <button
+              type="button"
+              onClick={() => onView(rec)}
+              className="flex w-full items-baseline gap-2 rounded-sm border border-transparent px-2 py-1 text-left font-mono text-xs hover:border-[var(--color-border)]"
+            >
+              <span className="tabular-nums text-[var(--color-text-muted)]">
+                {new Date(rec.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+              <span className="rounded-sm bg-[color-mix(in_oklab,var(--color-warning)_20%,var(--color-surface))] px-1.5 py-0.5 text-[10px] uppercase text-[var(--color-warning)]">
+                {rec.classification.replace("_", " ")}
+              </span>
+              {rec.caveats.length > 0 && (
+                <span className="text-[var(--color-text-secondary)]">// {rec.caveats.join(" / ")}</span>
+              )}
+              <span className="ml-auto text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                #{rec.chain_index ?? "—"} · {rec.input_hash.slice(0, 8)}…
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }

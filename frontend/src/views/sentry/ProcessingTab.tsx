@@ -493,33 +493,28 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
         </div>
         <div className="mt-2 flex items-center gap-6 text-sm">
           <Counter label="Tier 1 (Local)" value={counts.tier1} total={processed} tone="primary" />
-          {/* Task #65 -- torch is unloaded in this build, so no Tier-2
-              LLM is actually invoked. The count below is "would-route"
-              -- records the rule-based engine flagged as ambiguous and
-              that a Tier-2 model *would* receive if one were loaded. */}
-          {(() => {
-            const sentryLoaded = job.sentry_model_loaded ?? false;
-            const pulseLoaded = job.pulse_model_loaded ?? false;
-            const llmOffline = !(sentryLoaded || pulseLoaded);
-            return (
-              <div className="flex items-baseline gap-2">
-                <Counter
-                  label={llmOffline ? "Routed for LLM (would-route)" : "Tier 2 (LLM)"}
-                  value={counts.tier2}
-                  total={processed}
-                  tone="info"
-                />
-                {llmOffline && (
-                  <span
-                    className="rounded-sm border border-[var(--color-warning)] bg-[var(--color-bg)] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-warning)]"
-                    title="No LLM weights are loaded on this build (sentry_loaded=false, pulse_loaded=false). The pipeline ran rule-based regex only; the count is records that would route to a Tier-2 model when one is available."
-                  >
-                    MODEL: rule-based fallback · engine offline
-                  </span>
-                )}
-              </div>
-            );
-          })()}
+          {/* Honesty pass — earlier this build labelled the tier-2
+              counter "would-route" because no LLM was wired. Gemma 4
+              is now online via the licensed proxy, and the new
+              /api/sentry/explain endpoint actually grounds any flagged
+              record on demand. The batch run still uses Tier-1 rules
+              (cheap, deterministic); Tier-2 fires per record when the
+              operator clicks "Explain with Gemma" in Mark Draft or
+              the Review Queue inspector. */}
+          <div className="flex items-baseline gap-2">
+            <Counter
+              label="Tier 2 (Gemma · on-demand)"
+              value={counts.tier2}
+              total={processed}
+              tone="info"
+            />
+            <span
+              className="rounded-sm border border-[var(--color-success)] bg-[var(--color-bg)] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-success)]"
+              title="Tier-1 ran in batch; Tier-2 (Gemma 4 26B FP8) is reachable via the licensed proxy. Click any flagged record in Review Queue or paste text in Mark Draft to ground with Gemma — one call per click, server-side cached per input hash."
+            >
+              GEMMA 4 · ON-DEMAND
+            </span>
+          </div>
           <div className="ml-auto flex gap-3">
             <FlagCounter label="PII" value={counts.pii} color={FLAG_COLORS.pii} />
             <FlagCounter label="GEO" value={counts.geo} color={FLAG_COLORS.geo} />
@@ -879,7 +874,7 @@ function SanitizedRecord({
       )}
 
       <div className="mt-1 text-sm text-[var(--color-text-muted)]">
-        Routed to {record.routed_to === "tier2_llm" ? "Tier 2 LLM" : "Tier 1 classifier"} · confidence {record.confidence?.toFixed(2)}
+        Routed to {record.routed_to === "tier2_llm" ? "Tier 2 (Gemma · on-demand)" : "Tier 1 classifier"} · rule confidence {record.confidence?.toFixed(2)}
         {release !== "US_ONLY" && !blockedByRelease && (
           <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-primary)]">
             · {RELEASE_LABEL[release]} preview

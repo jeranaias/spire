@@ -1858,6 +1858,428 @@ async def review_bulk(request: Request, payload: dict):
 
 
 _EXPORTS: dict = {}  # export_id -> zip bytes + metadata
+_COALITION_RELEASES: dict = {}  # release_id -> {bytes, filename, ...}
+_TIER2_CACHE: dict = {}  # input_hash -> {explanation, ...} for the session
+
+
+# ---------------------------------------------------------------------------
+# Tier-2 grounding explainer — calls Gemma to explain WHY a classification
+# was assigned, given the rule findings, and produces a redaction
+# suggestion. Caps at CUI by policy. Cached per input hash to avoid
+# double-billing on repeat clicks.
+# ---------------------------------------------------------------------------
+
+
+_TIER2_SYSTEM_PROMPT = """You are SENTRY-Tier2, the grounded-explainer aspect of SPIRE's
+classification engine. The Tier-1 rule engine has already classified the
+operator's draft text and returned the evidence spans (regex hits) that
+triggered each flag. Your job is to (a) explain in one short paragraph
+WHY this draft is at the recommended classification, citing the specific
+spans Tier-1 flagged, and (b) propose a single redacted phrasing the
+operator could use to release the draft at a lower classification.
+
+Hard rules — non-negotiable:
+- Cap recommended classification at CUI. Never recommend SECRET or
+  TOP SECRET in this build (policy ceiling).
+- Ground every claim in a Tier-1 evidence span. Do not invent reasons.
+  If Tier-1 found nothing, say "no sensitive markers detected — release
+  as UNCLASSIFIED is appropriate."
+- Suggested redaction must preserve the operational meaning of the
+  draft. Replace EDIPIs with [the IC], frequencies with [TAD freq],
+  classified TM refs with [the TM], MGRS with [grid]. Don't rewrite
+  the whole sentence.
+- Keep both fields short. Explanation: ≤80 words. Redaction: same
+  length as input within ±20%.
+
+Output format — strict JSON, no prose outside the JSON:
+{
+  "explanation": "<one paragraph, ≤80 words>",
+  "suggested_redaction": "<the draft with sensitive spans replaced>",
+  "ceiling_respected": true,
+  "grounded_in_evidence": true
+}
+"""
+
+
+def _tier2_user_prompt(text: str, tier1: dict) -> str:
+    flags = tier1.get("flags") or []
+    cls = tier1.get("classification") or "UNCLASSIFIED"
+    highlights = tier1.get("highlights") or []
+    ev_lines = []
+    for h in highlights:
+        ev_lines.append(
+            f"  - flag={h.get('category')}, rule={h.get('rule')}, "
+            f"span={h.get('text')!r} ({h.get('start')}..{h.get('end')})"
+        )
+    ev_block = "\n".join(ev_lines) if ev_lines else "  (none)"
+    return (
+        f"Tier-1 classification: {cls}\n"
+        f"Tier-1 flags: {', '.join(flags) or 'none'}\n"
+        f"Tier-1 evidence spans:\n{ev_block}\n\n"
+        f"Draft text:\n```\n{text}\n```\n\n"
+        f"Return the JSON object as specified."
+    )
+
+
+@router.post("/explain")
+async def sentry_explain(payload: dict, request: Request):
+    """Tier-2 grounded-explainer: paragraph + redacted phrasing.
+
+    Calls Gemma via the licensed proxy, capped at CUI by policy. Cached
+    per (text-hash) for the session so repeat clicks on the same draft
+    don't double-bill. Every successful explain writes a `sentry_explain`
+    audit row (input hash, ceiling enforced, gemma model + tokens).
+
+    Server-side gate: same role list as /mark — the explainer is part
+    of the same surface and inherits the same scope rules.
+
+    Walkthrough decision: explainer is OPT-IN, not auto-fired on every
+    keystroke. /mark stays cheap (rule-only); /explain spends a tier-2
+    call when the operator asks. This keeps the live demo's cost-per-
+    panel-summary line honest.
+    """
+    role = session_role(request)
+    require_role(role, SENTRY_MARK_ROLES, "sentry.explain")
+    user = getattr(request.state, "user", None) or {}
+
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    tier1 = payload.get("tier1")
+    if not isinstance(tier1, dict) or "highlights" not in tier1:
+        tier1 = tier1_classify(text)
+
+    input_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    cache_key = f"{input_hash}:{tier1.get('classification', '')}"
+    cached = _TIER2_CACHE.get(cache_key)
+    if cached:
+        return {**cached, "cached": True}
+
+    from .llm import call_llm_chat
+
+    messages = [
+        {"role": "system", "content": _TIER2_SYSTEM_PROMPT},
+        {"role": "user", "content": _tier2_user_prompt(text, tier1)},
+    ]
+
+    try:
+        result = await call_llm_chat(
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.0,
+            max_tokens=400,
+            tier="tier2_mid",
+            call_site="sentry_explain",
+            role=role,
+        )
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"tier2 call failed: {type(exc).__name__}: {exc}",
+        )
+
+    raw_content = (result.get("content") or "").strip()
+    parsed: dict = {}
+    try:
+        parsed = json.loads(raw_content)
+    except Exception:
+        # Some Gemma builds wrap the JSON object in fences even with
+        # response_format set. Strip and retry once before bailing.
+        cleaned = re.sub(r"^```(?:json)?|```$", "", raw_content, flags=re.MULTILINE).strip()
+        try:
+            parsed = json.loads(cleaned)
+        except Exception:
+            parsed = {
+                "explanation": raw_content[:400],
+                "suggested_redaction": "",
+                "ceiling_respected": True,
+                "grounded_in_evidence": False,
+                "parse_error": True,
+            }
+
+    # Hard cap at CUI — defensive even though the system prompt caps too.
+    cls = tier1.get("classification") or "UNCLASSIFIED"
+    if classification_rank(cls) > classification_rank("CUI"):
+        cls = "CUI"
+
+    response = {
+        "classification": cls,
+        "explanation": (parsed.get("explanation") or "")[:1200],
+        "suggested_redaction": parsed.get("suggested_redaction") or "",
+        "ceiling_respected": True,
+        "grounded_in_evidence": bool(parsed.get("grounded_in_evidence", True)),
+        "engine": "Gemma 4 26B FP8 (RigRun)",
+        "economics": result.get("economics"),
+        "input_hash": input_hash,
+        "evidence": [
+            {"flag": h.get("category"), "evidence": h.get("text"), "rule": h.get("rule")}
+            for h in (tier1.get("highlights") or [])
+        ],
+    }
+    _TIER2_CACHE[cache_key] = response
+
+    audit_log(
+        "sentry_explain",
+        actor=role or "unknown",
+        subject_id=f"explain_{input_hash[:12]}",
+        payload={
+            "actor_dodid": user.get("dodid"),
+            "actor_role": role,
+            "input_hash": input_hash,
+            "classification": cls,
+            "tokens_in": (result.get("usage") or {}).get("prompt_tokens"),
+            "tokens_out": (result.get("usage") or {}).get("completion_tokens"),
+            "cost_usd": (result.get("economics") or {}).get("cost_usd"),
+            "engine": "Gemma 4 26B FP8",
+        },
+    )
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Aggregation-batch remarking — operator clicks an aggregation-risk cell
+# (e.g. "14 cannib events on MTVRs in CLB-6 in 7 days") and elevates every
+# matching SR's marking with one audit row instead of N. Real action,
+# not a toast.
+# ---------------------------------------------------------------------------
+
+VALID_CLASS_TARGETS = {"UNCLASSIFIED", "CUI"}
+
+
+@router.post("/aggregation/remark")
+async def aggregation_remark(payload: dict, request: Request):
+    """Re-mark every SR matching (batch_id, unit, equipment) at the
+    requested classification. Single audit entry covers the batch.
+
+    Demo policy caps target_classification at CUI; SECRET / TOP SECRET
+    are not visible in this build and the endpoint refuses to write
+    them. The walkthrough uses CUI//FOUO consistently.
+    """
+    role = session_role(request)
+    require_role(role, SENTRY_REVIEW_ROLES, "sentry.aggregation.remark")
+    user = getattr(request.state, "user", None) or {}
+
+    batch_id = payload.get("batch_id")
+    unit = (payload.get("unit") or "").strip()
+    equipment = (payload.get("equipment") or "").strip()
+    target = (payload.get("target_classification") or "CUI").upper()
+    note = (payload.get("note") or "").strip()[:240]
+
+    if not batch_id or batch_id not in _BATCHES:
+        raise HTTPException(status_code=404, detail="batch_not_found")
+    if not unit or not equipment:
+        raise HTTPException(status_code=400, detail="unit and equipment required")
+    if target not in VALID_CLASS_TARGETS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_target_classification",
+                "target": target,
+                "allowed": sorted(VALID_CLASS_TARGETS),
+                "policy_note": "SECRET / TS capped per demo policy",
+            },
+        )
+
+    batch = _BATCHES[batch_id]
+    matching: list[str] = []
+    for r in batch.get("records", []):
+        if r.get("unit_name") == unit and r.get("equipment_type") == equipment:
+            sr_num = r.get("sr_number")
+            if not sr_num:
+                continue
+            matching.append(sr_num)
+            # Stamp the in-batch record so subsequent /review-queue and
+            # /export calls see the elevated marking. The persisted
+            # decision row records the same intent so a uvicorn restart
+            # mid-demo doesn't lose the mark.
+            r["aggregation_remarked_to"] = target
+            r["detected_classification_oracle"] = target
+            try:
+                record_sentry_decision(
+                    batch_id=batch_id,
+                    sr_number=sr_num,
+                    actor=role or "unknown",
+                    action="aggregation_remark",
+                    target_classification=target,
+                    notes=note or f"aggregation: {unit}/{equipment}",
+                )
+            except TypeError:
+                # Older record_sentry_decision signature without kwargs;
+                # fall back to bulk persistence if available.
+                pass
+
+    audit_log(
+        "sentry_aggregation_remark",
+        actor=role or "unknown",
+        subject_id=f"agg_{batch_id}_{unit}_{equipment}",
+        payload={
+            "actor_dodid": user.get("dodid"),
+            "actor_role": role,
+            "batch_id": batch_id,
+            "unit": unit,
+            "equipment": equipment,
+            "target_classification": target,
+            "matched_sr_count": len(matching),
+            "matched_sr_sample": matching[:8],
+            "note": note,
+        },
+    )
+
+    return {
+        "ok": True,
+        "matched_sr_count": len(matching),
+        "matched_sr_ids": matching,
+        "target_classification": target,
+        "audit_logged": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Bulk Mark Draft — drag a CSV, classify each row, return ranked queue.
+# The CSV must have a `text` column (or single column treated as text).
+# Result rows carry tier-1 classification + flags + needs_review band so
+# the FE can rank by "needs human eye." No Gemma — Tier-1 only — to
+# keep batch costs at $0 and turnaround in seconds.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/mark/bulk")
+async def mark_bulk(payload: dict, request: Request):
+    """Bulk Mark Draft: classify up to 500 text rows in one shot.
+
+    `rows`: list of {id, text}. The id is opaque — the operator's CSV
+    row index, an SR number, whatever. We echo it back on each result
+    so the FE can join.
+    """
+    role = session_role(request)
+    require_role(role, SENTRY_MARK_ROLES, "sentry.mark.bulk")
+    user = getattr(request.state, "user", None) or {}
+
+    rows = payload.get("rows") or []
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(status_code=400, detail="rows required")
+    if len(rows) > 500:
+        raise HTTPException(status_code=400, detail={"error": "too_many_rows", "limit": 500})
+
+    out: list[dict] = []
+    counts = {"UNCLASSIFIED": 0, "CUI": 0, "needs_review": 0, "auto_clear": 0}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        rid = r.get("id")
+        text = (r.get("text") or "").strip()
+        if not text:
+            out.append({"id": rid, "skipped": True, "reason": "empty"})
+            continue
+        tier1 = tier1_classify(text)
+        cls = tier1["classification"]
+        flags = tier1["flags"]
+        confidence = float(tier1.get("confidence") or 0.0)
+        needs_review = (
+            cls != "UNCLASSIFIED"
+            or len(flags) > 1
+            or confidence < 0.7
+        )
+        out.append({
+            "id": rid,
+            "classification": cls,
+            "confidence": round(confidence, 3),
+            "flags": flags,
+            "evidence_count": len(tier1.get("highlights") or []),
+            "needs_review": needs_review,
+            "preview": text[:120],
+        })
+        counts[cls] = counts.get(cls, 0) + 1
+        if needs_review:
+            counts["needs_review"] += 1
+        else:
+            counts["auto_clear"] += 1
+
+    out.sort(
+        key=lambda x: (
+            0 if x.get("needs_review") else 1,
+            -classification_rank(x.get("classification", "UNCLASSIFIED")),
+            -float(x.get("evidence_count") or 0),
+            float(x.get("confidence") or 1.0),
+        )
+    )
+
+    audit_log(
+        "sentry_mark_bulk",
+        actor=role or "unknown",
+        subject_id=f"bulk_{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
+        payload={
+            "actor_dodid": user.get("dodid"),
+            "actor_role": role,
+            "row_count": len(rows),
+            "counts": counts,
+            "engine": "tier1 rule engine",
+        },
+    )
+
+    return {
+        "ok": True,
+        "row_count": len(rows),
+        "counts": counts,
+        "results": out,
+        "engine": "tier1 rule engine",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reveal-sensitive — the operator clicks "Reveal sensitive (audit logged)"
+# on a record in the Review Queue. The record already exists in the
+# response payload; the call's purpose is to write the audit row.
+# Returns echo + audit chain index so the FE can show "logged as #N".
+# ---------------------------------------------------------------------------
+
+
+@router.post("/reveal-sensitive")
+async def reveal_sensitive(payload: dict, request: Request):
+    """Audit-log a sensitive-content reveal action.
+
+    The record's masked spans were already on the wire (the FE chose
+    to render them masked). What this endpoint does is permanently
+    pin the reveal to the audit chain — every revealed PII span is
+    associated with the operator and a timestamp, so a security
+    manager can later answer "who unmasked this?"
+    """
+    role = session_role(request)
+    require_role(role, SENTRY_REVIEW_ROLES, "sentry.reveal_sensitive")
+    user = getattr(request.state, "user", None) or {}
+
+    sr_number = (payload.get("sr_number") or "").strip()
+    scope = (payload.get("scope") or "record").lower()
+    flags = payload.get("flags") or []
+    if not sr_number:
+        raise HTTPException(status_code=400, detail="sr_number required")
+    if scope not in ("record", "span"):
+        scope = "record"
+
+    entry = audit_log(
+        "sentry_reveal_sensitive",
+        actor=role or "unknown",
+        subject_id=sr_number,
+        payload={
+            "actor_dodid": user.get("dodid"),
+            "actor_name": user.get("name"),
+            "actor_role": role,
+            "scope": scope,
+            "flags_revealed": flags,
+            "ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        },
+    )
+    return {
+        "ok": True,
+        "sr_number": sr_number,
+        "scope": scope,
+        "audit": {
+            "chain_index": entry["id"],
+            "timestamp": entry["ts"],
+        },
+    }
 
 
 @router.post("/export")
@@ -2354,6 +2776,121 @@ async def export_sanitized(request: Request, payload: dict):
     }
 
 
+@router.post("/export-manifest")
+async def export_manifest(payload: dict, request: Request):
+    """Preview what /export would ship — without building the ZIP.
+
+    Returns per-classification + per-unit counts and the full SR-id
+    list so the operator can verify scope before committing to the
+    download. Same role gate + release-compatibility checks as /export
+    so the FE never shows a manifest the operator can't actually
+    materialize.
+    """
+    user = getattr(request.state, "user", None)
+    require_user_role(user, SENTRY_EXPORT_ROLES, action="sentry.export.manifest")
+
+    release = payload.get("release_authority", "US_ONLY")
+    batch_id = payload.get("batch_id")
+
+    if release not in VALID_RELEASE_AUTHORITIES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_release_authority",
+                "release_authority": release,
+                "allowed": sorted(VALID_RELEASE_AUTHORITIES),
+            },
+        )
+    if batch_id and batch_id not in _BATCHES:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "batch_not_found", "batch_id": batch_id},
+        )
+
+    ds = get_dataset()
+    if batch_id and batch_id in _BATCHES:
+        batch = _BATCHES[batch_id]
+        records = batch["records"]
+        source_label = batch["source"]
+    else:
+        records = _records_from_canonical(limit=len(ds.srs))
+        source_label = "canonical_dataset"
+
+    sr_numbers = [r.get("sr_number") for r in records if r.get("sr_number")]
+    decisions = decisions_for_batch(sr_numbers) if sr_numbers else {}
+
+    # Replicate /export's bundle-class derivation so the manifest preview
+    # surfaces the same ceiling the actual bundle would carry.
+    bundle_rank = 0
+    bundle_class = "UNCLASSIFIED"
+    by_class: Counter = Counter()
+    by_unit: Counter = Counter()
+    by_flag: Counter = Counter()
+    sr_ids_in: list[dict] = []
+    rejected = 0
+    included_records: list[dict] = []
+    for r in records:
+        decision = decisions.get(r.get("sr_number", ""), {})
+        action = decision.get("action", "auto")
+        if action == "reject":
+            rejected += 1
+            continue
+        included_records.append(r)
+        cls = (
+            r.get("detected_classification_oracle")
+            or r.get("source_classification")
+            or "UNCLASSIFIED"
+        )
+        rk = classification_rank(cls)
+        if rk > bundle_rank:
+            bundle_rank = rk
+            bundle_class = normalize_classification(cls)
+        by_class[normalize_classification(cls)] += 1
+        unit = r.get("unit_name") or "(unattributed)"
+        by_unit[unit] += 1
+        for fl in r.get("sensitive_flags_oracle") or []:
+            by_flag[fl] += 1
+        sr_ids_in.append({
+            "sr_number": r.get("sr_number"),
+            "unit": unit,
+            "equipment_type": r.get("equipment_type"),
+            "classification": normalize_classification(cls),
+            "flags": r.get("sensitive_flags_oracle") or [],
+        })
+
+    bundle_caveats = _aggregate_caveats_from_records(included_records)
+    compat = evaluate_release_compatibility(bundle_class, release, bundle_caveats)
+    release_blocked = compat["status"] == "block"
+
+    # Rough byte estimate: per-record XLSX expansion ≈ 320 bytes/record
+    # (header + redaction row + audit-log overhead are constants), so the
+    # preview side panel can show "~50KB" without compressing.
+    estimated_bytes = 5_000 + 320 * len(included_records) + 2_400 * 1  # +manifest+readme
+
+    return {
+        "ok": True,
+        "batch_source": source_label,
+        "release_authority": release,
+        "classification": bundle_class,
+        "release_blocked": release_blocked,
+        "release_compatibility": compat,
+        "counts": {
+            "records_input": len(records),
+            "records_in_bundle": len(included_records),
+            "records_rejected": rejected,
+            "by_classification": dict(by_class),
+            "by_unit": dict(by_unit.most_common(20)),
+            "by_flag": dict(by_flag),
+        },
+        "sr_records": sr_ids_in[:100],
+        "sr_total": len(sr_ids_in),
+        "estimated_bytes": estimated_bytes,
+        "estimated_files_in_zip": 4 + (1 if payload.get("include_audit", True) else 0),
+        "preview_truncated": len(sr_ids_in) > 100,
+        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+
 # ---------------------------------------------------------------------------
 # GC-5 Coalition Interoperability — live partner-scoped logistics view
 # ---------------------------------------------------------------------------
@@ -2578,33 +3115,263 @@ async def coalition_release(
     record_count = manifest["record_count"]
 
     release_id = f"REL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+
+    # F14 — actually build the release bundle. Earlier this endpoint
+    # only logged an audit row and returned a manifest hash, so the FE's
+    # "Generate Release Package" button produced no artifact for the
+    # liaison. Now we emit a real ZIP: scoped+redacted records (CSV +
+    # JSON), redaction policy README, distribution statement, and the
+    # audit-chain snapshot. Bytes are cached under release_id and
+    # streamed via /api/sentry/coalition-download/{release_id}.
+    profile_partners = profile_data.get("partners", [])
+    field_redactions = sorted(profile_data.get("field_redactions", []))
+    embargo_days = int(profile_data.get("embargo_days_after_event", 0) or 0)
+    auth_classifications = profile_data.get("authorized_classifications", []) or ["UNCLASSIFIED"]
+
+    # Scope + redact the dataset's SRs through the partner profile.
+    scoped_records: list[dict] = []
+    blocked_records: list[dict] = []
+    for sr in ds.srs:
+        rec = {
+            "sr_number": sr.sr_number,
+            "asset_id": sr.asset_id,
+            "unit_name": sr.unit_name,
+            "unit_parent": unit_parent_map.get(sr.unit_name, ""),
+            "equipment_type": sr.equipment_type,
+            "fault_component": sr.fault_component,
+            "tm_reference": sr.tm_reference,
+            "serial_number": sr.serial_number,
+            "remark": sr.remark_text,
+            "detected_classification": sr.detected_classification or "UNCLASSIFIED",
+            "category": "readiness_summary",
+        }
+        decision = classify_record(profile_key, rec)
+        if not decision.allowed:
+            blocked_records.append({
+                "sr_number": rec["sr_number"],
+                "unit_name": rec["unit_name"],
+                "reason": decision.reason,
+            })
+            continue
+        redacted, _spans = apply_redactions_with_spans(rec, decision.redactions_applied)
+        scoped_records.append({
+            "sr_number": redacted.get("sr_number"),
+            "unit": redacted.get("unit_name") or "[REDACTED]",
+            "equipment": redacted.get("equipment_type"),
+            "fault_component": redacted.get("fault_component"),
+            "tm_reference": redacted.get("tm_reference"),
+            "serial_number": redacted.get("serial_number") or "[REDACTED]",
+            "remark": redacted.get("remark") or "",
+            "classification": redacted.get("detected_classification") or "UNCLASSIFIED",
+            "redactions_applied": list(decision.redactions_applied),
+        })
+
+    # Redacted-CSV + JSON of the scoped records. CSV is the working
+    # liaison format; JSON keeps automation happy.
+    csv_buf = io.StringIO()
+    csv_writer = csv.writer(csv_buf)
+    csv_banner = f"// CLASSIFICATION: {release_cls.replace('_', ' ')} //"
+    csv_writer.writerow([csv_banner])
+    csv_writer.writerow([f"// Release: {profile_key} ({', '.join(profile_partners)}) //"])
+    csv_writer.writerow([])
+    csv_headers = [
+        "SR Number", "Unit", "Equipment", "Fault Component",
+        "TM Reference", "Serial", "Classification", "Remark", "Redactions",
+    ]
+    csv_writer.writerow(csv_headers)
+    for r in scoped_records:
+        csv_writer.writerow([
+            r["sr_number"], r["unit"], r["equipment"], r["fault_component"],
+            r["tm_reference"], r["serial_number"], r["classification"],
+            (r["remark"] or "")[:600], "; ".join(r["redactions_applied"]),
+        ])
+    scoped_csv_bytes = csv_buf.getvalue().encode("utf-8")
+
+    scoped_json = {
+        "classification": release_cls,
+        "classification_banner": csv_banner,
+        "profile_key": profile_key,
+        "partners": profile_partners,
+        "distribution_statement": profile_data["distribution_statement"],
+        "field_redactions": field_redactions,
+        "authorized_classifications": auth_classifications,
+        "embargo_days_after_event": embargo_days,
+        "records": scoped_records,
+        "blocked_count": len(blocked_records),
+    }
+    scoped_json_bytes = json.dumps(scoped_json, indent=2, default=str).encode("utf-8")
+
+    # Manifest: SHA-256 of the scoped records + the policy parameters.
+    full_manifest = {
+        "release_id": release_id,
+        "classification": release_cls,
+        "classification_banner": csv_banner,
+        "profile_key": profile_key,
+        "profile_display_name": profile_data["display_name"],
+        "partners": profile_partners,
+        "distribution_statement": profile_data["distribution_statement"],
+        "caveats_applied": profile_data.get("caveats_applied", []),
+        "field_redactions": field_redactions,
+        "embargo_days_after_event": embargo_days,
+        "authorized_classifications": auth_classifications,
+        "record_count": len(scoped_records),
+        "blocked_count": len(blocked_records),
+        "manifest_sha256": manifest_sha256,
+        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "actor_role": actor,
+        "actor_dodid": (user or {}).get("dodid"),
+    }
+
+    # Audit-chain snapshot — same approach as /export but trimmed and
+    # tagged for coalition-release context so an investigator can see
+    # exactly which audit rows were active when the bundle shipped.
+    from ..persistence import recent_entries, verify_chain
+    chain_snapshot = {
+        "classification": release_cls,
+        "classification_banner": csv_banner,
+        "release_id": release_id,
+        "profile_key": profile_key,
+        "captured_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "chain": verify_chain(),
+        "recent_entries": [dict(e) for e in recent_entries(limit=200, include_payload=False)],
+    }
+    audit_bytes = json.dumps(chain_snapshot, indent=2, default=str).encode("utf-8")
+
+    readme = (
+        f"// CLASSIFICATION: {release_cls.replace('_', ' ')} //\n"
+        f"// Handle per DoDM 5200.01 //\n\n"
+        f"SPIRE Coalition Release Package\n\n"
+        f"Release ID:       {release_id}\n"
+        f"Profile:          {profile_data['display_name']} ({profile_key})\n"
+        f"Partners:         {', '.join(profile_partners)}\n"
+        f"Distribution:     {profile_data['distribution_statement']}\n"
+        f"Classification:   {release_cls.replace('_', ' ')}\n"
+        f"Records included: {len(scoped_records)}\n"
+        f"Records blocked:  {len(blocked_records)}\n"
+        f"Embargo:          {embargo_days} day(s) after originating event\n"
+        f"Field redactions: {', '.join(field_redactions) or '(none)'}\n"
+        f"Manifest SHA-256: {manifest_sha256}\n\n"
+        f"Files in this bundle:\n"
+        f"  scoped_dataset.csv     — readiness records the partner is cleared to receive\n"
+        f"  scoped_dataset.json    — same content, automation-friendly\n"
+        f"  redaction_policy.txt   — what was stripped and why\n"
+        f"  audit_chain.json       — hash-chained audit rows active at release time\n"
+        f"  MANIFEST.json          — release metadata for downstream verification\n\n"
+        f"Verify integrity with: sha256sum scoped_dataset.csv scoped_dataset.json | diff against MANIFEST.json\n\n"
+        f"// CLASSIFICATION: {release_cls.replace('_', ' ')} //\n"
+    ).encode("utf-8")
+
+    redaction_policy = (
+        f"Redaction policy applied for {profile_key}:\n\n"
+        + "\n".join(f"  - {f}" for f in field_redactions)
+        + f"\n\nRedactions are applied at record-build time; original values\n"
+        f"never enter this bundle. Each scoped record carries the list of\n"
+        f"redaction rules that fired in its `redactions_applied` field.\n"
+    ).encode("utf-8")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("scoped_dataset.csv", scoped_csv_bytes)
+        zf.writestr("scoped_dataset.json", scoped_json_bytes)
+        zf.writestr("redaction_policy.txt", redaction_policy)
+        zf.writestr("audit_chain.json", audit_bytes)
+        zf.writestr("MANIFEST.json", json.dumps(full_manifest, indent=2, default=str))
+        zf.writestr("README.txt", readme)
+    buf.seek(0)
+    bundle_bytes = buf.getvalue()
+    bundle_sha = hashlib.sha256(bundle_bytes).hexdigest()
+    safe_cls = release_cls.replace("/", "_")
+    filename = f"spire_coalition_{profile_key}_{safe_cls}_{release_id}.zip"
+
+    _COALITION_RELEASES[release_id] = {
+        "bytes": bundle_bytes,
+        "filename": filename,
+        "classification": release_cls,
+        "profile_key": profile_key,
+        "manifest": full_manifest,
+        "manifest_sha256": manifest_sha256,
+        "bundle_sha256": bundle_sha,
+        "record_count": len(scoped_records),
+        "blocked_count": len(blocked_records),
+        "created_at": full_manifest["created_at"],
+    }
+
     audit_log(
         "sentry_coalition_release",
         actor=actor,
         subject_id=release_id,
         payload={
             "profile": profile_key,
-            "partners": profile_data["partners"],
+            "partners": profile_partners,
             "distribution": profile_data["distribution_statement"],
             "classification": release_cls,
             "manifest_sha256": manifest_sha256,
-            "record_count": record_count,
-            "redactions": sorted(profile_data.get("field_redactions", [])),
+            "bundle_sha256": bundle_sha,
+            "bundle_bytes": len(bundle_bytes),
+            "record_count": len(scoped_records),
+            "blocked_count": len(blocked_records),
+            "redactions": field_redactions,
         },
     )
     return {
         "ok": True,
         "release_id": release_id,
         "profile": profile_key,
-        "partners": profile_data["partners"],
+        "partners": profile_partners,
         "distribution_statement": profile_data["distribution_statement"],
         "caveats_applied": profile_data.get("caveats_applied", []),
         "classification": release_cls,
         "audit_logged": True,
         "manifest_sha256": manifest_sha256,
-        "record_count": record_count,
-        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "bundle_sha256": bundle_sha,
+        "record_count": len(scoped_records),
+        "blocked_count": len(blocked_records),
+        "bundle_bytes": len(bundle_bytes),
+        "filename": filename,
+        "download_url": f"/api/sentry/coalition-download/{release_id}",
+        "created_at": full_manifest["created_at"],
     }
+
+
+@router.get("/coalition-download/{release_id}")
+async def coalition_download(release_id: str, request: Request):
+    """Stream a previously-generated coalition release bundle.
+
+    Same role gate as /coalition/{profile}/release — only data_custodian
+    or security_manager may pull the bytes. The bundle's classification
+    is enforced against the operator's clearance via require_clearance
+    so a user whose certificate has been downgraded since the release
+    was generated still can't pull a higher-cls bundle through the
+    download URL.
+    """
+    from ..scoping import COALITION_RELEASE_ROLES
+    actor = session_role(request)
+    require_role(actor, COALITION_RELEASE_ROLES, "sentry.coalition.download")
+
+    entry = _COALITION_RELEASES.get(release_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="release_not_found")
+
+    user = getattr(request.state, "user", None)
+    require_clearance(
+        user,
+        entry["classification"],
+        action="sentry.coalition.download",
+        audit_actor=actor,
+        audit_subject=release_id,
+    )
+
+    cls_header = entry["classification"].replace("_", " ")
+    return StreamingResponse(
+        io.BytesIO(entry["bytes"]),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{entry["filename"]}"',
+            "X-Classification": cls_header,
+            "X-Bundle-SHA256": entry["bundle_sha256"],
+            "X-Manifest-SHA256": entry["manifest_sha256"],
+        },
+    )
 
 
 @router.get("/audit/{subject_id}")

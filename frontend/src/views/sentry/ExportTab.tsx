@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError, type ExportResult } from "../../api";
+import { api, ApiError, type ExportResult, type SentryExportManifest } from "../../api";
 import type { SentryContext } from "../SentryView";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
@@ -40,6 +40,14 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     caveats: string[];
     issues: string[];
   } | null>(null);
+  // Manifest preview — non-destructive dry-run of /export. Lets the operator
+  // sanity-check the bundle scope (counts, top units, top flags, first 100
+  // SRs, estimated bytes) BEFORE committing to a real ZIP build. The panel
+  // is independent of `result`/`releaseBlock`; clicking Generate Bundle
+  // afterward must not auto-clear it.
+  const [manifest, setManifest] = useState<SentryExportManifest | null>(null);
+  const [manifestLoading, setManifestLoading] = useState(false);
+  const [manifestError, setManifestError] = useState<string | null>(null);
   const pushToast = useSpireStore((s) => s.pushToast);
 
   if (role !== "data_custodian" && role !== "security_manager" && role !== "mef_commander") {
@@ -122,6 +130,53 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     }, 500);
   }
 
+  // Manifest preview — fetches /export-manifest and renders the side panel.
+  // Non-destructive: no ZIP is built, no audit chain entry is committed
+  // beyond the read-only manifest call itself. Surfaces inline errors
+  // (not toast-only) so a failed preview is debuggable in place.
+  async function loadManifest() {
+    setManifestLoading(true);
+    setManifestError(null);
+    try {
+      const m = await api.sentry.exportManifest(authority, ctx.batchId);
+      setManifest(m);
+      pushToast({
+        tone: "ok",
+        text: `Manifest preview loaded · ${m.counts.records_in_bundle.toLocaleString("en-US")} records`,
+        ttlMs: 4000,
+      });
+    } catch (err: unknown) {
+      const detail =
+        err instanceof ApiError && err.body && typeof err.body === "object"
+          ? (err.body as { detail?: Record<string, unknown> }).detail
+          : undefined;
+      let msg = "Manifest preview failed.";
+      if (detail && typeof detail === "object") {
+        if (detail.error === "batch_not_found") {
+          msg = `Batch ${detail.batch_id} not found. Re-run processing or pick a current batch.`;
+        } else if (detail.error === "invalid_release_authority") {
+          const allowed = (detail.allowed as string[] | undefined)?.join(", ") ?? "";
+          msg = `Unknown release authority "${detail.release_authority}". Allowed: ${allowed}.`;
+        } else if (typeof detail.error === "string") {
+          msg = `Manifest preview failed · ${detail.error}`;
+        }
+      } else if (err instanceof Error) {
+        msg = `Manifest preview failed · ${err.message}`;
+      }
+      setManifestError(msg);
+      setManifest(null);
+    } finally {
+      setManifestLoading(false);
+    }
+  }
+
+  function closeManifest() {
+    // Removes the panel from the DOM entirely — operator gets the rest of
+    // the tab back. Re-opening requires another click on Preview Manifest.
+    setManifest(null);
+    setManifestError(null);
+  }
+
   // The bundle classification is auto-inherited from the source records
   // server-side. Until the operator runs an export the marking is unknown;
   // default to UNCLASSIFIED so the FE doesn't pre-render a SECRET banner
@@ -194,14 +249,68 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
           label="Export Sanitized Bundle"
           pendingLabel="Building bundle …"
           loading={loading}
-          disabled={!ctx.batchId}
-          disabledReason="Requires a processed batch."
+          // Client-side gate — if the manifest preview already told us the
+          // build will be doctrinally refused, disable the Generate Bundle
+          // button instead of pretending it'll work. The backend still
+          // re-checks and 403s on its own (defense in depth).
+          disabled={!ctx.batchId || (manifest?.release_blocked ?? false)}
+          disabledReason={
+            !ctx.batchId
+              ? "Requires a processed batch."
+              : manifest?.release_blocked
+              ? "Release blocked by manifest preview — change release authority or batch."
+              : undefined
+          }
           onExport={doExport}
         />
+        <Pressable
+          block={false}
+          onClick={loadManifest}
+          disabled={!ctx.batchId || manifestLoading}
+          aria-label="Preview manifest"
+          className="rounded-md border px-4 py-[10px] font-mono text-xs font-semibold uppercase tracking-widest"
+          style={{
+            borderColor: "var(--color-border)",
+            background: "var(--color-surface)",
+            color: "var(--color-text)",
+          }}
+          title={!ctx.batchId ? "Requires a processed batch." : "Dry-run /export · no ZIP build, no audit-chain commit"}
+        >
+          {manifestLoading ? "Loading preview …" : "Preview Manifest"}
+        </Pressable>
         <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
           Bundle classification auto-inherits from source · {expectedBundleClass}
         </span>
       </div>
+
+      {/* Manifest-preview side panel · non-destructive scope check.
+          Sits above the success/warn/block panels so the operator can
+          verify counts before clicking Generate Bundle. Closable. */}
+      {manifestError && !manifest && (
+        <div
+          role="alert"
+          className="mt-6 rounded-md border p-3 font-mono text-sm"
+          style={{
+            background: "color-mix(in oklab, var(--color-danger) 14%, var(--color-surface))",
+            borderColor: "color-mix(in oklab, var(--color-danger) 50%, var(--color-border))",
+            color: "var(--color-text)",
+          }}
+        >
+          <div className="mb-1 font-semibold uppercase tracking-widest text-[var(--color-danger)]">
+            Manifest Preview Failed
+          </div>
+          <div>{manifestError}</div>
+        </div>
+      )}
+
+      {manifest && (
+        <ManifestPreviewPanel
+          manifest={manifest}
+          onClose={closeManifest}
+          onRefresh={loadManifest}
+          refreshing={manifestLoading}
+        />
+      )}
 
       {/* Task-69 — yellow warn banner ABOVE the result panel when the
           server returned status="warn" (e.g. SECRET → FVEY without an
@@ -567,6 +676,287 @@ function StatLabel({ children }: { children: React.ReactNode }) {
       className="font-mono text-xs uppercase text-[var(--color-text-muted)] tracking-widest"
     >
       {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Manifest Preview Panel — non-destructive scope check before /export.
+// Renders counts, top units, top flags, first 100 SR records, estimated
+// bundle size, and a prominent banner when release_blocked is true.
+// ---------------------------------------------------------------------------
+
+const PREVIEW_SR_LIMIT = 100;
+const TOP_UNITS_LIMIT = 10;
+const TOP_FLAGS_LIMIT = 10;
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function topEntries(rec: Record<string, number>, limit: number): Array<[string, number]> {
+  return Object.entries(rec)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+}
+
+function ManifestPreviewPanel({
+  manifest,
+  onClose,
+  onRefresh,
+  refreshing,
+}: {
+  manifest: SentryExportManifest;
+  onClose: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const counts = manifest.counts;
+  const byClassEntries = Object.entries(counts.by_classification).sort((a, b) => b[1] - a[1]);
+  const topUnits = topEntries(counts.by_unit, TOP_UNITS_LIMIT);
+  const topFlags = topEntries(counts.by_flag, TOP_FLAGS_LIMIT);
+  const visibleSrs = manifest.sr_records.slice(0, PREVIEW_SR_LIMIT);
+  const hiddenCount = Math.max(0, manifest.sr_total - visibleSrs.length);
+
+  return (
+    <div
+      className="mt-6 rounded-md border bg-[var(--color-surface)]"
+      style={{
+        borderColor: manifest.release_blocked
+          ? "color-mix(in oklab, var(--color-danger) 50%, var(--color-border))"
+          : "var(--color-border)",
+      }}
+    >
+      <div className="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-3">
+        <h4 className="font-mono text-sm font-semibold uppercase text-[var(--color-text)] tracking-widest">
+          Manifest Preview
+        </h4>
+        <ClassificationBadge classification={manifest.classification || "UNCLASSIFIED"} size="sm" />
+        <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+          {manifest.release_authority} · batch {manifest.batch_source} ·{" "}
+          {(() => {
+            const d = new Date(manifest.as_of);
+            if (Number.isNaN(d.getTime())) return manifest.as_of;
+            const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+            const z = (n: number) => String(n).padStart(2, "0");
+            return `${z(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${z(d.getUTCHours())}${z(d.getUTCMinutes())}z`;
+          })()}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <Pressable
+            block={false}
+            onClick={onRefresh}
+            disabled={refreshing}
+            aria-label="Refresh manifest preview"
+            className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}
+          >
+            {refreshing ? "Refreshing …" : "Refresh"}
+          </Pressable>
+          <Pressable
+            block={false}
+            onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? "Expand manifest preview" : "Collapse manifest preview"}
+            aria-expanded={!collapsed}
+            className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}
+          >
+            {collapsed ? "Expand" : "Collapse"}
+          </Pressable>
+          <Pressable
+            block={false}
+            onClick={onClose}
+            aria-label="Close manifest preview"
+            className="rounded-sm border px-2 py-1 font-mono text-xs uppercase tracking-wider"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}
+          >
+            Close
+          </Pressable>
+        </div>
+      </div>
+
+      {!collapsed && (
+        <div className="px-4 py-4">
+          {/* Doctrinal release-block banner — disables the actual Export
+              button via state in the parent. Surfaced here so the operator
+              can read the issues alongside the preview that produced them. */}
+          {manifest.release_blocked && (
+            <div
+              role="alert"
+              className="mb-4 rounded-md border p-3 font-mono text-sm"
+              style={{
+                background: "color-mix(in oklab, var(--color-danger) 14%, var(--color-surface))",
+                borderColor: "color-mix(in oklab, var(--color-danger) 50%, var(--color-border))",
+                color: "var(--color-text)",
+              }}
+            >
+              <div className="mb-1 font-semibold uppercase tracking-widest text-[var(--color-danger)]">
+                Release Blocked · Generate Bundle disabled
+              </div>
+              <div className="mb-2 text-xs text-[var(--color-text-secondary)]">
+                {manifest.classification} → {manifest.release_authority} is doctrinally incompatible.
+                Change release authority or remove the offending records, then refresh the preview.
+              </div>
+              {manifest.release_compatibility.issues.length > 0 && (
+                <ul className="list-disc pl-5">
+                  {manifest.release_compatibility.issues.map((msg, i) => (
+                    <li key={i}>{msg}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Counts row */}
+          <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Stat
+              label="In Bundle"
+              value={counts.records_in_bundle.toLocaleString("en-US")}
+            />
+            <Stat
+              label="Rejected"
+              value={counts.records_rejected.toLocaleString("en-US")}
+            />
+            <Stat
+              label="Estimated Size"
+              value={formatBytes(manifest.estimated_bytes)}
+            />
+            <Stat
+              label="Files in ZIP"
+              value={`${manifest.estimated_files_in_zip}`}
+            />
+          </div>
+
+          <div className="mb-4">
+            <StatLabel>By Classification</StatLabel>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {byClassEntries.length === 0 && (
+                <span className="font-mono text-xs text-[var(--color-text-muted)]">—</span>
+              )}
+              {byClassEntries.map(([cls, n]) => (
+                <span
+                  key={cls}
+                  className="rounded-sm border px-2 py-[2px] font-mono text-xs tracking-wide"
+                  style={{
+                    borderColor: "var(--color-border)",
+                    color: "var(--color-text)",
+                    background: "var(--color-bg)",
+                  }}
+                >
+                  <span className="font-semibold uppercase tracking-widest">{cls}</span>
+                  <span className="ml-2 tabular-nums text-[var(--color-text-muted)]">
+                    {n.toLocaleString("en-US")}
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <StatLabel>Top Units · {topUnits.length} of {Object.keys(counts.by_unit).length}</StatLabel>
+              <div className="mt-1 flex flex-col gap-1">
+                {topUnits.length === 0 && (
+                  <span className="font-mono text-xs text-[var(--color-text-muted)]">—</span>
+                )}
+                {topUnits.map(([unit, n]) => (
+                  <div
+                    key={unit}
+                    className="flex items-center justify-between rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs"
+                  >
+                    <span className="text-[var(--color-text)]">{unit}</span>
+                    <span className="tabular-nums text-[var(--color-text-muted)]">
+                      {n.toLocaleString("en-US")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <StatLabel>Top Flags · {topFlags.length} of {Object.keys(counts.by_flag).length}</StatLabel>
+              <div className="mt-1 flex flex-col gap-1">
+                {topFlags.length === 0 && (
+                  <span className="font-mono text-xs text-[var(--color-text-muted)]">—</span>
+                )}
+                {topFlags.map(([flag, n]) => (
+                  <div
+                    key={flag}
+                    className="flex items-center justify-between rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs"
+                  >
+                    <span
+                      className="font-semibold uppercase tracking-wider"
+                      style={{ color: FLAG_COLOR[flag] || "var(--color-text)" }}
+                    >
+                      {flag}
+                    </span>
+                    <span className="tabular-nums text-[var(--color-text-muted)]">
+                      {n.toLocaleString("en-US")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <StatLabel>
+              SR Records · showing {visibleSrs.length} of {manifest.sr_total.toLocaleString("en-US")}
+            </StatLabel>
+            <div
+              className="mt-1 max-h-72 overflow-y-auto rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]"
+            >
+              {visibleSrs.length === 0 && (
+                <div className="px-3 py-2 font-mono text-xs text-[var(--color-text-muted)]">
+                  No records in bundle.
+                </div>
+              )}
+              {visibleSrs.map((sr) => (
+                <div
+                  key={sr.sr_number}
+                  className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-1 font-mono text-xs last:border-b-0"
+                >
+                  <span className="text-[var(--color-text)]">{sr.sr_number}</span>
+                  <span className="text-[var(--color-text-muted)]">{sr.unit}</span>
+                  <span className="text-[var(--color-text-muted)]">
+                    {sr.equipment_type.replace(/_/g, " ")}
+                  </span>
+                  <span className="ml-auto flex items-center gap-1">
+                    <span
+                      className="rounded-sm border px-1 py-[1px] font-semibold uppercase tracking-wider"
+                      style={{
+                        borderColor: "var(--color-border)",
+                        color: "var(--color-text)",
+                      }}
+                    >
+                      {sr.classification}
+                    </span>
+                    {sr.flags.map((f) => (
+                      <span
+                        key={f}
+                        className="rounded-sm border px-1 py-[1px] font-semibold uppercase tracking-wider"
+                        style={{
+                          color: FLAG_COLOR[f] || "var(--color-text-muted)",
+                          borderColor: `color-mix(in oklab, ${FLAG_COLOR[f] || "#666"} 40%, var(--color-border))`,
+                        }}
+                      >
+                        {f}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {(manifest.preview_truncated || hiddenCount > 0) && (
+              <div className="mt-1 font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
+                truncated — {hiddenCount.toLocaleString("en-US")} more not shown
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
