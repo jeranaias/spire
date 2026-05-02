@@ -72,6 +72,8 @@ def _local_reachable_sync_cache_key() -> str:
 
 _LOCAL_FAIL_CACHE: dict[str, float] = {}
 _LOCAL_FAIL_BACKOFF_SEC = 30.0  # don't retry Tier-B for 30s after a failure
+_PRIMARY_FAIL_BACKOFF_SEC = 30.0  # don't retry Tier-A for 30s after a failure
+_PRIMARY_FAIL_KEY = "spire-llm-primary-unreachable-since"
 
 
 def _local_recently_failed() -> bool:
@@ -87,6 +89,28 @@ def _mark_local_failed() -> None:
 
 def _clear_local_failed() -> None:
     _LOCAL_FAIL_CACHE.pop(_local_reachable_sync_cache_key(), None)
+
+
+def _primary_recently_failed() -> bool:
+    ts = _LOCAL_FAIL_CACHE.get(_PRIMARY_FAIL_KEY)
+    if ts is None:
+        return False
+    return (time.time() - ts) < _PRIMARY_FAIL_BACKOFF_SEC
+
+
+def _mark_primary_failed() -> None:
+    _LOCAL_FAIL_CACHE[_PRIMARY_FAIL_KEY] = time.time()
+
+
+def _clear_primary_failed() -> None:
+    _LOCAL_FAIL_CACHE.pop(_PRIMARY_FAIL_KEY, None)
+
+
+# When the operator explicitly wants air-gap-style behavior (no upstream
+# at all, ever — useful for DDIL drills + the Marine pilot deployment
+# where there's no Tailscale to RigRun), set SPIRE_LLM_PRIMARY_DISABLE=1
+# and Tier-A is skipped entirely. The router goes straight to local.
+LLM_PRIMARY_DISABLED = (os.environ.get("SPIRE_LLM_PRIMARY_DISABLE") or "").strip().lower() in ("1", "true", "yes")
 
 
 async def _probe_llm() -> dict:
@@ -207,46 +231,73 @@ async def call_llm_chat(
     `tools` + `tool_choice` enable OpenAI-style function calling for the
     co-pilot planner. Pass tools=None for plain chat.
     """
-    # Tier-A: licensed RigRun proxy (frontier 26B). Default path.
+    # Tier-A: licensed RigRun proxy (frontier 26B). Default path,
+    # unless SPIRE_LLM_PRIMARY_DISABLE=1 (air-gap pilot mode) or
+    # we recently failed Tier-A (backoff cache: skip Tier-A for 30s
+    # after a failure so subsequent calls don't each pay the full
+    # connect-timeout before falling through).
     primary_url = os.environ.get("SPIRE_LLM_PROXY", LLM_PROXY_URL)
     primary_model = os.environ.get("SPIRE_LLM_MODEL", LLM_MODEL)
+    skip_primary = LLM_PRIMARY_DISABLED or _primary_recently_failed()
 
-    try:
-        return await _call_one_tier(
-            base_url=primary_url,
-            model=primary_model,
-            tier_label="primary",
-            messages=messages,
-            response_format=response_format,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            tools=tools,
-            tool_choice=tool_choice,
-            tier=tier,
-            call_site=call_site,
-            role=role,
-            route=route,
-        )
-    except HTTPException as exc:
-        # Tier-A failures that warrant trying Tier-B: connection
-        # refused (503), upstream gateway error (502), or any 5xx that
-        # isn't auth-related. 4xx (400 bad request, 401 unauth) means
-        # the request is malformed — falling back won't help and we
-        # let the caller see the original error.
-        if exc.status_code not in (502, 503, 504):
-            raise
-        if LLM_LOCAL_DISABLED or _local_recently_failed():
-            raise
+    if not skip_primary:
+        try:
+            result = await _call_one_tier(
+                base_url=primary_url,
+                model=primary_model,
+                tier_label="primary",
+                messages=messages,
+                response_format=response_format,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tools=tools,
+                tool_choice=tool_choice,
+                tier=tier,
+                call_site=call_site,
+                role=role,
+                route=route,
+            )
+            _clear_primary_failed()
+            return result
+        except HTTPException as exc:
+            # Tier-A failures that warrant trying Tier-B: connection
+            # refused (503), upstream gateway error (502), timeout (504).
+            # 4xx is a malformed request — falling back won't help.
+            if exc.status_code not in (502, 503, 504):
+                raise
+            _mark_primary_failed()
+            if LLM_LOCAL_DISABLED or _local_recently_failed():
+                raise
 
     # Tier-B: localhost Ollama (gemma4:e2b by default). Falls back
     # only when Tier-A is unreachable, so a normal demo with RigRun
     # online never spends a Tier-B call.
+    #
+    # Gemma 4 ships configurable-thinking — by default the model
+    # dumps a "Thinking Process: 1. Analyze the request..." block
+    # into the OpenAI-compat `reasoning` field BEFORE emitting the
+    # actual answer in `content`. For SPIRE's workload (short Tier-2
+    # explainer + SPIRO chat) we want answer-direct. Prepend a system
+    # message that suppresses the thinking block. Only applied when
+    # the caller didn't already set their own system message — we
+    # don't want to override role-aware grounding (e.g. the SPIRO
+    # planner's full system prompt).
+    has_system_msg = any(m.get("role") == "system" for m in messages or [])
+    local_messages = list(messages or [])
+    if not has_system_msg:
+        local_messages.insert(0, {
+            "role": "system",
+            "content": (
+                "Respond directly with the answer. Do not output any reasoning, "
+                "thinking process, or step-by-step analysis. Just the answer."
+            ),
+        })
     try:
         result = await _call_one_tier(
             base_url=LLM_LOCAL_URL,
             model=LLM_LOCAL_MODEL,
             tier_label="local",
-            messages=messages,
+            messages=local_messages,
             response_format=response_format,
             temperature=temperature,
             max_tokens=max_tokens,
