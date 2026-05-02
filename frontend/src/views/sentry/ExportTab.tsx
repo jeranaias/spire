@@ -3,6 +3,7 @@ import { api, ApiError, type ExportResult, type SentryExportManifest } from "../
 import type { SentryContext } from "../SentryView";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
+import { DemoOnly } from "../../state/buildMode";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Pressable, fireIdempotent } from "../../components/ui";
 import { ClassifiedExport, ClassificationBadge } from "../../components/classification";
@@ -193,10 +194,12 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
         >
           Export Sanitized Dataset
         </h2>
-        <div className="mt-1 spire-body-muted">
-          Release-authority selection adjusts sanitization rules. A NATO release, for example, further
-          generalizes unit designators and strips REL TO USA-only markings.
-        </div>
+        <DemoOnly>
+          <div className="mt-1 spire-body-muted">
+            Release-authority selection adjusts sanitization rules. A NATO release, for example, further
+            generalizes unit designators and strips REL TO USA-only markings.
+          </div>
+        </DemoOnly>
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-6">

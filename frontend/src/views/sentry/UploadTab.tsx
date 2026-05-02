@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import clsx from "clsx";
 import { api, type SentryBatch } from "../../api";
 import { formatApiError } from "../../api-retry";
+import { DemoOnly } from "../../state/buildMode";
 import type { SentryContext } from "../SentryView";
 import { Button, fireIdempotent } from "../../components/ui";
 
@@ -267,9 +268,11 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6 pb-12">
       <div className="mb-4">
         <h2 className="text-lg font-semibold">Data ingestion</h2>
-        <div className="text-xs text-[var(--color-text-muted)]">
-          Upload CSV / XLSX / JSON from GCSS-MC or DRRS-MC exports. For the live demo the canonical synthetic dataset seeds automatically.
-        </div>
+        <DemoOnly>
+          <div className="text-xs text-[var(--color-text-muted)]">
+            Upload CSV / XLSX / JSON from GCSS-MC or DRRS-MC exports. For the live demo the canonical synthetic dataset seeds automatically.
+          </div>
+        </DemoOnly>
       </div>
 
       <div
