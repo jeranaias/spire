@@ -83,6 +83,13 @@ async def _probe_llm_brief() -> dict:
         "max_context": 524288,
         "proxy": proxy,
     }
+    # Honor air-gap pilot mode: if SPIRE_LLM_PRIMARY_DISABLE=1 we
+    # never even probe Tier-A. Saves the connect-timeout cost on
+    # /api/system/status (which polls every few seconds from the FE).
+    if (os.environ.get("SPIRE_LLM_PRIMARY_DISABLE") or "").strip().lower() in ("1", "true", "yes"):
+        info["disabled"] = True
+        info["error"] = "primary disabled (SPIRE_LLM_PRIMARY_DISABLE=1)"
+        return info
     # Cloud-routing aliases that must NEVER appear in SPIRE's public surface.
     # Anything matching these gets dropped from available_models and would be
     # rejected by call_llm_chat() if requested as the model.
