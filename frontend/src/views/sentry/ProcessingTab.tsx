@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { api, type SentryJob, type SentryReviewQueue } from "../../api";
 import { formatApiError } from "../../api-retry";
 import type { SentryContext } from "../SentryView";
+import { DemoOnly } from "../../state/buildMode";
 import { Button, ErrorState, EmptyState, LoadingState } from "../../components/ui";
 import {
   ClassificationBadge,
@@ -365,13 +366,16 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
           >
             Engine: {(job.engine_seconds ?? 0).toFixed(2)}s · {all.length.toLocaleString("en-US")} SRs
           </span>
-          {/* Determinism owned, not hidden. */}
-          <span
-            className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 font-mono text-[11px] tracking-wide text-[var(--color-text-muted)]"
-            title="This batch is generated from the canonical synthetic dataset (seed=42) so demos and tests reproduce bit-for-bit."
-          >
-            synthetic dataset · seed=42 · deterministic replay
-          </span>
+          {/* Determinism chip — demo build only (operational batches
+              come from real GCSS-MC ingest, not seed=42). */}
+          <DemoOnly>
+            <span
+              className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-0.5 font-mono text-[11px] tracking-wide text-[var(--color-text-muted)]"
+              title="This batch is generated from the canonical synthetic dataset (seed=42) so demos and tests reproduce bit-for-bit."
+            >
+              synthetic dataset · seed=42 · deterministic replay
+            </span>
+          </DemoOnly>
           <span className="font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             Batch {ctx.batchId} · Job {ctx.jobId}
           </span>
