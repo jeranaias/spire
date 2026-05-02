@@ -6,6 +6,7 @@ import { api, type AuthUser } from "../api";
 import { formatApiError } from "../api-retry";
 import { useScenarioPlayer } from "../state/scenarioPlayer";
 import { useFailsafe } from "../state/failsafe";
+import { DemoOnly } from "../state/buildMode";
 import { MissionClock } from "./MissionClock";
 import { CommsControl } from "./CommsControl";
 import { SystemStatusChip } from "./SystemStatusChip";
@@ -76,9 +77,11 @@ export function TopBar() {
          * and (at sm) the System chip dropdown's Mission timeline row is
          * the fallback. Absolute-positioned so it claims the geometric
          * centre without fighting the flex justify-between layout. */}
-        <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 xl:block">
-          <MissionClock />
-        </div>
+        <DemoOnly>
+          <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 xl:block">
+            <MissionClock />
+          </div>
+        </DemoOnly>
         <div className="flex min-w-0 items-center gap-4">
           <Link
             to="/"
@@ -208,10 +211,14 @@ export function TopBar() {
           {/* CompactMissionClock for the cramped 1024–1279 (md/lg) range.
            * The full centred MissionClock renders at xl+. Below md the
            * compact chip is hidden — the IdentityPill dropdown's
-           * "Mission timeline" row is the fallback access path. */}
-          <span className="hidden md:inline-flex xl:hidden">
-            <MissionClock compact />
-          </span>
+           * "Mission timeline" row is the fallback access path. Demo
+           * build only — operational hides the clock entirely (real
+           * operators have their own mission clocks). */}
+          <DemoOnly>
+            <span className="hidden md:inline-flex xl:hidden">
+              <MissionClock compact />
+            </span>
+          </DemoOnly>
           {/* SystemStatusChip / CommsControl / Push-to-Joint / Notifications
            * collapse to icon-only or hide entirely below sm — everything
            * is reachable through the IdentityPill account-menu drawer
