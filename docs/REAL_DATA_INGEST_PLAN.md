@@ -186,14 +186,452 @@ hard 403 we already ship.
 | RD-6 | 2 days | Audit-chain → unit-S-4 weekly snapshot export (the inverse — SPIRE feeds back to GCSS) |
 | RD-7 | 1 day | Per-pilot-unit configuration UI (which sources, which cadence) |
 
+---
+
+## Pipeline architecture — per source, end-to-end
+
+The source register (above) says *what* each system carries. This
+section says *how* SPIRE consumes it: code module path, canonical
+schema, transform stages, persistence layer, refresh tracking,
+failure modes. One section per source.
+
+### General architecture
+
+```
+                     ┌─────────────────────────────────────┐
+  source export ───▶ │  ingest adapter (per-source module) │
+  (CSV/XLSX/JSON)    │  backend/integrations/<src>_adapter │
+                     └────────────┬────────────────────────┘
+                                  │  ↓ normalize + scrub
+                     ┌────────────▼────────────────────────┐
+                     │  schema mapper                       │
+                     │    (a) known-shape → fast path       │
+                     │    (b) unknown-shape → Gemma 4       │
+                     │        + operator confirm + persist  │
+                     └────────────┬────────────────────────┘
+                                  │  ↓ canonical CanonicalDataset slice
+                     ┌────────────▼────────────────────────┐
+                     │  Tier-1 SENTRY scrub                 │
+                     │  (PII / classification flag pass)    │
+                     └────────────┬────────────────────────┘
+                                  │
+        ┌─────────────────────────┴─────────────────────────┐
+        │                                                   │
+   ┌────▼─────────┐                              ┌──────────▼──────────┐
+   │ swap_dataset │  ── atomic in-mem replace ──▶│ in-memory singleton │
+   │   (state.py) │                              │ all panels read here │
+   └────┬─────────┘                              └─────────────────────┘
+        │
+   ┌────▼──────────────────────┐
+   │ persistence layer          │
+   │   sqlite + Fernet at rest  │
+   │   audit chain entry per    │
+   │   ingest action            │
+   └────────────────────────────┘
+```
+
+Every source goes through this pipe. The differences are:
+- **Adapter module** (parses the specific export format)
+- **Canonical-schema mapping** (which source field becomes which
+  CanonicalDataset attribute)
+- **Refresh cadence** (event vs poll vs live)
+- **Failure mode** (what SPIRE shows when the source is unreachable)
+
+### Canonical schema (target shape every adapter produces)
+
+Defined in `backend/state.py::CanonicalDataset`. Adapters MUST emit
+a `CanonicalDataset` (or a partial slice that `swap_dataset()` can
+splice into the singleton):
+
+```python
+@dataclass
+class CanonicalDataset:
+    units:           list[Unit]            # 10 USMC units (DRRS-MC)
+    assets:          list[Asset]           # GCSS-MC asset master
+    roster:          list[Person]          # MILES + DEERS
+    srs:             list[ServiceRequest]  # GCSS-MC SRs
+    snapshots:       list[Snapshot]        # daily MC% rollup
+    reqs:            list[Requisition]     # GCSS-MC parts pipeline
+    cannib_events:   list[CannibEvent]     # synthesized at ingest
+    incidents:       list[Incident]        # PACS + SCADA + Wx fusion
+    tmrs:            list[TMR]             # TPS-D
+    dq_defects:      list[DQDefect]        # ingest QA findings
+    violations:      list[Violation]       # consistency engine output
+    generated_at:    str
+    seed:            int
+```
+
+Field-level shape lives in `backend/state.py` — adapters pull the
+dataclass schemas directly so canonical drift is impossible (a
+schema change forces every adapter to compile or fail loudly).
+
+### Per-source pipelines
+
+#### 1. GCSS-MC (assets / SRs / requisitions) — **the load-bearing pipeline**
+
+```
+weekly export (CSV bundle) ─▶ backend/integrations/sentry_gcss_adapter.py
+                                  │
+                                  ├─▶ ingest_sr_header_csv(bytes)
+                                  │     pandas read + column normalize
+                                  │     → list[ParsedSrRow]
+                                  │
+                                  ├─▶ canonical mapping (per CanonicalDataset.assets / .srs / .reqs)
+                                  │     stable column → field map
+                                  │     drop rows missing asset_id
+                                  │     coerce dates to ISO 8601
+                                  │
+                                  └─▶ Tier-1 SENTRY scrub
+                                        backend/routes/sentry.py::tier1_classify
+                                        flags PII / geo / comms / classified-TM
+```
+
+**Canonical mapping (GCSS column → SPIRE field):**
+
+| GCSS-MC column | SPIRE canonical field | Transform |
+|---|---|---|
+| `Bumper Number` | `Asset.asset_id` | strip whitespace, uppercase |
+| `TAMCN` | `Asset.equipment_type` | TAMCN→equipment-type lookup table |
+| `NSN` | `Requisition.nsn` | 13-digit zero-pad |
+| `SR Number` | `ServiceRequest.sr_number` | already canonical |
+| `Open Date` | `ServiceRequest.open_date` | parse `MM/DD/YYYY` → ISO date |
+| `Job Status` | `ServiceRequest.job_status` | enum coerce: OPEN/PENDING/CLOSED |
+| `Condition` | `ServiceRequest.condition` | enum coerce: Operational/Deadlined/PMC |
+| `Fault Component` | `ServiceRequest.fault_component` | strip + lowercase |
+| `Maint Level` | `ServiceRequest.maintenance_level` | `1`/`2`/`3`/`4` |
+| `Remark` | `ServiceRequest.remark_text` | preserve verbatim — Tier-1 reads this |
+| `Org Code` | `ServiceRequest.unit_name` | UIC→unit-name lookup |
+| `EDIPI` (in remark) | flagged + redacted | regex strip in remark; persist only the hash |
+
+**Persistence:** `swap_dataset()` atomically replaces the in-memory
+singleton; ingest event written to audit chain with file hash + row
+counts + DQ-defect counts.
+
+**Refresh cadence:** event-driven on file drop. Decision Bridge's
+`StageIngestHero` is the operator-facing trigger.
+
+**Failure modes:**
+| Failure | SPIRE behavior |
+|---|---|
+| Unknown column shape | 422; FE re-uploads to `/api/sentry/schema-map` for Gemma 4 mapping (Stage 2) |
+| Required column missing (asset_id) | 422 + per-row error report; partial ingest aborted |
+| Row-level PII bleed (EDIPI in Remark) | Tier-1 flags; redacted before SR lands in canonical; original NEVER persisted |
+| Schema drift mid-ingest | Latest mapping profile applied; mismatched rows go to DQ-defects with reason |
+
+#### 2. DRRS-MC (unit C-rating + MET scores)
+
+```
+weekly DRRS-MC JSON export ─▶ backend/integrations/drrs_adapter.py (NEW)
+                                  │
+                                  ├─▶ parse_drrs_export(json)
+                                  │     validate JSON Schema (per Service A&S directive)
+                                  │     → list[ParsedUnitReadiness]
+                                  │
+                                  ├─▶ canonical mapping
+                                  │     readiness.unit_uic → Unit.uic match
+                                  │     c_rating → Unit.c_rating
+                                  │     met_scores → Unit.met_scores
+                                  │     reporting_period → Snapshot.date
+                                  │
+                                  └─▶ swap into singleton
+                                        units left untouched if their UIC isn't in this drop
+```
+
+**Canonical mapping:**
+
+| DRRS field | SPIRE field |
+|---|---|
+| `unitId` (UIC) | `Unit.uic` (join key) |
+| `cRatingOverall` | `Unit.c_rating` |
+| `pRating` (personnel) | `Unit.p_rating` |
+| `sRating` (supply) | `Unit.s_rating` |
+| `rRating` (training) | `Unit.r_rating` |
+| `metRatings[]` | `Unit.met_scores: dict[met_id, score]` |
+| `reportingPeriodEnd` | `Snapshot.date` |
+| `narrative` | `Unit.readiness_narrative` |
+
+**Classification ceiling:** CUI (DRRS-MC C-ratings are CUI by
+default). Adapter writes the dataset with a `_max_classification`
+flag so SENTRY's release engine knows the slice can't go below CUI
+without redaction.
+
+**Failure modes:**
+| Failure | SPIRE behavior |
+|---|---|
+| DRRS JSON unreachable | Decision Bridge MC tile shows last-good + staleness chip |
+| UIC mismatch (DRRS unit absent from GCSS-MC dataset) | Logged to DQ; UI shows "DRRS reporting for unaligned UIC X" |
+| Schema version drift | Validator flags + ingest aborted; Security Mgr notified via FeedbackDrawer wire |
+
+#### 3. DEERS / RAPIDS (CAC PKI + EDIPI lookup)
+
+```
+sign-in (CAC card insert) ─▶ frontend cert picker
+                                  │
+                                  ├─▶ /api/auth/login (cert serial + PIN)
+                                  │
+                                  └─▶ backend/auth.py::session_middleware
+                                        DEERS_PROXY (on-prem) for cert validation
+                                        on miss: reject with 401
+                                        on hit: hydrate session.user{ dodid, role, clearance }
+```
+
+**Canonical mapping:** None — DEERS is a sign-in dependency, not a
+data domain. The session payload is the only persisted artifact:
+`session.user.dodid` (hashed for audit), `session.user.role` (used
+for scoping).
+
+**Failure modes:**
+| Failure | SPIRE behavior |
+|---|---|
+| DEERS proxy unreachable | Air-gap fallback: signed local roster (CAC verified offline by cert chain) |
+| Cert revoked / expired | 401, refuse session |
+| Insufficient role | view shows InsufficientPrivilege panel |
+
+#### 4. MILES (personnel-equipment matrix)
+
+```
+weekly S-1 CSV export ─▶ backend/integrations/miles_adapter.py (NEW)
+                              │
+                              ├─▶ parse_miles_csv(bytes)
+                              │     pandas read; expected columns:
+                              │     EDIPI · Last4 · Unit · Billet · TAMCN · Bumper#
+                              │
+                              ├─▶ Tier-1 PII scrub (EDIPI never persisted plaintext)
+                              │     EDIPI → SHA-256(salt + edipi)
+                              │
+                              └─▶ canonical mapping
+                                    Person.edipi_hash · .unit · .billet
+                                    Asset.assigned_to_edipi_hash (back-reference)
+```
+
+**Canonical mapping:**
+
+| MILES column | SPIRE field | Transform |
+|---|---|---|
+| `EDIPI` | `Person.edipi_hash` | SHA-256(salt + edipi) |
+| `Last 4` | `Person.last_4` | preserved (low PII risk) |
+| `Unit` | `Person.unit_name` | UIC→unit-name lookup |
+| `Billet Code` | `Person.billet` | enum |
+| `TAMCN` | `Person.assigned_tamcn` | TAMCN→equipment lookup |
+| `Bumper#` | `Asset.assigned_to_edipi_hash` | back-reference into Asset |
+
+**Persistence:** Person records land in `roster`; Asset back-references
+update via `swap_dataset` partial slice.
+
+#### 5. TPS-D / TC-AIMS-II (TMR submission)
+
+```
+operator-typed TMR ─▶ backend/routes/pulse.py::parse_tmr_text_llm
+                          │
+                          ├─▶ Gemma 4 extracts {origin, dest, qty, hazmat, lift_class}
+                          │
+                          ├─▶ canonical mapping
+                          │     extracted → TMR(...)
+                          │
+                          ├─▶ POST to TPS-D API (Stage 3 wiring; Stage 1+2 store locally)
+                          │     TC-AIMS-II XML envelope
+                          │
+                          └─▶ audit chain (TMR.tmr_id, hash of extracted struct)
+```
+
+**Canonical mapping (extracted JSON → TPS-D XML):**
+
+| Gemma extraction | TPS-D field | Required |
+|---|---|---|
+| `origin` | `<DepartureLocation>` | yes |
+| `dest` | `<DestinationLocation>` | yes |
+| `qty` | `<UnitsRequested>` | yes |
+| `equipment_class` | `<EquipmentClass>` | yes |
+| `hazmat_class` | `<HazmatClass>` | required if any hazmat |
+| `route_clearance_id` | `<RouteClearanceId>` | conditional |
+| `requested_pickup` | `<RequestedPickupDateTime>` | yes |
+
+#### 6. PACS (gate ingress/egress events)
+
+```
+PACS event push (NetEvents subscription) ─▶ backend/routes/streams.py
+                                                 │
+                                                 ├─▶ event normalize (per-make adapter)
+                                                 │     LenelOnGuard / Maxxess / etc.
+                                                 │
+                                                 └─▶ live correlator (fusion.py)
+                                                       drives BASTION fused-threat panel
+```
+
+**Canonical event:**
+
+```python
+@dataclass
+class PacsEvent:
+    ts:               datetime
+    gate_id:          str
+    direction:        Literal["ingress", "egress"]
+    actor_dodid_hash: Optional[str]   # absent for unauthorized
+    cred_status:      Literal["valid", "expired", "denied"]
+    site:             str
+```
+
+**Refresh cadence:** live (push subscription). Buffer at 1s.
+
+**Failure modes:** if PACS push stops, BASTION fused-threat panel
+shows stale-warning chip (`PACS · 14m stale`).
+
+#### 7. SCADA (utility / fuel / HVAC)
+
+```
+SCADA Modbus poll (60s cycle) ─▶ backend/routes/streams.py
+                                       │
+                                       ├─▶ tag-map (per site config)
+                                       │     coil → SpireMetric{site, kind, value, unit}
+                                       │
+                                       └─▶ fusion.py
+                                             POL anomaly trigger / generator alarm
+```
+
+**Canonical event:**
+
+```python
+@dataclass
+class ScadaSample:
+    ts:    datetime
+    site:  str
+    kind:  Literal["pol_tank_pct", "generator_load", "hvac_setpoint", "flow_rate"]
+    value: float
+    unit:  str
+```
+
+#### 8. Threat-rings / S-2 product
+
+```
+weekly S-2 KML drop ─▶ backend/integrations/s2_adapter.py (NEW)
+                            │
+                            ├─▶ parse KML
+                            │
+                            └─▶ canonical mapping
+                                  ThreatRing(system, range_km, center_lat_lng, valid_until)
+```
+
+**Classification:** SECRET in real life. Out of scope for current
+build (CUI ceiling). Placeholder synthetic in BASTION will swap
+to real source under a separate-domain SPIRE deployment with the
+right ATO.
+
+#### 9. METOC (weather)
+
+```
+hourly METOC XML pull ─▶ backend/integrations/metoc_adapter.py (NEW)
+                              │
+                              ├─▶ parse TAF / METAR
+                              │
+                              └─▶ canonical
+                                    WxWindow(site, valid_from, valid_to,
+                                             vis_km, ceiling_ft, wind_kt, sig_wx)
+```
+
+**Refresh:** hourly poll. Cached in-memory; staleness chip on
+BASTION when last successful fetch > 90 min ago.
+
+### Persistence layer
+
+Two layers, distinct purposes:
+
+1. **In-memory singleton** (`backend/state.py::_DATASET`):
+   - Every panel reads here
+   - Replaced atomically via `swap_dataset()`
+   - Pickled to `.cache/dataset/` for boot-time hydration (F1)
+
+2. **SQLite + Fernet** (`backend/persistence.py`):
+   - Audit chain (every ingest, every decision)
+   - Saved review-queue decisions
+   - Per-pilot mapping profiles (Stage 2 schema-mapper)
+   - Encrypted at rest with `SPIRE_DB_PASSPHRASE`
+   - Files: `runtime/spire.db.enc`
+
+### Refresh / staleness tracking
+
+Every adapter writes a `LastIngest` record:
+
+```python
+@dataclass
+class LastIngest:
+    source:        str              # "GCSS-MC" / "DRRS-MC" / etc.
+    ingested_at:   datetime
+    ingested_by:   str              # actor (dodid hash + role)
+    file_hash:     Optional[str]    # SHA-256 of the source file
+    row_count:     int
+    dq_defects:    int
+    canonical_at:  datetime         # when swap_dataset landed
+```
+
+Surface chip on every panel: `PULSE · GCSS-MC: 6h ago` / `DRRS-MC:
+2d ago`. When > 2× expected cadence, chip turns amber. > 4×, red.
+
+### Failure modes (cross-cutting)
+
+| Class | Behavior |
+|---|---|
+| Source unreachable | Last-good in-memory singleton stays; staleness chip surfaces; FeedbackDrawer auto-fires alert to Security Manager |
+| Schema unknown | 422 → schema-mapper fallback (Stage 2) → mapping profile persists |
+| Required field missing | Per-row reject with reason; partial ingest with DQ-defect log |
+| Classification ceiling exceeded | Hard 403; audit row tagged `release_blocked`; never enters canonical |
+| File hash matches last ingest | No-op; no re-ingest, no audit row spam |
+| Mid-ingest crash | Atomic-swap means partial state never lands; canonical stays at previous good |
+| Schema drift on a known source | Adapter loud-fail; Security Mgr is the gate |
+
+### Stage-3 ingest scheduler (the watcher)
+
+```
+                  ┌─────────────────────────────────────┐
+                  │ scripts/spire_ingest_watcher.py     │
+                  │ (Windows Task Scheduler / cron)     │
+                  └─────────────────┬───────────────────┘
+                                    │
+            ┌───────────────────────┼─────────────────────┐
+            │                       │                     │
+       ┌────▼────────┐    ┌─────────▼────────┐   ┌────────▼────────┐
+       │ \\share\... │    │ S3 / blob bucket │   │ on-prem HTTPS    │
+       │ SharePoint  │    │ (per site)        │   │ pull endpoint    │
+       └─────────────┘    └──────────────────┘   └──────────────────┘
+                                    │
+                                    ▼
+                  ┌──────────────────────────────────┐
+                  │ /api/system/stage-ingest         │
+                  │ (existing endpoint, multi-source) │
+                  └──────────────────────────────────┘
+```
+
+The watcher is dumb: tail folders + post bytes. Every smart decision
+(schema map, scrub, swap, audit) happens server-side in the
+adapters that already exist.
+
+## Outstanding work (revised, ranked)
+
+| # | Effort | Item | Unblocks |
+|---|---|---|---|
+| RD-1 | 3 days | Gemma 4 schema-mapper endpoint + UI | Drop-any-spreadsheet pilot day-1 |
+| RD-2 | 2 days | Mapping-profile persistence (`mapping_profiles` table) | Unit-specific mappings stable across drops |
+| RD-3 | 2 days | DRRS-MC adapter (`drrs_adapter.py` + JSON Schema) | Real C-rating in MC tile |
+| RD-4 | 4 days | TPS-D / TC-AIMS-II TMR adapter | Real TMR submission, replaces LLM-parsed mock |
+| RD-5 | 3 days | MILES adapter | Real personnel ↔ asset linkage |
+| RD-6 | 5 days | Stage-3 watcher + scheduler | Continuous ingest from network share |
+| RD-7 | 2 days | LastIngest staleness chips on every panel | Operator sees data freshness at a glance |
+| RD-8 | 3 days | METOC + SCADA + PACS live adapters | BASTION fused-threat from real sensors |
+| RD-9 | 2 days | Audit-chain → unit S-4 weekly report export (the inverse) | SPIRE feeds back to GCSS |
+| RD-10 | 1 day | Per-pilot configuration UI (sources, cadences, profiles) | Pilot self-service |
+
+**Total: ~27 working days** for full pilot ingest. RD-1+RD-2 (5
+days) is the critical path for "day-1 spreadsheet drop works."
+
 ## What this gets us
 
 Once Stage 2 (LLM schema-mapper) lands, a Marine S-4 can drop their
 own weekly readiness Excel — *no matter how it's shaped* — and
 SPIRE classifies it, redacts it, predicts failures, recommends
-actions, and ships sanitized coalition releases. The synthetic
-dataset becomes an offline test fixture; pilot operators run on
-their own data within minutes of a fresh drop.
+actions, and ships sanitized coalition releases. Once Stage 3
+(watcher) lands, the SPIRE host polls a designated network share
+and ingests automatically. The synthetic dataset becomes an offline
+test fixture; pilot operators run on their own data within minutes
+of a fresh drop.
 
 That's the path from "won the hackathon" to "running in a unit."
 
