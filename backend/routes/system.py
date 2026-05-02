@@ -154,6 +154,24 @@ def _dataset_fingerprint() -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+@router.get("/build-mode")
+async def build_mode():
+    """Return the deployment's build posture so the frontend can sync.
+
+    The frontend reads VITE_SPIRE_BUILD at compile time; the backend
+    reads SPIRE_BUILD at runtime. They should match, but this endpoint
+    surfaces the backend value for downstream tools (CLI clients,
+    test harnesses, monitoring dashboards) that don't have the FE
+    bundle's compiled-in env.
+    """
+    raw = (os.environ.get("SPIRE_BUILD") or "demo").strip().lower()
+    mode = "operational" if raw == "operational" else "demo"
+    return {
+        "build_mode": mode,
+        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+
 @router.get("/status")
 async def status():
     ds = get_dataset()
@@ -162,6 +180,11 @@ async def status():
     llm_probe = await _probe_llm_brief()
     return {
         "mode": os.environ.get("SPIRE_MODE", "full"),
+        "build_mode": (
+            "operational"
+            if (os.environ.get("SPIRE_BUILD") or "").strip().lower() == "operational"
+            else "demo"
+        ),
         "version": "0.1.0",
         "backend_time_local": datetime.now().isoformat(timespec="seconds"),
         "dataset": {
