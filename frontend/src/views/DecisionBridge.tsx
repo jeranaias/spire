@@ -34,6 +34,7 @@ import {
 } from "../api";
 import { pollWithBackoff, formatApiError } from "../api-retry";
 import { ROLE_DEFAULT_VIEW, useSpireStore, type DdilMode } from "../state/store";
+import { DemoOnly } from "../state/buildMode";
 import { resolveAlertTarget } from "./bastion/resolveAlertTarget";
 import { StageIngestHero } from "../components/StageIngestHero";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
@@ -388,16 +389,21 @@ function MissionTile({ mission, error }: { mission: DecisionBridgeMission | null
               </div>
             </div>
           </div>
-          {mission.mission_essential_task ? (
-            <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)]">
-              MET: {mission.mission_essential_task}
-            </div>
-          ) : null}
-          {mission.mission_objective ? (
-            <p className="line-clamp-2 text-[12px] leading-snug text-[var(--color-text-secondary)]">
-              {mission.mission_objective}
-            </p>
-          ) : null}
+          {/* MET + objective are demo-only — operators already have
+           * these from their orders / OPORD. The tile becomes a
+           * tight FPCON · DTG · installation card in operational. */}
+          <DemoOnly>
+            {mission.mission_essential_task ? (
+              <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+                MET: {mission.mission_essential_task}
+              </div>
+            ) : null}
+            {mission.mission_objective ? (
+              <p className="line-clamp-2 text-[12px] leading-snug text-[var(--color-text-secondary)]">
+                {mission.mission_objective}
+              </p>
+            ) : null}
+          </DemoOnly>
         </TileChromePressable>
       )}
     </Tile>
@@ -1233,9 +1239,11 @@ export function DecisionBridgeView() {
           <h1 className="font-mono text-sm font-semibold uppercase tracking-[0.22em] text-[var(--color-text)]">
             Decision Bridge
           </h1>
-          <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            15-second decision · five live signals · click any tile to drill in
-          </p>
+          <DemoOnly>
+            <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+              15-second decision · five live signals · click any tile to drill in
+            </p>
+          </DemoOnly>
         </div>
         <Pressable
           onClick={() => nav(fallbackPath)}
