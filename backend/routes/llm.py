@@ -28,13 +28,70 @@ from ..inference_economics import RATE_CARD, record_call
 
 router = APIRouter()
 
+# ---------------------------------------------------------------------------
+# Two-tier LLM router.
+#
+#   Tier A — primary, frontier-quality. RigRun's classification proxy
+#            in front of Gemma 4 26B FP8. Reached over Tailscale.
+#            ~480 ms typical for plain chat.
+#   Tier B — local fallback, on-device. Ollama OpenAI-compatible
+#            REST on `localhost:11434/v1` serving Gemma 4 E2B.
+#            ~3 GB RAM, ~10-15 tok/s on a duty laptop CPU. Closes
+#            the air-gap pitch — when SATCOM goes amber and Tier-A
+#            is unreachable, Tier-B keeps the experience working
+#            at ~70-80% quality.
+#   Tier C — deterministic regex / lookup. Always available; only
+#            fires when both A and B are unreachable. Lives in
+#            backend/copilot/planner.py and isn't this module's
+#            concern — call_llm_chat just throws an HTTPException
+#            and the caller falls through.
+# ---------------------------------------------------------------------------
+
 LLM_PROXY_URL = os.environ.get("SPIRE_LLM_PROXY", "http://127.0.0.1:8095")
 LLM_MODEL = os.environ.get("SPIRE_LLM_MODEL", "llama4-maverick")  # proxy alias for gemma4
+LLM_LOCAL_URL = os.environ.get("SPIRE_LLM_LOCAL", "http://127.0.0.1:11434")
+LLM_LOCAL_MODEL = os.environ.get("SPIRE_LLM_LOCAL_MODEL", "gemma4:e2b")
 LLM_TIMEOUT = float(os.environ.get("SPIRE_LLM_TIMEOUT", "30"))
 LLM_MAX_TOKENS = int(os.environ.get("SPIRE_LLM_MAX_TOKENS", "512"))
 
+# Set SPIRE_LLM_LOCAL_DISABLE=1 to skip Tier-B entirely. Useful when
+# the local Ollama install is missing the Gemma 4 model and we'd
+# rather fail fast to deterministic rules than spend a request
+# discovering the gap.
+LLM_LOCAL_DISABLED = (os.environ.get("SPIRE_LLM_LOCAL_DISABLE") or "").strip().lower() in ("1", "true", "yes")
+
+
+def _local_reachable_sync_cache_key() -> str:
+    """Cache key for the rolling reachability of localhost:11434.
+    The first failed call writes the timestamp; subsequent calls
+    within a short window short-circuit Tier-B without paying the
+    connection-attempt cost. Reset on next process boot.
+    """
+    return "spire-llm-local-unreachable-since"
+
+
+_LOCAL_FAIL_CACHE: dict[str, float] = {}
+_LOCAL_FAIL_BACKOFF_SEC = 30.0  # don't retry Tier-B for 30s after a failure
+
+
+def _local_recently_failed() -> bool:
+    ts = _LOCAL_FAIL_CACHE.get(_local_reachable_sync_cache_key())
+    if ts is None:
+        return False
+    return (time.time() - ts) < _LOCAL_FAIL_BACKOFF_SEC
+
+
+def _mark_local_failed() -> None:
+    _LOCAL_FAIL_CACHE[_local_reachable_sync_cache_key()] = time.time()
+
+
+def _clear_local_failed() -> None:
+    _LOCAL_FAIL_CACHE.pop(_local_reachable_sync_cache_key(), None)
+
 
 async def _probe_llm() -> dict:
+    """Probe Tier-A (RigRun proxy). Used by /llm/status to surface a
+    chip in the operator's StatusFooter."""
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(f"{LLM_PROXY_URL}/v1/models")
@@ -52,12 +109,67 @@ async def _probe_llm() -> dict:
     return {"reachable": False, "proxy": LLM_PROXY_URL}
 
 
+async def _probe_local() -> dict:
+    """Probe Tier-B (Ollama localhost:11434). Cheap — Ollama answers
+    /api/tags in <50 ms when up."""
+    if LLM_LOCAL_DISABLED:
+        return {"reachable": False, "disabled": True, "proxy": LLM_LOCAL_URL}
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{LLM_LOCAL_URL}/api/tags")
+            if resp.status_code == 200:
+                data = resp.json()
+                models = [m.get("name") for m in (data.get("models") or [])]
+                has_target = LLM_LOCAL_MODEL in models
+                return {
+                    "reachable": True,
+                    "models": models,
+                    "target_model": LLM_LOCAL_MODEL,
+                    "target_loaded": has_target,
+                    "proxy": LLM_LOCAL_URL,
+                }
+    except Exception as e:  # noqa: BLE001
+        return {"reachable": False, "error": str(e), "proxy": LLM_LOCAL_URL}
+    return {"reachable": False, "proxy": LLM_LOCAL_URL}
+
+
 @router.get("/status")
 async def llm_status():
-    probe = await _probe_llm()
+    """Tier-A status. Kept compatible with the previous shape so the
+    StatusFooter chip continues to render against existing callers.
+    Tier-B status surfaces under `local`."""
+    primary = await _probe_llm()
+    local = await _probe_local()
     return {
         "time": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        **probe,
+        **primary,
+        "local": local,
+        # Active tier hint — what the next call_llm_chat would land on.
+        # Three-state: 'primary', 'local', 'rule' (when both fail).
+        "active_tier": (
+            "primary" if primary.get("reachable")
+            else "local" if local.get("reachable") and local.get("target_loaded")
+            else "rule"
+        ),
+    }
+
+
+@router.get("/tiers")
+async def llm_tiers():
+    """Per-tier status — the StatusFooter chip uses this to render
+    `LLM · 26B / E2B-LOCAL / RULE` based on which tier is currently
+    serving."""
+    primary = await _probe_llm()
+    local = await _probe_local()
+    return {
+        "primary": primary,
+        "local": local,
+        "active_tier": (
+            "primary" if primary.get("reachable")
+            else "local" if local.get("reachable") and local.get("target_loaded")
+            else "rule"
+        ),
+        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 
@@ -95,8 +207,82 @@ async def call_llm_chat(
     `tools` + `tool_choice` enable OpenAI-style function calling for the
     co-pilot planner. Pass tools=None for plain chat.
     """
-    proxy_url = os.environ.get("SPIRE_LLM_PROXY", LLM_PROXY_URL)
-    model = os.environ.get("SPIRE_LLM_MODEL", LLM_MODEL)
+    # Tier-A: licensed RigRun proxy (frontier 26B). Default path.
+    primary_url = os.environ.get("SPIRE_LLM_PROXY", LLM_PROXY_URL)
+    primary_model = os.environ.get("SPIRE_LLM_MODEL", LLM_MODEL)
+
+    try:
+        return await _call_one_tier(
+            base_url=primary_url,
+            model=primary_model,
+            tier_label="primary",
+            messages=messages,
+            response_format=response_format,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            tier=tier,
+            call_site=call_site,
+            role=role,
+            route=route,
+        )
+    except HTTPException as exc:
+        # Tier-A failures that warrant trying Tier-B: connection
+        # refused (503), upstream gateway error (502), or any 5xx that
+        # isn't auth-related. 4xx (400 bad request, 401 unauth) means
+        # the request is malformed — falling back won't help and we
+        # let the caller see the original error.
+        if exc.status_code not in (502, 503, 504):
+            raise
+        if LLM_LOCAL_DISABLED or _local_recently_failed():
+            raise
+
+    # Tier-B: localhost Ollama (gemma4:e2b by default). Falls back
+    # only when Tier-A is unreachable, so a normal demo with RigRun
+    # online never spends a Tier-B call.
+    try:
+        result = await _call_one_tier(
+            base_url=LLM_LOCAL_URL,
+            model=LLM_LOCAL_MODEL,
+            tier_label="local",
+            messages=messages,
+            response_format=response_format,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            tier=tier,
+            call_site=call_site,
+            role=role,
+            route="fallback-local",
+        )
+        _clear_local_failed()
+        return result
+    except HTTPException:
+        _mark_local_failed()
+        raise
+
+
+async def _call_one_tier(
+    *,
+    base_url: str,
+    model: str,
+    tier_label: str,
+    messages: list,
+    response_format: Optional[dict],
+    temperature: float,
+    max_tokens: int,
+    tools: Optional[list],
+    tool_choice: Optional[Any],
+    tier: str,
+    call_site: str,
+    role: Optional[str],
+    route: str,
+) -> dict:
+    """Single-tier LLM call. Owns the HTTP round-trip + cost
+    bookkeeping for one upstream. Raises HTTPException on any
+    failure so the parent router can decide whether to fall through."""
     rate_card_label = (RATE_CARD.get(tier) or {}).get("model", model)
     payload: dict[str, Any] = {
         "model": model,
@@ -119,21 +305,20 @@ async def call_llm_chat(
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
             resp = await client.post(
-                f"{proxy_url}/v1/chat/completions",
+                f"{base_url}/v1/chat/completions",
                 json=payload,
                 headers=headers,
             )
     except httpx.RequestError as exc:
         latency_ms = (time.perf_counter() - started) * 1000
-        # Log the failed proxy call so unreachable-proxy storms are
-        # visible in the cost tab even though they cost $0.
         record_call(
             tier=tier, model=rate_card_label,
             input_tokens=0, output_tokens=0,
             latency_ms=latency_ms, call_site=call_site,
-            route=route, role=role, error=f"proxy unreachable: {type(exc).__name__}",
+            route=f"{route}/{tier_label}", role=role,
+            error=f"{tier_label} unreachable: {type(exc).__name__}",
         )
-        raise HTTPException(status_code=503, detail=f"LLM proxy unreachable: {exc}")
+        raise HTTPException(status_code=503, detail=f"LLM {tier_label} unreachable: {exc}")
 
     latency_ms = (time.perf_counter() - started) * 1000
 
@@ -142,9 +327,13 @@ async def call_llm_chat(
             tier=tier, model=rate_card_label,
             input_tokens=0, output_tokens=0,
             latency_ms=latency_ms, call_site=call_site,
-            route=route, role=role, error=f"proxy {resp.status_code}",
+            route=f"{route}/{tier_label}", role=role,
+            error=f"{tier_label} {resp.status_code}",
         )
-        raise HTTPException(status_code=502, detail=f"LLM proxy error {resp.status_code}: {resp.text[:200]}")
+        raise HTTPException(
+            status_code=502 if resp.status_code >= 500 else resp.status_code,
+            detail=f"LLM {tier_label} error {resp.status_code}: {resp.text[:200]}",
+        )
 
     body = resp.json()
     content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -155,21 +344,19 @@ async def call_llm_chat(
         tier=tier, model=rate_card_label,
         input_tokens=input_tokens, output_tokens=output_tokens,
         latency_ms=latency_ms, call_site=call_site,
-        route=route, role=role,
+        route=f"{route}/{tier_label}", role=role,
     )
     return {
         "content": content,
         "raw": body,
         "usage": usage,
         "finish_reason": body.get("choices", [{}])[0].get("finish_reason"),
-        # Per-call economics so callers can surface "$0.0008" to the
-        # operator without re-computing. Stable shape: tier, cost_usd,
-        # latency_ms, call_site.
         "economics": {
             "tier": tier,
             "model": rate_card_label,
             "call_site": call_site,
-            "route": route,
+            "route": f"{route}/{tier_label}",
+            "served_by": tier_label,  # primary | local
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost_usd": cost_entry["cost_usd"],
