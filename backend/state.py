@@ -127,9 +127,118 @@ def init_empty_dataset() -> CanonicalDataset:
     return _DATASET
 
 
+# Pickle cache for the deterministic seed=42 dataset. Generation chews
+# 1-2s on shared CPU (most of it lifecycle.run_simulation across 128k
+# snapshots); pickling lands at ~30 MB on disk and reloads in <100 ms.
+# Cache is scoped per-seed and invalidates on any source-file mtime
+# change so a dataset-engine edit always regenerates.
+import hashlib  # noqa: E402
+import os  # noqa: E402
+import pickle  # noqa: E402
+import time as _time  # noqa: E402
+
+_DATASET_CACHE_DIR = ROOT / ".cache" / "dataset"
+
+
+def _dataset_source_fingerprint() -> str:
+    """SHA-1 over (sorted) mtimes of every dataset/*.py module so a
+    code edit transparently invalidates the pickle. Cheap — stat'ing
+    20-ish files takes microseconds vs the 1-2 s of full regeneration.
+    """
+    h = hashlib.sha1()
+    dataset_dir = ROOT / "dataset"
+    for p in sorted(dataset_dir.glob("**/*.py")):
+        try:
+            mt = int(p.stat().st_mtime)
+        except OSError:
+            continue
+        h.update(p.relative_to(dataset_dir).as_posix().encode("utf-8"))
+        h.update(b":")
+        h.update(str(mt).encode("ascii"))
+        h.update(b"\n")
+    return h.hexdigest()[:16]
+
+
+def _cache_path_for(seed: int) -> Path:
+    return _DATASET_CACHE_DIR / f"seed-{seed}-{_dataset_source_fingerprint()}.pickle"
+
+
+def _load_dataset_from_cache(seed: int) -> Optional[CanonicalDataset]:
+    cache = _cache_path_for(seed)
+    if not cache.exists():
+        return None
+    try:
+        t0 = _time.perf_counter()
+        with cache.open("rb") as f:
+            ds = pickle.load(f)
+        dt_ms = (_time.perf_counter() - t0) * 1000
+        if not isinstance(ds, CanonicalDataset):
+            return None
+        # Stamp the load duration onto the dataset so /api/system/status
+        # can report whether this boot hit the cache.
+        print(f"[SPIRE]   pickle hit · {cache.name} loaded in {dt_ms:.0f} ms")
+        return ds
+    except Exception as e:  # noqa: BLE001
+        # Pickle corruption or schema drift — silently regenerate.
+        print(f"[SPIRE]   pickle miss · {cache.name}: {type(e).__name__}: {e}")
+        return None
+
+
+def _save_dataset_to_cache(seed: int, ds: CanonicalDataset) -> None:
+    try:
+        _DATASET_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache = _cache_path_for(seed)
+        # Atomic write — pickle to a sibling temp file then rename, so a
+        # killed process mid-write never leaves a partial cache.
+        tmp = cache.with_suffix(cache.suffix + ".tmp")
+        with tmp.open("wb") as f:
+            pickle.dump(ds, f, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp.replace(cache)
+        size_mb = cache.stat().st_size / (1024 * 1024)
+        print(f"[SPIRE]   pickle saved · {cache.name} ({size_mb:.1f} MB)")
+        # Garbage-collect older caches so we don't accumulate one per
+        # source-file edit. Keep the 3 most recent for quick rollback.
+        siblings = sorted(
+            _DATASET_CACHE_DIR.glob(f"seed-{seed}-*.pickle"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for stale in siblings[3:]:
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+    except Exception as e:  # noqa: BLE001
+        # Cache write failure is never fatal — we ran fresh, that's
+        # the source of truth. Surface it once at boot.
+        print(f"[SPIRE]   pickle save failed: {type(e).__name__}: {e}")
+
+
 def load_dataset(*, seed: int = RANDOM_SEED) -> CanonicalDataset:
-    """Generate (or regenerate) the canonical dataset under the given seed."""
+    """Generate (or regenerate) the canonical dataset under the given seed.
+
+    Cold-start cache: if a pickle exists for this (seed, source-mtime)
+    pair we load it (<100 ms). Otherwise we regenerate (~1-2 s) and
+    write a fresh pickle for the next boot. ``SPIRE_DATASET_NO_CACHE=1``
+    forces regeneration — useful when iterating on the dataset engine
+    and the mtime fingerprint hasn't changed (e.g. a JSON-only data
+    file edit that the fingerprint doesn't see).
+    """
     global _DATASET
+
+    no_cache = (os.environ.get("SPIRE_DATASET_NO_CACHE") or "").strip().lower() in ("1", "true", "yes")
+    if not no_cache:
+        cached = _load_dataset_from_cache(seed)
+        if cached is not None:
+            with _DATASET_LOCK:
+                _DATASET = cached
+                _DATASET_META.update({
+                    "source": f"seed-{seed}-pickle",
+                    "ingested_at": cached.generated_at,
+                    "ingested_by": "lifespan-pickle",
+                    "ingest_hash": None,
+                })
+            return _DATASET
 
     units, assets = generate_fleet(seed)
     roster = generate_personnel(units, OUTPUT_TARGETS["personnel_count"], seed)
@@ -163,6 +272,8 @@ def load_dataset(*, seed: int = RANDOM_SEED) -> CanonicalDataset:
             "ingested_by": "lifespan",
             "ingest_hash": None,
         })
+    if not no_cache:
+        _save_dataset_to_cache(seed, new_ds)
     return _DATASET
 
 

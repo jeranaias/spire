@@ -69,3 +69,6 @@ walkthrough/
 /data/thermal_demo/
 attached_assets/
 datasets/
+
+# Dataset pickle cache (regenerated at boot from dataset/ source mtimes)
+.cache/
