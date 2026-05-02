@@ -3,22 +3,39 @@
  *
  * Wraps a panel header + body with a `▾` toggle. Default-collapsed shows
  * only the header (hero metric + 1-line summary supplied by the caller).
- * Expanded shows the full panel content. State persists per role in
- * localStorage at `spire.panel.{view}.{panel}.collapsed.{role}` so the
- * Maintenance Chief landing fresh on PULSE/Forecast doesn't re-see the
- * Recommended-Actions wall every visit.
+ * Expanded shows the full panel content.
  *
- * Roles can specify a different default-collapsed-state via the
- * `defaultCollapsedFor` map: e.g. Maintenance Chief lands with
- * RecommendActions collapsed, Security Manager lands with FusedThreats
- * already expanded, MEF Commander gets FusedThreats collapsed by default.
+ * Two persistence modes:
  *
- * Override is local only. The TopBar density toggle and role-shaped
- * defaults stay separate concerns.
+ *   1. Legacy (demo build, or any caller that just sets
+ *      `defaultCollapsedFor`): per-role boolean stored at
+ *      `spire.panel.{view}.{panel}.collapsed.{role}`. Drives the
+ *      Track-G2 walk-through defaults that ship today.
+ *
+ *   2. PULSE per-DODID (operational build): caller passes
+ *      `pulsePanel="predictedFailures" | "recommendActions"` and the
+ *      panel state is read from / written to
+ *      `spire.pulse.panels.{dodidHash}` as part of an object payload
+ *      `{ predictedFailures: "expanded", recommendActions: "collapsed" }`.
+ *      Role defaults come from `state/pulsePanels.ts` and only fire
+ *      when `isOperational()` is true. Demo build falls back to the
+ *      legacy `defaultCollapsedFor` path so the show-and-tell posture
+ *      doesn't shift.
+ *
+ * Visual: when collapsed under PULSE/operational, render a compact
+ * pill-style header (e.g. `+ Predicted failures (11 flagged)`) supplied
+ * by the caller via `collapsedPill`. Click → smooth expand. Other
+ * callers keep the original chevron + summary chrome.
  */
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { useSpireStore, type Role } from "../state/store";
+import { isOperational } from "../state/buildMode";
+import {
+  resolvePanelCollapsed,
+  savePanelState,
+  type PanelKey,
+} from "../state/pulsePanels";
 import { Pressable } from "./ui";
 
 export interface CollapsiblePanelProps {
@@ -31,19 +48,37 @@ export interface CollapsiblePanelProps {
   header: React.ReactNode;
   /** Optional one-line summary shown ONLY when collapsed (under the header). */
   collapsedSummary?: React.ReactNode;
+  /**
+   * Optional pill-style collapsed renderer (operational build, PULSE
+   * panels). When provided AND `pulsePanel` is set AND the panel is
+   * collapsed, this renders in place of the default chevron header.
+   * Click → expand.
+   */
+  collapsedPill?: React.ReactNode;
   /** Body content — shown only when expanded. */
   children: React.ReactNode;
   /** Optional className for the outer wrapper. */
   className?: string;
+  /**
+   * PULSE panel key. Activates per-DODID persistence and the
+   * operational-build role defaults from `state/pulsePanels.ts`.
+   * Demo build still honors `defaultCollapsedFor` for backward compat.
+   */
+  pulsePanel?: PanelKey;
 }
 
-function lsKey(view: string, panel: string, role: Role): string {
+function legacyKey(view: string, panel: string, role: Role): string {
   return `spire.panel.${view}.${panel}.collapsed.${role}`;
 }
 
-function loadCollapsed(view: string, panel: string, role: Role, fallback: boolean): boolean {
+function loadLegacyCollapsed(
+  view: string,
+  panel: string,
+  role: Role,
+  fallback: boolean,
+): boolean {
   try {
-    const raw = window.localStorage.getItem(lsKey(view, panel, role));
+    const raw = window.localStorage.getItem(legacyKey(view, panel, role));
     if (raw === "true") return true;
     if (raw === "false") return false;
   } catch {
@@ -52,12 +87,42 @@ function loadCollapsed(view: string, panel: string, role: Role, fallback: boolea
   return fallback;
 }
 
-function saveCollapsed(view: string, panel: string, role: Role, collapsed: boolean): void {
+function saveLegacyCollapsed(
+  view: string,
+  panel: string,
+  role: Role,
+  collapsed: boolean,
+): void {
   try {
-    window.localStorage.setItem(lsKey(view, panel, role), collapsed ? "true" : "false");
+    window.localStorage.setItem(
+      legacyKey(view, panel, role),
+      collapsed ? "true" : "false",
+    );
   } catch {
     /* tolerate */
   }
+}
+
+/**
+ * Resolve the initial collapsed state for a fresh mount or a role-swap
+ * re-hydrate. PULSE/operational path branches into the per-DODID
+ * payload + role defaults; everything else stays on the legacy
+ * per-role boolean path.
+ */
+function resolveInitialCollapsed(args: {
+  view: string;
+  panel: string;
+  role: Role;
+  legacyFallback: boolean;
+  pulsePanel: PanelKey | undefined;
+  dodid: string | null | undefined;
+}): boolean {
+  const { view, panel, role, legacyFallback, pulsePanel, dodid } = args;
+  if (typeof window === "undefined") return legacyFallback;
+  if (pulsePanel && isOperational()) {
+    return resolvePanelCollapsed(dodid, role, pulsePanel);
+  }
+  return loadLegacyCollapsed(view, panel, role, legacyFallback);
 }
 
 export function CollapsiblePanel({
@@ -66,30 +131,82 @@ export function CollapsiblePanel({
   defaultCollapsedFor,
   header,
   collapsedSummary,
+  collapsedPill,
   children,
   className,
+  pulsePanel,
 }: CollapsiblePanelProps) {
   const role = useSpireStore((s) => s.role);
-  const fallback = defaultCollapsedFor?.[role] ?? false;
+  const dodid = useSpireStore((s) => s.currentUser?.dodid ?? null);
+  const legacyFallback = defaultCollapsedFor?.[role] ?? false;
   // Read once per mount; updates from elsewhere don't fight the operator.
   const [collapsed, setCollapsed] = useState<boolean>(() =>
-    typeof window === "undefined" ? fallback : loadCollapsed(view, panel, role, fallback),
+    resolveInitialCollapsed({ view, panel, role, legacyFallback, pulsePanel, dodid }),
   );
 
-  // Re-hydrate when the role changes — we want the per-role memory to follow.
+  // Re-hydrate on role / DODID swap. Each operator and role keep their
+  // own preferences, so a role flip on the topbar should snap the panel
+  // back to that role's default unless the new operator has an explicit
+  // persisted value.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    setCollapsed(loadCollapsed(view, panel, role, fallback));
-    // fallback is derived from defaultCollapsedFor[role], so role covers both.
+    setCollapsed(
+      resolveInitialCollapsed({
+        view,
+        panel,
+        role,
+        legacyFallback,
+        pulsePanel,
+        dodid,
+      }),
+    );
+    // legacyFallback is derived from defaultCollapsedFor[role]; covered
+    // by the role dep. pulsePanel is configuration, not user data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, view, panel]);
+  }, [role, view, panel, dodid, pulsePanel]);
 
   function toggle() {
     setCollapsed((prev) => {
       const next = !prev;
-      saveCollapsed(view, panel, role, next);
+      if (pulsePanel && isOperational()) {
+        savePanelState(dodid, role, pulsePanel, next ? "collapsed" : "expanded");
+      } else {
+        saveLegacyCollapsed(view, panel, role, next);
+      }
       return next;
     });
+  }
+
+  const usingPill = !!pulsePanel && isOperational() && !!collapsedPill;
+
+  // Pill-only collapsed render — replaces the chevron header entirely.
+  // The pill IS the click-target; expanding swaps to the full panel
+  // (header + body) on the next render.
+  if (usingPill && collapsed) {
+    return (
+      <div className={className}>
+        <Pressable
+          onClick={toggle}
+          aria-expanded={false}
+          aria-label="Expand panel"
+          className={clsx(
+            "inline-flex w-full items-center gap-2 rounded-full",
+            "border border-[var(--color-border)] bg-[var(--color-surface)]",
+            "px-3 py-1.5 text-left transition-colors",
+            "hover:border-[var(--color-border-active)] hover:bg-[var(--color-surface-hover)]",
+          )}
+        >
+          <span
+            aria-hidden
+            className="font-mono text-[var(--color-text-muted)]"
+            style={{ fontSize: "var(--text-sm)" }}
+          >
+            +
+          </span>
+          <span className="min-w-0 flex-1">{collapsedPill}</span>
+        </Pressable>
+      </div>
+    );
   }
 
   return (
@@ -122,7 +239,16 @@ export function CollapsiblePanel({
             </div>
           ))
         : (
-          <div>
+          <div
+            style={{
+              // Smooth expand on first render after a click. We rely on
+              // the conditional render above to unmount the body when
+              // collapsed so heavy children (Recharts ResponsiveContainer
+              // keeps a ResizeObserver alive) don't sit on the page
+              // unused.
+              animation: "spire-panel-expand 180ms ease-out",
+            }}
+          >
             {children}
           </div>
         )}
