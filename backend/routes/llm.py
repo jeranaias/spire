@@ -282,15 +282,37 @@ async def call_llm_chat(
     # the caller didn't already set their own system message — we
     # don't want to override role-aware grounding (e.g. the SPIRO
     # planner's full system prompt).
-    has_system_msg = any(m.get("role") == "system" for m in messages or [])
+    # Gemma 4 ships configurable-thinking. By default the model emits
+    # a "Thinking Process: 1. Analyze the request..." block into the
+    # OpenAI-compat `reasoning` field BEFORE emitting the actual answer
+    # in `content`. For SPIRE's workload (Tier-2 explainer + SPIRO chat)
+    # we want answer-direct.
+    #
+    # Always tack a no-reasoning suffix onto the system message — if
+    # the caller already set one (e.g. the SENTRY explainer system
+    # prompt), append; if not, insert. This keeps caller grounding
+    # intact while unconditionally suppressing the thinking block.
+    NO_REASONING_LINE = (
+        "\n\nIMPORTANT — operate in answer-direct mode. Do not output any "
+        "reasoning, thinking process, chain-of-thought, or step-by-step "
+        "analysis before your answer. Output only the final answer/JSON "
+        "as requested."
+    )
     local_messages = list(messages or [])
-    if not has_system_msg:
+    has_system_idx = next(
+        (i for i, m in enumerate(local_messages) if m.get("role") == "system"),
+        -1,
+    )
+    if has_system_idx >= 0:
+        existing = local_messages[has_system_idx]
+        local_messages[has_system_idx] = {
+            **existing,
+            "content": (existing.get("content") or "") + NO_REASONING_LINE,
+        }
+    else:
         local_messages.insert(0, {
             "role": "system",
-            "content": (
-                "Respond directly with the answer. Do not output any reasoning, "
-                "thinking process, or step-by-step analysis. Just the answer."
-            ),
+            "content": "Respond directly." + NO_REASONING_LINE,
         })
     try:
         result = await _call_one_tier(
@@ -387,7 +409,21 @@ async def _call_one_tier(
         )
 
     body = resp.json()
-    content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+    msg0 = body.get("choices", [{}])[0].get("message", {}) or {}
+    content = msg0.get("content", "") or ""
+    # Gemma 4's configurable-thinking sometimes ignores our "no
+    # reasoning" suffix and emits the entire response into the
+    # `reasoning` field with `content` empty. When that happens
+    # the user sees nothing despite tokens having been generated
+    # and billed. Fall back to reasoning if content is empty —
+    # lossy (the operator sees the thinking + answer concatenated)
+    # but better than a silent empty box. Tier-A (RigRun 26B) never
+    # hits this path because its chat template doesn't emit a
+    # separate reasoning field.
+    if not content.strip():
+        reasoning = msg0.get("reasoning") or ""
+        if reasoning.strip():
+            content = reasoning
     usage = body.get("usage", {}) or {}
     input_tokens = int(usage.get("prompt_tokens") or 0)
     output_tokens = int(usage.get("completion_tokens") or 0)
