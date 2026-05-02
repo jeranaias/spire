@@ -22,6 +22,7 @@ import clsx from "clsx";
 import { api, type CoalitionProfileSummary, type CoalitionView } from "../../api";
 import { formatApiError } from "../../api-retry";
 import { useSpireStore } from "../../state/store";
+import { DemoOnly } from "../../state/buildMode";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, Pressable, ErrorState, LoadingState, fireIdempotent } from "../../components/ui";
 
@@ -258,28 +259,23 @@ export function CoalitionTab() {
           >
             Coalition Interoperability · Live Partner View
           </h2>
-          <div className="mt-1 spire-body-muted">
-            {(() => {
-              // Template the partner name from the active profile so the
-              // intro doesn't keep saying "what JSDF sees" while the operator
-              // is on Philippines · AFP. Walkthrough audit: prior version
-              // picked partners[0] which is USA on every FVEY profile —
-              // 'Show me what USA sees' is meaningless to a US operator.
-              // Pick the first non-USA partner instead so the prompt names
-              // a foreign partner (the actual point of the view).
-              const partners =
-                view?.partners
-                ?? profiles.find((p) => p.key === selected)?.partners
-                ?? [];
-              const foreign = partners.find((p) => p.toUpperCase() !== "USA");
-              const partnerName = foreign
-                ?? profiles.find((p) => p.key === selected)?.display_name
-                ?? "this partner";
-              return `"Show me what ${partnerName} sees right now."`;
-            })()}{" "}
-            Live-data preview scoped through the partner's release profile.
-            Same canonical dataset; different release ceiling, different redactions, different caveats — all applied in real time.
-          </div>
+          <DemoOnly>
+            <div className="mt-1 spire-body-muted">
+              {(() => {
+                const partners =
+                  view?.partners
+                  ?? profiles.find((p) => p.key === selected)?.partners
+                  ?? [];
+                const foreign = partners.find((p) => p.toUpperCase() !== "USA");
+                const partnerName = foreign
+                  ?? profiles.find((p) => p.key === selected)?.display_name
+                  ?? "this partner";
+                return `"Show me what ${partnerName} sees right now."`;
+              })()}{" "}
+              Live-data preview scoped through the partner's release profile.
+              Same canonical dataset; different release ceiling, different redactions, different caveats — all applied in real time.
+            </div>
+          </DemoOnly>
         </div>
         {/* Walkthrough #24 — partner tabs were colliding ("AUSTRALIA · ADF"
             overlapping "PHILIPPINES · AFP"). Use a flex-wrap row of
