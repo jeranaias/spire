@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type SystemStatus } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
+import { DemoOnly } from "../state/buildMode";
 import { Pressable } from "./ui";
 
 // Audit hash + classification posture pin to fixed positions in the footer
@@ -191,15 +192,17 @@ export function StatusFooter() {
         <span className="text-[var(--color-text-muted)]" title="Operating mode (full-feature vs lite)">
           MODE {status?.mode?.toUpperCase() || "—"}
         </span>
-        <span className="text-[var(--color-border-active)]">│</span>
-        <span
-          className="text-[var(--color-text-muted)]"
-          title="Designed and built by a team of active-duty Marines, on duty time. See LICENSE.md §0 for full attribution."
-        >
-          MARINE MADE
-        </span>
-        <span className="text-[var(--color-border-active)]">│</span>
-        <span className="text-[var(--color-brand)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
+        <DemoOnly>
+          <span className="text-[var(--color-border-active)]">│</span>
+          <span
+            className="text-[var(--color-text-muted)]"
+            title="Designed and built by a team of active-duty Marines, on duty time. See LICENSE.md §0 for full attribution."
+          >
+            MARINE MADE
+          </span>
+          <span className="text-[var(--color-border-active)]">│</span>
+          <span className="text-[var(--color-brand)]">SPIRE v1.0.0-rc1 · MDM 2026</span>
+        </DemoOnly>
       </div>
 
       {/* Walkthrough #JOB-C (review #36 PULSE / #25 SENTRY) — every token
