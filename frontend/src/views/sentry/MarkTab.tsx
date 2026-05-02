@@ -282,18 +282,20 @@ export function MarkTab() {
           </div>
         </DemoOnly>
 
-        <div className="mb-2 flex flex-wrap gap-2">
-          {SAMPLES.map((s) => (
-            <Pressable
-              key={s.label}
-              onClick={() => loadSample(s.text)}
-              block={false}
-              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
-            >
-              {s.label}
-            </Pressable>
-          ))}
-        </div>
+        <DemoOnly>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {SAMPLES.map((s) => (
+              <Pressable
+                key={s.label}
+                onClick={() => loadSample(s.text)}
+                block={false}
+                className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+              >
+                {s.label}
+              </Pressable>
+            ))}
+          </div>
+        </DemoOnly>
 
         <textarea
           ref={textareaRef}
