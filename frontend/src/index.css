@@ -389,6 +389,20 @@ body {
   100% { transform: translateY(0);   opacity: 1; }
 }
 
+/* CollapsiblePanel expand — used when an operator clicks a collapsed
+ * pill (PULSE per-role defaults) so the body fades + slides in rather
+ * than snapping. Cheap; respects prefers-reduced-motion via the rule
+ * below. */
+@keyframes spire-panel-expand {
+  0%   { transform: translateY(-4px); opacity: 0; }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="spire-panel-expand"] {
+    animation: none !important;
+  }
+}
+
 /* Feedback drawer first-run coachmark + button pulse */
 @keyframes feedback-coach-in {
   0%   { transform: translateY(8px) scale(0.96); opacity: 0; }
