@@ -73,6 +73,23 @@ export function StatusFooter() {
   const srs = status?.dataset.srs ?? 0;
   const llmOk = status?.llm.reachable ?? false;
   const llmModel = status?.llm.model ?? "—";
+  const activeTier = status?.llm.active_tier;
+  const localTarget = status?.llm.local?.target_model;
+  const localLoaded = status?.llm.local?.target_loaded;
+  // Tier-aware label + tone for the LLM chip. Three states:
+  //   primary  RigRun 26B online             — green, reads "Gemma 4 26B FP8 · online"
+  //   local    fell to local Ollama E2B      — warn (visual signal), reads "<model> · LOCAL"
+  //   rule     both upstreams unreachable    — warn, reads "rule-based fallback"
+  const llmTierLabel: string =
+    activeTier === "local" && localTarget
+      ? `${localTarget} · LOCAL`
+      : activeTier === "rule"
+      ? "rule-based fallback"
+      : `${llmModel} · ${llmOk ? "online" : "standby"}`;
+  const llmTierTone: "ok" | "warn" =
+    activeTier === "primary" || (activeTier === "local" && localLoaded)
+      ? "ok"
+      : "warn";
   const errs = status?.dataset.consistency_errors ?? 0;
   // Full fingerprint preserved (no longer slice to 12) — operators copy
   // the whole hash for incident reports. We render a fixed-width 12-char
@@ -107,7 +124,7 @@ export function StatusFooter() {
     },
     { label: "DATASET", value: `${assets.toLocaleString("en-US")} assets · ${srs.toLocaleString("en-US")} SR`, tone: "muted" },
     { label: "INTEGRITY", value: errs === 0 ? "0 errors" : `${errs} errors`, tone: errs === 0 ? "ok" : "warn" },
-    { label: "LLM", value: `${llmModel} · ${llmOk ? "online" : "standby"}`, tone: llmOk ? "ok" : "warn" },
+    { label: "LLM", value: llmTierLabel, tone: llmTierTone },
     {
       label: "SENTRY·CLASSIFIER",
       value: sentryLoaded ? "online" : "rule-based fallback",
