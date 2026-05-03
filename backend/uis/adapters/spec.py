@@ -53,6 +53,13 @@ class ColumnSpec:
     hash_prefix: Optional[str] = None               # used when sensitive=True
     hash_alg: Literal["sha256"] = "sha256"
     enum_aliases: Optional[dict] = None             # raw → canonical for type="enum"
+    # Known source-column aliases. The auto-mapper checks these
+    # first (exact + case-insensitive + canonical-form match)
+    # before falling back to token-similarity. Use this when the
+    # canonical field name doesn't share tokens with the source
+    # column header (e.g. canonical `current_status` vs source
+    # `READINESS_CODE`).
+    source_aliases: List[str] = field(default_factory=list)
     description: str = ""
     # Allow per-spec custom transform when the library doesn't fit.
     # Receives the raw string + a context dict; returns the coerced value.

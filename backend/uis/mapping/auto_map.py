@@ -48,11 +48,16 @@ def propose_mapping(
     *,
     threshold: float = DEFAULT_THRESHOLD,
 ) -> MappingProposal:
-    """Propose source-col → canonical-field via Jaccard similarity.
+    """Propose source-col → canonical-field via two-stage match.
 
-    Greedy assignment: each canonical column claims its
-    highest-similarity unclaimed source column above the threshold.
-    Ties resolve in canonical-column order (declared order on the
+    Stage 1: each canonical column with `source_aliases` claims the
+    first source column that exact-canonical-form-matches one of
+    its aliases (confidence 1.0). Stage 2: greedy Jaccard
+    similarity for any remaining canonical columns.
+
+    Greedy stage-2: each canonical column claims its highest-
+    similarity unclaimed source column above the threshold. Ties
+    resolve in canonical-column order (declared order on the
     AdapterSpec).
     """
     src_keys = [canonical_header(c) for c in source_columns]
@@ -62,8 +67,28 @@ def propose_mapping(
 
     proposal = MappingProposal()
     claimed_src: set = set()
+    claimed_canon: set = set()
 
+    # Stage 1: source_aliases exact match (case-insensitive via
+    # canonical-form key)
     for ci, col in enumerate(canon_cols):
+        if not col.source_aliases:
+            continue
+        alias_keys = {canonical_header(a) for a in col.source_aliases}
+        for si in range(len(source_columns)):
+            if si in claimed_src:
+                continue
+            if src_keys[si] in alias_keys:
+                claimed_src.add(si)
+                claimed_canon.add(ci)
+                proposal.column_map[source_columns[si]] = col.name
+                proposal.confidence_per_field[col.name] = 1.0
+                break
+
+    # Stage 2: greedy similarity match for remaining canonical cols
+    for ci, col in enumerate(canon_cols):
+        if ci in claimed_canon:
+            continue
         best_idx: Optional[int] = None
         best_score = 0.0
         for si in range(len(source_columns)):
