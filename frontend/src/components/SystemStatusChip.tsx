@@ -298,8 +298,14 @@ export function SystemStatusChip() {
                 : "var(--color-surface)",
         }}
       >
+        {/* Ping animation reserved for `down` (actual outage). The
+         * `warn` state covers steady-state conditions like running
+         * against the GCSS-MC reference implementation or LITE mode —
+         * those are honest signals but not urgent, so a static dot
+         * communicates posture without pulsing in the operator's
+         * peripheral vision. */}
         <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
-          {combined !== "ok" && (
+          {combined === "down" && (
             <span
               className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-50"
               style={{ background: dotColor }}
