@@ -6,6 +6,7 @@ import { MetricCard } from "../../components/MetricCard";
 import { Heatmap } from "../../components/Heatmap";
 import { AlertCard } from "../../components/AlertCard";
 import { useSpireStore } from "../../state/store";
+import { DemoOnly } from "../../state/buildMode";
 import { Button, IconButton, Pressable, ErrorState, LoadingState } from "../../components/ui";
 import { AwaitingIngestEmpty } from "../../components/AwaitingIngestEmpty";
 import { useDatasetStatus } from "../../hooks/useDatasetStatus";
@@ -176,26 +177,32 @@ export function FleetOverviewTab() {
           />
         </div>
 
-        {narrative && (
-          <div
-            className="mb-3 rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))] px-3 py-2 spire-body-muted"
-          >
-            <span className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
-              Narrative
-            </span>{" "}
-            <span className="text-[var(--color-text)]">{narrative.text}</span>
-            {narrative.unit && (
-              <Button
-                onClick={() => nav(`/pulse/risk?unit=${encodeURIComponent(narrative.unit!)}`)}
-                variant="ghost"
-                size="sm"
-                className="ml-2 text-[var(--color-primary)] hover:underline"
-              >
-                View top contributors →
-              </Button>
-            )}
-          </div>
-        )}
+        {/* Demo nights get the "Narrative" hero strip; operational pilots
+         * don't need a marketing-shape sentence above the heatmap because
+         * the metric cards plus the heatmap itself carry the same signal
+         * without the editorial framing. */}
+        <DemoOnly>
+          {narrative && (
+            <div
+              className="mb-3 rounded-sm border border-[var(--color-border)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-bg))] px-3 py-2 spire-body-muted"
+            >
+              <span className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
+                Narrative
+              </span>{" "}
+              <span className="text-[var(--color-text)]">{narrative.text}</span>
+              {narrative.unit && (
+                <Button
+                  onClick={() => nav(`/pulse/risk?unit=${encodeURIComponent(narrative.unit!)}`)}
+                  variant="ghost"
+                  size="sm"
+                  className="ml-2 text-[var(--color-primary)] hover:underline"
+                >
+                  View top contributors →
+                </Button>
+              )}
+            </div>
+          )}
+        </DemoOnly>
 
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>

@@ -8,6 +8,7 @@ import { formatApiError, withRetry } from "../../api-retry";
 import { RiskBar } from "../../components/RiskBar";
 import { LoadingOverlay, formatAsOf } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
+import { DemoOnly } from "../../state/buildMode";
 import { PredictedFailurePanel } from "../../components/PredictedFailurePanel";
 import { CollapsiblePanel } from "../../components/CollapsiblePanel";
 import { Button, IconButton, Pressable, ErrorState, fireIdempotent } from "../../components/ui";
@@ -178,7 +179,8 @@ export function RiskBoardTab() {
             }
             collapsedSummary={
               <span>
-                Assets likely to fail in the configured window. Click ▾ to expand.
+                Assets likely to fail in the configured window.
+                <DemoOnly> Click ▾ to expand.</DemoOnly>
               </span>
             }
             collapsedPill={
@@ -187,9 +189,11 @@ export function RiskBoardTab() {
                 style={{ fontSize: "var(--text-xs)" }}
               >
                 Predicted failures
-                <span className="ml-2 text-[var(--color-text-muted)] tracking-wide normal-case">
-                  · click to expand
-                </span>
+                <DemoOnly>
+                  <span className="ml-2 text-[var(--color-text-muted)] tracking-wide normal-case">
+                    · click to expand
+                  </span>
+                </DemoOnly>
               </span>
             }
           >
@@ -246,18 +250,24 @@ export function RiskBoardTab() {
                 </span>
               </div>
             )}
-            <div className="spire-body-muted mt-0.5">
-              Weighted: fault frequency 30% · days NMC 25% · hours 20% · severity trend 15% · age 7% · cost 3%.
-              {/* W1 #30 — no cross-link to /admin/models/pulse-risk-scorer
-               * is rendered here. The model supply-chain page is restricted
-               * to security_manager (see VIEW_SCOPE in state/store.ts), and
-               * security_manager is NOT in PULSE's scope, so any operator
-               * who can see this surface cannot reach the model card. The
-               * security_manager reaches the same card via
-               * /admin → "Model supply chain →" instead. The reverse
-               * direction (model card → in-app surface list) IS rendered
-               * inside ModelDetailView. */}
-            </div>
+            {/* The scoring-weight breakdown is helpful when a stakeholder
+             * is asking "where does this number come from" on stage. In
+             * the operational pilot the weights are documented in the
+             * model card; the chrome strip becomes noise above the table. */}
+            <DemoOnly>
+              <div className="spire-body-muted mt-0.5">
+                Weighted: fault frequency 30% · days NMC 25% · hours 20% · severity trend 15% · age 7% · cost 3%.
+                {/* W1 #30 — no cross-link to /admin/models/pulse-risk-scorer
+                 * is rendered here. The model supply-chain page is restricted
+                 * to security_manager (see VIEW_SCOPE in state/store.ts), and
+                 * security_manager is NOT in PULSE's scope, so any operator
+                 * who can see this surface cannot reach the model card. The
+                 * security_manager reaches the same card via
+                 * /admin → "Model supply chain →" instead. The reverse
+                 * direction (model card → in-app surface list) IS rendered
+                 * inside ModelDetailView. */}
+              </div>
+            </DemoOnly>
           </div>
           <div className="flex items-center gap-2">
             {/* Walkthrough #8 — explicit unit dropdown so operators can
@@ -598,11 +608,12 @@ function DraftActionModal({
             })}
           </div>
         )}
-        {/* Honest framing: drafts persist + audit but no approval workflow ships
-         * with MDM. The TopBar badge is where the operator finds them next. */}
+        {/* Honest framing: drafts persist + audit but no approval workflow
+         * ships with MDM. The "ships post-MDM" framing is demo-context;
+         * pilots see the draft path without the hackathon timeline. */}
         <div className="mt-3 font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-widest">
           Drafts are held with an audit row · review via the Drafts badge in the top bar.
-          Full approval workflow ships post-MDM.
+          <DemoOnly> Full approval workflow ships post-MDM.</DemoOnly>
         </div>
         <div className="mt-3 flex items-center justify-end">
           <Button onClick={onClose} variant="secondary" size="sm">
@@ -678,11 +689,19 @@ function RiskRow({
           <span className="min-w-0 truncate font-mono text-xs text-[var(--color-text-muted)] tracking-wide">
             {asset.equipment_type.replace(/_/g, " ")} · {asset.unit_name} · SN {asset.serial_number}
           </span>
-          <span
-            className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-wider"
-          >
-            UNCLASSIFIED // SYNTHETIC
-          </span>
+          {/* The "UNCLASSIFIED // SYNTHETIC" badge is a demo honesty cue
+           * — every row stamps itself as fake data so a stage audience
+           * doesn't conflate it with operational rows. The pilot build
+           * carries a single page-level "UNCLASSIFIED // FOUO" banner
+           * top-and-bottom (DoDM 5200.01) and doesn't need a per-row
+           * marking on top of that. */}
+          <DemoOnly>
+            <span
+              className="ml-auto rounded-sm border border-[var(--color-border)] px-1.5 py-[1px] font-mono text-[10px] uppercase text-[var(--color-text-muted)] tracking-wider"
+            >
+              UNCLASSIFIED // SYNTHETIC
+            </span>
+          </DemoOnly>
         </div>
         <div className="mt-2">
           <RiskBar score={asset.risk_score} band={asset.band} compact />
