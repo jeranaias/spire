@@ -210,6 +210,27 @@ CREATE TABLE IF NOT EXISTS pulse_drafts (
 
 CREATE INDEX IF NOT EXISTS idx_pulse_drafts_status ON pulse_drafts(status);
 CREATE INDEX IF NOT EXISTS idx_pulse_drafts_created ON pulse_drafts(created_at);
+
+-- UIS MappingProfile (UIS-12). One row per (source_id × unit ×
+-- source_version) profile the operator has confirmed. Looked up at
+-- ingest time so the second drop of the same shape skips the
+-- mapping-review UI entirely.
+CREATE TABLE IF NOT EXISTS uis_mapping_profiles (
+    profile_id      TEXT PRIMARY KEY,
+    source_id       TEXT NOT NULL,
+    unit            TEXT,
+    source_version  TEXT,
+    column_map_json TEXT NOT NULL,
+    cell_transforms_json TEXT NOT NULL DEFAULT '{}',
+    operator_notes  TEXT NOT NULL DEFAULT '',
+    created_by      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    confirmed_at    TEXT,
+    confidence      REAL NOT NULL DEFAULT 1.0
+);
+
+CREATE INDEX IF NOT EXISTS idx_uis_profiles_source ON uis_mapping_profiles(source_id);
+CREATE INDEX IF NOT EXISTS idx_uis_profiles_unit ON uis_mapping_profiles(unit);
 """
 
 

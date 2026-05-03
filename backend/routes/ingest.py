@@ -31,9 +31,7 @@ from fastapi import APIRouter, Body, File, Form, HTTPException, Query, Request, 
 
 from ..integrations.pulse_gcss_ecp_adapter import (
     EXPECTED_HEADER_COLUMNS as ECP_EXPECTED_COLUMNS,
-    IngestReport as ECPIngestReport,
     ParsedAssetRow as ECPParsedAssetRow,
-    parse_ecp,
 )
 from ..integrations.pulse_gcss_ecp_merge import (
     apply_diff,
@@ -43,7 +41,6 @@ from ..integrations.pulse_gcss_ecp_merge import (
 from ..integrations.pulse_gcss_util_adapter import (
     EXPECTED_HEADER_COLUMNS as UTIL_EXPECTED_COLUMNS,
     apply_latest_readings,
-    parse_util,
 )
 from ..integrations.sentry_gcss_adapter import (
     EXPECTED_HEADER_COLUMNS as SR_EXPECTED_COLUMNS,
@@ -52,6 +49,16 @@ from ..integrations.sentry_gcss_adapter import (
 from ..persistence import log as audit_log
 from ..scoping import require_user_role
 from ..state import CanonicalDataset, get_dataset, swap_dataset
+
+# UIS pipeline — the new universal ingest path that all routes share.
+from ..uis.adapters import get_adapter
+from ..uis.pipeline import run_pipeline
+from ..uis.route_helpers import (
+    map_pipeline_report_to_ecp_legacy,
+    map_pipeline_report_to_util_legacy,
+    to_parsed_asset_rows,
+    to_parsed_util_rows,
+)
 
 
 router = APIRouter()
@@ -248,7 +255,14 @@ async def ingest_gcss_mc_ecp(
         )
 
     preview_token = _file_token(body)
-    rows, report = parse_ecp(text)
+    # UIS pipeline drives the parse — same canonical output, but with
+    # automatic encoding detection, smart-quote normalization, and
+    # mapping-profile lookup support that the legacy parser didn't
+    # have. Output shape converted back to ParsedAssetRow for the
+    # diff engine via to_parsed_asset_rows().
+    pipeline_result = run_pipeline(body, get_adapter("gcss-mc/ecp"))
+    rows = to_parsed_asset_rows(pipeline_result)
+    legacy_report = map_pipeline_report_to_ecp_legacy(pipeline_result)
 
     try:
         ds = get_dataset()
@@ -259,12 +273,18 @@ async def ingest_gcss_mc_ecp(
 
     if not apply:
         return {
-            "report": _ecp_report_to_dict(report),
+            "report": legacy_report,
             "rows": [_ecp_row_to_dict(r) for r in rows],
             "preview": diff_to_payload(diff),
             "preview_token": preview_token,
             "merge_target": "asset_roster",
             "applied": False,
+            "pipeline_meta": {
+                "detected_format": pipeline_result.report.detected_format,
+                "detected_encoding": pipeline_result.report.detected_encoding,
+                "auto_mapper_confidence": pipeline_result.report.auto_mapper_confidence,
+                "column_map": pipeline_result.report.column_map,
+            },
         }
 
     # ---- Apply path ----
@@ -343,7 +363,7 @@ async def ingest_gcss_mc_ecp(
         )
 
     return {
-        "report": _ecp_report_to_dict(report),
+        "report": legacy_report,
         "preview": diff_to_payload(diff),
         "preview_token": preview_token,
         "merge_target": "asset_roster",
@@ -426,7 +446,9 @@ async def ingest_gcss_mc_util(
         )
 
     preview_token = _file_token(body)
-    rows, report = parse_util(text)
+    pipeline_result = run_pipeline(body, get_adapter("gcss-mc/util"))
+    rows = to_parsed_util_rows(pipeline_result)
+    legacy_report = map_pipeline_report_to_util_legacy(pipeline_result)
 
     try:
         ds = get_dataset()
@@ -436,21 +458,23 @@ async def ingest_gcss_mc_util(
 
     if not apply:
         # Dry-run preview: show how many rows would match without
-        # mutating anything. We pass a copy of the asset list to
-        # apply_latest_readings to compute counts; the in-place
-        # mutation is harmless on the copy because the route doesn't
-        # use those copies after.
-        # Only the count summary is returned — full mutation happens
-        # on apply.
+        # mutating anything. Shallow-copy assets so apply_latest_readings'
+        # in-place writes don't leak into the singleton.
         from copy import copy as _copy
         preview_assets = [_copy(a) for a in canonical_assets]
         _, preview_counts = apply_latest_readings(rows, preview_assets)
         return {
-            "report": _util_report_to_dict(report),
+            "report": legacy_report,
             "preview_counts": preview_counts,
             "preview_token": preview_token,
             "merge_target": "asset_current_hours_miles_status",
             "applied": False,
+            "pipeline_meta": {
+                "detected_format": pipeline_result.report.detected_format,
+                "detected_encoding": pipeline_result.report.detected_encoding,
+                "auto_mapper_confidence": pipeline_result.report.auto_mapper_confidence,
+                "column_map": pipeline_result.report.column_map,
+            },
         }
 
     if confirm != preview_token:
@@ -485,7 +509,7 @@ async def ingest_gcss_mc_util(
     )
 
     return {
-        "report": _util_report_to_dict(report),
+        "report": legacy_report,
         "preview_token": preview_token,
         "merge_target": "asset_current_hours_miles_status",
         "applied": True,

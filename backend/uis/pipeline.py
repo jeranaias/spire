@@ -110,6 +110,17 @@ class PipelineResult:
     report: ParseReport
     warnings: List[RowWarning] = field(default_factory=list)
     constraint_failures: List[ConstraintFailure] = field(default_factory=list)
+    # Per-row sanitization labels — same row order as `rows`. Each
+    # entry is a {field_name: "pre_hashed" | "self_hashed" | "missing"}
+    # dict for the sensitive fields on this row. Lets callers (like
+    # the legacy ECP route) reconstruct ParsedAssetRow.serial_number_source
+    # without re-running the classifier on the post-hashed value.
+    sanitization_per_row: List[Dict[str, str]] = field(default_factory=list)
+    # Per-row warning labels — same row order as `rows`. Each entry
+    # is the list of warning codes that fired for that row (e.g.
+    # ["date_oracle_unparseable", "owner_uic_self_hashed"]). Allows
+    # the legacy route to populate ParsedAssetRow._warnings.
+    warnings_per_row: List[List[str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -347,8 +358,11 @@ def run_pipeline(
 
     # 4. Per-row project + transform + validate
     canonical_rows: List[Dict[str, Any]] = []
+    sanitization_per_row: List[Dict[str, str]] = []
+    warnings_per_row: List[List[str]] = []
     for row_idx, source_row in enumerate(source_rows):
         ctx: dict = {"row_idx": row_idx, "filename": None}
+        warnings_before = len(warnings)
         canonical_row: Dict[str, Any] = {}
         for source_col, canonical_field in column_map.items():
             try:
@@ -366,8 +380,10 @@ def run_pipeline(
             if col.name not in canonical_row:
                 canonical_row[col.name] = col.default
 
-        # Sanitization counts
-        sanitization = ctx.get("_sanitization") or {}
+        # Sanitization counts (aggregate) + per-row labels (parallel
+        # to the row list so callers like the legacy route handler
+        # can reconstruct ParsedAssetRow.serial_number_source).
+        sanitization = dict(ctx.get("_sanitization") or {})
         for field_name, source_label in sanitization.items():
             if source_label == "self_hashed":
                 report.sanitization_self_hashed[field_name] = (
@@ -401,6 +417,8 @@ def run_pipeline(
             continue
 
         canonical_rows.append(canonical_row)
+        sanitization_per_row.append(sanitization)
+        warnings_per_row.append([w.code for w in warnings[warnings_before:]])
         report.rows_kept += 1
 
     # Aggregate warning count: unique row indices that hit at least
@@ -416,4 +434,6 @@ def run_pipeline(
         report=report,
         warnings=warnings,
         constraint_failures=constraint_failures,
+        sanitization_per_row=sanitization_per_row,
+        warnings_per_row=warnings_per_row,
     )
