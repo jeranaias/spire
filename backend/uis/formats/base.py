@@ -120,12 +120,19 @@ def _stream_jsonl(raw: bytes) -> RowStream:
 
 
 def _stream_xlsx(raw: bytes) -> RowStream:
-    """Read the first sheet of an XLSX as rows.
+    """Read the largest non-empty sheet of an XLSX as rows.
+
+    Earlier this only read wb.active — fine for single-sheet
+    workbooks, but a multi-sheet export (common: GCSS-MC operators
+    paste into "Sheet1", "Data", and "Notes" then save) with the
+    actual data on a non-default sheet silently produced zero rows.
+
+    Strategy: scan every sheet, count non-empty rows below the
+    header, pick the sheet with the most. On a tie, take wb.active
+    (preserves historical behavior when multiple sheets have data).
 
     Requires `openpyxl` — declared as an optional dep so the rest of
-    the UIS package stays import-safe on a minimal install. If the
-    dep isn't present, callers see a clear error at upload time
-    rather than at import time.
+    the UIS package stays import-safe on a minimal install.
     """
     try:
         import openpyxl  # type: ignore
@@ -134,21 +141,45 @@ def _stream_xlsx(raw: bytes) -> RowStream:
             "XLSX ingest requires `openpyxl`. Install it: pip install openpyxl"
         ) from e
     wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-    ws = wb.active
+    if not wb.sheetnames:
+        return iter([])
+
+    # Pick the largest non-empty sheet
+    best_sheet = None
+    best_rows: list = []
+    best_count = -1
+    for name in wb.sheetnames:
+        ws = wb[name]
+        sheet_rows = list(_xlsx_sheet_to_rows(ws))
+        # Count non-empty rows (some sheets have data scattered
+        # across blank rows; we use the populated count as the
+        # tie-breaker).
+        non_empty = sum(1 for r in sheet_rows if any(v.strip() for v in r.values()))
+        if non_empty > best_count:
+            best_count = non_empty
+            best_sheet = name
+            best_rows = sheet_rows
+
+    if best_sheet is None or best_count <= 0:
+        return iter([])
+    return iter(best_rows)
+
+
+def _xlsx_sheet_to_rows(ws) -> RowStream:
+    """Convert one openpyxl worksheet to a row-of-dicts iterator."""
     rows = ws.iter_rows(values_only=True)
     try:
-        header = list(next(rows))
+        header_row = list(next(rows))
     except StopIteration:
         return iter([])
-    header = [str(h) if h is not None else "" for h in header]
-    out = []
+    header = [str(h) if h is not None else "" for h in header_row]
+    out: list = []
     for row in rows:
-        d = {}
+        d: Dict[str, str] = {}
         for i, cell in enumerate(row):
             key = header[i] if i < len(header) else f"col_{i}"
-            if cell is None:
-                d[key] = ""
-            else:
-                d[key] = str(cell)
+            if not key:
+                continue  # skip cells whose header column is blank
+            d[key] = "" if cell is None else str(cell)
         out.append(d)
     return iter(out)

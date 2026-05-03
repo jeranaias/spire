@@ -107,3 +107,74 @@ def test_stream_jsonl_skips_unparseable_lines():
 def test_stream_unknown_raises():
     with pytest.raises(ValueError):
         list(stream_rows(b"...", "fixed_width"))
+
+
+# ---------------------------------------------------------------------------
+# XLSX multi-sheet handling (UIS-19)
+# ---------------------------------------------------------------------------
+
+
+def _make_xlsx(sheets: list[tuple[str, list[list]]]) -> bytes:
+    """Build an XLSX file in memory with named sheets + rows.
+
+    Each sheet entry is (sheet_name, [[cell, cell, ...], ...]).
+    First inner list is the header.
+    """
+    import io as _io
+    import openpyxl  # type: ignore
+    wb = openpyxl.Workbook()
+    # Drop the default empty sheet, append ours by name
+    default = wb.active
+    wb.remove(default)
+    for name, rows in sheets:
+        ws = wb.create_sheet(title=name)
+        for row in rows:
+            ws.append(row)
+    out = _io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def test_xlsx_single_sheet_round_trip():
+    raw = _make_xlsx([
+        ("Sheet1", [
+            ["TAMCN", "NSN"],
+            ["D1196", "2320-01-540-2480"],
+            ["D0082", "2320-01-440-1234"],
+        ]),
+    ])
+    rows = list(stream_rows(raw, "xlsx"))
+    assert len(rows) == 2
+    assert rows[0]["TAMCN"] == "D1196"
+
+
+def test_xlsx_picks_largest_sheet_when_data_on_non_default():
+    """Multi-sheet workbook with data on a non-default sheet —
+    earlier code only read wb.active and silently missed everything."""
+    raw = _make_xlsx([
+        ("Notes", [["readme"], ["see Data sheet"]]),  # 1 data row
+        ("Data", [
+            ["TAMCN", "NSN", "SERIAL_NUMBER"],
+            ["D1196", "NSN1", "S1"],
+            ["D0082", "NSN2", "S2"],
+            ["D1196", "NSN3", "S3"],
+        ]),  # 3 data rows — should win
+        ("Empty", []),
+    ])
+    rows = list(stream_rows(raw, "xlsx"))
+    assert len(rows) == 3
+    assert rows[0]["TAMCN"] == "D1196"
+    assert rows[2]["SERIAL_NUMBER"] == "S3"
+
+
+def test_xlsx_empty_workbook_yields_nothing():
+    raw = _make_xlsx([("Empty", [])])
+    rows = list(stream_rows(raw, "xlsx"))
+    assert rows == []
+
+
+def test_xlsx_format_detect_via_magic_bytes():
+    """The PK\\x03\\x04 zip magic is what we sniff. Ensure
+    actual openpyxl-generated XLSX hits the xlsx branch."""
+    raw = _make_xlsx([("Sheet1", [["A"], ["1"]])])
+    assert detect_format(raw[:64]) == "xlsx"
