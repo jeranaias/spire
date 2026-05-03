@@ -52,7 +52,7 @@ from ..state import CanonicalDataset, get_dataset, swap_dataset
 
 # UIS pipeline — the new universal ingest path that all routes share.
 from ..uis.adapters import get_adapter
-from ..uis.pipeline import run_pipeline
+from ..uis.pipeline import PipelineRowLimitExceeded, run_pipeline
 from ..uis.route_helpers import (
     map_pipeline_report_to_ecp_legacy,
     map_pipeline_report_to_util_legacy,
@@ -260,7 +260,13 @@ async def ingest_gcss_mc_ecp(
     # mapping-profile lookup support that the legacy parser didn't
     # have. Output shape converted back to ParsedAssetRow for the
     # diff engine via to_parsed_asset_rows().
-    pipeline_result = run_pipeline(body, get_adapter("gcss-mc/ecp"))
+    try:
+        pipeline_result = run_pipeline(body, get_adapter("gcss-mc/ecp"))
+    except PipelineRowLimitExceeded as e:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Row count exceeds pipeline cap {e.limit}. Split the file or raise SPIRE_UIS_MAX_ROWS.",
+        )
     rows = to_parsed_asset_rows(pipeline_result)
     legacy_report = map_pipeline_report_to_ecp_legacy(pipeline_result)
 
@@ -446,7 +452,13 @@ async def ingest_gcss_mc_util(
         )
 
     preview_token = _file_token(body)
-    pipeline_result = run_pipeline(body, get_adapter("gcss-mc/util"))
+    try:
+        pipeline_result = run_pipeline(body, get_adapter("gcss-mc/util"))
+    except PipelineRowLimitExceeded as e:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Row count exceeds pipeline cap {e.limit}. Split the file or raise SPIRE_UIS_MAX_ROWS.",
+        )
     rows = to_parsed_util_rows(pipeline_result)
     legacy_report = map_pipeline_report_to_util_legacy(pipeline_result)
 
