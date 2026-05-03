@@ -8,6 +8,7 @@ import { ForecastTab } from "./pulse/ForecastTab";
 import { ModelTab } from "./pulse/ModelTab";
 import { UseCaseStrip } from "../components/UseCaseStrip";
 import { AwaitingIngestEmpty } from "../components/AwaitingIngestEmpty";
+import { DemoOnly } from "../state/buildMode";
 import { useDatasetStatus } from "../hooks/useDatasetStatus";
 
 // Walkthrough #28 — numbered prefix on each tab + ARIA tablist + arrow
@@ -123,7 +124,13 @@ function PulseSubnav() {
                   : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
               )}
             >
-              <span className="mr-1.5 text-[var(--color-text-muted)]">{t.number}</span>
+              {/* Tab numerals are stage decoration — they help an audience
+               * parse "we're at step 02 of the PULSE walk" but operators
+               * navigate by label. Demo build keeps them; pilot build
+               * drops them so the subnav reads as plain mission-mode tabs. */}
+              <DemoOnly>
+                <span className="mr-1.5 text-[var(--color-text-muted)]">{t.number}</span>
+              </DemoOnly>
               {t.label}
               {isActive && (
                 <>
