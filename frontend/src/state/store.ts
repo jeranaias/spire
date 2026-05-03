@@ -257,6 +257,8 @@ export const VIEW_SCOPE: Record<string, Role[]> = {
   // data_custodian doesn't have a demo persona seeded but the scope
   // is left in so a real pilot deployment grants it without code.
   "/admin/ingest": ["security_manager", "data_custodian"],
+  // UIS-15 — column-mapping editor. Same scope as /admin/ingest.
+  "/admin/ingest/mapper": ["security_manager", "data_custodian"],
 };
 
 function uid(): string {

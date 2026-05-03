@@ -37,6 +37,7 @@ from .routes.joint import router as joint_router
 from .routes.decision_bridge import router as decision_bridge_router
 from .routes.stage_ingest import router as stage_ingest_router
 from .routes.ingest import router as ingest_router
+from .routes.uis import router as uis_router
 from .scoping import (
     BASTION_VIEW_ROLES,
     PULSE_VIEW_ROLES,
@@ -150,6 +151,11 @@ app.include_router(decision_bridge_router, prefix="/api/decision-bridge", tags=[
 # SPIRE_INGEST_ENABLED=1 in the environment. The /status probe is open
 # so the frontend can render the right affordance without 503-ing.
 app.include_router(ingest_router, prefix="/api/ingest", tags=["ingest"])
+# UIS — generic Universal Ingest Service routes (adapters, upload,
+# map proposal, mapping-profile CRUD). Same feature flag + RBAC as
+# /api/ingest/*. The legacy adapter-specific routes stay live for
+# backwards compat; new UI flows target /api/uis/*.
+app.include_router(uis_router, prefix="/api/uis", tags=["uis"])
 
 
 # Serve the built frontend bundle at /. Assets land at /assets/*, index.html

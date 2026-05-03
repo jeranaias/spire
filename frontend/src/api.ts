@@ -560,6 +560,65 @@ export const api = {
         { method: "POST", body: JSON.stringify({ resolutions }) },
       ),
   },
+  // UIS — Universal Ingest Service generic surface. Used by the
+  // column-mapping editor at /admin/ingest/mapper. The legacy
+  // adapter-specific ingest endpoints stay live for the existing
+  // dropzone; the UIS surface is the schema-flexible path that
+  // proposes mappings (auto + LLM) and persists profiles.
+  uis: {
+    listAdapters: () =>
+      jsonFetch<{
+        enabled: boolean;
+        adapters: UisAdapterSummary[];
+      }>("/uis/adapters"),
+    proposeMapping: (file: File, adapterId: string, opts?: { use_llm?: boolean }) => {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const params = new URLSearchParams();
+      params.set("adapter_id", adapterId);
+      if (opts?.use_llm === false) params.set("use_llm", "false");
+      return jsonFetch<UisMappingProposal>(
+        `/uis/map?${params.toString()}`,
+        { method: "POST", body: fd },
+        false,
+      );
+    },
+    upload: (file: File, adapterId: string, opts?: { profile_id?: string; apply?: boolean; confirm?: string }) => {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const params = new URLSearchParams();
+      params.set("adapter_id", adapterId);
+      if (opts?.profile_id) params.set("profile_id", opts.profile_id);
+      if (opts?.apply) params.set("apply", "1");
+      if (opts?.confirm) params.set("confirm", opts.confirm);
+      return jsonFetch<UisUploadResult>(
+        `/uis/upload?${params.toString()}`,
+        { method: "POST", body: fd },
+        false,
+      );
+    },
+    listProfiles: (sourceId?: string) => {
+      const qs = sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : "";
+      return jsonFetch<{ profiles: UisProfile[] }>(`/uis/profiles${qs}`);
+    },
+    getProfile: (profileId: string) =>
+      jsonFetch<UisProfile>(`/uis/profiles/${encodeURIComponent(profileId)}`),
+    createProfile: (payload: UisProfileCreate) =>
+      jsonFetch<UisProfile>(
+        "/uis/profiles",
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
+    updateProfile: (profileId: string, payload: Partial<UisProfileCreate> & { confirm?: boolean }) =>
+      jsonFetch<UisProfile>(
+        `/uis/profiles/${encodeURIComponent(profileId)}`,
+        { method: "PUT", body: JSON.stringify(payload) },
+      ),
+    deleteProfile: (profileId: string) =>
+      jsonFetch<{ deleted: boolean; profile_id: string }>(
+        `/uis/profiles/${encodeURIComponent(profileId)}`,
+        { method: "DELETE" },
+      ),
+  },
   pulse: {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
     riskBoard: (top = 20) => jsonFetch<RiskBoard>(`/pulse/risk-board?top=${top}`),
@@ -1099,6 +1158,90 @@ export interface StaleAsset {
   unit_name: string;
   nomenclature: string;
   current_status: string;
+}
+
+// UIS — Universal Ingest Service types (UIS-15).
+export interface UisAdapterSummary {
+  id: string;
+  name: string;
+  version: string;
+  target_entity: string;
+  description: string;
+  primary_key: string[];
+  fallback_key: string[];
+  auth_roles: string[];
+  canonical_columns: {
+    name: string;
+    type: string;
+    required: boolean;
+    sensitive: boolean;
+    description: string;
+    source_aliases: string[];
+    enum_aliases: Record<string, string> | null;
+  }[];
+  constraints: { kind: string; fields: string[]; message: string }[];
+}
+
+export interface UisMappingProposal {
+  adapter_id: string;
+  detected_format: string;
+  detected_encoding: string;
+  source_columns: string[];
+  column_map: Record<string, string>;
+  confidence_per_field: Record<string, number>;
+  reasoning_per_field: Record<string, string>;
+  unmapped_canonical: string[];
+  unmapped_source: string[];
+  llm_invoked: boolean;
+  llm_failed?: boolean;
+  llm_failure_reason?: string;
+  auto_baseline_confidence: number;
+}
+
+export interface UisUploadResult {
+  adapter_id: string;
+  rows_total: number;
+  rows_kept: number;
+  report: {
+    detected_format: string;
+    detected_encoding: string;
+    column_map: Record<string, string>;
+    auto_mapper_confidence: number;
+    profile_id: string | null;
+    sanitization_self_hashed: Record<string, number>;
+    constraint_failures_count: number;
+    warnings_count: number;
+    [k: string]: unknown;
+  };
+  rows: Record<string, unknown>[];
+  preview_token: string;
+  applied: boolean;
+  profile_id: string | null;
+}
+
+export interface UisProfile {
+  profile_id: string;
+  source_id: string;
+  unit: string | null;
+  source_version: string | null;
+  column_map: Record<string, string>;
+  cell_transforms: Record<string, string>;
+  operator_notes: string;
+  created_by: string;
+  created_at: string;
+  confirmed_at: string | null;
+  confidence: number;
+}
+
+export interface UisProfileCreate {
+  profile_id: string;
+  source_id: string;
+  unit?: string | null;
+  source_version?: string | null;
+  column_map: Record<string, string>;
+  cell_transforms?: Record<string, string>;
+  operator_notes?: string;
+  confirm?: boolean;
 }
 
 // Domain endpoints can return an empty-state envelope under stage
