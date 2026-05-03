@@ -260,15 +260,15 @@ function Tile({ label, drillLabel, onDrill, rightSlot, className, children }: Ti
     >
       <Pressable
         onClick={onDrill}
-        aria-label={`${label} — ${drillLabel}`}
+        aria-label={`${label} — open ${drillLabel}`}
         className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2 hover:bg-[color-mix(in_oklab,var(--color-bg)_45%,transparent)]"
       >
         <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
           {label}
         </span>
-        <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-secondary)] group-hover:text-[var(--color-text)]">
+        <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)] group-hover:text-[var(--color-text)]">
           {rightSlot}
-          <span aria-hidden>→ {drillLabel}</span>
+          <span aria-hidden className="opacity-0 transition-opacity group-hover:opacity-100">→</span>
         </span>
       </Pressable>
       <div className="flex flex-1 min-h-0 flex-col px-3 py-2">{children}</div>
@@ -385,7 +385,12 @@ function MissionTile({ mission, error }: { mission: DecisionBridgeMission | null
                 {dtg}
               </div>
               <div className="truncate font-mono text-[11px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                {mission.installation_name} · {mission.parent_command}
+                {/* Parent command (e.g. "2d MLG") is demo flavor —
+                 * pilot operators already know who they belong to. */}
+                {mission.installation_name}
+                <DemoOnly>
+                  {mission.parent_command ? ` · ${mission.parent_command}` : ""}
+                </DemoOnly>
               </div>
             </div>
           </div>
@@ -443,7 +448,7 @@ function AlertsTile({
 
   return (
     <Tile
-      label="Top Alerts (10s)"
+      label="Top Alerts"
       drillLabel="BASTION"
       onDrill={() => drillToAlert()}
       rightSlot={
@@ -618,7 +623,7 @@ function McTile({
 
   return (
     <Tile
-      label="MC% by Unit (60s)"
+      label="MC% by Unit"
       drillLabel="PULSE"
       onDrill={() => drill()}
       rightSlot={<DatasetBadge day={data?.dataset_day} />}
@@ -709,7 +714,7 @@ function AuditTile({
 
   return (
     <Tile
-      label="Audit Health (5s)"
+      label="Audit Health"
       drillLabel="ADMIN"
       onDrill={drill}
       rightSlot={
@@ -733,62 +738,43 @@ function AuditTile({
         <TileChromePressable
           onDrill={drill}
           ariaLabel={`Audit chain ${statusLabel} · ${data.events_per_minute.toFixed(1)} events/min — open ADMIN`}
-          className="gap-3"
+          className="gap-2"
         >
-          <div className="grid grid-cols-3 gap-3">
-            <div className="flex flex-col">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                Events / min
-              </span>
-              <span className="font-mono text-2xl font-semibold tabular-nums text-[var(--color-text)]">
-                {data.events_per_minute.toFixed(1)}
-              </span>
-              <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">
-                {data.events_in_window} in last {data.window_minutes}m
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                Total entries
-              </span>
-              <span className="font-mono text-2xl font-semibold tabular-nums text-[var(--color-text)]">
-                {data.total_entries.toLocaleString()}
-              </span>
-              <span className="truncate font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">
-                last: {relTime(data.last_entry_at)}
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-                Last anomaly
-              </span>
-              {data.last_anomaly ? (
-                <>
-                  <span className="font-mono text-2xl font-semibold tabular-nums text-[var(--color-danger)]">
-                    #{data.last_anomaly.broken_at_id}
-                  </span>
-                  <span className="font-mono text-[10px] tracking-widest text-[var(--color-danger)]">
-                    chain broken
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="font-mono text-2xl font-semibold tabular-nums text-[var(--color-success)]">
-                    NONE
-                  </span>
-                  <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">
-                    chain verified
-                  </span>
-                </>
-              )}
-            </div>
+          {/* Events/min as the hero figure; everything else collapses into
+           * a single quiet caption row underneath. The 3-column "label /
+           * big number / sub-caption" grid was the loudest tile on the
+           * bridge for what is, in steady state, a green-light heartbeat. */}
+          <div className="flex items-baseline gap-2">
+            <span className="font-mono text-3xl font-semibold tabular-nums text-[var(--color-text)]">
+              {data.events_per_minute.toFixed(1)}
+            </span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+              events / min
+            </span>
           </div>
-          {data.head_hash ? (
-            <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-              head: <span className="text-[var(--color-text-secondary)]">{data.head_hash.slice(0, 16)}…</span>
-              {data.last_entry_kind ? <> · last: <span className="text-[var(--color-text-secondary)]">{data.last_entry_kind}</span></> : null}
-            </div>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            <span>
+              {data.total_entries.toLocaleString()} entries
+            </span>
+            <span aria-hidden>·</span>
+            <span>last {relTime(data.last_entry_at)}</span>
+            {data.last_anomaly ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="text-[var(--color-danger)]">
+                  anomaly #{data.last_anomaly.broken_at_id}
+                </span>
+              </>
+            ) : null}
+            {data.head_hash ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="truncate text-[var(--color-text-secondary)]">
+                  head {data.head_hash.slice(0, 12)}…
+                </span>
+              </>
+            ) : null}
+          </div>
         </TileChromePressable>
       )}
     </Tile>
@@ -834,17 +820,26 @@ function LinkStatusStrip({ lastSuccessAt }: { lastSuccessAt: number | null }) {
   const ddilSyncing = useSpireStore((s) => s.ddilSyncing);
   const queueDepth = useSpireStore((s) => s.ddilQueue.length);
 
-  // Tick once a second so the "12s ago" clock advances live without the
-  // pollers having to rerender — the strip is the operator's primary
-  // honesty cue, so it has to feel alive even when the lane is silent.
-  const [now, setNow] = useState<number>(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
+  // Happy-path silence: when the link is CONNECTED, queue is empty, and
+  // nothing's syncing, the strip is just visual noise. The footer's
+  // CommsIndicator already shows posture; suppress this row entirely on
+  // the operational happy path. Surfaces only when there's something to
+  // say (degraded lane, queued writes, or an active sync).
   const tone = LINK_TONE[ddilMode] ?? LINK_TONE.CONNECTED;
   const isDegraded = ddilMode !== "CONNECTED";
+  const shouldRender = isDegraded || queueDepth > 0 || ddilSyncing;
+
+  // Tick once a second so the "12s ago" clock advances live. Hooks must
+  // stay above the early return so render order is stable across the
+  // visible/hidden flip.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!shouldRender) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [shouldRender]);
+
+  if (!shouldRender) return null;
 
   // Pick the most honest "last fresh" timestamp we can produce.
   //   CONNECTED   → the most recent of `lastSuccessAt` (per-tile poll
@@ -1231,32 +1226,35 @@ export function DecisionBridgeView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto bg-[var(--color-bg)] p-3">
-      {/* Header strap — view title + escape hatch to the role-default surface.
-       * Wraps to two rows on narrow viewports so the title doesn't squeeze
-       * the Skip-to button to the point of unreadability. */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="font-mono text-sm font-semibold uppercase tracking-[0.22em] text-[var(--color-text)]">
-            Decision Bridge
-          </h1>
+      {/* Quiet eyebrow — view name + escape hatch on a single thin row.
+       * Demo subtitle moves into the eyebrow itself (DemoOnly) so the
+       * operational pilot reads as `BRIDGE     skip → BASTION` and
+       * nothing else. The h1 + paragraph stack was the loudest single
+       * piece of chrome on the page; trimming it reclaims ~60px of
+       * vertical space without losing the breadcrumb cue. */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-baseline gap-3">
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+            Bridge
+          </span>
           <DemoOnly>
-            <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-              15-second decision · five live signals · click any tile to drill in
-            </p>
+            <span className="hidden truncate font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] md:inline">
+              click any tile to drill
+            </span>
           </DemoOnly>
         </div>
         <Pressable
           onClick={() => nav(fallbackPath)}
-          aria-label={`Skip to my default view (${fallbackPath})`}
+          aria-label={`Skip to ${fallbackPath}`}
           block={false}
-          className="shrink-0 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+          className="shrink-0 rounded-sm font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
         >
-          Skip to {fallbackPath.replace(/^\//, "").toUpperCase()} →
+          skip → {fallbackPath.replace(/^\//, "").toUpperCase()}
         </Pressable>
       </div>
 
-      {/* Link-status strip — Task #47. Sits between header and tile grid so
-       * it's the first thing the operator sees when they ask "is this live?". */}
+      {/* Link-status strip — only renders when the lane is degraded, a
+       * write is queued, or a sync is in flight. Happy path is silent. */}
       <LinkStatusStrip lastSuccessAt={lastSuccessAt} />
 
       {/* Task #183 — stage live-ingest mode. While the dataset is empty
