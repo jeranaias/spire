@@ -13,6 +13,14 @@ from __future__ import annotations
 from .spec import AdapterSpec, ColumnSpec, RowConstraint
 from .registry import ADAPTERS, get_adapter, register_adapter
 
+# Import each adapter module so its `register_adapter(...)` call
+# fires at package-import time. Listing them here is the discovery
+# mechanism — no plugin scan, no entry-point auto-load. Adding a
+# new source = drop a file in this directory + add the import line.
+from . import gcss_mc_ecp        # noqa: F401
+from . import gcss_mc_util       # noqa: F401
+from . import gcss_mc_sr_header  # noqa: F401
+
 __all__ = [
     "ADAPTERS",
     "AdapterSpec",

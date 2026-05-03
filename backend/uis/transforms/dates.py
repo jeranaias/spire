@@ -75,8 +75,11 @@ def parse_date(raw: str) -> Optional[date]:
             return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except ValueError:
             return None
-    # MM/DD/YYYY (US)
-    m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", s)
+    # MM/DD/YYYY (US). Only slash separator — dashes in non-ISO
+    # positions are ambiguous between US and European conventions and
+    # we'd rather return None than guess wrong on a date that drives
+    # readiness math.
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
     if m:
         try:
             return date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
