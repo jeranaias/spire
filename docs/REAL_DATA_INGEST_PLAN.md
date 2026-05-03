@@ -174,17 +174,59 @@ The current build caps at CUI everywhere. Sources that real-world
 hit SECRET would gate at the SPIRE boundary with the `release_blocked`
 hard 403 we already ship.
 
-## Outstanding work (post-MDM 2026)
+## What's shipped (as of 2026-05-02)
+
+Three real-data ingest paths land an operator-grade dropzone +
+audited write into the canonical dataset. Each follows a uniform
+dry-run → preview-token → confirmed-apply → audit-chain lifecycle.
+
+| Adapter | Route | What lands | Status |
+|---|---|---|---|
+| GCSS-MC ECP | `POST /api/ingest/gcss-mc/ecp` | Asset roster (TAMCN, NSN, serial, allowance, on-hand, last inventory) | dry-run + apply |
+| GCSS-MC UTIL | `POST /api/ingest/gcss-mc/util` | Asset current_hours, current_miles, current_status (latest reading wins) | dry-run + apply |
+| GCSS-MC SR-header | `POST /api/ingest/gcss-mc/sr-header` | Sanitization-validation analyzer | dry-run only — full bundle apply is `/api/system/stage-ingest` |
+| Stale resolution | `GET /api/ingest/stale` + `POST /api/ingest/stale/resolve` | Operator confirms / defers / removes assets missing from latest ECP | live |
+
+Operator surface lives at `/admin/ingest`, scoped to data_custodian +
+security_manager. Drag-and-drop CSV → preview pane (counts + sample
+rows + sanitization warnings) → "Apply" button → atomic dataset
+swap → audit chain.
+
+The whole pipeline is feature-flag-gated: the `/api/ingest/*` routes
+return 503 unless `SPIRE_INGEST_ENABLED=1` is set on the box. Default
+is OFF for both demo and pilot builds — a pilot data custodian flips
+it on once they're ready to bring real data in.
+
+Apply paths are gated by a `preview_token` (SHA-256 of the file body)
+returned on dry-run and required as `?confirm=<token>` on apply. This
+prevents fat-finger applies of stale diffs and gives the audit chain
+a stable join key between the diff preview and the resulting writes.
+
+44 backend tests cover the dry-run, apply, conflict, and round-trip
+behavior across the three adapters.
+
+## Outstanding work
 
 | # | Effort | Item |
 |---|---|---|
-| RD-1 | 3 days | LLM schema-mapper endpoint + UI (Stage 2) |
-| RD-2 | 2 days | Mapping-profile persistence (per unit/format) |
-| RD-3 | 5 days | Network-share watcher + scheduled-ingest scaffolding (Stage 3) |
-| RD-4 | 3 days | DRRS-MC JSON ingest path (replaces synthetic MC% tile) |
-| RD-5 | 4 days | TPS-D / TC-AIMS-II TMR submission integration (replaces LLM-parsed mock) |
-| RD-6 | 2 days | Audit-chain → unit-S-4 weekly snapshot export (the inverse — SPIRE feeds back to GCSS) |
-| RD-7 | 1 day | Per-pilot-unit configuration UI (which sources, which cadence) |
+| ~~RD-1~~ | done | Real-data plan doc + per-source pipeline architecture |
+| ~~RD-3~~ | done | ECP adapter foundation |
+| ~~RD-4~~ | done | ECP route mounted behind feature flag |
+| ~~RD-5~~ | done | ECP merge diff engine — dry-run preview |
+| ~~RD-6a~~ | done | Asset schema gains allowance_qty / on_hand_qty / last_inventory_date |
+| ~~RD-6b~~ | done | ECP apply path — atomic swap + audit chain |
+| ~~RD-6c~~ | done | Stale-asset resolution endpoint |
+| ~~RD-7~~ | done | UTIL extract adapter + apply |
+| ~~RD-8~~ | done | SR-header dry-run analyzer route |
+| ~~RD-9~~ | done | Frontend ingest dropzone (`/admin/ingest`) |
+| ~~RD-10~~ | done | This doc — "what's shipped" section |
+| RD-11 | 2 days | LLM schema-mapper endpoint + UI (Stage 2 — auto-map operator's column names to the canonical schema) |
+| RD-12 | 2 days | Mapping-profile persistence (per unit/format) |
+| RD-13 | 5 days | Network-share watcher + scheduled-ingest scaffolding (Stage 3) |
+| RD-14 | 3 days | DRRS-MC JSON ingest path (replaces synthetic MC% tile) |
+| RD-15 | 4 days | TPS-D / TC-AIMS-II TMR submission integration (replaces LLM-parsed mock) |
+| RD-16 | 2 days | Audit-chain → unit-S-4 weekly snapshot export (the inverse — SPIRE feeds back to GCSS) |
+| RD-17 | 1 day | Per-pilot-unit configuration UI (which sources, which cadence) |
 
 ---
 

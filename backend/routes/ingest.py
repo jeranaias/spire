@@ -27,7 +27,7 @@ import os
 from datetime import date
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Query, Request, UploadFile
 
 from ..integrations.pulse_gcss_ecp_adapter import (
     EXPECTED_HEADER_COLUMNS as ECP_EXPECTED_COLUMNS,
@@ -44,6 +44,10 @@ from ..integrations.pulse_gcss_util_adapter import (
     EXPECTED_HEADER_COLUMNS as UTIL_EXPECTED_COLUMNS,
     apply_latest_readings,
     parse_util,
+)
+from ..integrations.sentry_gcss_adapter import (
+    EXPECTED_HEADER_COLUMNS as SR_EXPECTED_COLUMNS,
+    ingest_sr_header_csv,
 )
 from ..persistence import log as audit_log
 from ..scoping import require_user_role
@@ -103,6 +107,14 @@ async def ingest_status(request: Request):
                 "shape": "csv",
                 "expected_columns": list(UTIL_EXPECTED_COLUMNS),
                 "writes_to": "asset_current_hours_miles_status",
+                "auth_roles": sorted(INGEST_ROLES),
+            },
+            {
+                "id": "gcss-mc/sr-header",
+                "name": "GCSS-MC SR Header Export",
+                "shape": "csv",
+                "expected_columns": list(SR_EXPECTED_COLUMNS),
+                "writes_to": "service_request_log (dry-run only via this route — full bundle ingest is /api/system/stage-ingest)",
                 "auth_roles": sorted(INGEST_ROLES),
             },
         ],
@@ -277,6 +289,15 @@ async def ingest_gcss_mc_ecp(
 
     # Build the new asset list (pure function — no swap yet)
     new_assets = apply_diff(diff, canonical_assets, asset_factory=_ecp_row_to_asset)
+
+    # RD6c — flag stale assets as needs_verification so the operator
+    # surface (`GET /api/ingest/stale`) lists them for review without
+    # auto-deleting. Stale = in canonical, not in this file.
+    stale_ids = {s.asset_id for s in diff.stale}
+    if stale_ids:
+        for a in new_assets:
+            if getattr(a, "asset_id", "") in stale_ids and hasattr(a, "needs_verification"):
+                a.needs_verification = True
 
     # Construct the new CanonicalDataset by cloning the singleton with
     # the asset list replaced. Other collections (snapshots, srs, etc.)
@@ -486,4 +507,221 @@ def _util_report_to_dict(report) -> dict:
         "header_mismatch": report.header_mismatch,
         "header_missing_columns": list(report.header_missing_columns),
         "header_extra_columns": list(report.header_extra_columns),
+    }
+
+
+# ===========================================================================
+# Stale-asset resolution (RD6c)
+# ===========================================================================
+
+
+VALID_STALE_ACTIONS = frozenset({"remove", "confirm", "defer"})
+
+
+@router.get("/stale")
+async def list_stale_assets(request: Request):
+    """List canonical assets currently flagged needs_verification."""
+    _require_ingest_enabled()
+    user = getattr(request.state, "user", None)
+    require_user_role(user, INGEST_ROLES, action="ingest.stale.list")
+
+    try:
+        ds = get_dataset()
+        assets = list(getattr(ds, "assets", []) or [])
+    except Exception:
+        assets = []
+
+    stale = [
+        {
+            "asset_id": getattr(a, "asset_id", ""),
+            "serial_number": getattr(a, "serial_number", ""),
+            "tamcn": getattr(a, "tamcn", ""),
+            "unit_uic": getattr(a, "unit_uic", ""),
+            "unit_name": getattr(a, "unit_name", ""),
+            "nomenclature": getattr(a, "nomenclature", ""),
+            "current_status": getattr(a, "current_status", ""),
+        }
+        for a in assets
+        if getattr(a, "needs_verification", False)
+    ]
+    return {"stale": stale, "count": len(stale)}
+
+
+@router.post("/stale/resolve")
+async def resolve_stale_assets(
+    request: Request,
+    payload: dict = Body(...),
+):
+    """Resolve stale-flagged assets in bulk.
+
+    Body shape::
+
+        {
+          "resolutions": [
+            {"asset_id": "M-21670-...", "action": "remove",  "note": "EOR'd"},
+            {"asset_id": "M-26300-...", "action": "confirm"},
+            {"asset_id": "M-22100-...", "action": "defer",   "note": "ECP late"}
+          ]
+        }
+
+    Actions:
+      * `remove`  — drop the asset from the canonical roster
+      * `confirm` — clear `needs_verification` (asset is real, file was incomplete)
+      * `defer`   — keep flagged; just record the operator note
+    """
+    _require_ingest_enabled()
+    user = getattr(request.state, "user", None)
+    actor_role = require_user_role(user, INGEST_ROLES, action="ingest.stale.resolve")
+    actor_dodid = (user or {}).get("dodid") if isinstance(user, dict) else None
+
+    resolutions = payload.get("resolutions") if isinstance(payload, dict) else None
+    if not isinstance(resolutions, list) or not resolutions:
+        raise HTTPException(
+            status_code=400,
+            detail="Body must contain a non-empty `resolutions` array.",
+        )
+
+    try:
+        ds = get_dataset()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Dataset unavailable.")
+
+    by_id = {getattr(a, "asset_id", ""): a for a in (ds.assets or [])}
+
+    counts = {"remove": 0, "confirm": 0, "defer": 0, "not_found": 0, "invalid_action": 0}
+    outcomes: List[dict] = []
+    to_remove: set = set()
+
+    for res in resolutions:
+        if not isinstance(res, dict):
+            counts["invalid_action"] += 1
+            continue
+        asset_id = (res.get("asset_id") or "").strip()
+        action = (res.get("action") or "").strip().lower()
+        note = (res.get("note") or "").strip()
+        if not asset_id or action not in VALID_STALE_ACTIONS:
+            counts["invalid_action"] += 1
+            outcomes.append({"asset_id": asset_id, "action": action, "outcome": "invalid"})
+            continue
+        asset = by_id.get(asset_id)
+        if asset is None:
+            counts["not_found"] += 1
+            outcomes.append({"asset_id": asset_id, "action": action, "outcome": "not_found"})
+            continue
+
+        if action == "remove":
+            to_remove.add(asset_id)
+            counts["remove"] += 1
+            outcomes.append({"asset_id": asset_id, "action": action, "outcome": "queued_remove"})
+        elif action == "confirm":
+            if hasattr(asset, "needs_verification"):
+                asset.needs_verification = False
+            counts["confirm"] += 1
+            outcomes.append({"asset_id": asset_id, "action": action, "outcome": "cleared_flag"})
+        elif action == "defer":
+            counts["defer"] += 1
+            outcomes.append({"asset_id": asset_id, "action": action, "outcome": "deferred"})
+
+        audit_log(
+            kind="ingest.stale.resolve",
+            actor=actor_dodid or actor_role or "system",
+            subject_id=asset_id,
+            payload={"action": action, "note": note, "actor_role": actor_role},
+        )
+
+    if to_remove:
+        new_assets = [a for a in ds.assets if getattr(a, "asset_id", "") not in to_remove]
+        new_ds = _replace_assets(ds, new_assets)
+        swap_dataset(
+            new_ds,
+            source="ingest.stale.remove",
+            ingested_by=actor_dodid or actor_role or "ingest",
+            ingest_hash=None,
+        )
+
+    return {"counts": counts, "outcomes": outcomes}
+
+
+# ===========================================================================
+# GCSS-MC SR header (RD8) — dry-run analyzer
+# ===========================================================================
+
+
+@router.post("/gcss-mc/sr-header")
+async def ingest_gcss_mc_sr_header(
+    request: Request,
+    file: UploadFile = File(...),
+    cm_only: bool = Query(True, description="Filter to Maintenance - CM rows (matches SPIRE's posture)"),
+):
+    """Upload + parse one GCSS-MC SR header export.
+
+    This route is dry-run only. It runs the existing
+    `ingest_sr_header_csv` adapter and returns the IngestReport so
+    the operator can sanity-check the file (sanitization warnings,
+    schema mismatch, defect-code normalization counts) before pushing
+    it through the existing 3-CSV stage-ingest flow at
+    /api/system/stage-ingest, which is the canonical write path for a
+    full GCSS-MC bundle (header + sr_parts + due_in).
+
+    The choice to keep apply out of /api/ingest/gcss-mc/sr-header
+    is deliberate: writing SRs in isolation (without the parts +
+    due-in joins) leaves dataset.lifecycle.ServiceRequest with
+    half-populated fields, which the PULSE risk model would then
+    score against. The single-file analyzer is for "is this file
+    sane?"; the full bundle ingest covers actual writes.
+    """
+    _require_ingest_enabled()
+    user = getattr(request.state, "user", None)
+    require_user_role(user, INGEST_ROLES, action="ingest.gcss_mc_sr_header")
+
+    body = await file.read()
+    if len(body) > INGEST_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({len(body):,} bytes); max is {INGEST_FILE_MAX_BYTES:,} bytes.",
+        )
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File must be UTF-8 text (CSV). Decode failed at byte {e.start}.",
+        )
+
+    report = ingest_sr_header_csv(text, cm_only=cm_only)
+    return {
+        "report": _sr_report_to_dict(report),
+        "preview_rows": [_sr_row_to_dict(r) for r in report.rows[:10]],
+        "merge_target": "service_request_log",
+        "applied": False,
+        "applied_pointer": "/api/system/stage-ingest (full 3-CSV bundle)",
+    }
+
+
+def _sr_report_to_dict(report) -> dict:
+    return {
+        "rows_total": report.rows_total,
+        "rows_kept": report.rows_kept,
+        "rows_filtered_pmcs": report.rows_filtered_pmcs,
+        "rows_with_warnings": report.rows_with_warnings,
+        "defect_code_trailing_period_normalized": report.defect_code_trailing_period_normalized,
+        "date_parse_failures": report.date_parse_failures,
+        "unsanitized_field_counts": dict(report.unsanitized_field_counts or {}),
+        "schema_warnings": list(report.schema_warnings or []),
+    }
+
+
+def _sr_row_to_dict(row) -> dict:
+    return {
+        "sr_number": getattr(row, "sr_number", ""),
+        "service_request_type": getattr(row, "service_request_type", ""),
+        "defect_code_primary": getattr(row, "defect_code_primary", ""),
+        "defect_code_secondary": getattr(row, "defect_code_secondary", ""),
+        "problem_summary": (getattr(row, "problem_summary", "") or "")[:200],
+        "echelon_of_maint": getattr(row, "echelon_of_maint", ""),
+        "tamcn": getattr(row, "tamcn", ""),
+        "priority": getattr(row, "priority", ""),
+        "unit_uic_hashed": getattr(row, "unit_uic_hashed", ""),
+        "unit_uic_source": getattr(row, "unit_uic_source", ""),
+        "warnings": list(getattr(row, "_warnings", []) or []),
     }

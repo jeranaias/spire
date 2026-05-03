@@ -252,6 +252,11 @@ export const VIEW_SCOPE: Record<string, Role[]> = {
   // Sub-routes inherit the same scope so a deep-linked /admin/models/:id
   // hits the same overlay as bare /admin for non-security_manager.
   "/admin/models": ["security_manager", "mef_commander"],
+  // RD9 — real-data ingest dropzone. Scoped to data_custodian +
+  // security_manager (matches INGEST_ROLES on the backend).
+  // data_custodian doesn't have a demo persona seeded but the scope
+  // is left in so a real pilot deployment grants it without code.
+  "/admin/ingest": ["security_manager", "data_custodian"],
 };
 
 function uid(): string {
