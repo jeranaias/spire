@@ -127,3 +127,77 @@ def test_ecp_upload_role_gate(monkeypatch):
         files={"file": ("ecp.csv", body, "text/csv")},
     )
     assert r.status_code == 403, r.text
+
+
+def _ecp_csv(*lines: str) -> bytes:
+    """Build an ECP CSV body with the canonical header."""
+    header = ",".join((
+        "TAMCN", "NSN", "SERIAL_NUMBER", "NOMENCLATURE",
+        "OWNER_UIC", "ALLOWANCE_QTY", "ON_HAND_QTY", "LAST_INVENTORY_DATE",
+    ))
+    return ("\n".join((header, *lines)) + "\n").encode("utf-8")
+
+
+def test_ecp_dry_run_returns_preview_token(client_enabled):
+    """Dry-run includes a `preview_token` for use on apply."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = client_enabled.post(
+        "/api/ingest/gcss-mc/ecp",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["applied"] is False
+    assert isinstance(out.get("preview_token"), str)
+    assert len(out["preview_token"]) == 32  # SHA-256 truncated
+
+
+def test_ecp_apply_requires_confirm_token(client_enabled):
+    """`?apply=1` without a confirm token → 409."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = client_enabled.post(
+        "/api/ingest/gcss-mc/ecp?apply=1",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 409, r.text
+    assert "Confirm token mismatch" in r.text
+
+
+def test_ecp_apply_with_stale_token_409(client_enabled):
+    """Wrong token is also 409."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = client_enabled.post(
+        "/api/ingest/gcss-mc/ecp?apply=1&confirm=" + ("0" * 32),
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_ecp_apply_round_trip(client_enabled):
+    """Dry-run → grab token → apply → response says applied=true with counts."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r1 = client_enabled.post(
+        "/api/ingest/gcss-mc/ecp",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r1.status_code == 200, r1.text
+    token = r1.json()["preview_token"]
+
+    r2 = client_enabled.post(
+        f"/api/ingest/gcss-mc/ecp?apply=1&confirm={token}",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r2.status_code == 200, r2.text
+    out = r2.json()
+    assert out["applied"] is True
+    assert "applied_counts" in out
+    assert out["applied_counts"]["new"] >= 0
+    assert out["applied_counts"]["matched_changed"] >= 0

@@ -7,6 +7,7 @@ from datetime import date
 from backend.integrations.pulse_gcss_ecp_adapter import ParsedAssetRow
 from backend.integrations.pulse_gcss_ecp_merge import (
     MergeDiff,
+    apply_diff,
     compute_diff,
     diff_to_payload,
 )
@@ -14,7 +15,11 @@ from backend.integrations.pulse_gcss_ecp_merge import (
 
 @dataclass
 class FakeAsset:
-    """Minimal duck-typed Asset for diff testing."""
+    """Minimal duck-typed Asset for diff testing.
+
+    Includes the ECP-only roster fields (RD6a) so `apply_diff` has
+    somewhere to write when the dry-run says they should land.
+    """
 
     asset_id: str
     serial_number: str
@@ -22,6 +27,9 @@ class FakeAsset:
     nsn: str
     unit_uic: str
     nomenclature: str = ""
+    allowance_qty: int = 0
+    on_hand_qty: int = 0
+    last_inventory_date: date | None = None
 
 
 def _row(
@@ -177,3 +185,68 @@ def test_empty_inputs_produce_empty_diff():
         "stale": 0,
         "conflicts": 0,
     }
+
+
+def test_apply_diff_writes_ecp_only_fields_to_matched_asset():
+    """apply_diff mutates the matched asset's ECP-only fields in place
+    and returns a list reflecting the new state."""
+    row = _row(allowance=15, on_hand=12, last_inv=date(2026, 3, 12))
+    asset = _asset()  # default ECP-only fields are 0/None
+    diff = compute_diff([row], [asset])
+    new_assets = apply_diff(diff, [asset])
+    assert len(new_assets) == 1
+    a = new_assets[0]
+    assert a.allowance_qty == 15
+    assert a.on_hand_qty == 12
+    assert a.last_inventory_date == date(2026, 3, 12)
+
+
+def test_apply_diff_preserves_unchanged_assets():
+    """Apply with no diff is a no-op on the asset list."""
+    row = _row(allowance=0, on_hand=0, last_inv=None)
+    asset = _asset()
+    diff = compute_diff([row], [asset])
+    new_assets = apply_diff(diff, [asset])
+    assert new_assets[0].allowance_qty == 0
+    assert new_assets[0].on_hand_qty == 0
+    assert new_assets[0].last_inventory_date is None
+
+
+def test_apply_diff_appends_new_rows_when_factory_supplied():
+    """A `new` row is appended via the factory; without a factory, dropped."""
+    row = _row(serial="owner_serial_unique_zzzzzzzzzzzzzzzzzzzz")
+    asset = _asset()
+    diff = compute_diff([row], [asset])
+
+    # Without factory: stays at 1 (the original asset)
+    new_assets = apply_diff(diff, [asset])
+    assert len(new_assets) == 1
+
+    # With factory: 2 (original + new from row)
+    def factory(parsed):
+        return FakeAsset(
+            asset_id=f"new-{parsed.serial_number[-6:]}",
+            serial_number=parsed.serial_number,
+            tamcn=parsed.tamcn,
+            nsn=parsed.nsn,
+            unit_uic=parsed.owner_uic,
+            nomenclature=parsed.nomenclature,
+        )
+    new_assets = apply_diff(diff, [asset], asset_factory=factory)
+    assert len(new_assets) == 2
+    assert new_assets[1].asset_id.startswith("new-")
+
+
+def test_apply_diff_factory_exception_drops_row_safely():
+    """An exception in the factory drops the row but doesn't crash apply."""
+    row = _row(serial="owner_serial_unique_zzzzzzzzzzzzzzzzzzzz")
+    asset = _asset()
+    diff = compute_diff([row], [asset])
+
+    def bad_factory(parsed):
+        raise ValueError("simulated bad row")
+
+    new_assets = apply_diff(diff, [asset], asset_factory=bad_factory)
+    # The original asset is preserved; the bad-factory row is dropped.
+    assert len(new_assets) == 1
+    assert new_assets[0].asset_id == asset.asset_id
