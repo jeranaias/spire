@@ -33,7 +33,9 @@ from ..integrations.pulse_gcss_ecp_adapter import (
     ParsedAssetRow as ECPParsedAssetRow,
     parse_ecp,
 )
+from ..integrations.pulse_gcss_ecp_merge import compute_diff, diff_to_payload
 from ..scoping import require_user_role
+from ..state import get_dataset
 
 
 router = APIRouter()
@@ -155,12 +157,25 @@ async def ingest_gcss_mc_ecp(request: Request, file: UploadFile = File(...)):
         )
 
     rows, report = parse_ecp(text)
+
+    # Dry-run merge preview (RD5). compute_diff matches rows against the
+    # canonical dataset's asset roster and surfaces new/updated/stale/
+    # conflict counts plus a sample list per bucket. The actual write
+    # path lands in a follow-up — for now this lets the operator see
+    # exactly what would change before they decide to apply.
+    try:
+        ds = get_dataset()
+        canonical_assets = list(getattr(ds, "assets", []) or [])
+    except Exception:
+        # Empty/empty-envelope dataset — surface zero canonical assets;
+        # the diff will report every parsed row as "new".
+        canonical_assets = []
+    diff = compute_diff(rows, canonical_assets)
+
     return {
         "report": _ecp_report_to_dict(report),
         "rows": [_ecp_row_to_dict(r) for r in rows],
-        # Convenience: the merge target so a frontend preview can
-        # show "this would write to N existing assets and add M new".
-        # The actual merge engine ships in RD-5.
+        "preview": diff_to_payload(diff),
         "merge_target": "asset_roster",
         "applied": False,
     }
