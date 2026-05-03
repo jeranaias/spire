@@ -230,12 +230,22 @@ export function CommsControl() {
         title={`Comms ${current.label} · click to switch DDIL mode${queueDepth > 0 ? ` · ${queueDepth} write${queueDepth === 1 ? "" : "s"} queued` : ""}`}
         className="!min-h-0 inline-flex h-9 items-center gap-2 rounded-sm border px-2 font-mono text-xs uppercase tracking-wider transition-colors"
         style={{
-          borderColor: current.tone,
+          // Idle CONNECTED state reads neutral so the chip stops competing
+          // with active signals (System orange dot, Notifications red).
+          // Degraded states keep tone-colored chrome — those ARE real
+          // operator signals and the eye should land on them. The colored
+          // dot stays in either state so the comms posture is still
+          // legible at a glance without opening the popover.
+          borderColor:
+            ddilMode === "CONNECTED" ? "var(--color-border)" : current.tone,
           background:
             ddilMode === "CONNECTED"
               ? "transparent"
               : `color-mix(in oklab, ${current.tone} 15%, transparent)`,
-          color: current.tone,
+          color:
+            ddilMode === "CONNECTED"
+              ? "var(--color-text-secondary)"
+              : current.tone,
         }}
       >
         <span className="relative flex h-2 w-2" aria-hidden>

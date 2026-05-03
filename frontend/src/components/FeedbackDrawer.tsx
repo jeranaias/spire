@@ -264,18 +264,26 @@ export function FeedbackDrawer() {
             />
           </div>
         )}
+        {/* Quieted idle treatment. The button used to render in primary
+         * blue with a tinted background, pulling eye to the bottom-right
+         * corner on every page. Pilot operators glance at it once when
+         * they want to file something — it doesn't need to compete with
+         * map markers, alerts, and the topbar at idle. Hover + coachmark
+         * still lift the contrast to primary, and the warning-triangle
+         * icon is swapped for a speech-bubble (was misreading as
+         * "danger / fault" rather than "tell us something"). */}
         <Button
           onClick={() => { setOpen(true); dismissCoach(); }}
           variant="secondary"
           size="md"
-          className="pointer-events-auto !border-[var(--color-primary)] !bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] !text-[var(--color-primary)] shadow-lg backdrop-blur hover:!bg-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-surface))]"
+          className="pointer-events-auto !border-[var(--color-border)] !bg-[var(--color-surface)] !text-[var(--color-text-secondary)] shadow-md backdrop-blur hover:!border-[var(--color-primary)] hover:!bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] hover:!text-[var(--color-primary)]"
           style={{
             animation: coachVisible ? "feedback-pulse 1.6s ease-in-out infinite" : undefined,
           }}
           title="Report issue / idea / question (press g then f)"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2L1 21h22L12 2zm0 5l7.5 12h-15L12 7zm-1 4v3h2v-3h-2zm0 5v2h2v-2h-2z" />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
           <span>Report Issue</span>
         </Button>

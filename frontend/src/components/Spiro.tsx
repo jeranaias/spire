@@ -554,10 +554,15 @@ export function Spiro() {
   // Collapsed-pill view — small button on the right edge.
   if (!open) {
     return (
+      {/* Quiet idle. The vertical SPIRO tab used to render in primary
+       * blue with a 18% tint, holding the right edge against view
+       * content. It's an opener tab, not a primary control — neutral
+       * chrome at idle keeps the eye on the surface. Hover + active
+       * use lift it back to primary so the affordance is unmistakable. */}
       <Pressable
         onClick={() => setOpen(true)}
         block={false}
-        className="pointer-events-auto fixed right-0 top-1/2 z-[8400] !min-h-0 -translate-y-1/2 rounded-l-md border border-r-0 border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] px-2 py-3 font-mono text-xs font-semibold uppercase text-[var(--color-primary)] shadow-lg backdrop-blur transition-all hover:px-3 hover:bg-[color-mix(in_oklab,var(--color-primary)_28%,var(--color-surface))] tracking-widest"
+        className="pointer-events-auto fixed right-0 top-1/2 z-[8400] !min-h-0 -translate-y-1/2 rounded-l-md border border-r-0 border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3 font-mono text-xs font-semibold uppercase text-[var(--color-text-secondary)] shadow-md backdrop-blur transition-all hover:px-3 hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))] hover:text-[var(--color-primary)] tracking-widest"
         style={{ writingMode: "vertical-rl" }}
         title="Open SPIRO (Ctrl+/)"
         aria-label="Open SPIRO assistant (Ctrl+/)"
