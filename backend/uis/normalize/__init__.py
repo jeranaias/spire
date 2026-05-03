@@ -7,12 +7,13 @@ consistent representation regardless of source format.
 """
 from __future__ import annotations
 
-from .encoding import decode_bytes, normalize_text
+from .encoding import decode_bytes, is_low_confidence_encoding, normalize_text
 from .headers import canonical_header, header_token_set
 
 __all__ = [
     "canonical_header",
     "decode_bytes",
     "header_token_set",
+    "is_low_confidence_encoding",
     "normalize_text",
 ]

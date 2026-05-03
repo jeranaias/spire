@@ -29,7 +29,7 @@ from .adapters.spec import AdapterSpec, ColumnSpec, RowConstraint
 from .formats import detect_format, stream_rows
 from .mapping.auto_map import propose_mapping, MappingProposal
 from .mapping.profile import MappingProfile
-from .normalize import decode_bytes, normalize_text
+from .normalize import decode_bytes, is_low_confidence_encoding, normalize_text
 from .transforms import (
     classify_hashed_field,
     map_enum,
@@ -75,6 +75,13 @@ class ParseReport:
     rows_with_warnings: int = 0
     detected_format: str = ""
     detected_encoding: str = ""
+    # When True, the encoding was guessed (latin-1 last-resort,
+    # cp1252 byte-strict pass, or charset_normalizer best-effort).
+    # The frontend dropzone surfaces a yellow banner so the operator
+    # can verify before applying — silent corruption was the failure
+    # mode this guards against (a UTF-16 file decoded as cp1252
+    # produces garbage rows that look "valid" but aren't).
+    encoding_low_confidence: bool = False
     column_map: Dict[str, str] = field(default_factory=dict)
     auto_mapper_confidence: float = 0.0
     profile_id: Optional[str] = None
@@ -93,6 +100,7 @@ class ParseReport:
             "rows_with_warnings": self.rows_with_warnings,
             "detected_format": self.detected_format,
             "detected_encoding": self.detected_encoding,
+            "encoding_low_confidence": self.encoding_low_confidence,
             "column_map": dict(self.column_map),
             "auto_mapper_confidence": self.auto_mapper_confidence,
             "profile_id": self.profile_id,
@@ -313,6 +321,14 @@ def run_pipeline(
     # 1. Decode + format detect
     text, encoding = decode_bytes(raw)
     report.detected_encoding = encoding
+    report.encoding_low_confidence = is_low_confidence_encoding(encoding)
+    if report.encoding_low_confidence:
+        warnings.append(RowWarning(
+            row_index=-1,
+            field="",
+            code="encoding_low_confidence",
+            message=f"Decoded as {encoding}; verify the file isn't a wrong-encoding silent corruption.",
+        ))
     fmt = detect_format(raw[:4096])
     report.detected_format = fmt
 
