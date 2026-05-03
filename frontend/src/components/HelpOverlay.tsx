@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useSpireStore, ROLE_LABELS, VIEW_SCOPE } from "../state/store";
+import { DemoOnly } from "../state/buildMode";
 import { IconButton, Pressable } from "./ui";
 
 const SHORTCUTS = [
@@ -30,9 +31,13 @@ const SHORTCUTS = [
   { keys: ["+", "-"],     label: "Zoom map (BASTION)" },
   { keys: ["0"],           label: "Reset view (BASTION)" },
   { keys: ["←", "→", "↑", "↓"], label: "Pan map (BASTION)" },
-  // W2 Task #39 — failsafe panic key. Confined to /demo and /pitch.
-  // Esc closes from anywhere once active.
-  { keys: ["F9"],          label: "Failsafe — recorded backup (presenter only, /demo & /pitch)" },
+];
+
+// Demo-only shortcut. Failsafe is the panic-button behind /demo and
+// /pitch routes (presenter-only) — surface in the help overlay only
+// for the demo build so pilots don't see a shortcut they can't use.
+const DEMO_KEYBINDS: ReadonlyArray<{ keys: string[]; label: string }> = [
+  { keys: ["F9"], label: "Failsafe — recorded backup (presenter only, /demo & /pitch)" },
 ];
 
 export function HelpOverlay() {
@@ -132,6 +137,25 @@ export function HelpOverlay() {
                   </span>
                 </li>
               ))}
+              <DemoOnly>
+                {DEMO_KEYBINDS.map((s, i) => (
+                  <li key={`demo-${i}`} className="flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      {s.keys.map((k, j) => (
+                        <kbd
+                          key={j}
+                          className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-1.5 py-[1px] font-mono text-xs text-[var(--color-text)] tracking-wide"
+                        >
+                          {k}
+                        </kbd>
+                      ))}
+                    </div>
+                    <span className="font-mono text-sm text-[var(--color-text-secondary)]">
+                      {s.label}
+                    </span>
+                  </li>
+                ))}
+              </DemoOnly>
             </ul>
           </section>
 

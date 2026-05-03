@@ -229,10 +229,13 @@ def _build_alerts(ds: CanonicalDataset, last_snaps, last_day) -> list[dict]:
                 "unit": u_name,
                 "timestamp": _jittered_alert_ts(last_day, f"readiness:{u_name}"),
                 "title": f"{u_name} readiness below threshold",
-                "body": (
-                    f"{u_name} MC rate is {rate*100:.1f}% ({stats['mc']}/{stats['total']} assets). "
-                    "Review risk board for contributing factors."
-                ),
+                # Drop the "Review risk board for contributing factors"
+                # imperative tail — the AlertCard CTA already routes to
+                # the risk board, and the body should report what the
+                # operator needs to know (the fraction + delta), not what
+                # to do about it. Keeping it data-only also reads as
+                # operational honesty rather than a demo nudge.
+                "body": f"{u_name} MC rate is {rate*100:.1f}% ({stats['mc']}/{stats['total']} assets).",
             })
 
     # Data quality

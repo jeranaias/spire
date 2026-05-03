@@ -12,6 +12,7 @@ import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
 import { Onboarding } from "./components/Onboarding";
+import { DemoOnly } from "./state/buildMode";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { FailsafePlayer } from "./components/FailsafePlayer";
 import { useFailsafe } from "./state/failsafe";
@@ -313,7 +314,14 @@ export default function App() {
       <FeedbackDrawer />
       <HelpOverlay />
       <Spiro />
-      <Onboarding />
+      {/* Onboarding is the hackathon "judge-facing 60-second intro" —
+       * customer/problem/four-views/CTA pitch deck baked into a modal.
+       * Demo nights need it, pilots don't. The pilot welcome flow is
+       * the StageIngestHero on the Bridge (drag in 3 GCSS-MC CSVs)
+       * which happens once on first boot anyway. */}
+      <DemoOnly>
+        <Onboarding />
+      </DemoOnly>
       {/* W2 Task #39 — recorded-backup overlay. Renders nothing until the
        * presenter opens it (via the Failsafe button on /demo or /pitch,
        * or the F9 hotkey). Mounted at the shell so it covers any view. */}
