@@ -153,14 +153,20 @@ export function RiskBoardTab() {
   return (
     <div className="flex h-full">
       <div data-pulse-risk-scroll className="flex-1 overflow-y-auto p-4">
-        {/* Track-G2 — G-4 sees too many panels at once on landing. Collapse
-         * Predicted Failures by default for G-4 (they have BASTION as their
-         * primary surface; PULSE is a drill-down). Maintenance Chief and
-         * MEF Commander see it expanded as before. */}
+        {/* P9 — per-role panel-collapse defaults. In the operational build
+         * each role lands with non-primary panels folded into a pill so a
+         * Maint Chief landing on the Risk Board doesn't eat three panels
+         * they didn't ask for. Demo build keeps the legacy `defaultCollapsedFor`
+         * posture so the stage walk-through still photographs as designed.
+         * Persistence keys off the operator's DODID hash — once they
+         * expand it, it stays expanded for THAT operator until they
+         * collapse it again. See state/pulsePanels.ts for the role
+         * default mapping. */}
         <div className="mb-3">
           <CollapsiblePanel
             view="pulse.risk"
             panel="predicted"
+            pulsePanel="predictedFailures"
             defaultCollapsedFor={{ g4: true }}
             header={
               <span
@@ -173,6 +179,17 @@ export function RiskBoardTab() {
             collapsedSummary={
               <span>
                 Assets likely to fail in the configured window. Click ▾ to expand.
+              </span>
+            }
+            collapsedPill={
+              <span
+                className="font-mono uppercase text-[var(--color-warning)] tracking-widest"
+                style={{ fontSize: "var(--text-xs)" }}
+              >
+                Predicted failures
+                <span className="ml-2 text-[var(--color-text-muted)] tracking-wide normal-case">
+                  · click to expand
+                </span>
               </span>
             }
           >

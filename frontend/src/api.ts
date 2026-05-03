@@ -822,7 +822,26 @@ export interface SystemStatus {
     consistency_errors: number;
     data_quality_defects: Record<string, number>;
   };
-  llm: { reachable: boolean; model: string; max_context: number };
+  llm: {
+    reachable: boolean;
+    model: string;
+    max_context: number;
+    /** Tier-B (local Ollama) status. Populated when the backend
+     * could probe localhost:11434. */
+    local?: {
+      reachable: boolean;
+      target_model?: string;
+      target_loaded?: boolean;
+      models?: string[];
+      error?: string;
+      disabled?: boolean;
+    };
+    /** Three-state hint: which tier call_llm_chat would land on.
+     * 'primary' = RigRun 26B reachable; 'local' = Ollama E2B
+     * reachable and target loaded; 'rule' = neither, deterministic
+     * fallback only. */
+    active_tier?: "primary" | "local" | "rule";
+  };
   features: Record<string, boolean>;
   // Walkthrough audit: footer chips used to hardcode '0 egress',
   // 'AES-256-GCM', 'val=1.0 · 413K params', etc. The backend exposes

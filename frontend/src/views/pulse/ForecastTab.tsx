@@ -569,6 +569,7 @@ export function ForecastTab() {
         <CollapsiblePanel
           view="pulse.forecast"
           panel="recommend"
+          pulsePanel="recommendActions"
           defaultCollapsedFor={{ maintenance_chief: true }}
           header={
             <span
@@ -581,6 +582,17 @@ export function ForecastTab() {
           collapsedSummary={
             <span>
               Top at-risk asset actions ranked by impact-per-dollar-per-day. Click ▾ to expand.
+            </span>
+          }
+          collapsedPill={
+            <span
+              className="font-mono uppercase text-[var(--color-primary)] tracking-widest"
+              style={{ fontSize: "var(--text-xs)" }}
+            >
+              Recommend actions
+              <span className="ml-2 text-[var(--color-text-muted)] tracking-wide normal-case">
+                · click to expand
+              </span>
             </span>
           }
         >
