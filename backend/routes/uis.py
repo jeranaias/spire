@@ -49,7 +49,7 @@ from ..uis.mapping import (
 )
 from ..uis.mapping.llm_map import propose_mapping_with_llm
 from ..uis.normalize import decode_bytes, normalize_text
-from ..uis.pipeline import run_pipeline
+from ..uis.pipeline import PipelineRowLimitExceeded, run_pipeline
 
 
 log = logging.getLogger(__name__)
@@ -204,7 +204,16 @@ async def uis_upload(
 
     # Run pipeline
     preview_token = _file_token(body)
-    pipeline_result = run_pipeline(body, adapter, profile=profile)
+    try:
+        pipeline_result = run_pipeline(body, adapter, profile=profile)
+    except PipelineRowLimitExceeded as e:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Row count exceeds pipeline cap {e.limit}. Split the file "
+                f"or raise SPIRE_UIS_MAX_ROWS."
+            ),
+        )
     payload: Dict[str, Any] = {
         "adapter_id": adapter_id,
         "rows_total": pipeline_result.report.rows_total,

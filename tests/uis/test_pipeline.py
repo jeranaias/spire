@@ -185,6 +185,43 @@ def test_pipeline_handles_utf8_bom():
     assert result.report.detected_encoding == "utf-8-sig"
 
 
+def test_pipeline_row_cap_raises(monkeypatch):
+    """Files exceeding the per-pipeline row cap raise
+    PipelineRowLimitExceeded so the route can 413 instead of OOMing."""
+    from backend.uis.pipeline import PipelineRowLimitExceeded
+
+    monkeypatch.setenv("SPIRE_UIS_MAX_ROWS", "5")
+    # Build a 10-row CSV; cap is 5
+    rows = [
+        f"D{i:04d},NSN-{i},owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,1,1,12-MAR-26"
+        for i in range(10)
+    ]
+    raw = _ecp_csv(*rows)
+
+    with pytest.raises(PipelineRowLimitExceeded) as exc:
+        run_pipeline(raw, get_adapter("gcss-mc/ecp"))
+    assert exc.value.limit == 5
+
+
+def test_pipeline_at_cap_passes(monkeypatch):
+    """Files exactly at the cap parse normally."""
+    monkeypatch.setenv("SPIRE_UIS_MAX_ROWS", "10")
+    rows = [
+        f"D{i:04d},NSN-{i},owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,1,1,12-MAR-26"
+        for i in range(10)
+    ]
+    raw = _ecp_csv(*rows)
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"))
+    assert result.report.rows_kept == 10
+
+
+def test_pipeline_default_cap_is_500k():
+    """Sanity — make sure the default cap isn't tiny."""
+    from backend.uis.pipeline import _max_rows_per_pipeline
+    # No env var set
+    assert _max_rows_per_pipeline() >= 100_000
+
+
 def test_pipeline_jsonl_input():
     """Pipeline handles a JSONL file with the same schema."""
     raw = (

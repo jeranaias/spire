@@ -21,9 +21,45 @@ to `apply_diff` + `swap_dataset` for the apply.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable, Dict, List, Optional
+
+
+# Hard cap on rows per pipeline run. Default 500k — a full-MEF ECP
+# is ~50k assets so this is 10x headroom. Override via env for
+# scaled-up deployments. The cap is enforced at the row-stream
+# stage so we don't materialize a multi-million-row CSV in RAM
+# and OOM the box.
+DEFAULT_MAX_ROWS = 500_000
+
+
+def _max_rows_per_pipeline() -> int:
+    raw = (os.environ.get("SPIRE_UIS_MAX_ROWS") or "").strip()
+    if not raw:
+        return DEFAULT_MAX_ROWS
+    try:
+        n = int(raw)
+        return n if n > 0 else DEFAULT_MAX_ROWS
+    except ValueError:
+        return DEFAULT_MAX_ROWS
+
+
+class PipelineRowLimitExceeded(Exception):
+    """Raised when the file has more rows than the pipeline cap.
+
+    Surfaced as HTTP 413 by the route layer so the operator gets a
+    clear "file too big — split it or raise SPIRE_UIS_MAX_ROWS".
+    """
+
+    def __init__(self, *, limit: int, observed: int):
+        self.limit = limit
+        self.observed = observed
+        super().__init__(
+            f"Row count {observed} exceeds pipeline cap {limit}. "
+            f"Split the file or raise SPIRE_UIS_MAX_ROWS."
+        )
 
 from .adapters.spec import AdapterSpec, ColumnSpec, RowConstraint
 from .formats import detect_format, stream_rows
@@ -343,9 +379,23 @@ def run_pipeline(
         # XLSX is binary; pass through original
         raw_for_stream = raw
 
-    # 2. Stream rows
+    # 2. Stream rows. Walk the iterator manually so we can short-
+    #    circuit on the row cap before materializing more memory
+    #    than the pipeline budget allows. The cap protects against
+    #    OOM on very large uploads — a 10M-row CSV at ~200 bytes/row
+    #    is 2GB of dict objects in Python; we'd rather reject early
+    #    with 413 than tip the whole backend over.
+    max_rows = _max_rows_per_pipeline()
+    source_rows: List[Dict[str, str]] = []
     try:
-        source_rows = list(stream_rows(raw_for_stream, fmt))
+        stream = stream_rows(raw_for_stream, fmt)
+        for row in stream:
+            source_rows.append(row)
+            if len(source_rows) > max_rows:
+                # Drain & raise — the route catches this and 413s.
+                raise PipelineRowLimitExceeded(limit=max_rows, observed=max_rows + 1)
+    except PipelineRowLimitExceeded:
+        raise
     except Exception as e:  # noqa: BLE001
         warnings.append(RowWarning(
             row_index=-1, field="", code="format_stream_error",
