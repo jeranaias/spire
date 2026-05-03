@@ -18,8 +18,22 @@ from __future__ import annotations
 
 from .auto_map import propose_mapping
 from .profile import MappingProfile
+from .store import (
+    create_profile,
+    delete_profile,
+    find_profile,
+    get_profile,
+    list_profiles,
+    update_profile,
+)
 
 __all__ = [
     "MappingProfile",
+    "create_profile",
+    "delete_profile",
+    "find_profile",
+    "get_profile",
+    "list_profiles",
     "propose_mapping",
+    "update_profile",
 ]
