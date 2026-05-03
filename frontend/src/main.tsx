@@ -77,6 +77,9 @@ const InferenceEconomicsView = lazyWithRecovery(() => import("./views/admin/Infe
 // RD9 — operator-side real-data ingest dropzone. Scoped to
 // data_custodian + security_manager via VIEW_SCOPE.
 const IngestView = lazyWithRecovery(() => import("./views/admin/IngestView").then((m) => ({ default: m.IngestView })));
+// UIS-15 — column-mapping editor (drag-edit auto + LLM mapping
+// proposals, save as MappingProfile). Same scope as /admin/ingest.
+const IngestMapperView = lazyWithRecovery(() => import("./views/admin/IngestMapperView").then((m) => ({ default: m.IngestMapperView })));
 // E1 hardened-primitives gallery — design/QA surface for verifying every
 // variant of every primitive renders correctly. Not in role-based nav;
 // reachable only by direct deep link (#/__ui-docs).
@@ -339,6 +342,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="admin/models/:modelId" element={<ViewSuspense><ModelDetailView /></ViewSuspense>} />
             <Route path="admin/economics" element={<ViewSuspense><InferenceEconomicsView /></ViewSuspense>} />
             <Route path="admin/ingest" element={<ViewSuspense><IngestView /></ViewSuspense>} />
+            <Route path="admin/ingest/mapper" element={<ViewSuspense><IngestMapperView /></ViewSuspense>} />
             {/* E1 hardened-primitives gallery — design/QA surface only.
              * Not gated, intentionally hidden from nav. */}
             <Route path="__ui-docs" element={<ViewSuspense><UiDocsView /></ViewSuspense>} />
