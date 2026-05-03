@@ -182,8 +182,10 @@ async def build_mode():
     test harnesses, monitoring dashboards) that don't have the FE
     bundle's compiled-in env.
     """
-    raw = (os.environ.get("SPIRE_BUILD") or "demo").strip().lower()
-    mode = "operational" if raw == "operational" else "demo"
+    # Default flipped 2026-05-02 — pilot deployments are the common
+    # case. Demo nights set SPIRE_BUILD=demo explicitly.
+    raw = (os.environ.get("SPIRE_BUILD") or "operational").strip().lower()
+    mode = "demo" if raw == "demo" else "operational"
     return {
         "build_mode": mode,
         "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
@@ -212,9 +214,9 @@ async def status():
     return {
         "mode": os.environ.get("SPIRE_MODE", "full"),
         "build_mode": (
-            "operational"
-            if (os.environ.get("SPIRE_BUILD") or "").strip().lower() == "operational"
-            else "demo"
+            "demo"
+            if (os.environ.get("SPIRE_BUILD") or "").strip().lower() == "demo"
+            else "operational"
         ),
         "version": "0.1.0",
         "backend_time_local": datetime.now().isoformat(timespec="seconds"),

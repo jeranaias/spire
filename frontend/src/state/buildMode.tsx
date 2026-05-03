@@ -43,12 +43,16 @@ function readBuildMode(): BuildMode {
   // import.meta.env is only populated under Vite; in a non-Vite
   // context (e.g. a node test harness importing this file), fall
   // back to a process.env read so the helpers stay usable.
+  //
+  // Default flipped 2026-05-02 — pilot deployments are the common
+  // case so the unset default is "operational". Demo nights set
+  // VITE_SPIRE_BUILD=demo explicitly via build arg or Fly secret.
   const viteVal = (typeof import.meta !== "undefined" &&
     (import.meta as any).env?.VITE_SPIRE_BUILD) as string | undefined;
   const procVal =
     typeof process !== "undefined" ? (process as any).env?.SPIRE_BUILD : undefined;
-  const raw = (viteVal ?? procVal ?? "demo").toString().toLowerCase();
-  return raw === "operational" ? "operational" : "demo";
+  const raw = (viteVal ?? procVal ?? "operational").toString().toLowerCase();
+  return raw === "demo" ? "demo" : "operational";
 }
 
 export const BUILD_MODE: BuildMode = readBuildMode();
