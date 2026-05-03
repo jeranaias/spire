@@ -137,7 +137,8 @@ async def ingest_gcss_mc_ecp(request: Request, file: UploadFile = File(...)):
     we wire the merge.
     """
     _require_ingest_enabled()
-    require_user_role(request, allowed=INGEST_ROLES)
+    user = getattr(request.state, "user", None)
+    require_user_role(user, INGEST_ROLES, action="ingest.gcss_mc_ecp")
 
     body = await file.read()
     if len(body) > INGEST_FILE_MAX_BYTES:
