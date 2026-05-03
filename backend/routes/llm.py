@@ -50,6 +50,21 @@ router = APIRouter()
 LLM_PROXY_URL = os.environ.get("SPIRE_LLM_PROXY", "http://127.0.0.1:8095")
 LLM_MODEL = os.environ.get("SPIRE_LLM_MODEL", "llama4-maverick")  # proxy alias for gemma4
 LLM_LOCAL_URL = os.environ.get("SPIRE_LLM_LOCAL", "http://127.0.0.1:11434")
+# Tier-B local model on the duty laptop. e2b is a 5.1B-param Q4_K_M
+# Gemma 4 quant — ~7.6GB resident at runtime + a small KV cache. The
+# 02-MAY-2026 F9 benchmark on Lunar Lake (Core Ultra 7 256V, 32GB
+# RAM) confirmed:
+#   - e2b loads cleanly alongside Vite + Chrome + the SPIRE backend
+#     dataset (~7GB pickle), produces a valid SPIRO tool-call JSON
+#     for the cannib-donor planner prompt at 11.4 tok/s post-load,
+#     and serves the air-gap path correctly.
+#   - e4b (the next size up at 9.6GB on disk) fails to allocate on
+#     this hardware under any normal load — Ollama returns
+#     "memory layout cannot be allocated" whether or not GPU offload
+#     is forced off. The duty laptop class can't host it.
+# Pilots running on heavier boxes (≥64GB) can override via
+# SPIRE_LLM_LOCAL_MODEL=gemma4:e4b. See scripts/bench_local_llm.py
+# for the harness.
 LLM_LOCAL_MODEL = os.environ.get("SPIRE_LLM_LOCAL_MODEL", "gemma4:e2b")
 LLM_TIMEOUT = float(os.environ.get("SPIRE_LLM_TIMEOUT", "30"))
 LLM_MAX_TOKENS = int(os.environ.get("SPIRE_LLM_MAX_TOKENS", "512"))
