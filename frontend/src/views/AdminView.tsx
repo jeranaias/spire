@@ -477,6 +477,7 @@ export function AdminTabs({ active }: { active: AdminTabKey }) {
       {tab("/admin",           "flywheel",  "Training Flywheel",   "Per-engine accuracy + decision outcomes")}
       {tab("/admin/audit",     "audit",     "Audit · SOC View",    "Hash-chained audit log with filters + export")}
       {tab("/admin/economics", "economics", "Inference Economics", "Per-call LLM cost telemetry + 180k-Marine extrapolation")}
+      {tab("/admin/ingest",    "ingest",    "Real-Data Ingest",    "Drop a GCSS-MC export to dry-run + apply")}
     </nav>
   );
 }

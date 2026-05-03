@@ -129,6 +129,13 @@ class Asset:
     allowance_qty: int = 0
     on_hand_qty: int = 0
     last_inventory_date: Optional[date] = None
+    # Stale-asset resolution flag (RD6c). Set by the ECP apply path to
+    # `True` when an asset is in the canonical roster but missing from
+    # the most recent ECP file — surfaces in the operator review queue
+    # so they can confirm removal vs. flag the file as incomplete.
+    # Reset to False once an operator resolves the asset via
+    # /api/ingest/stale/resolve.
+    needs_verification: bool = False
     # Mutable state updated by lifecycle.py each simulated day.
     current_deployment_status: str = ""  # today's effective status (field exercise overrides)
     current_hours: float = 0.0

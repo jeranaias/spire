@@ -74,6 +74,9 @@ const AuditView   = lazyWithRecovery(() => import("./views/admin/AuditView").the
 const ModelRegistryView = lazyWithRecovery(() => import("./views/admin/ModelRegistryView").then((m) => ({ default: m.ModelRegistryView })));
 const ModelDetailView   = lazyWithRecovery(() => import("./views/admin/ModelDetailView").then((m) => ({ default: m.ModelDetailView })));
 const InferenceEconomicsView = lazyWithRecovery(() => import("./views/admin/InferenceEconomicsTab").then((m) => ({ default: m.InferenceEconomicsView })));
+// RD9 — operator-side real-data ingest dropzone. Scoped to
+// data_custodian + security_manager via VIEW_SCOPE.
+const IngestView = lazyWithRecovery(() => import("./views/admin/IngestView").then((m) => ({ default: m.IngestView })));
 // E1 hardened-primitives gallery — design/QA surface for verifying every
 // variant of every primitive renders correctly. Not in role-based nav;
 // reachable only by direct deep link (#/__ui-docs).
@@ -335,6 +338,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="admin/models" element={<ViewSuspense><ModelRegistryView /></ViewSuspense>} />
             <Route path="admin/models/:modelId" element={<ViewSuspense><ModelDetailView /></ViewSuspense>} />
             <Route path="admin/economics" element={<ViewSuspense><InferenceEconomicsView /></ViewSuspense>} />
+            <Route path="admin/ingest" element={<ViewSuspense><IngestView /></ViewSuspense>} />
             {/* E1 hardened-primitives gallery — design/QA surface only.
              * Not gated, intentionally hidden from nav. */}
             <Route path="__ui-docs" element={<ViewSuspense><UiDocsView /></ViewSuspense>} />

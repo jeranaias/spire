@@ -498,6 +498,68 @@ export const api = {
       );
     },
   },
+  // RD9 — operator-side real-data ingest dropzone calls these. Each
+  // upload is dry-run by default (apply=false); the UI displays the
+  // returned preview + token, then re-POSTs with `?apply=1&confirm=`
+  // to actually mutate the canonical dataset.
+  ingest: {
+    status: () =>
+      jsonFetch<{
+        enabled: boolean;
+        adapters: {
+          id: string;
+          name: string;
+          shape: string;
+          expected_columns: string[];
+          writes_to: string;
+          auth_roles: string[];
+        }[];
+      }>("/ingest/status"),
+    ecp: (file: File, opts?: { apply?: boolean; confirm?: string }) => {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const params = new URLSearchParams();
+      if (opts?.apply) params.set("apply", "1");
+      if (opts?.confirm) params.set("confirm", opts.confirm);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      return jsonFetch<EcpUploadResult>(
+        `/ingest/gcss-mc/ecp${qs}`,
+        { method: "POST", body: fd },
+        false,
+      );
+    },
+    util: (file: File, opts?: { apply?: boolean; confirm?: string }) => {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const params = new URLSearchParams();
+      if (opts?.apply) params.set("apply", "1");
+      if (opts?.confirm) params.set("confirm", opts.confirm);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      return jsonFetch<UtilUploadResult>(
+        `/ingest/gcss-mc/util${qs}`,
+        { method: "POST", body: fd },
+        false,
+      );
+    },
+    srHeader: (file: File, opts?: { cm_only?: boolean }) => {
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const params = new URLSearchParams();
+      if (opts?.cm_only === false) params.set("cm_only", "0");
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      return jsonFetch<SrHeaderUploadResult>(
+        `/ingest/gcss-mc/sr-header${qs}`,
+        { method: "POST", body: fd },
+        false,
+      );
+    },
+    listStale: () => jsonFetch<{ stale: StaleAsset[]; count: number }>("/ingest/stale"),
+    resolveStale: (resolutions: { asset_id: string; action: "remove" | "confirm" | "defer"; note?: string }[]) =>
+      jsonFetch<{ counts: Record<string, number>; outcomes: { asset_id: string; action: string; outcome: string }[] }>(
+        "/ingest/stale/resolve",
+        { method: "POST", body: JSON.stringify({ resolutions }) },
+      ),
+  },
   pulse: {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
     riskBoard: (top = 20) => jsonFetch<RiskBoard>(`/pulse/risk-board?top=${top}`),
@@ -933,6 +995,110 @@ export interface StageIngestResult {
     defect_code_trailing_period_normalized: number;
     date_parse_failures: number;
   };
+}
+
+// RD9 — operator-side ingest dropzone result types. The route returns
+// one shape on dry-run (preview + token) and a slightly trimmed shape
+// on apply (counts only).
+export interface EcpUploadResult {
+  report: {
+    rows_total: number;
+    rows_kept: number;
+    rows_with_warnings: number;
+    rows_with_self_hashed_uic: number;
+    rows_with_self_hashed_serial: number;
+    rows_missing_tamcn: number;
+    rows_missing_serial: number;
+    date_parse_failures: number;
+    header_mismatch: boolean;
+    header_missing_columns: string[];
+    header_extra_columns: string[];
+  };
+  rows?: Array<{
+    tamcn: string;
+    nsn: string;
+    serial_number: string;
+    serial_number_source: string;
+    nomenclature: string;
+    owner_uic: string;
+    owner_uic_source: string;
+    allowance_qty: number;
+    on_hand_qty: number;
+    last_inventory_date: string | null;
+    warnings: string[];
+  }>;
+  preview?: {
+    counts: { matched_changed: number; new: number; unchanged: number; stale: number; conflicts: number };
+    matched_changed: { asset_id: string; match_method: string; changes: { field: string; before: unknown; after: unknown }[] }[];
+    new: { tamcn: string; serial_number: string; owner_uic: string; nomenclature: string; reason: string }[];
+    stale: { asset_id: string; serial_number: string; tamcn: string; unit_uic: string; nomenclature: string }[];
+    conflicts: { tamcn: string; serial_number: string; owner_uic: string; candidate_asset_ids: string[]; reason: string }[];
+  };
+  preview_token: string;
+  merge_target: string;
+  applied: boolean;
+  applied_counts?: { matched_changed: number; new: number; unchanged: number; stale: number; conflicts: number };
+}
+
+export interface UtilUploadResult {
+  report: {
+    rows_total: number;
+    rows_kept: number;
+    rows_with_warnings: number;
+    rows_missing_asset_id: number;
+    rows_missing_date: number;
+    rows_with_invalid_readiness: number;
+    rows_with_unknown_source: number;
+    date_parse_failures: number;
+    numeric_parse_failures: number;
+    header_mismatch: boolean;
+    header_missing_columns: string[];
+    header_extra_columns: string[];
+  };
+  preview_counts?: { matched: number; unmatched_rows: number; skipped_assets: number };
+  preview_token: string;
+  merge_target: string;
+  applied: boolean;
+  applied_counts?: { matched: number; unmatched_rows: number; skipped_assets: number };
+}
+
+export interface SrHeaderUploadResult {
+  report: {
+    rows_total: number;
+    rows_kept: number;
+    rows_filtered_pmcs: number;
+    rows_with_warnings: number;
+    defect_code_trailing_period_normalized: number;
+    date_parse_failures: number;
+    unsanitized_field_counts: Record<string, number>;
+    schema_warnings: string[];
+  };
+  preview_rows: Array<{
+    sr_number: string;
+    service_request_type: string;
+    defect_code_primary: string;
+    defect_code_secondary: string;
+    problem_summary: string;
+    echelon_of_maint: string;
+    tamcn: string;
+    priority: string;
+    unit_uic_hashed: string;
+    unit_uic_source: string;
+    warnings: string[];
+  }>;
+  merge_target: string;
+  applied: boolean;
+  applied_pointer: string;
+}
+
+export interface StaleAsset {
+  asset_id: string;
+  serial_number: string;
+  tamcn: string;
+  unit_uic: string;
+  unit_name: string;
+  nomenclature: string;
+  current_status: string;
 }
 
 // Domain endpoints can return an empty-state envelope under stage
