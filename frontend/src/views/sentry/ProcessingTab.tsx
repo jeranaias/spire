@@ -287,21 +287,25 @@ export function ProcessingTab({ ctx }: { ctx: SentryContext }) {
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
-      {/* Subtle CRT scanline overlay across the whole processing view */}
-      <div
-        className="pointer-events-none absolute inset-0 z-10 overflow-hidden opacity-[0.06]"
-        aria-hidden
-      >
+      {/* Page-level CRT scanline overlay is demo theatre — see RecordRow
+       * above for the rationale. Operational pilots watch the queue
+       * without the simulated phosphor sweep. */}
+      <DemoOnly>
         <div
-          className="crt-scan absolute inset-x-0"
-          style={{
-            height: "3px",
-            background:
-              "linear-gradient(90deg, transparent 0%, var(--color-primary) 50%, transparent 100%)",
-            boxShadow: "0 0 20px var(--color-primary), 0 0 40px var(--color-primary)",
-          }}
-        />
-      </div>
+          className="pointer-events-none absolute inset-0 z-10 overflow-hidden opacity-[0.06]"
+          aria-hidden
+        >
+          <div
+            className="crt-scan absolute inset-x-0"
+            style={{
+              height: "3px",
+              background:
+                "linear-gradient(90deg, transparent 0%, var(--color-primary) 50%, transparent 100%)",
+              boxShadow: "0 0 20px var(--color-primary), 0 0 40px var(--color-primary)",
+            }}
+          />
+        </div>
+      </DemoOnly>
 
       {/* CAPCO classification banner — top. Required on every screen
           rendering classified content per DoDM 5200.01. Computed from the
@@ -664,15 +668,22 @@ function RawRecord({ record, isMostRecent }: { record: any; isMostRecent: boolea
           : "border-[var(--color-border)]",
       )}
     >
+      {/* Per-record scan-line + reticle corners are demo theatre. The
+       * engine pass already finished synchronously inside POST
+       * /sentry/process before this tab mounted; the animation below
+       * is a deterministic replay, not live work. Demo nights want
+       * the visual "engagement framing"; pilot operators don't need
+       * a tactical reticle every time SENTRY classifies a row. The
+       * primary-bordered card + the "most recent" highlight stays
+       * in both builds. */}
       {isMostRecent && (
-        <>
+        <DemoOnly>
           <div className="scan-line pointer-events-none absolute inset-x-0 top-0 h-full bg-gradient-to-b from-transparent via-[var(--color-primary)] to-transparent opacity-40" />
-          {/* Reticle corners — tactical engagement framing */}
           <span className="pointer-events-none absolute -left-[2px] -top-[2px] h-2 w-2 border-l border-t border-[var(--color-primary)]" aria-hidden />
           <span className="pointer-events-none absolute -right-[2px] -top-[2px] h-2 w-2 border-r border-t border-[var(--color-primary)]" aria-hidden />
           <span className="pointer-events-none absolute -bottom-[2px] -left-[2px] h-2 w-2 border-b border-l border-[var(--color-primary)]" aria-hidden />
           <span className="pointer-events-none absolute -bottom-[2px] -right-[2px] h-2 w-2 border-b border-r border-[var(--color-primary)]" aria-hidden />
-        </>
+        </DemoOnly>
       )}
       <div className="mb-1 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
         <span className="font-mono">{record.sr_number}</span>

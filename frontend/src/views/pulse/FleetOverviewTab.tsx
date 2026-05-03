@@ -149,12 +149,19 @@ export function FleetOverviewTab() {
           {/* Walkthrough #26 — tooltip explains the 7d delta. */}
           {/* Walkthrough #29 — KPI labels bumped via component default. */}
           {/* Walkthrough #30 — consistent severity-by-threshold tone across all 4. */}
+          {/* Threshold calibration: ≥80% success, ≥65% warning, <65%
+           * danger. The previous 75/85 split tipped 70.7% into red even
+           * though that's "watch" territory, not "fire". Marine MC% in
+           * the 65–80% band is below target but still functional —
+           * yellow signals that without the visual eq of an actual
+           * danger condition. <65% is the floor where readiness is
+           * compromised; that's where red lives. */}
           <MetricCard
             label="Fleet MC"
             value={(hero.fleet_mc_rate * 100).toFixed(1)}
             delta={hero.fleet_mc_delta_7d * 100}
             unit="%"
-            tone={hero.fleet_mc_rate >= 0.85 ? "success" : hero.fleet_mc_rate >= 0.75 ? "warning" : "danger"}
+            tone={hero.fleet_mc_rate >= 0.80 ? "success" : hero.fleet_mc_rate >= 0.65 ? "warning" : "danger"}
             deltaTooltip={`${hero.fleet_mc_delta_7d >= 0 ? "+" : ""}${(hero.fleet_mc_delta_7d * 100).toFixed(1)}% week-over-week (rolling 7-day avg)`}
           />
           <MetricCard
