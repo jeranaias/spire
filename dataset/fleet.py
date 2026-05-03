@@ -13,6 +13,7 @@ import random
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Optional
 
 from config import (
     OPTEMPO,
@@ -115,6 +116,19 @@ class Asset:
     initial_hours: float
     initial_miles: int
     classification_risk: str
+    # GCSS-MC Equipment Custodian Report fields (ECP — RD-track real-data
+    # ingest). These are the unit's allowance + on-hand counts + last
+    # inventory date pulled from the ECP export. The synthetic dataset
+    # generator doesn't populate them yet (defaults are zero / None);
+    # the ECP ingest apply path writes them once a pilot operator drops
+    # in a real ECP file via /api/ingest/gcss-mc/ecp.
+    #
+    # Fields are intentionally per-asset rather than per-unit so the
+    # diff path can attribute changes back to the canonical asset
+    # row. Aggregate per-unit views derive from these by sum.
+    allowance_qty: int = 0
+    on_hand_qty: int = 0
+    last_inventory_date: Optional[date] = None
     # Mutable state updated by lifecycle.py each simulated day.
     current_deployment_status: str = ""  # today's effective status (field exercise overrides)
     current_hours: float = 0.0

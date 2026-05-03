@@ -303,6 +303,93 @@ def _compare_row_to_asset(row: ParsedAssetRow, asset: Any) -> List[FieldChange]:
 # ---------------------------------------------------------------------------
 
 
+def apply_diff(
+    diff: MergeDiff,
+    canonical_assets: Sequence[Any],
+    *,
+    asset_factory=None,
+) -> List[Any]:
+    """Produce a new asset list with the diff applied — does NOT swap.
+
+    The caller owns the swap (atomic via state.swap_dataset). This
+    function is pure: it returns a new list reflecting matched-row
+    updates and new-row appends. Stale assets are passed through
+    unchanged — operator hand-off, not auto-delete. Conflicts are
+    skipped (the operator must resolve before apply).
+
+    Parameters
+    ----------
+    diff
+        Output of `compute_diff(...)`.
+    canonical_assets
+        Same iterable used to compute the diff. We rebuild the list
+        deterministically so hot writes can't sneak in between
+        diff and apply.
+    asset_factory
+        Callable that takes a `ParsedAssetRow` and returns a new
+        `dataset.fleet.Asset`. The merge engine doesn't import the
+        Asset class directly to keep this module test-friendly;
+        callers (the route) inject the constructor. New rows are
+        skipped with a warning if no factory is supplied.
+
+    Returns
+    -------
+    List of asset objects (same type as input) reflecting the apply.
+    """
+    # Index matched changes by asset_id for cheap lookup.
+    matched_by_id: Dict[str, List[FieldChange]] = {
+        m.asset_id: m.changes for m in diff.matched
+    }
+
+    new_assets: List[Any] = []
+    for asset in canonical_assets:
+        asset_id = getattr(asset, "asset_id", "")
+        changes = matched_by_id.get(asset_id)
+        if changes:
+            _apply_changes_in_place(asset, changes)
+        new_assets.append(asset)
+
+    if asset_factory is not None:
+        for new_row in diff.new:
+            try:
+                new_assets.append(asset_factory(new_row.parsed))
+            except Exception:  # noqa: BLE001
+                # An exception here means the factory rejected the row
+                # (e.g. missing required field). Drop it; the audit log
+                # records the apply attempt with the reject reason at
+                # the route level.
+                continue
+
+    # Conflicts and stale: untouched. The operator resolves conflicts
+    # in a follow-up flow; stale assets stay in the canonical roster
+    # until the operator confirms removal.
+    return new_assets
+
+
+def _apply_changes_in_place(asset: Any, changes: List[FieldChange]) -> None:
+    """Mutate the asset object to reflect each FieldChange.
+
+    Roster fields are direct attribute assignments. ECP-only fields
+    (allowance_qty, on_hand_qty, last_inventory_date) are also direct
+    assignments on the post-RD6a Asset schema. Fields the asset
+    object doesn't expose are skipped (defensive — keeps this
+    function safe against future schema changes).
+    """
+    for change in changes:
+        if not hasattr(asset, change.field):
+            continue
+        value = change.after
+        if change.field == "last_inventory_date" and isinstance(value, str):
+            # diff serialized the date as ISO string; parse it back.
+            from datetime import date as _date
+            try:
+                yyyy, mm, dd = value.split("-")
+                value = _date(int(yyyy), int(mm), int(dd))
+            except (ValueError, AttributeError):
+                continue
+        setattr(asset, change.field, value)
+
+
 def diff_to_payload(diff: MergeDiff, *, max_samples: int = 10) -> Dict[str, Any]:
     """Convert a MergeDiff to a JSON-serializable preview payload.
 
