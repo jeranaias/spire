@@ -973,6 +973,12 @@ function PushToJointButton({ role }: { role: Role }) {
     url.hash = "#/joint/preview";
     window.open(url.toString(), "_blank", "noopener,noreferrer");
   }
+  // Demoted to neutral chrome so the bar reads quiet at idle. The
+  // button used to render in primary blue at full saturation, which
+  // pulled the eye away from active-state chips (System, Notif). The
+  // partner push is a tertiary action: visible when allowed, but it
+  // shouldn't shout. Hover lifts the contrast to the prior treatment
+  // so the affordance is still clearly a CTA on dwell.
   return (
     <Button
       variant="secondary"
@@ -980,7 +986,7 @@ function PushToJointButton({ role }: { role: Role }) {
       onClick={openPartner}
       aria-label="Push current SPIRE state to the Joint COP partner viewer (opens in a new tab)"
       title="Push to Joint COP — opens the sister-service OMS/UCI viewer in a new tab"
-      className="hidden xl:inline-flex px-2.5 text-xs tracking-wider border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_18%,var(--color-surface))]"
+      className="hidden xl:inline-flex px-2.5 text-xs tracking-wider border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] hover:text-[var(--color-primary)]"
       leadingIcon={
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M5 12h14" />

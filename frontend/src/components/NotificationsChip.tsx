@@ -185,12 +185,14 @@ export function NotificationsChip() {
           <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
-        {/* Numeric badge — sums alerts and drafts. Shows the urgent
-         * count separately when there are alerts so the operator sees
-         * the situation, not just a sum. */}
+        {/* Numeric badge — sums alerts and drafts. The chip's `tone`
+         * already encodes urgency (red ≥3, orange ≥1, primary on draft
+         * traffic, muted at idle), so the count itself stays plain.
+         * The previous `30!` rendering double-encoded urgency and read
+         * as a permanent alarm even when the alert mix was routine. */}
         <span className="tabular-nums" style={{ color: tone }}>
           {alertCount > 0
-            ? `${alertCount}!${draftsAllowed && draftCount > 0 ? `+${draftCount}` : ""}`
+            ? `${alertCount}${draftsAllowed && draftCount > 0 ? `+${draftCount}` : ""}`
             : draftsAllowed
               ? String(draftCount).padStart(2, "0")
               : "00"}

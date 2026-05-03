@@ -63,7 +63,7 @@ export function AlertCard({ severity, source, title, body, timestamp, onClick, a
   return (
     <div
       className={clsx(
-        "rounded-sm border border-[var(--color-border)] border-l-4 p-3 transition-all",
+        "group rounded-sm border border-[var(--color-border)] border-l-4 p-3 transition-all",
         style,
         onClick && "cursor-pointer hover:border-[var(--color-border-active)]",
       )}
@@ -87,8 +87,13 @@ export function AlertCard({ severity, source, title, body, timestamp, onClick, a
       </div>
       <div className="mb-1 text-sm font-medium text-[var(--color-text)]">{title}</div>
       <div className="text-xs leading-snug text-[var(--color-text-secondary)]">{body}</div>
+      {/* Quieter action affordance. The whole card is already clickable
+       * (cursor-pointer + hover border lift), so the action label is a
+       * cue, not a centerpiece. Demoting from sm/medium/primary to
+       * uppercase mono caption matches the severity row above and stops
+       * the link from competing with the title. */}
       {actionLabel && (
-        <div className="mt-2 text-sm font-medium text-[var(--color-primary)] hover:underline">
+        <div className="mt-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] group-hover:text-[var(--color-primary)]">
           {actionLabel} →
         </div>
       )}
