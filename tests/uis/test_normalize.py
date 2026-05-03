@@ -1,7 +1,11 @@
 """UIS normalize — encoding + headers."""
 from __future__ import annotations
 
-from backend.uis.normalize.encoding import decode_bytes, normalize_text
+from backend.uis.normalize.encoding import (
+    decode_bytes,
+    is_low_confidence_encoding,
+    normalize_text,
+)
 from backend.uis.normalize.headers import (
     canonical_header,
     header_token_set,
@@ -33,7 +37,60 @@ def test_decode_falls_back_to_cp1252():
     raw = b"col1,col2\n\x93value\x94,foo\n"
     text, enc = decode_bytes(raw)
     assert "col1" in text
-    assert enc in {"cp1252", "latin-1"}
+    assert enc in {"cp1252", "latin-1?"} or enc.startswith("charset_normalizer:")
+
+
+def test_decode_utf16_le_with_bom():
+    """Excel "Save as Unicode" emits UTF-16 LE with BOM. Without
+    explicit handling our old chain silently fell through to
+    cp1252 / latin-1 producing garbage."""
+    raw = "TAMCN,SR_NUMBER\nD1196,12345\n".encode("utf-16-le")
+    raw_with_bom = b"\xff\xfe" + raw
+    text, enc = decode_bytes(raw_with_bom)
+    assert text == "TAMCN,SR_NUMBER\nD1196,12345\n"
+    assert enc == "utf-16-le"
+
+
+def test_decode_utf16_be_with_bom():
+    raw = "TAMCN\nD1196\n".encode("utf-16-be")
+    raw_with_bom = b"\xfe\xff" + raw
+    text, enc = decode_bytes(raw_with_bom)
+    assert text == "TAMCN\nD1196\n"
+    assert enc == "utf-16-be"
+
+
+def test_decode_utf16_le_without_bom():
+    """Some exports drop the BOM. Heuristic catches the
+    every-other-byte-zero pattern."""
+    raw = "TAMCN,SR_NUMBER\nD1196,12345\n".encode("utf-16-le")
+    text, enc = decode_bytes(raw)
+    assert text == "TAMCN,SR_NUMBER\nD1196,12345\n"
+    assert enc == "utf-16-le"
+
+
+def test_low_confidence_label_for_latin1_fallback():
+    """When latin-1 fires, we tag with `?` so the pipeline can warn.
+    This is the primary fix: latin-1 silently succeeds on every
+    byte stream so without an explicit signal a UTF-16 file would
+    decode as gibberish with no error."""
+    # Construct bytes that look like none of the strict encodings
+    # but still trigger the latin-1 last-resort branch. \x81 is
+    # undefined in cp1252.
+    raw = b"\x81\x82\x83\x84"
+    text, enc = decode_bytes(raw)
+    # Either charset_normalizer (if installed) wins, or latin-1?
+    # fires. Both surface as low-confidence.
+    assert is_low_confidence_encoding(enc)
+
+
+def test_is_low_confidence_helper():
+    assert is_low_confidence_encoding("latin-1?") is True
+    assert is_low_confidence_encoding("cp1252") is True
+    assert is_low_confidence_encoding("charset_normalizer:big5") is True
+    assert is_low_confidence_encoding("utf-8") is False
+    assert is_low_confidence_encoding("utf-8-sig") is False
+    assert is_low_confidence_encoding("utf-16-le") is False
+    assert is_low_confidence_encoding("utf-16-be") is False
 
 
 def test_normalize_smart_quotes():
