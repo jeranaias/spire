@@ -40,6 +40,11 @@ from ..integrations.pulse_gcss_ecp_merge import (
     compute_diff,
     diff_to_payload,
 )
+from ..integrations.pulse_gcss_util_adapter import (
+    EXPECTED_HEADER_COLUMNS as UTIL_EXPECTED_COLUMNS,
+    apply_latest_readings,
+    parse_util,
+)
 from ..persistence import log as audit_log
 from ..scoping import require_user_role
 from ..state import CanonicalDataset, get_dataset, swap_dataset
@@ -90,6 +95,14 @@ async def ingest_status(request: Request):
                 "shape": "csv",
                 "expected_columns": list(ECP_EXPECTED_COLUMNS),
                 "writes_to": "asset_roster",
+                "auth_roles": sorted(INGEST_ROLES),
+            },
+            {
+                "id": "gcss-mc/util",
+                "name": "GCSS-MC Utilization Extract",
+                "shape": "csv",
+                "expected_columns": list(UTIL_EXPECTED_COLUMNS),
+                "writes_to": "asset_current_hours_miles_status",
                 "auth_roles": sorted(INGEST_ROLES),
             },
         ],
@@ -349,3 +362,128 @@ def _replace_assets(ds: CanonicalDataset, new_assets: List[Any]) -> CanonicalDat
         generated_at=ds.generated_at,
         seed=ds.seed,
     )
+
+
+# ===========================================================================
+# GCSS-MC Utilization extract (RD7)
+# ===========================================================================
+
+
+@router.post("/gcss-mc/util")
+async def ingest_gcss_mc_util(
+    request: Request,
+    file: UploadFile = File(...),
+    apply: bool = Query(False, description="Apply latest readings to canonical assets (default: dry-run)"),
+    confirm: Optional[str] = Query(None, description="Preview token from a prior dry-run"),
+):
+    """Upload + parse one GCSS-MC utilization extract.
+
+    Same dry-run / apply pattern as the ECP route. The merge target
+    here is each Asset's `current_hours / current_miles /
+    current_status` — latest reading per asset wins. Stale readings
+    against assets that no longer exist in the canonical roster are
+    surfaced via `applied_counts.unmatched_rows` so the operator can
+    track upstream feed drift.
+    """
+    _require_ingest_enabled()
+    user = getattr(request.state, "user", None)
+    actor_role = require_user_role(user, INGEST_ROLES, action="ingest.gcss_mc_util")
+    actor_dodid = (user or {}).get("dodid") if isinstance(user, dict) else None
+
+    body = await file.read()
+    if len(body) > INGEST_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({len(body):,} bytes); max is {INGEST_FILE_MAX_BYTES:,} bytes.",
+        )
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File must be UTF-8 text (CSV). Decode failed at byte {e.start}.",
+        )
+
+    preview_token = _file_token(body)
+    rows, report = parse_util(text)
+
+    try:
+        ds = get_dataset()
+        canonical_assets = list(getattr(ds, "assets", []) or [])
+    except Exception:
+        canonical_assets = []
+
+    if not apply:
+        # Dry-run preview: show how many rows would match without
+        # mutating anything. We pass a copy of the asset list to
+        # apply_latest_readings to compute counts; the in-place
+        # mutation is harmless on the copy because the route doesn't
+        # use those copies after.
+        # Only the count summary is returned — full mutation happens
+        # on apply.
+        from copy import copy as _copy
+        preview_assets = [_copy(a) for a in canonical_assets]
+        _, preview_counts = apply_latest_readings(rows, preview_assets)
+        return {
+            "report": _util_report_to_dict(report),
+            "preview_counts": preview_counts,
+            "preview_token": preview_token,
+            "merge_target": "asset_current_hours_miles_status",
+            "applied": False,
+        }
+
+    if confirm != preview_token:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Confirm token mismatch. Re-run the dry-run upload, paste the "
+                "returned `preview_token` into ?confirm=<token>, and try again."
+            ),
+        )
+
+    updated_assets, applied_counts = apply_latest_readings(rows, canonical_assets)
+    new_ds = _replace_assets(ds, updated_assets)
+    swap_dataset(
+        new_ds,
+        source="ingest.util",
+        ingested_by=actor_dodid or actor_role or "ingest",
+        ingest_hash=preview_token,
+    )
+
+    audit_log(
+        kind="ingest.util.apply",
+        actor=actor_dodid or actor_role or "system",
+        subject_id=preview_token,
+        payload={
+            "source": "gcss-mc/util",
+            "preview_token": preview_token,
+            "applied_counts": applied_counts,
+            "filename": file.filename,
+            "actor_role": actor_role,
+        },
+    )
+
+    return {
+        "report": _util_report_to_dict(report),
+        "preview_token": preview_token,
+        "merge_target": "asset_current_hours_miles_status",
+        "applied": True,
+        "applied_counts": applied_counts,
+    }
+
+
+def _util_report_to_dict(report) -> dict:
+    return {
+        "rows_total": report.rows_total,
+        "rows_kept": report.rows_kept,
+        "rows_with_warnings": report.rows_with_warnings,
+        "rows_missing_asset_id": report.rows_missing_asset_id,
+        "rows_missing_date": report.rows_missing_date,
+        "rows_with_invalid_readiness": report.rows_with_invalid_readiness,
+        "rows_with_unknown_source": report.rows_with_unknown_source,
+        "date_parse_failures": report.date_parse_failures,
+        "numeric_parse_failures": report.numeric_parse_failures,
+        "header_mismatch": report.header_mismatch,
+        "header_missing_columns": list(report.header_missing_columns),
+        "header_extra_columns": list(report.header_extra_columns),
+    }
