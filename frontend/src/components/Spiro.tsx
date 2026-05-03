@@ -552,13 +552,14 @@ export function Spiro() {
   }
 
   // Collapsed-pill view — small button on the right edge.
+  //
+  // Quiet idle. The vertical SPIRO tab used to render in primary blue
+  // with a 18% tint, holding the right edge against view content. It's
+  // an opener tab, not a primary control — neutral chrome at idle keeps
+  // the eye on the surface. Hover + active use lift it back to primary
+  // so the affordance is unmistakable.
   if (!open) {
     return (
-      {/* Quiet idle. The vertical SPIRO tab used to render in primary
-       * blue with a 18% tint, holding the right edge against view
-       * content. It's an opener tab, not a primary control — neutral
-       * chrome at idle keeps the eye on the surface. Hover + active
-       * use lift it back to primary so the affordance is unmistakable. */}
       <Pressable
         onClick={() => setOpen(true)}
         block={false}

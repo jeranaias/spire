@@ -361,6 +361,12 @@ function CommsIndicator({
     DISCONNECTED: "var(--color-danger)",
   };
   const c = colors[effective];
+  // Idle CONNECTED state: keep the green dot for at-a-glance posture but
+  // render the text neutral so the footer stops shouting "everything is
+  // fine!" alongside the topbar CommsControl. Degraded states keep
+  // tone-colored text — those ARE real signals.
+  const idleOk = effective === "CONNECTED" && !airGap;
+  const textColor = idleOk ? "var(--color-text-secondary)" : c;
   return (
     <span
       className="flex items-center gap-1.5"
@@ -375,7 +381,7 @@ function CommsIndicator({
         }}
       />
       <span className="text-[var(--color-text-muted)]">COMMS</span>
-      <span className="font-semibold uppercase tracking-wider" style={{ color: c }}>
+      <span className="font-semibold uppercase tracking-wider" style={{ color: textColor }}>
         {airGap ? "AIRGAP" : effective}
       </span>
       {airGap && queueDepth > 0 && (
