@@ -59,6 +59,70 @@ class LlmMappingProposal:
 LlmCaller = Callable[..., Awaitable[Dict[str, Any]]]
 
 
+def _redact_sample_rows(
+    sample_rows: List[Dict[str, str]],
+    adapter: AdapterSpec,
+    column_map_so_far: Dict[str, str],
+) -> List[Dict[str, str]]:
+    """Strip values for source columns whose canonical target is
+    declared sensitive on the AdapterSpec.
+
+    The LLM gets to see the COLUMN NAME of every source col so it
+    can propose mappings, but the VALUES of columns we already know
+    map to sensitive canonical fields are replaced with a fixed
+    redaction placeholder. Without this, a pre-sanitization upload
+    (operator drops a raw export before running it through their
+    sanitization pipeline) would leak clear UICs / serials / SSNs /
+    EDIPIs to the upstream LLM service.
+
+    Note: we can only redact columns that the auto-mapper ALREADY
+    matched to a sensitive canonical target. Columns the LLM is
+    being asked about are by definition unmapped — for those we
+    apply heuristic field-name redaction (any source col whose
+    canonical-form name matches a known sensitive token like
+    SERIAL, UIC, EDIPI, SSN, DODID, NAME) so even unmapped cols
+    that LOOK sensitive get redacted.
+    """
+    if not sample_rows:
+        return sample_rows
+    sensitive_canonical = {
+        c.name for c in adapter.canonical_columns if c.sensitive
+    }
+    sensitive_sources_via_mapping = {
+        src for src, canon in column_map_so_far.items()
+        if canon in sensitive_canonical
+    }
+    # Heuristic redaction for unmapped source cols whose name
+    # contains a known sensitive token. False positives (a column
+    # genuinely named "name" that's not PII) just lose their
+    # sample value — the LLM still sees the column name.
+    sensitive_tokens = (
+        "ssn", "edipi", "dodid", "serial", "name", "uic", "address",
+        "phone", "email", "passport", "license",
+    )
+    from ..normalize.headers import canonical_header
+
+    def is_heuristically_sensitive(col_name: str) -> bool:
+        # Substring match against the canonical-form name catches
+        # variants like Address1, AddressLine, FullName, FirstName,
+        # serialNum, SerialNumber, etc. The token-set approach only
+        # matched whole tokens after underscore-split which missed
+        # Address1 tokenizing as {"address1"}.
+        canon = canonical_header(col_name).lower()
+        return any(tok in canon for tok in sensitive_tokens)
+
+    redacted_rows: List[Dict[str, str]] = []
+    for row in sample_rows:
+        out: Dict[str, str] = {}
+        for src_col, value in row.items():
+            if src_col in sensitive_sources_via_mapping or is_heuristically_sensitive(src_col):
+                out[src_col] = "<redacted>"
+            else:
+                out[src_col] = value
+        redacted_rows.append(out)
+    return redacted_rows
+
+
 def _build_messages(
     adapter: AdapterSpec,
     unmapped_canonical: List[str],
@@ -220,11 +284,20 @@ async def propose_mapping_with_llm(
             return out
 
     out.llm_invoked = True
+    # Redact sensitive cell values before composing the LLM prompt.
+    # The LLM sees source-column NAMES and a redaction placeholder
+    # for sensitive cells, never clear PII. See _redact_sample_rows
+    # for the policy.
+    redacted_rows = _redact_sample_rows(
+        sample_rows or [],
+        adapter,
+        column_map_so_far=base.column_map,
+    )
     messages = _build_messages(
         adapter,
         unmapped_canonical=out.unmapped_canonical,
         unmapped_source=out.unmapped_source,
-        sample_rows=sample_rows or [],
+        sample_rows=redacted_rows,
     )
     try:
         response = await llm_caller(

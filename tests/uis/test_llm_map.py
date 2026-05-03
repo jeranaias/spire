@@ -209,6 +209,75 @@ async def test_llm_with_sample_rows_passes_them_to_caller(ecp_spec):
 
 
 @pytest.mark.asyncio
+async def test_mapped_sensitive_columns_never_sent_to_llm(ecp_spec):
+    """When the auto-mapper has already claimed SERIAL_NUMBER →
+    serial_number, that source column is no longer in unmapped_source
+    so the prompt builder never includes its values. Defense-in-depth:
+    the redaction layer would also catch it, but the primary guard is
+    the prompt itself only looking at unmapped columns."""
+    captured = {}
+    async def stub(*, messages, **kwargs):
+        captured["user_text"] = next(
+            m["content"] for m in messages if m["role"] == "user"
+        )
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    headers = ["TAMCN", "SERIAL_NUMBER", "FooDescription"]
+    sample = [
+        {"TAMCN": "D1196", "SERIAL_NUMBER": "JLTV-001234-clear", "FooDescription": "JLTV"},
+    ]
+    await propose_mapping_with_llm(headers, ecp_spec, sample, llm_caller=stub)
+    user_text = captured.get("user_text", "")
+    # The clear serial value must NOT appear in the prompt
+    assert "JLTV-001234-clear" not in user_text
+    # SERIAL_NUMBER is the source column name; doesn't appear in
+    # unmapped_source either (already mapped) so absent from prompt
+    assert "SERIAL_NUMBER" not in user_text or "<redacted>" in user_text
+
+
+@pytest.mark.asyncio
+async def test_sample_rows_redact_heuristic_sensitive_columns(ecp_spec):
+    """Source columns NOT yet mapped but whose name contains a
+    sensitive token (SSN, EDIPI, DODID, SERIAL, UIC, NAME, ADDRESS)
+    have their values redacted heuristically. Catches the
+    pre-sanitization-upload case."""
+    captured = {}
+    async def stub(*, messages, **kwargs):
+        captured["user_text"] = next(
+            m["content"] for m in messages if m["role"] == "user"
+        )
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    # An unrecognized export — auto-mapper catches nothing — but
+    # has columns whose names match sensitive tokens.
+    headers = ["UnitName", "SSN", "Address1", "RandomCol"]
+    sample = [{
+        "UnitName": "GySgt John Smith",
+        "SSN": "123-45-6789",
+        "Address1": "123 Main St",
+        "RandomCol": "non-sensitive",
+    }]
+    await propose_mapping_with_llm(headers, ecp_spec, sample, llm_caller=stub)
+    user_text = captured.get("user_text", "")
+    assert "John Smith" not in user_text
+    assert "123-45-6789" not in user_text
+    assert "123 Main St" not in user_text
+    # Non-sensitive col passes through
+    assert "non-sensitive" in user_text
+
+
+@pytest.mark.asyncio
+async def test_no_sample_rows_no_redaction_path(ecp_spec):
+    """When sample_rows=None the redaction path is a noop."""
+    async def stub(*, messages, **kwargs):
+        return {"choices": [{"message": {"content": "{}"}}]}
+    headers = ["UnknownCol"]
+    proposal = await propose_mapping_with_llm(headers, ecp_spec, None, llm_caller=stub)
+    # No crash; LLM still gets the column-name hint
+    assert proposal.llm_invoked is True
+
+
+@pytest.mark.asyncio
 async def test_llm_confidence_clamped_to_unit_interval(ecp_spec):
     """If the LLM hallucinates confidence>1 or negative, clamp to [0,1]."""
     headers = ["Description"]
