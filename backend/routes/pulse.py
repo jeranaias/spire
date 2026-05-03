@@ -187,22 +187,27 @@ async def fleet_overview(role: Optional[str] = None):
 def _build_alerts(ds: CanonicalDataset, last_snaps, last_day) -> list[dict]:
     alerts: list[dict] = []
 
-    # Cannibalization matches (fresh events).
-    # Walkthrough #11 — self-cannib (donor and recipient share the same
-    # unit) is a unit-internal motor-pool transfer (INFO + 'self' badge);
-    # cross-unit is MODERATE because parts crossing unit boundaries is a
-    # coordination-worthy signal.
-    # Walkthrough #12 — jitter alert timestamps off the canonical event.
-    for c in sorted(ds.cannib_events, key=lambda x: x.event_date, reverse=True)[:6]:
-        is_self = c.donor_unit == c.recipient_unit
+    # Cannibalization matches (fresh cross-unit events only).
+    #
+    # Self-cannibalization (donor and recipient in the same unit) is a
+    # routine motor-pool transfer — captured in the canonical cannib log
+    # but kept out of the alert feed to avoid inflating the alert count
+    # with INFO-tier rows the operator doesn't have to act on. Cross-
+    # unit cannib remains MODERATE (coordination signal) and we cap at
+    # the 3 most-recent so the feed stays scannable.
+    cross_unit_recent = [
+        c for c in sorted(ds.cannib_events, key=lambda x: x.event_date, reverse=True)
+        if c.donor_unit != c.recipient_unit
+    ][:3]
+    for c in cross_unit_recent:
         alerts.append({
             "id": f"cannib-{c.event_id}",
             "kind": "cannibalization",
-            "severity": "INFO" if is_self else "MODERATE",
-            "scope": "self" if is_self else "cross_unit",
+            "severity": "MODERATE",
+            "scope": "cross_unit",
             "unit": c.recipient_unit,
             "timestamp": _jittered_alert_ts(c.event_date, f"cannib:{c.event_id}"),
-            "title": f"Cannibalization {'(self)' if is_self else 'match'}: {c.recipient_unit} ← {c.donor_unit}",
+            "title": f"Cannibalization match: {c.recipient_unit} ← {c.donor_unit}",
             "body": (
                 f"{c.recipient_asset_id} needs {c.nomenclature}. "
                 f"Donor {c.donor_asset_id} ({c.donor_unit}) has it. {c.readiness_impact_note}"

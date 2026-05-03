@@ -249,21 +249,29 @@ def _compose_raw_alerts(ds) -> list[dict]:
             })
 
     # Cannibalization matches.
-    # Severity heuristic — single-unit cannibalization (donor and recipient
-    # are the same unit) is INFO with a "self" badge; cross-unit is MODERATE
-    # because parts leaving one unit's fleet for another's is a maintenance
-    # signal worth a yellow stripe. Reviewer caught all-INFO under-weighting
-    # cross-unit. Walkthrough also caught all 6 cannib rows displaying as
-    # "00:00Z" because event_date is a date (not datetime); apply the same
-    # _jittered_timestamp the readiness rows use so each event gets a
-    # plausible per-event time within the working day.
-    for ev in sorted(ds.cannib_events, key=lambda e: e.event_date, reverse=True):
-        cross_unit = ev.donor_unit and ev.recipient_unit and ev.donor_unit != ev.recipient_unit
+    #
+    # Volume rule: only the 3 most-recent cross-unit cannib events surface
+    # as alerts. Single-unit (self) cannibalization is a routine motor-pool
+    # transfer that doesn't cross authority boundaries — it's still
+    # captured in the cannib log (PULSE → Cannibalization tab + audit
+    # chain) but emitting one as a top-of-feed alert just inflates the
+    # count without adding signal. Cross-unit cannib IS a coordination
+    # signal (parts moving between unit boundaries) so those still emit;
+    # capping at 3 keeps the alert lane scannable.
+    #
+    # Walkthrough timestamp jitter retained — each event gets a plausible
+    # per-event time within the working day instead of all rendering as
+    # "00:00Z".
+    cross_unit_cannibs = [
+        ev for ev in sorted(ds.cannib_events, key=lambda e: e.event_date, reverse=True)
+        if ev.donor_unit and ev.recipient_unit and ev.donor_unit != ev.recipient_unit
+    ][:3]
+    for ev in cross_unit_cannibs:
         out.append({
             "id": f"pulse-cannib-{ev.event_id}",
             "source": "PULSE",
-            "severity": "MODERATE" if cross_unit else "INFO",
-            "scope": "cross_unit" if cross_unit else "self",
+            "severity": "MODERATE",
+            "scope": "cross_unit",
             "timestamp": _jittered_timestamp(ev.event_date, f"cannib:{ev.event_id}"),
             "title": f"Cannibalization: {ev.recipient_unit} ← {ev.donor_unit}",
             "body": f"{ev.nomenclature} transferred ({ev.asset_pair_body() if hasattr(ev, 'asset_pair_body') else ev.recipient_asset_id + ' from ' + ev.donor_asset_id})",
