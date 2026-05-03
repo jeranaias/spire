@@ -36,6 +36,7 @@ from .routes.gcss_export import router as gcss_export_router
 from .routes.joint import router as joint_router
 from .routes.decision_bridge import router as decision_bridge_router
 from .routes.stage_ingest import router as stage_ingest_router
+from .routes.ingest import router as ingest_router
 from .scoping import (
     BASTION_VIEW_ROLES,
     PULSE_VIEW_ROLES,
@@ -144,6 +145,11 @@ app.include_router(gcss_export_router, prefix="/api/gcss/export", tags=["gcss-ex
 app.include_router(gcss_export_router, prefix="/api/integrations/gcss-mc/export", tags=["gcss-export"])
 app.include_router(joint_router,  prefix="/api/joint",  tags=["joint"])
 app.include_router(decision_bridge_router, prefix="/api/decision-bridge", tags=["decision-bridge"])
+# RD-track real-data ingest (ECP / SR-header / utilization / …).
+# Router itself ships dormant: every write endpoint returns 503 unless
+# SPIRE_INGEST_ENABLED=1 in the environment. The /status probe is open
+# so the frontend can render the right affordance without 503-ing.
+app.include_router(ingest_router, prefix="/api/ingest", tags=["ingest"])
 
 
 # Serve the built frontend bundle at /. Assets land at /assets/*, index.html
