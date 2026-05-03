@@ -52,11 +52,18 @@ const FPCON_COLOR: Record<string, { fg: string; bg: string; flash?: boolean }> =
 
 // Default banner copy — the page-level marking. Reads as a single
 // canonical sentence so a screenshot escaping its chrome still carries
-// the disclaimer (DEMO DATA, NOT FOR OPERATIONAL USE) alongside the
-// classification level. This is the wording adopted in W2 task #28
-// after the auth-splash adversarial review (findings F2 + F12).
-export const DEFAULT_BANNER_TEXT =
-  "UNCLASSIFIED // DEMO DATA // NOT FOR OPERATIONAL USE";
+// the disclaimer alongside the classification level.
+//
+// Build-aware copy: the demo build carries the "DEMO DATA / NOT FOR
+// OPERATIONAL USE" disclaimer (judging panels and stakeholder demos
+// must see this); the operational build carries the standard
+// "UNCLASSIFIED // FOUO" marking that pilot CWOs and SSgts would
+// expect on a live system.
+import { pickByBuild as _pickByBuild } from "../state/buildMode";
+export const DEFAULT_BANNER_TEXT = _pickByBuild({
+  demo: "UNCLASSIFIED // DEMO DATA // NOT FOR OPERATIONAL USE",
+  operational: "UNCLASSIFIED // FOUO",
+});
 
 interface Props {
   // Default "top". The bottom strip omits the FPCON badge (state lives

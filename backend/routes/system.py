@@ -83,6 +83,13 @@ async def _probe_llm_brief() -> dict:
         "max_context": 524288,
         "proxy": proxy,
     }
+    # Honor air-gap pilot mode: if SPIRE_LLM_PRIMARY_DISABLE=1 we
+    # never even probe Tier-A. Saves the connect-timeout cost on
+    # /api/system/status (which polls every few seconds from the FE).
+    if (os.environ.get("SPIRE_LLM_PRIMARY_DISABLE") or "").strip().lower() in ("1", "true", "yes"):
+        info["disabled"] = True
+        info["error"] = "primary disabled (SPIRE_LLM_PRIMARY_DISABLE=1)"
+        return info
     # Cloud-routing aliases that must NEVER appear in SPIRE's public surface.
     # Anything matching these gets dropped from available_models and would be
     # rejected by call_llm_chat() if requested as the model.
@@ -140,6 +147,17 @@ async def _probe_llm_brief() -> dict:
     return info
 
 
+async def _probe_local_brief() -> dict:
+    """Probe the Tier-B local model (Ollama at localhost:11434).
+    Embedded in /api/system/status so the footer can render which
+    tier is currently serving without a second poll cycle."""
+    try:
+        from .llm import _probe_local
+        return await _probe_local()
+    except Exception as e:  # noqa: BLE001
+        return {"reachable": False, "error": str(e)[:160]}
+
+
 def _dataset_fingerprint() -> str:
     """Stable 16-char digest of the current in-memory dataset for status ping."""
     ds = get_dataset()
@@ -154,14 +172,52 @@ def _dataset_fingerprint() -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
+@router.get("/build-mode")
+async def build_mode():
+    """Return the deployment's build posture so the frontend can sync.
+
+    The frontend reads VITE_SPIRE_BUILD at compile time; the backend
+    reads SPIRE_BUILD at runtime. They should match, but this endpoint
+    surfaces the backend value for downstream tools (CLI clients,
+    test harnesses, monitoring dashboards) that don't have the FE
+    bundle's compiled-in env.
+    """
+    # Default flipped 2026-05-02 — pilot deployments are the common
+    # case. Demo nights set SPIRE_BUILD=demo explicitly.
+    raw = (os.environ.get("SPIRE_BUILD") or "operational").strip().lower()
+    mode = "demo" if raw == "demo" else "operational"
+    return {
+        "build_mode": mode,
+        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+
 @router.get("/status")
 async def status():
     ds = get_dataset()
     err = sum(1 for v in ds.violations if v.severity == "error")
     chain = verify_chain()
     llm_probe = await _probe_llm_brief()
+    llm_local = await _probe_local_brief()
+    # active_tier — what call_llm_chat would land on for the next call.
+    # Three-state: 'primary' (RigRun 26B reachable), 'local' (Ollama
+    # E2B reachable + target model loaded), 'rule' (both down →
+    # deterministic fallback). Drives the StatusFooter chip color +
+    # label so operators see when SATCOM goes amber and the laptop
+    # picks up the Tier-2 work.
+    active_tier = (
+        "primary" if llm_probe.get("reachable")
+        else "local" if (llm_local.get("reachable") and llm_local.get("target_loaded"))
+        else "rule"
+    )
+    llm_probe = {**llm_probe, "local": llm_local, "active_tier": active_tier}
     return {
         "mode": os.environ.get("SPIRE_MODE", "full"),
+        "build_mode": (
+            "demo"
+            if (os.environ.get("SPIRE_BUILD") or "").strip().lower() == "demo"
+            else "operational"
+        ),
         "version": "0.1.0",
         "backend_time_local": datetime.now().isoformat(timespec="seconds"),
         "dataset": {

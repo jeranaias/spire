@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useSpireStore } from "../state/store";
+import { DemoOnly } from "../state/buildMode";
 import { Button, IconButton, Pressable } from "./ui";
 import {
   getMapBridge,
@@ -584,9 +585,11 @@ export function Spiro() {
           <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
             ◆ SPIRO · SPIRE Officer · Gemma 4
           </div>
-          <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">
-            Tell SPIRO what you want. SPIRO plans; you approve before anything runs.
-          </div>
+          <DemoOnly>
+            <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">
+              Tell SPIRO what you want. SPIRO plans; you approve before anything runs.
+            </div>
+          </DemoOnly>
         </div>
         <div className="flex items-center gap-1">
           {messages.length > 0 && (
@@ -603,24 +606,26 @@ export function Spiro() {
       {/* Transcript */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3">
         {messages.length === 0 && (
-          <div className="font-mono text-[10px] leading-relaxed text-[var(--color-text-muted)] tracking-wide">
-            <div className="mb-2 text-xs uppercase text-[var(--color-text-secondary)] tracking-widest">
-              Examples · click to use
+          <DemoOnly>
+            <div className="font-mono text-[10px] leading-relaxed text-[var(--color-text-muted)] tracking-wide">
+              <div className="mb-2 text-xs uppercase text-[var(--color-text-secondary)] tracking-widest">
+                Examples · click to use
+              </div>
+              <ul className="flex flex-col gap-1.5">
+                {examplesForRole.map((ex) => (
+                  <li key={ex}>
+                    <Pressable
+                      onClick={() => fillExample(ex)}
+                      className="!min-h-0 block w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-left font-mono text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-bg))] hover:text-[var(--color-text)]"
+                      title="Click to drop this example into the prompt"
+                    >
+                      "{ex}"
+                    </Pressable>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <ul className="flex flex-col gap-1.5">
-              {examplesForRole.map((ex) => (
-                <li key={ex}>
-                  <Pressable
-                    onClick={() => fillExample(ex)}
-                    className="!min-h-0 block w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-left font-mono text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-bg))] hover:text-[var(--color-text)]"
-                    title="Click to drop this example into the prompt"
-                  >
-                    "{ex}"
-                  </Pressable>
-                </li>
-              ))}
-            </ul>
-          </div>
+          </DemoOnly>
         )}
 
         <div className="flex flex-col gap-2.5">

@@ -22,6 +22,7 @@ import { useNavigate } from "react-router-dom";
 import { api, type DatasetInfo } from "../api";
 import { pollWithBackoff } from "../api-retry";
 import { useSpireStore } from "../state/store";
+import { DemoOnly } from "../state/buildMode";
 import { Pressable } from "./ui";
 
 const FPCON_TONE: Record<string, { fg: string; bg: string }> = {
@@ -208,39 +209,39 @@ export function StatusStrip() {
 
         {/* Mission context: collapses to a single-line objective. Click to
          * expand the full CCIR row inline. Sits flush right so the chip
-         * row stays the visual anchor. */}
-        <div className="ml-auto flex min-w-0 items-center gap-2">
-          <span
-            className="hidden font-mono uppercase text-[var(--color-text-muted)] md:inline"
-            style={{ fontSize: "10px", letterSpacing: "var(--tracking-widest)" }}
-          >
-            Mission
-          </span>
-          <Pressable
-            onClick={() => setMissionOpen((v) => !v)}
-            block={false}
-            aria-expanded={missionOpen}
-            aria-controls="status-strip-mission-detail"
-            className="!min-h-0 flex min-w-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-xs text-[var(--color-text)] transition-colors hover:border-[var(--color-border-active)] tracking-wide"
-            title={`${datasetInfo?.installation_name ?? "Camp Henderson"} mission summary · click to expand CCIR + status`}
-          >
-            {/* Walkthrough audit: trailing space inside the bold span so
-             * screen readers + .innerText don't concatenate "PROTECTIONCamp"
-             * (the previous ml-2 gave only visual separation, no character
-             * boundary). */}
-            <span className="truncate">
-              <span className="font-semibold uppercase tracking-widest text-[var(--color-text-secondary)]">
-                {datasetInfo?.mission_essential_task ?? "BASE DEFENSE / FORCE PROTECTION"}{" "}
-              </span>
-              <span className="ml-2 text-[var(--color-text-muted)]">
-                {datasetInfo?.installation_name ?? "Camp Henderson"} · {datasetInfo?.parent_command ?? "2d MLG"}
-              </span>
+         * row stays the visual anchor. Demo-only — operational hides
+         * the canned BASE DEFENSE/FORCE PROTECTION pill since real
+         * mission posture comes from orders/TMR, not a UI chip. */}
+        <DemoOnly>
+          <div className="ml-auto flex min-w-0 items-center gap-2">
+            <span
+              className="hidden font-mono uppercase text-[var(--color-text-muted)] md:inline"
+              style={{ fontSize: "10px", letterSpacing: "var(--tracking-widest)" }}
+            >
+              Mission
             </span>
-            <span aria-hidden className="text-[var(--color-text-muted)]">
-              {missionOpen ? "▴" : "▾"}
-            </span>
-          </Pressable>
-        </div>
+            <Pressable
+              onClick={() => setMissionOpen((v) => !v)}
+              block={false}
+              aria-expanded={missionOpen}
+              aria-controls="status-strip-mission-detail"
+              className="!min-h-0 flex min-w-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-xs text-[var(--color-text)] transition-colors hover:border-[var(--color-border-active)] tracking-wide"
+              title={`${datasetInfo?.installation_name ?? "Camp Henderson"} mission summary · click to expand CCIR + status`}
+            >
+              <span className="truncate">
+                <span className="font-semibold uppercase tracking-widest text-[var(--color-text-secondary)]">
+                  {datasetInfo?.mission_essential_task ?? "BASE DEFENSE / FORCE PROTECTION"}{" "}
+                </span>
+                <span className="ml-2 text-[var(--color-text-muted)]">
+                  {datasetInfo?.installation_name ?? "Camp Henderson"} · {datasetInfo?.parent_command ?? "2d MLG"}
+                </span>
+              </span>
+              <span aria-hidden className="text-[var(--color-text-muted)]">
+                {missionOpen ? "▴" : "▾"}
+              </span>
+            </Pressable>
+          </div>
+        </DemoOnly>
       </div>
 
       {missionOpen && (

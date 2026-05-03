@@ -4,6 +4,7 @@ import { api, type MarkResult, type MarkExplainResult, type SentryBulkMarkRow } 
 import { formatApiError } from "../../api-retry";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useSpireStore } from "../../state/store";
+import { DemoOnly } from "../../state/buildMode";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Pressable } from "../../components/ui";
 import { ClassifiedExport } from "../../components/classification";
@@ -273,25 +274,28 @@ export function MarkTab() {
       )}
       <div className="flex w-1/2 flex-col overflow-y-auto border-r border-[var(--color-border)] p-4">
         <h2 className="mb-1 text-sm font-semibold">Upstream marking — recommend before release</h2>
-        <div className="mb-4 text-xs text-[var(--color-text-muted)]">
-          {/* Walkthrough #32 — operator-readable copy, no engine jargon. */}
-          Paste a paragraph, remark, or draft section. The pattern engine returns a recommended
-          classification and caveat set per DoDM 5200.01. Recommendations refresh automatically
-          as you type or change release authority.
-        </div>
+        <DemoOnly>
+          <div className="mb-4 text-xs text-[var(--color-text-muted)]">
+            Paste a paragraph, remark, or draft section. The pattern engine returns a recommended
+            classification and caveat set per DoDM 5200.01. Recommendations refresh automatically
+            as you type or change release authority.
+          </div>
+        </DemoOnly>
 
-        <div className="mb-2 flex flex-wrap gap-2">
-          {SAMPLES.map((s) => (
-            <Pressable
-              key={s.label}
-              onClick={() => loadSample(s.text)}
-              block={false}
-              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
-            >
-              {s.label}
-            </Pressable>
-          ))}
-        </div>
+        <DemoOnly>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {SAMPLES.map((s) => (
+              <Pressable
+                key={s.label}
+                onClick={() => loadSample(s.text)}
+                block={false}
+                className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]"
+              >
+                {s.label}
+              </Pressable>
+            ))}
+          </div>
+        </DemoOnly>
 
         <textarea
           ref={textareaRef}
