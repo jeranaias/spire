@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { TopBar } from "./components/TopBar";
 import { StatusFooter } from "./components/StatusFooter";
 import { StatusStrip } from "./components/StatusStrip";
@@ -259,6 +259,14 @@ export default function App() {
   useFailsafeHotkey();
   useStageResetHotkey();
 
+  // Decision Bridge already shows MC%, FPCON, comms, and alert counts in
+  // its tile grid — duplicating them in the StatusStrip above pushes the
+  // tiles down and makes the page look busy without adding signal. Skip
+  // the strip on `/` and let the bridge be the at-a-glance surface it's
+  // designed to be. Every other route still gets the strip.
+  const location = useLocation();
+  const showStatusStrip = location.pathname !== "/";
+
   return (
     <div className="flex h-full flex-col overflow-x-hidden">
       {/* WCAG 2.4.1 Bypass Blocks — first focusable element on the page.
@@ -273,7 +281,7 @@ export default function App() {
        * shows the disclaimer top + bottom. */}
       <ClassificationBannerStrip position="top" showFpcon />
       <TopBar />
-      <StatusStrip />
+      {showStatusStrip && <StatusStrip />}
       <main
         id="main"
         role="main"
