@@ -326,6 +326,20 @@ export default function App() {
        * presenter opens it (via the Failsafe button on /demo or /pitch,
        * or the F9 hotkey). Mounted at the shell so it covers any view. */}
       <FailsafePlayer />
+      {/* Build-mode watermark — pinned to the corner so screenshots and
+       * recordings unambiguously show whether they were captured against
+       * a demo or operational build. Sits behind interactive chrome
+       * (z=20) and below the classification bands (z=60+) so it never
+       * intercepts clicks or hides marking. Only renders in demo. */}
+      <DemoOnly>
+        <div
+          aria-hidden
+          className="pointer-events-none fixed bottom-2 right-2 z-20 select-none rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)]/70 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]"
+          title="This build was started with VITE_SPIRE_BUILD=demo. Operational deployments do not show this watermark."
+        >
+          DEMO BUILD
+        </div>
+      </DemoOnly>
     </div>
   );
 }
