@@ -350,15 +350,25 @@ def apply_diff(
         new_assets.append(asset)
 
     if asset_factory is not None:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
         for new_row in diff.new:
             try:
                 new_assets.append(asset_factory(new_row.parsed))
-            except Exception:  # noqa: BLE001
-                # An exception here means the factory rejected the row
-                # (e.g. missing required field). Drop it; the audit log
-                # records the apply attempt with the reject reason at
-                # the route level.
-                continue
+            except Exception as e:  # noqa: BLE001
+                # The factory rejected the row (typically a missing
+                # required field after coercion). Log at WARN so the
+                # backend operator can grep stderr / journalctl when
+                # they wonder why a "diff said 100 new" but only "92
+                # new applied" happened. The route-level audit entry
+                # carries the diff counts; this log gives per-row
+                # visibility for debugging.
+                _log.warning(
+                    "apply_diff: asset_factory rejected row tamcn=%r serial=%r reason=%s",
+                    getattr(new_row.parsed, "tamcn", ""),
+                    getattr(new_row.parsed, "serial_number", ""),
+                    str(e)[:200],
+                )
 
     # Conflicts and stale: untouched. The operator resolves conflicts
     # in a follow-up flow; stale assets stay in the canonical roster
