@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS uis_channels (
 """
 
 
+# Versioned migrations for uis_channels. Append new entries; never
+# edit a published version. The migration runner skips already-
+# applied versions tracked in uis_schema_migrations.
+CHANNELS_MIGRATIONS = [
+    # (version, sql)
+    # v1 is the initial CREATE — covered by CHANNELS_SCHEMA above
+    # via ensure_schema(). Migrations start at v2 for additive
+    # changes.
+    # Example (uncomment when needed):
+    # (2, "ALTER TABLE uis_channels ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"),
+]
+
+
 @dataclass
 class ChannelConfig:
     """Persisted channel-config row.
@@ -95,10 +108,14 @@ def reset_connection_factory() -> None:
 
 
 def ensure_schema() -> None:
-    """Create the uis_channels table if it doesn't exist."""
+    """Create the uis_channels table if it doesn't exist + apply
+    any pending migrations from CHANNELS_MIGRATIONS."""
     with _factory() as c:
         c.execute(CHANNELS_SCHEMA)
         c.commit()
+    if CHANNELS_MIGRATIONS:
+        from ..migrations import apply_migrations
+        apply_migrations(_factory, "uis_channels", CHANNELS_MIGRATIONS)
 
 
 # ---------------------------------------------------------------------------

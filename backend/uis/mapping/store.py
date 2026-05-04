@@ -101,11 +101,25 @@ CREATE INDEX IF NOT EXISTS idx_uis_profiles_unit ON uis_mapping_profiles(unit);
 """
 
 
+# Versioned migrations for uis_mapping_profiles. Append new
+# entries; never edit a published version.
+PROFILES_MIGRATIONS = [
+    # (version, sql)
+    # v1 is the initial CREATE; future ALTER TABLE ADD COLUMN
+    # changes go here. Example:
+    # (2, "ALTER TABLE uis_mapping_profiles ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"),
+]
+
+
 def ensure_schema() -> None:
-    """Apply the profiles schema. Idempotent. Call once at startup
-    if you're using the UIS package outside of backend/."""
+    """Apply the profiles schema + any pending migrations.
+    Idempotent. Call once at startup if you're using the UIS
+    package outside of backend/."""
     with conn() as c:
         c.executescript(PROFILES_SCHEMA)
+    if PROFILES_MIGRATIONS:
+        from ..migrations import apply_migrations
+        apply_migrations(conn, "uis_mapping_profiles", PROFILES_MIGRATIONS)
 
 
 def _row_to_profile(row) -> MappingProfile:
