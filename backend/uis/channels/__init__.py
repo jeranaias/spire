@@ -18,6 +18,9 @@ Available channel types
   even when MS Graph is gated.
 * **http_poll** — REST/SOAP polling for systems without file
   export (GCSS-MC SOAP web services, REST APIs).
+* **db_cdc** — watermark-polling change data capture. Direct DB
+  access to source systems (sqlite for tests/small stores, plus
+  Postgres / Oracle / MySQL via their respective drivers).
 
 Adding a new channel = drop a class implementing IngestChannel,
 register it, import the module here for the side-effect.
@@ -35,6 +38,7 @@ from .base import (
     register_channel,
     unregister_channel,
 )
+from .db_cdc import DbCdcChannel
 from .filesystem import FilesystemChannel
 from .http_poll import HttpPollChannel
 from .imap import IMAPChannel
@@ -61,6 +65,7 @@ __all__ = [
     "SFTPChannel",
     "IMAPChannel",
     "HttpPollChannel",
+    "DbCdcChannel",
     "poll_channel",
     "PollResult",
     "FileResult",
