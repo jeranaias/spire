@@ -270,6 +270,37 @@ def test_max_files_caps_per_cycle(fs_channel, audit_capture, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_byte_cap_quarantines_oversized_file(fs_channel, audit_capture, tmp_path, monkeypatch):
+    """UIS-P4.8 — files larger than SPIRE_UIS_MAX_FILE_BYTES are
+    quarantined post-fetch with a clear `file_size_exceeds_cap`
+    reason. Protects against single-file OOM regardless of channel
+    type. Default cap is 256MB; tests use a tiny override."""
+    monkeypatch.setenv("SPIRE_UIS_MAX_FILE_BYTES", "100")  # 100 bytes
+    big_body = b"x" * 1000
+    _drop_ecp(tmp_path, "huge.csv", big_body)
+
+    result = poll_channel(fs_channel)
+    fr = result.file_results[0]
+    assert fr.status == "quarantined"
+    assert "file_size_exceeds_cap" in fr.error
+    assert (tmp_path / "quarantine" / "huge.csv").exists()
+    quar = [e for e in audit_capture if e["kind"] == "channel.quarantined"]
+    assert quar
+    assert quar[0]["payload"]["max_bytes"] == 100
+
+
+def test_byte_cap_default_passes_normal_files(fs_channel, audit_capture, tmp_path):
+    """Without env override, the 256MB default lets normal-sized
+    files through cleanly."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    _drop_ecp(tmp_path, "normal.csv", body)
+    result = poll_channel(fs_channel)
+    assert result.file_results[0].status == "applied"
+
+
 @pytest.mark.asyncio
 async def test_scheduler_polls_at_interval(fs_channel, tmp_path, audit_capture):
     import asyncio

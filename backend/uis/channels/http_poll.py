@@ -279,6 +279,12 @@ class HttpPollChannel:
             cert=cert,
             auth=auth,
         ) as client:
+            # Pre-flight HEAD to check Content-Length when we can
+            # — fail-fast before downloading a 10GB response into
+            # memory. Some servers don't support HEAD or omit
+            # Content-Length on dynamic responses; in that case
+            # the runner's post-fetch byte-cap is the safety net.
+            self._preflight_size_check(client, url, headers)
             resp = client.request(
                 method=self.method,
                 url=url,
@@ -333,6 +339,31 @@ class HttpPollChannel:
                 return None
             return _walk_jsonpath(doc, self.watermark_jsonpath)
         return None
+
+    def _preflight_size_check(self, client, url, headers) -> None:
+        """Optional HEAD request — if the server reports
+        Content-Length above the channel's byte cap, raise BEFORE
+        downloading the body. Best-effort: HEAD-not-supported or
+        Content-Length-omitted just falls through to the runner's
+        post-fetch cap."""
+        # Read the cap from the same env knob the runner uses
+        try:
+            max_bytes_raw = (os.environ.get("SPIRE_UIS_MAX_FILE_BYTES") or "").strip()
+            max_bytes = int(max_bytes_raw) if max_bytes_raw else 256 * 1024 * 1024
+        except ValueError:
+            max_bytes = 256 * 1024 * 1024
+        try:
+            head_resp = client.request(
+                method="HEAD", url=url, headers=headers,
+            )
+            cl = int(head_resp.headers.get("Content-Length") or 0)
+        except Exception:
+            return
+        if cl > 0 and cl > max_bytes:
+            raise RuntimeError(
+                f"HttpPollChannel {self.channel_id}: declared Content-Length "
+                f"{cl:,} exceeds cap {max_bytes:,} (SPIRE_UIS_MAX_FILE_BYTES)"
+            )
 
     def _build_auth_into_headers(self, headers: Dict[str, str]):
         """Resolve auth at request time. Bearer tokens get injected

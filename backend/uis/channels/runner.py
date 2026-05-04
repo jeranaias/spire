@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -47,6 +48,27 @@ from .resilience import (
 
 
 log = logging.getLogger(__name__)
+
+
+# Hard cap on bytes per fetched file. Enforced after the bytes
+# come back from the channel — protects against single-file OOM
+# regardless of channel type. The pipeline's row-cap is in
+# addition to (not a substitute for) this byte-cap: a 5GB
+# single-line JSON has zero rows from a row-counter perspective
+# but still OOMs the box. Default 256MB matches the route-level
+# upload limit; override via SPIRE_UIS_MAX_FILE_BYTES.
+DEFAULT_MAX_FILE_BYTES = 256 * 1024 * 1024
+
+
+def _max_file_bytes() -> int:
+    raw = (os.environ.get("SPIRE_UIS_MAX_FILE_BYTES") or "").strip()
+    if not raw:
+        return DEFAULT_MAX_FILE_BYTES
+    try:
+        n = int(raw)
+        return n if n > 0 else DEFAULT_MAX_FILE_BYTES
+    except ValueError:
+        return DEFAULT_MAX_FILE_BYTES
 
 
 @dataclass
@@ -312,6 +334,33 @@ def _process_one(
         return file_result
 
     file_result.bytes_read = len(body)
+
+    # 1a. Byte cap — protects against single-file OOM. A 5GB
+    # JSONL single-line, a 2GB XML doc, an unbounded HTTP body,
+    # an oversized email attachment all land in quarantine here
+    # rather than tipping the backend over.
+    max_bytes = _max_file_bytes()
+    if file_result.bytes_read > max_bytes:
+        reason = (
+            f"file_size_exceeds_cap: {file_result.bytes_read:,} bytes > "
+            f"{max_bytes:,} (SPIRE_UIS_MAX_FILE_BYTES)"
+        )
+        _safe_quarantine(channel, pending, reason)
+        file_result.status = "quarantined"
+        file_result.error = reason
+        file_result.duration_ms = round((time.perf_counter() - file_started) * 1000.0, 2)
+        _emit_audit(
+            kind="channel.quarantined",
+            actor=actor,
+            subject_id=channel.channel_id,
+            payload={
+                "filename": pending.filename,
+                "reason": reason,
+                "bytes_read": file_result.bytes_read,
+                "max_bytes": max_bytes,
+            },
+        )
+        return file_result
 
     # 1b. File integrity verify — channel may have surfaced a
     # declared sha256 (sidecar file, HTTP header, mailbox subject
