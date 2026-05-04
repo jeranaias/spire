@@ -552,12 +552,39 @@ async def uis_update_profile(profile_id: str, request: Request, payload: dict = 
         adapter = get_adapter(existing.source_id)
     except KeyError:
         raise HTTPException(status_code=500, detail="adapter for stored profile no longer registered")
+    # UIS-32 — mirror the same validation gauntlet as create_profile.
+    # Without it, a clean POSTed profile could be PUT into an invalid
+    # state (empty keys silently drop at apply, duplicate targets
+    # produce a "last write wins" surprise on the canonical row).
+    empty_keys = [k for k in column_map.keys() if not str(k).strip()]
+    if empty_keys:
+        raise HTTPException(
+            status_code=400,
+            detail="column_map has empty source-side keys; every key must be a non-blank source column name.",
+        )
+    empty_targets = [
+        f"{k!r}" for k, v in column_map.items() if not str(v).strip()
+    ]
+    if empty_targets:
+        raise HTTPException(
+            status_code=400,
+            detail=f"column_map has empty canonical targets for keys {empty_targets}.",
+        )
     canonical_fields = set(adapter.field_names())
     bad_targets = [v for v in column_map.values() if v not in canonical_fields]
     if bad_targets:
         raise HTTPException(
             status_code=400,
             detail=f"column_map targets not in adapter spec: {sorted(set(bad_targets))}",
+        )
+    target_counts: Dict[str, int] = {}
+    for v in column_map.values():
+        target_counts[v] = target_counts.get(v, 0) + 1
+    dupes = [k for k, v in target_counts.items() if v > 1]
+    if dupes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"column_map has duplicate canonical targets: {sorted(dupes)}",
         )
 
     existing.column_map = {str(k): str(v) for k, v in column_map.items()}
