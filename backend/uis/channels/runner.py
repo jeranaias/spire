@@ -569,12 +569,26 @@ def _process_one(
 
     try:
         apply_result = writer.apply(writer_diff, ds)
-        swap_dataset(
-            apply_result.new_dataset,
-            source=f"channel.{channel.channel_id}",
-            ingested_by=actor,
-            ingest_hash=file_result.file_sha256[:16],
-        )
+        # P6.10 — two-phase audited swap. The runner is unattended,
+        # so process-death-mid-swap is the realistic case here.
+        # Orphaned attempt entries surface for operator review.
+        from ..audited_swap import audited_swap
+        with audited_swap(
+            kind=f"channel.apply.{channel.channel_id}",
+            actor=actor,
+            subject_id=file_result.file_sha256[:16] or pending.filename,
+            payload={
+                "channel_id": channel.channel_id,
+                "filename": pending.filename,
+                "counts": apply_result.summary_counts,
+            },
+        ):
+            swap_dataset(
+                apply_result.new_dataset,
+                source=f"channel.{channel.channel_id}",
+                ingested_by=actor,
+                ingest_hash=file_result.file_sha256[:16],
+            )
     except Exception as e:  # noqa: BLE001
         reason = f"writer_apply_failed: {str(e)[:300]}"
         _safe_quarantine(channel, pending, reason)

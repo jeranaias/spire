@@ -52,6 +52,7 @@ from ..state import CanonicalDataset, get_dataset, swap_dataset
 
 # UIS pipeline — the new universal ingest path that all routes share.
 from ..uis.adapters import get_adapter
+from ..uis.audited_swap import audited_swap
 from ..uis.pipeline import PipelineRowLimitExceeded, run_pipeline
 from ..uis.route_helpers import (
     map_pipeline_report_to_ecp_legacy,
@@ -422,15 +423,10 @@ async def ingest_gcss_mc_ecp(
     # the swap_dataset call and audit fan-out so the side effects
     # remain testable + colocated with auth context.
     apply_result = writer.apply(writer_diff, ds)
-    swap_dataset(
-        apply_result.new_dataset,
-        source="ingest.ecp",
-        ingested_by=actor_dodid or actor_role or "ingest",
-        ingest_hash=preview_token,
-    )
-
     counts = apply_result.summary_counts
-    audit_log(
+    # P6.10 — two-phase audited swap. attempt + commit pair so
+    # process-death-mid-swap is detectable rather than silent.
+    with audited_swap(
         kind="ingest.ecp.apply",
         actor=actor_dodid or actor_role or "system",
         subject_id=preview_token,
@@ -441,7 +437,13 @@ async def ingest_gcss_mc_ecp(
             "filename": file.filename,
             "actor_role": actor_role,
         },
-    )
+    ):
+        swap_dataset(
+            apply_result.new_dataset,
+            source="ingest.ecp",
+            ingested_by=actor_dodid or actor_role or "ingest",
+            ingest_hash=preview_token,
+        )
     for row_audit in apply_result.audit_rows:
         audit_log(
             kind=row_audit["kind"],
@@ -608,14 +610,8 @@ async def ingest_gcss_mc_util(
         )
 
     apply_result = writer.apply(writer_diff, ds)
-    swap_dataset(
-        apply_result.new_dataset,
-        source="ingest.util",
-        ingested_by=actor_dodid or actor_role or "ingest",
-        ingest_hash=preview_token,
-    )
-
-    audit_log(
+    # P6.10 — two-phase audited swap.
+    with audited_swap(
         kind="ingest.util.apply",
         actor=actor_dodid or actor_role or "system",
         subject_id=preview_token,
@@ -626,7 +622,13 @@ async def ingest_gcss_mc_util(
             "filename": file.filename,
             "actor_role": actor_role,
         },
-    )
+    ):
+        swap_dataset(
+            apply_result.new_dataset,
+            source="ingest.util",
+            ingested_by=actor_dodid or actor_role or "ingest",
+            ingest_hash=preview_token,
+        )
 
     return {
         "report": legacy_report,
