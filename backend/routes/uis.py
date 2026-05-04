@@ -49,7 +49,7 @@ from ..uis.mapping import (
 )
 from ..uis.mapping.llm_map import propose_mapping_with_llm
 from ..uis.normalize import decode_bytes, normalize_text
-from ..uis.pipeline import PipelineRowLimitExceeded, run_pipeline
+from ..uis.pipeline import ALLOWED_CELL_TRANSFORMS, PipelineRowLimitExceeded, run_pipeline
 
 
 log = logging.getLogger(__name__)
@@ -478,6 +478,52 @@ def _profile_to_dict(p: MappingProfile) -> dict:
     return p.to_dict()
 
 
+def _validate_cell_transforms(
+    cell_transforms: Any,
+    canonical_fields: set,
+) -> Dict[str, str]:
+    """UIS-36 — validate the optional cell_transforms dict.
+
+    Each key must be a known canonical field on the adapter; each
+    value must be a recognized transform id. Returns the cleaned
+    dict (empty when not provided). Raises HTTPException(400) on
+    any violation so a malformed POST/PUT is rejected before the
+    profile lands in SQLite — saved garbage is much harder to
+    diagnose than a 400 at the boundary.
+    """
+    if cell_transforms is None or cell_transforms == {}:
+        return {}
+    if not isinstance(cell_transforms, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="cell_transforms must be a dict of canonical_field → transform_id",
+        )
+    bad_fields = [
+        k for k in cell_transforms.keys() if k not in canonical_fields
+    ]
+    if bad_fields:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"cell_transforms keys not in adapter spec: {sorted(bad_fields)}. "
+                f"Each key must be a canonical field name."
+            ),
+        )
+    bad_ids = [
+        v for v in cell_transforms.values()
+        if v not in ALLOWED_CELL_TRANSFORMS
+    ]
+    if bad_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"cell_transforms ids not recognized: {sorted(set(bad_ids))}. "
+                f"Allowed: {sorted(ALLOWED_CELL_TRANSFORMS)}."
+            ),
+        )
+    return {str(k): str(v) for k, v in cell_transforms.items()}
+
+
 @router.get("/profiles")
 async def uis_list_profiles(
     request: Request,
@@ -571,6 +617,10 @@ async def uis_create_profile(request: Request, payload: dict = Body(...)):
             detail=f"column_map has duplicate canonical targets: {sorted(dupes)}",
         )
 
+    cell_transforms = _validate_cell_transforms(
+        payload.get("cell_transforms"), canonical_fields,
+    )
+
     confirmed_at = _utc_iso() if payload.get("confirm") else None
     profile = MappingProfile(
         profile_id=profile_id,
@@ -578,7 +628,7 @@ async def uis_create_profile(request: Request, payload: dict = Body(...)):
         unit=(payload.get("unit") or None) or None,
         source_version=(payload.get("source_version") or None) or None,
         column_map={str(k): str(v) for k, v in column_map.items()},
-        cell_transforms=dict(payload.get("cell_transforms") or {}),
+        cell_transforms=cell_transforms,
         operator_notes=(payload.get("operator_notes") or "").strip(),
         created_by=actor_dodid or "",
         created_at=_utc_iso(),
@@ -655,6 +705,11 @@ async def uis_update_profile(profile_id: str, request: Request, payload: dict = 
         raise HTTPException(
             status_code=400,
             detail=f"column_map has duplicate canonical targets: {sorted(dupes)}",
+        )
+
+    if "cell_transforms" in payload:
+        existing.cell_transforms = _validate_cell_transforms(
+            payload.get("cell_transforms"), canonical_fields,
         )
 
     existing.column_map = {str(k): str(v) for k, v in column_map.items()}

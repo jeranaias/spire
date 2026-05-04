@@ -365,6 +365,78 @@ def test_duplicate_header_xlsx_rejected():
     assert any(w.code == "duplicate_header_columns" for w in result.warnings)
 
 
+def test_cell_transforms_override_field_type_per_profile():
+    """UIS-36 — saved profile can override the adapter's declared
+    transform for a canonical field. Use case: ECP adapter's
+    `last_inventory_date` is `date_oracle` (`12-MAR-26`), but a
+    different export from the same source system uses Excel
+    serial dates (`45728`). Profile transform override means we
+    don't need a separate adapter.
+    """
+    from backend.uis.mapping.profile import MappingProfile
+    profile = MappingProfile(
+        profile_id="test/excel-dates",
+        source_id="gcss-mc/ecp",
+        unit="3d MLR",
+        column_map={
+            "TAMCN": "tamcn",
+            "NSN": "nsn",
+            "SERIAL_NUMBER": "serial_number",
+            "NOMENCLATURE": "nomenclature",
+            "OWNER_UIC": "owner_uic",
+            "ALLOWANCE_QTY": "allowance_qty",
+            "ON_HAND_QTY": "on_hand_qty",
+            "LAST_INVENTORY_DATE": "last_inventory_date",
+        },
+        cell_transforms={"last_inventory_date": "date_excel"},
+        confirmed_at="2026-04-01T00:00:00+00:00",
+        confidence=1.0,
+    )
+    # 45728 = 2025-03-12 in Excel-1900 epoch. Pipeline must use the
+    # override, not the adapter's default `date_oracle`.
+    raw = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,45728"
+    )
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"), profile=profile)
+    assert result.report.rows_kept == 1
+    assert result.rows[0]["last_inventory_date"] == date(2025, 3, 12)
+
+
+def test_cell_transforms_unknown_id_silently_filtered():
+    """If the saved profile has a stale / unrecognized transform_id
+    (e.g. someone hand-edited SQLite, or schema drift), the
+    pipeline filters it out and falls back to the adapter's default
+    rather than crashing on the unknown id."""
+    from backend.uis.mapping.profile import MappingProfile
+    profile = MappingProfile(
+        profile_id="test/bad-override",
+        source_id="gcss-mc/ecp",
+        unit="3d MLR",
+        column_map={
+            "TAMCN": "tamcn",
+            "NSN": "nsn",
+            "SERIAL_NUMBER": "serial_number",
+            "NOMENCLATURE": "nomenclature",
+            "OWNER_UIC": "owner_uic",
+            "ALLOWANCE_QTY": "allowance_qty",
+            "ON_HAND_QTY": "on_hand_qty",
+            "LAST_INVENTORY_DATE": "last_inventory_date",
+        },
+        cell_transforms={"last_inventory_date": "totally_made_up"},
+        confirmed_at="2026-04-01T00:00:00+00:00",
+        confidence=1.0,
+    )
+    raw = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"), profile=profile)
+    # Falls back to adapter's date_oracle, parses fine
+    assert result.report.rows_kept == 1
+    assert result.rows[0]["last_inventory_date"] == date(2026, 3, 12)
+
+
 def test_profile_orphan_key_surfaces_warning_and_unmapped_canonical():
     """UIS-35 — when a saved profile references a source column
     missing from the current file (export schema drift), the
