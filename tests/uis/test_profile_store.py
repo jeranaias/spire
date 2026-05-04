@@ -151,3 +151,28 @@ def test_delete_profile(tmp_db):
 def test_delete_unknown_returns_false(tmp_db):
     from backend.uis.mapping import delete_profile
     assert delete_profile("nope") is False
+
+
+def test_find_profile_deterministic_on_same_second_confirmation(tmp_db):
+    """Two profiles for the same (source, unit) confirmed in the
+    same second must resolve deterministically. Without an explicit
+    secondary sort key the SQLite output order on a tie is
+    implementation-defined — risky for a value the apply path
+    depends on."""
+    from backend.uis.mapping import create_profile, find_profile
+
+    same_ts = "2026-05-03T10:00:00+00:00"
+    p_a = _sample_profile(profile_id="aaa/ecp/v1")
+    p_a.confirmed_at = same_ts
+    create_profile(p_a)
+
+    p_b = _sample_profile(profile_id="bbb/ecp/v1")
+    p_b.confirmed_at = same_ts
+    create_profile(p_b)
+
+    # find_profile must return the same profile every call. ASC
+    # secondary sort means "aaa/ecp/v1" wins.
+    found1 = find_profile(source_id="gcss-mc/ecp", unit="3d MLR")
+    found2 = find_profile(source_id="gcss-mc/ecp", unit="3d MLR")
+    assert found1 is not None
+    assert found1.profile_id == found2.profile_id == "aaa/ecp/v1"
