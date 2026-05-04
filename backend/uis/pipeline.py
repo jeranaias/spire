@@ -410,7 +410,20 @@ def run_pipeline(
     # 3. Determine column mapping
     source_columns = list(source_rows[0].keys())
     if profile is not None:
-        column_map = dict(profile.column_map)
+        # UIS-26 — match profile keys against source columns using
+        # canonical-form comparison so a profile saved with "TAMCN"
+        # still matches a file whose header is "tamcn" (or vice
+        # versa, or "Tamcn", or "TAMCN_Code" if that variant was
+        # also confirmed). Look up by canonical key, store the
+        # ACTUAL source-column name in the effective column_map
+        # so downstream stages still index source_row correctly.
+        from .normalize.headers import canonical_header
+        source_by_canon = {canonical_header(c): c for c in source_columns}
+        column_map = {}
+        for profile_src_key, canonical_field in profile.column_map.items():
+            actual_src = source_by_canon.get(canonical_header(profile_src_key))
+            if actual_src is not None:
+                column_map[actual_src] = canonical_field
         report.profile_id = profile.profile_id
         report.auto_mapper_confidence = profile.confidence
     else:

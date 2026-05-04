@@ -222,6 +222,59 @@ def test_pipeline_default_cap_is_500k():
     assert _max_rows_per_pipeline() >= 100_000
 
 
+def test_profile_keys_canonicalize_to_match_file_headers():
+    """UIS-26 — a profile saved with 'TAMCN' must match a file
+    whose header is 'tamcn' (or 'Tamcn' or 'TAMCN_Code'). Without
+    canonical-form key matching the profile silently doesn't apply
+    and the auto-mapper baseline kicks in instead."""
+    from backend.uis.mapping.profile import MappingProfile
+
+    # Profile uses uppercase + underscore form
+    profile = MappingProfile(
+        profile_id="test/v1",
+        source_id="gcss-mc/ecp",
+        column_map={
+            "TAMCN_CODE": "tamcn",
+            "Serial_Number": "serial_number",
+            "OWNER_UIC": "owner_uic",  # snake_case form
+        },
+    )
+
+    # File uses casual / different form for the same logical columns.
+    # All three should canonicalize to the same comparison key as the
+    # profile entries above (TAMCN_CODE / SERIAL_NUMBER / OWNER_UIC).
+    raw = (
+        "tamcn code,serialNumber,Owner UIC\n"
+        "D1196,owner_serial_aBcDeFgHiJkLmNoPqRsT,owner_uic_zZyYxXwWvVuUtTsSrRqQ\n"
+    ).encode("utf-8")
+
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"), profile=profile)
+    # All three profile keys should match via canonical-form compare
+    assert "tamcn code" in result.report.column_map
+    assert "serialNumber" in result.report.column_map
+    assert "Owner UIC" in result.report.column_map
+    # And the canonical fields land
+    if result.rows:
+        assert result.rows[0]["tamcn"] == "D1196"
+
+
+def test_profile_with_no_matching_columns_still_runs():
+    """If NONE of the profile keys canonicalize-match any file
+    column, the pipeline should still produce a result (empty
+    column_map, zero rows kept) rather than crash."""
+    from backend.uis.mapping.profile import MappingProfile
+
+    profile = MappingProfile(
+        profile_id="test/v1",
+        source_id="gcss-mc/ecp",
+        column_map={"NONEXISTENT": "tamcn"},
+    )
+    raw = b"foo,bar\n1,2\n"
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"), profile=profile)
+    # No crash; column_map is empty since the profile didn't match
+    assert result.report.column_map == {}
+
+
 def test_pipeline_jsonl_input():
     """Pipeline handles a JSONL file with the same schema."""
     raw = (
