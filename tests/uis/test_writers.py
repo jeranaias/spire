@@ -280,6 +280,159 @@ def test_util_state_token_includes_utilization_columns():
     assert t0 != t1
 
 
+# ---------------------------------------------------------------------------
+# ServiceRequestWriter
+# ---------------------------------------------------------------------------
+
+
+def _sr_csv(*lines):
+    """SR-header export shape: 13 columns matching the GCSS-MC export."""
+    header = (
+        "SERVICE_REQUEST_TYPE,SR_NUMBER,DEFECT_CODE_PRIMARY,"
+        "DEFECT_CODE_SECONDARY,PROBLEM_SUMMARY,OPEN_DATE,ECHELON_OF_MAINT,"
+        "SERIAL_NUMBER,TAMCN,DEADLINED_DATE,PRIORITY,OWNER_UIC,JOB_STATUS_DATE"
+    )
+    return ("\n".join((header, *lines)) + "\n").encode("utf-8")
+
+
+def test_sr_writer_registered():
+    assert has_writer("gcss-mc/sr-header")
+    w = get_writer("gcss-mc/sr-header")
+    assert w.target_entity == "ServiceRequest"
+
+
+def test_sr_writer_new_sr_appended_with_header_only_flag():
+    """SR not in canonical → appended with data_quality_flag=
+    "header_only" so downstream consumers know parts/due-in still
+    haven't joined."""
+    raw = _sr_csv(
+        "Maintenance - CM,sr_number_aBcDeFgHiJkLmNoPqRsT,B12,,Engine fault,12-MAR-26,1,"
+        "owner_serial_aBcDeFgHiJkLmNoPqRsT,owner_tamcn_aBcDeFgHiJkLmNoPqRsT,"
+        ",02,owner_uic_zZyYxXwWvVuUtTsSrRqQ,12-MAR-26"
+    )
+    pipeline_result = run_pipeline(raw, get_adapter("gcss-mc/sr-header"))
+    ds = _empty_dataset()
+    w = get_writer("gcss-mc/sr-header")
+    diff = w.preview(pipeline_result, ds)
+
+    assert diff.counts["new"] == 1
+    assert diff.counts["matched_changed"] == 0
+
+    result = w.apply(diff, ds)
+    assert len(result.new_dataset.srs) == 1
+    new_sr = result.new_dataset.srs[0]
+    assert new_sr.sr_number == "sr_number_aBcDeFgHiJkLmNoPqRsT"
+    assert new_sr.data_quality_flag == "header_only"
+
+
+def test_sr_writer_matched_sr_updates_changed_fields_only():
+    """Matched SRs get a per-field changes list. Non-empty parsed
+    values overwrite stale canonical values; empty parsed cells
+    leave canonical alone."""
+    from dataset.lifecycle import ServiceRequest as _SR
+    existing = _SR(
+        sr_number="sr_number_aBcDeFgHiJkLmNoPqRsT",
+        asset_id="A-1",
+        unit_uic="owner_uic_old",
+        unit_name="3d MLR",
+        equipment_type="JLTV",
+        tamcn="D1196",
+        nsn="2320-01-540-2480",
+        serial_number="serial_a",
+        open_date=date(2026, 3, 12),
+        priority="03",
+        defect_code_primary="B05",
+    )
+    ds = _empty_dataset()
+    ds.srs = [existing]
+
+    raw = _sr_csv(
+        # Same SR — different priority and defect_code_primary
+        "Maintenance - CM,sr_number_aBcDeFgHiJkLmNoPqRsT,B12,,Engine fault,12-MAR-26,1,"
+        "owner_serial_aBcDeFgHiJkLmNoPqRsT,owner_tamcn_aBcDeFgHiJkLmNoPqRsT,"
+        ",02,owner_uic_zZyYxXwWvVuUtTsSrRqQ,12-MAR-26"
+    )
+    pipeline_result = run_pipeline(raw, get_adapter("gcss-mc/sr-header"))
+    w = get_writer("gcss-mc/sr-header")
+    diff = w.preview(pipeline_result, ds)
+
+    assert diff.counts["matched_changed"] == 1
+    fields_changed = {c.field for c in diff.matched[0].changes}
+    assert "defect_code_primary" in fields_changed
+    assert "priority" in fields_changed
+
+    result = w.apply(diff, ds)
+    updated_sr = result.new_dataset.srs[0]
+    assert updated_sr.defect_code_primary == "B12"
+    assert updated_sr.priority == "02"
+    # Preserved fields untouched (asset_id wasn't in the export)
+    assert updated_sr.asset_id == "A-1"
+
+
+def test_sr_writer_unchanged_when_all_fields_match():
+    """Aligned SR with no diffs lands in unchanged, not matched."""
+    from dataset.lifecycle import ServiceRequest as _SR
+    existing = _SR(
+        sr_number="sr_number_aBcDeFgHiJkLmNoPqRsT",
+        asset_id="A-1",
+        unit_uic="owner_uic_zZyYxXwWvVuUtTsSrRqQ",
+        unit_name="3d MLR",
+        equipment_type="JLTV",
+        tamcn="owner_tamcn_aBcDeFgHiJkLmNoPqRsT",
+        nsn="",
+        serial_number="owner_serial_aBcDeFgHiJkLmNoPqRsT",
+        open_date=date(2026, 3, 12),
+        priority="02",
+        defect_code_primary="B12",
+        service_request_type="Maintenance - CM",
+        echelon_numeric=1,
+    )
+    ds = _empty_dataset()
+    ds.srs = [existing]
+
+    raw = _sr_csv(
+        "Maintenance - CM,sr_number_aBcDeFgHiJkLmNoPqRsT,B12,,Engine fault,12-MAR-26,1,"
+        "owner_serial_aBcDeFgHiJkLmNoPqRsT,owner_tamcn_aBcDeFgHiJkLmNoPqRsT,"
+        ",02,owner_uic_zZyYxXwWvVuUtTsSrRqQ,12-MAR-26"
+    )
+    pipeline_result = run_pipeline(raw, get_adapter("gcss-mc/sr-header"))
+    w = get_writer("gcss-mc/sr-header")
+    diff = w.preview(pipeline_result, ds)
+
+    # Note: parsed open_date will match existing.open_date; deadlined
+    # is empty in the file so won't fire a change either.
+    assert diff.counts["matched_changed"] == 0
+    assert diff.counts["unchanged"] == 1
+
+
+def test_sr_writer_apply_emits_new_and_matched_audit_rows():
+    raw = _sr_csv(
+        "Maintenance - CM,sr_number_aBcDeFgHiJkLmNoPqRsT,B12,,Engine fault,12-MAR-26,1,"
+        "owner_serial_aBcDeFgHiJkLmNoPqRsT,owner_tamcn_aBcDeFgHiJkLmNoPqRsT,"
+        ",02,owner_uic_zZyYxXwWvVuUtTsSrRqQ,12-MAR-26"
+    )
+    pipeline_result = run_pipeline(raw, get_adapter("gcss-mc/sr-header"))
+    ds = _empty_dataset()
+    w = get_writer("gcss-mc/sr-header")
+    diff = w.preview(pipeline_result, ds)
+    result = w.apply(diff, ds)
+    kinds = {a["kind"] for a in result.audit_rows}
+    assert "ingest.sr.apply.new" in kinds
+
+
+def test_sr_state_token_changes_when_sr_added():
+    from dataset.lifecycle import ServiceRequest as _SR
+    ds = _empty_dataset()
+    w = get_writer("gcss-mc/sr-header")
+    t0 = w.state_token(ds)
+    ds.srs = [_SR(
+        sr_number="sr_999", asset_id="A-1", unit_uic="u", unit_name="",
+        equipment_type="", tamcn="", nsn="", serial_number="",
+        open_date=date(2026, 3, 12),
+    )]
+    assert t0 != w.state_token(ds)
+
+
 def test_apply_propagates_field_changes_into_audit_rows():
     """Matched-row audit payloads carry the per-field before/after
     so the audit chain has a tamper-evident record of what changed.

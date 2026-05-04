@@ -31,6 +31,7 @@ from .base import (
 # this package + import it here.
 from . import asset_ecp  # noqa: F401  — side-effect: register
 from . import asset_util  # noqa: F401  — side-effect: register
+from . import service_request  # noqa: F401  — side-effect: register
 
 __all__ = [
     "EntityWriter",
