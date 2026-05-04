@@ -184,6 +184,18 @@ async def uis_upload(
             detail=f"Unknown adapter {adapter_id!r}. Known: {sorted(ADAPTERS.keys())}",
         )
 
+    # Pre-check Content-Length BEFORE buffering 10GB into memory.
+    # The Starlette UploadFile API has already read enough of the
+    # request to know its declared size; we trust it and fail-fast.
+    declared_size = int(request.headers.get("content-length") or 0)
+    if declared_size and declared_size > INGEST_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Declared content-length {declared_size:,} exceeds limit "
+                f"{INGEST_FILE_MAX_BYTES:,}. Reject before buffering the upload."
+            ),
+        )
     # Read body
     body = await file.read()
     if len(body) > INGEST_FILE_MAX_BYTES:

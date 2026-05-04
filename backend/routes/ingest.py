@@ -282,6 +282,16 @@ async def ingest_gcss_mc_ecp(
     actor_role = require_user_role(user, INGEST_ROLES, action="ingest.gcss_mc_ecp")
     actor_dodid = (user or {}).get("dodid") if isinstance(user, dict) else None
 
+    # Content-Length pre-check before buffering — UIS-27.
+    declared_size = int(request.headers.get("content-length") or 0)
+    if declared_size and declared_size > INGEST_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Declared content-length {declared_size:,} exceeds limit "
+                f"{INGEST_FILE_MAX_BYTES:,}. Reject before buffering the upload."
+            ),
+        )
     body = await file.read()
     if len(body) > INGEST_FILE_MAX_BYTES:
         raise HTTPException(
@@ -524,6 +534,16 @@ async def ingest_gcss_mc_util(
     actor_role = require_user_role(user, INGEST_ROLES, action="ingest.gcss_mc_util")
     actor_dodid = (user or {}).get("dodid") if isinstance(user, dict) else None
 
+    # Content-Length pre-check before buffering — UIS-27.
+    declared_size = int(request.headers.get("content-length") or 0)
+    if declared_size and declared_size > INGEST_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Declared content-length {declared_size:,} exceeds limit "
+                f"{INGEST_FILE_MAX_BYTES:,}. Reject before buffering the upload."
+            ),
+        )
     body = await file.read()
     if len(body) > INGEST_FILE_MAX_BYTES:
         raise HTTPException(
@@ -818,6 +838,16 @@ async def ingest_gcss_mc_sr_header(
     user = getattr(request.state, "user", None)
     require_user_role(user, INGEST_ROLES, action="ingest.gcss_mc_sr_header")
 
+    # Content-Length pre-check before buffering — UIS-27.
+    declared_size = int(request.headers.get("content-length") or 0)
+    if declared_size and declared_size > INGEST_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Declared content-length {declared_size:,} exceeds limit "
+                f"{INGEST_FILE_MAX_BYTES:,}. Reject before buffering the upload."
+            ),
+        )
     body = await file.read()
     if len(body) > INGEST_FILE_MAX_BYTES:
         raise HTTPException(
