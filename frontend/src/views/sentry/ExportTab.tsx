@@ -7,6 +7,7 @@ import { DemoOnly } from "../../state/buildMode";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Pressable, fireIdempotent } from "../../components/ui";
 import { ClassifiedExport, ClassificationBadge } from "../../components/classification";
+import { NextStepHint } from "./NextStepHint";
 
 const AUTHORITIES = [
   { value: "US_ONLY",  label: "U.S. Only" },
@@ -90,6 +91,7 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
           tone: "ok",
           text: `✓ Export ${r.export_id} · ${cls} · ${(r.records_exported ?? 0).toLocaleString("en-US")} records · ${((r.bytes ?? 0) / 1024).toFixed(1)} KB`,
           link: r.download_url ? { label: "Download", href: r.download_url } : undefined,
+          links: [{ label: "Audit", href: "#/admin/audit" }],
           ttlMs: 6000,
         });
       } catch (err: unknown) {
@@ -495,6 +497,21 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
           )}
         </div>
       )}
+      <NextStepHint
+        steps={[
+          {
+            kind: "tab",
+            to: "/sentry/coalition",
+            label: "Coalition",
+            hint: "Re-scope this batch for a specific partner nation.",
+          },
+          {
+            kind: "external",
+            label: "Hand bundle to receiving authority",
+            hint: "Bundle ZIP + manifest hash are what the recipient verifies.",
+          },
+        ]}
+      />
     </div>
   );
 }

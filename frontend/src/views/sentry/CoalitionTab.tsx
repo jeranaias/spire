@@ -25,6 +25,7 @@ import { useSpireStore } from "../../state/store";
 import { DemoOnly } from "../../state/buildMode";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Button, Pressable, ErrorState, LoadingState, fireIdempotent } from "../../components/ui";
+import { NextStepHint } from "./NextStepHint";
 
 export function CoalitionTab() {
   const role = useSpireStore((s) => s.role);
@@ -181,6 +182,7 @@ export function CoalitionTab() {
         pushToast({
           tone: "ok",
           text: toastText,
+          links: [{ label: "Audit", href: "#/admin/audit" }],
           ttlMs: 7000,
         });
       } catch (e) {
@@ -732,6 +734,22 @@ export function CoalitionTab() {
           </div>
         </div>
       )}
+
+      <NextStepHint
+        steps={[
+          {
+            kind: "external",
+            label: "Hand bundle to receiving partner",
+            hint: "Bundle ZIP + manifest hash + release_id are what the partner verifies on receipt.",
+          },
+          {
+            kind: "tab",
+            to: "/sentry/export",
+            label: "Re-export at higher ceiling",
+            hint: "Switch back to the unscoped Export builder if the partner profile is too restrictive.",
+          },
+        ]}
+      />
 
       {confirmOpen && view && (
         <CoalitionReleaseConfirmModal

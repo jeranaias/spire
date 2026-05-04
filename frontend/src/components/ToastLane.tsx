@@ -82,6 +82,17 @@ function ToastRow({ toast, onDismiss }: { toast: Toast; onDismiss: () => void })
           {toast.link.label} ↗
         </a>
       )}
+      {toast.links?.map((l, i) => (
+        <a
+          key={i}
+          href={l.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-mono text-xs uppercase text-[var(--color-primary)] hover:underline tracking-wider"
+        >
+          {l.label} ↗
+        </a>
+      ))}
       <IconButton onClick={onDismiss} aria-label="Dismiss toast">
         ✕
       </IconButton>

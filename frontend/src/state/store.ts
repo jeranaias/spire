@@ -46,6 +46,9 @@ export interface Toast {
   undo?: { label: string; onUndo: () => void };
   // Optional click-through link — rendered as an external-opening anchor.
   link?: { label: string; href: string };
+  // Additional click-through links (audit deep-links, secondary actions).
+  // Rendered inline after `link`; both fields can be supplied.
+  links?: { label: string; href: string }[];
   ttlMs?: number;
 }
 

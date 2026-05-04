@@ -8,6 +8,7 @@ import { DemoOnly } from "../../state/buildMode";
 import { InsufficientPrivilege } from "../../components/InsufficientPrivilege";
 import { Pressable } from "../../components/ui";
 import { ClassifiedExport } from "../../components/classification";
+import { NextStepHint } from "./NextStepHint";
 
 // Recent attestations — cap is intentionally small. The localStorage
 // payload holds enough to re-render the row + show the JSON the
@@ -500,7 +501,13 @@ export function MarkTab() {
                       };
                       saveAttestation(rec);
                       setAttestations(loadAttestations());
-                      pushToast({ tone: "ok", text: `Attestation downloaded · ${banner}` });
+                      pushToast({
+                        tone: "ok",
+                        text: `Attestation downloaded · ${banner}${
+                          rec.chain_index != null ? ` · audit #${rec.chain_index}` : ""
+                        }`,
+                        links: [{ label: "Audit", href: "#/admin/audit" }],
+                      });
                     } finally {
                       setDownloading(false);
                     }
@@ -725,6 +732,28 @@ export function MarkTab() {
             </section>
           </>
         )}
+        <NextStepHint
+          steps={[
+            {
+              kind: "tab",
+              to: "/sentry/review",
+              label: "Review Queue",
+              hint: "Adjudicate the batch SENTRY pre-classified.",
+            },
+            {
+              kind: "tab",
+              to: "/sentry/export",
+              label: "Export",
+              hint: "Build a sanitized release bundle.",
+            },
+            {
+              kind: "tab",
+              to: "/sentry/coalition",
+              label: "Coalition",
+              hint: "Partner-scoped release with live redaction.",
+            },
+          ]}
+        />
       </div>
     </div>
   );

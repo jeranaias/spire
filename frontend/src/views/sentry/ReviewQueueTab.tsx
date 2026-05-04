@@ -283,6 +283,7 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
           pushUndoToast({
             tone: action === "approve" ? "ok" : "warn",
             text: `${sr} ${action === "approve" ? "approved" : "rejected"}`,
+            links: [{ label: "Audit", href: "#/admin/audit" }],
             onUndo: () => {
               setResolved((prev) => {
                 const next = { ...prev };
@@ -352,6 +353,7 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
         pushUndoToast({
           tone: action === "approve" ? "ok" : "warn",
           text: `${items.length} records ${action === "approve" ? "approved" : "rejected"} · 1 audit entry`,
+          links: [{ label: "Audit", href: "#/admin/audit" }],
           onUndo: () => {
             const inverse: Action = action === "approve" ? "reject" : "approve";
             setResolved((prev) => {
