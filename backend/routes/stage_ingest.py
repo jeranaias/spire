@@ -417,6 +417,7 @@ def _build_dataset_from_report(
         tmrs=[],
         dq_defects={},
         violations=[],
+        c_ratings=[],
         generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
         seed=seed,
     )

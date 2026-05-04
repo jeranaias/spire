@@ -96,6 +96,7 @@ def _replace_dataset_assets(ds: Any, new_assets: List[Any]) -> Any:
         tmrs=ds.tmrs,
         dq_defects=ds.dq_defects,
         violations=ds.violations,
+        c_ratings=getattr(ds, "c_ratings", []),
         generated_at=ds.generated_at,
         seed=ds.seed,
     )

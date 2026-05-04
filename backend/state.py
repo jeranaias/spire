@@ -59,6 +59,10 @@ class CanonicalDataset:
     tmrs: list = field(default_factory=list)
     dq_defects: dict = field(default_factory=dict)
     violations: list = field(default_factory=list)
+    # DRRS-MC unit C-ratings — appended to via the universal
+    # ingest path (UIS-P3.5). Synthetic seeds leave this empty;
+    # it fills as operators land DRRS-MC exports.
+    c_ratings: list = field(default_factory=list)
     generated_at: str = ""
     seed: int = RANDOM_SEED
 
@@ -114,7 +118,7 @@ def init_empty_dataset() -> CanonicalDataset:
         _DATASET = CanonicalDataset(
             units=[], assets=[], roster=[], srs=[], snapshots=[], reqs=[],
             cannib_events=[], incidents=[], tmrs=[], dq_defects={},
-            violations=[],
+            violations=[], c_ratings=[],
             generated_at=_utc_iso(),
             seed=RANDOM_SEED,
         )

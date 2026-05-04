@@ -318,6 +318,7 @@ def _replace_dataset_srs(ds: Any, new_srs: List[Any]) -> Any:
         tmrs=ds.tmrs,
         dq_defects=ds.dq_defects,
         violations=ds.violations,
+        c_ratings=getattr(ds, "c_ratings", []),
         generated_at=ds.generated_at,
         seed=ds.seed,
     )

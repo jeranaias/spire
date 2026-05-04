@@ -433,6 +433,86 @@ def test_sr_state_token_changes_when_sr_added():
     assert t0 != w.state_token(ds)
 
 
+# ---------------------------------------------------------------------------
+# CRatingWriter — proves the protocol works for non-Asset entities
+# ---------------------------------------------------------------------------
+
+
+def _drrs_csv(*lines):
+    header = "Reporting UIC,Effective Date,Cat,MET Scores,Commander Remarks"
+    return ("\n".join((header, *lines)) + "\n").encode("utf-8")
+
+
+def test_crating_writer_registered():
+    assert has_writer("drrs-mc/c-rating")
+    w = get_writer("drrs-mc/c-rating")
+    assert w.target_entity == "CRating"
+
+
+def test_crating_apply_appends_new_record():
+    raw = _drrs_csv(
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,2026-04-26,Cat 2,{},Stable"
+    )
+    pipeline_result = run_pipeline(raw, get_adapter("drrs-mc/c-rating"))
+    ds = _empty_dataset()
+    w = get_writer("drrs-mc/c-rating")
+    diff = w.preview(pipeline_result, ds)
+    assert diff.counts["new"] == 1
+
+    result = w.apply(diff, ds)
+    assert len(result.new_dataset.c_ratings) == 1
+    cr = result.new_dataset.c_ratings[0]
+    assert cr.unit_uic == "owner_uic_zZyYxXwWvVuUtTsSrRqQ"
+    assert cr.c_rating == "C2"
+
+
+def test_crating_apply_updates_existing_record_on_same_key():
+    """(unit_uic, as_of_date) is the primary key. A second export
+    with the same key + a different rating updates the prior
+    record rather than appending a duplicate."""
+    from backend.uis.writers.c_rating import CRatingRecord
+    ds = _empty_dataset()
+    ds.c_ratings = [CRatingRecord(
+        unit_uic="owner_uic_zZyYxXwWvVuUtTsSrRqQ",
+        as_of_date=date(2026, 4, 26),
+        c_rating="C3",
+        met_scores="{}",
+        operator_assessment="Old assessment",
+    )]
+
+    raw = _drrs_csv(
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,2026-04-26,Cat 2,{},New assessment"
+    )
+    pipeline_result = run_pipeline(raw, get_adapter("drrs-mc/c-rating"))
+    w = get_writer("drrs-mc/c-rating")
+    diff = w.preview(pipeline_result, ds)
+
+    assert diff.counts["matched_changed"] == 1
+    assert diff.counts["new"] == 0
+
+    result = w.apply(diff, ds)
+    # Still one record, but updated
+    assert len(result.new_dataset.c_ratings) == 1
+    cr = result.new_dataset.c_ratings[0]
+    assert cr.c_rating == "C2"
+    assert cr.operator_assessment == "New assessment"
+
+
+def test_crating_state_token_changes_with_rating():
+    from backend.uis.writers.c_rating import CRatingRecord
+    ds = _empty_dataset()
+    ds.c_ratings = [CRatingRecord(
+        unit_uic="u",
+        as_of_date=date(2026, 4, 26),
+        c_rating="C2",
+    )]
+    w = get_writer("drrs-mc/c-rating")
+    t0 = w.state_token(ds)
+    ds.c_ratings[0].c_rating = "C3"
+    t1 = w.state_token(ds)
+    assert t0 != t1
+
+
 def test_apply_propagates_field_changes_into_audit_rows():
     """Matched-row audit payloads carry the per-field before/after
     so the audit chain has a tamper-evident record of what changed.
