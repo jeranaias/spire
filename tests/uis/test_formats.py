@@ -173,6 +173,51 @@ def test_xlsx_empty_workbook_yields_nothing():
     assert rows == []
 
 
+def test_detect_csv_with_oracle_comment_header():
+    """Oracle SQL*Plus spool exports prefix a `# Generated ...` line.
+    Earlier the first-line comma count would be zero so the file
+    fell through to 'unknown' and the rest of the pipeline silently
+    refused to parse it."""
+    head = b"# Generated 2026-04-26 by SQLPlus 19.10\n# Comment line 2\n\nTAMCN,NSN,SERIAL\nD1196,foo,bar\n"
+    assert detect_format(head) == "csv"
+
+
+def test_detect_tsv_with_oracle_comment_header():
+    head = b"# Generated 2026-04-26\nCOL1\tCOL2\nfoo\tbar\n"
+    assert detect_format(head) == "tsv"
+
+
+def test_detect_2col_tsv():
+    """A legitimate 2-column TSV ('ID\\tValue') has 1 tab on the
+    header. Old threshold required ≥2 tabs and would misdetect
+    as CSV-with-zero-commas → 'unknown'."""
+    head = b"ID\tVALUE\n1\tfoo\n2\tbar\n"
+    assert detect_format(head) == "tsv"
+
+
+def test_detect_european_excel_semicolon_csv():
+    """European Excel uses `;` as field delimiter (because `,` is
+    decimal separator). Treat as CSV — the standard csv module
+    parses it fine if the user passes the right delimiter; for
+    autodetect we surface "csv"."""
+    head = b"TAMCN;NSN;SERIAL\nD1196;foo;bar\n"
+    assert detect_format(head) == "csv"
+
+
+def test_csv_streamer_skips_comment_lines():
+    raw = b"# Generated 2026-04-26\nTAMCN,NSN\nD1196,2320-01-540\n# trailing comment\nD0082,2320-01-440\n"
+    rows = list(stream_rows(raw, "csv"))
+    assert len(rows) == 2
+    assert rows[0]["TAMCN"] == "D1196"
+    assert rows[1]["TAMCN"] == "D0082"
+
+
+def test_csv_streamer_skips_blank_lines_above_header():
+    raw = b"\n\n\nTAMCN,NSN\nD1196,foo\n"
+    rows = list(stream_rows(raw, "csv"))
+    assert len(rows) == 1
+
+
 def test_xlsx_format_detect_via_magic_bytes():
     """The PK\\x03\\x04 zip magic is what we sniff. Ensure
     actual openpyxl-generated XLSX hits the xlsx branch."""
