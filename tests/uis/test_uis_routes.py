@@ -205,6 +205,33 @@ def test_create_profile_rejects_unknown_source_id(uis_client):
     assert r.status_code == 400, r.text
 
 
+def test_create_profile_rejects_empty_source_key(uis_client):
+    """UIS-30 — column_map with empty source-side key was silently
+    accepted but dropped at apply time. Reject at create time."""
+    payload = _profile_payload()
+    payload["column_map"] = {"": "tamcn", "Real": "nsn"}
+    r = uis_client.post("/api/uis/profiles", json=payload)
+    assert r.status_code == 400, r.text
+    assert "empty source-side keys" in r.text
+
+
+def test_create_profile_rejects_whitespace_source_key(uis_client):
+    """Whitespace-only key is also rejected (str.strip is empty)."""
+    payload = _profile_payload()
+    payload["column_map"] = {"   ": "tamcn"}
+    r = uis_client.post("/api/uis/profiles", json=payload)
+    assert r.status_code == 400, r.text
+
+
+def test_create_profile_rejects_empty_canonical_target(uis_client):
+    """Symmetric guard: empty value also rejected."""
+    payload = _profile_payload()
+    payload["column_map"] = {"FooCol": ""}
+    r = uis_client.post("/api/uis/profiles", json=payload)
+    assert r.status_code == 400, r.text
+    assert "empty canonical targets" in r.text
+
+
 def test_create_then_get_profile(uis_client):
     uis_client.post("/api/uis/profiles", json=_profile_payload())
     r = uis_client.get("/api/uis/profiles/3d-mlr/gcss-mc-ecp/v1")

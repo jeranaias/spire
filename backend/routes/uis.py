@@ -468,6 +468,23 @@ async def uis_create_profile(request: Request, payload: dict = Body(...)):
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Unknown source_id {source_id!r}")
     canonical_fields = set(adapter.field_names())
+    # Reject empty source-side keys outright — they silently drop at
+    # apply (dict.get on "") and the operator gets no signal.
+    empty_keys = [k for k in column_map.keys() if not str(k).strip()]
+    if empty_keys:
+        raise HTTPException(
+            status_code=400,
+            detail="column_map has empty source-side keys; every key must be a non-blank source column name.",
+        )
+    # Reject empty / non-string canonical targets too.
+    empty_targets = [
+        f"{k!r}" for k, v in column_map.items() if not str(v).strip()
+    ]
+    if empty_targets:
+        raise HTTPException(
+            status_code=400,
+            detail=f"column_map has empty canonical targets for keys {empty_targets}.",
+        )
     bad_targets = [v for v in column_map.values() if v not in canonical_fields]
     if bad_targets:
         raise HTTPException(

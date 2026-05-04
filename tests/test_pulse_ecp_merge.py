@@ -250,3 +250,25 @@ def test_apply_diff_factory_exception_drops_row_safely():
     # The original asset is preserved; the bad-factory row is dropped.
     assert len(new_assets) == 1
     assert new_assets[0].asset_id == asset.asset_id
+
+
+def test_apply_diff_factory_exception_logs_warning(caplog):
+    """UIS-30 — bad-factory rows used to disappear silently. The
+    apply now logs at WARN level so the backend operator can
+    discover them via stderr / journalctl when they notice
+    "diff said 5 new, only 3 applied" mismatches."""
+    import logging
+    row = _row(serial="owner_serial_unique_zzzzzzzzzzzzzzzzzzzz")
+    asset = _asset()
+    diff = compute_diff([row], [asset])
+
+    def bad_factory(parsed):
+        raise ValueError("simulated factory crash for tamcn=" + parsed.tamcn)
+
+    with caplog.at_level(logging.WARNING, logger="backend.integrations.pulse_gcss_ecp_merge"):
+        apply_diff(diff, [asset], asset_factory=bad_factory)
+
+    # At least one WARN message naming the factory rejection
+    assert any(
+        "asset_factory rejected row" in r.message for r in caplog.records
+    ), f"caplog: {[r.message for r in caplog.records]}"
