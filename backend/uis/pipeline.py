@@ -22,6 +22,7 @@ to `apply_diff` + `swap_dataset` for the apply.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -118,6 +119,13 @@ class ParseReport:
     # mode this guards against (a UTF-16 file decoded as cp1252
     # produces garbage rows that look "valid" but aren't).
     encoding_low_confidence: bool = False
+    # Per-stage wall-clock timings in milliseconds. Lets the
+    # dropzone render "parsed in 2.3s" and lets operators / oncall
+    # spot which stage dominates a slow upload. Stages: decode (
+    # bytes → text), detect (format sniff), stream (csv → row dicts),
+    # map (auto-mapper), transform (per-cell coercion), validate
+    # (constraint checks).
+    timings_ms: Dict[str, float] = field(default_factory=dict)
     column_map: Dict[str, str] = field(default_factory=dict)
     auto_mapper_confidence: float = 0.0
     profile_id: Optional[str] = None
@@ -145,6 +153,7 @@ class ParseReport:
             "sanitization_self_hashed": dict(self.sanitization_self_hashed),
             "constraint_failures_count": self.constraint_failures_count,
             "warnings_count": self.warnings_count,
+            "timings_ms": dict(self.timings_ms),
         }
 
 
@@ -371,8 +380,13 @@ def run_pipeline(
     report = ParseReport()
     warnings: List[RowWarning] = []
     constraint_failures: List[ConstraintFailure] = []
+    timings: Dict[str, float] = {}
+
+    def _now() -> float:
+        return time.perf_counter() * 1000.0
 
     # 1. Decode + format detect
+    t0 = _now()
     text, encoding = decode_bytes(raw)
     report.detected_encoding = encoding
     report.encoding_low_confidence = is_low_confidence_encoding(encoding)
@@ -383,10 +397,14 @@ def run_pipeline(
             code="encoding_low_confidence",
             message=f"Decoded as {encoding}; verify the file isn't a wrong-encoding silent corruption.",
         ))
+    timings["decode_ms"] = round(_now() - t0, 2)
+    t0 = _now()
     fmt = detect_format(raw[:4096])
     report.detected_format = fmt
+    timings["detect_ms"] = round(_now() - t0, 2)
 
     if fmt == "unknown":
+        report.timings_ms = timings
         return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
 
     # Re-encode normalized text into bytes for stream_rows
@@ -405,6 +423,7 @@ def run_pipeline(
     #    with 413 than tip the whole backend over.
     max_rows = _max_rows_per_pipeline()
     source_rows: List[Dict[str, str]] = []
+    t0 = _now()
     try:
         stream = stream_rows(raw_for_stream, fmt)
         for row in stream:
@@ -419,13 +438,18 @@ def run_pipeline(
             row_index=-1, field="", code="format_stream_error",
             message=str(e)[:200],
         ))
+        timings["stream_ms"] = round(_now() - t0, 2)
+        report.timings_ms = timings
         return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
+    timings["stream_ms"] = round(_now() - t0, 2)
 
     report.rows_total = len(source_rows)
     if not source_rows:
+        report.timings_ms = timings
         return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
 
     # 3. Determine column mapping
+    t0 = _now()
     source_columns = list(source_rows[0].keys())
     if profile is not None:
         # UIS-26 — match profile keys against source columns using
@@ -452,8 +476,10 @@ def run_pipeline(
         report.unmapped_source = list(proposal.unmapped_source)
 
     report.column_map = dict(column_map)
+    timings["map_ms"] = round(_now() - t0, 2)
 
     # 4. Per-row project + transform + validate
+    t0 = _now()
     canonical_rows: List[Dict[str, Any]] = []
     sanitization_per_row: List[Dict[str, str]] = []
     warnings_per_row: List[List[str]] = []
@@ -518,6 +544,8 @@ def run_pipeline(
         warnings_per_row.append([w.code for w in warnings[warnings_before:]])
         report.rows_kept += 1
 
+    timings["transform_ms"] = round(_now() - t0, 2)
+
     # Aggregate warning count: unique row indices that hit at least
     # one warning. Surfaces "X% of rows had something to look at" in
     # the dry-run preview without double-counting per-cell warnings.
@@ -525,6 +553,7 @@ def run_pipeline(
     report.rows_with_warnings = len(rows_with_warnings)
     report.warnings_count = len(warnings)
     report.constraint_failures_count = len(constraint_failures)
+    report.timings_ms = timings
 
     return PipelineResult(
         rows=canonical_rows,

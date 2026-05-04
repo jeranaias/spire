@@ -325,3 +325,34 @@ def test_pipeline_jsonl_input():
     result = run_pipeline(raw, get_adapter("gcss-mc/ecp"))
     assert result.report.detected_format == "jsonl"
     assert result.report.rows_kept == 1
+
+
+def test_pipeline_records_per_stage_timings():
+    """UIS-31 — every successful run reports per-stage wall-clock
+    timings so an operator can tell which stage dominates a slow
+    upload. We don't assert exact durations (timing is environment-
+    dependent), only that each stage key is populated and numeric."""
+    raw = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"))
+    timings = result.report.timings_ms
+    assert set(timings.keys()) >= {"decode_ms", "detect_ms", "stream_ms", "map_ms", "transform_ms"}
+    for stage, value in timings.items():
+        assert isinstance(value, (int, float)), f"{stage} is not numeric"
+        assert value >= 0
+
+
+def test_pipeline_timings_surface_in_report_dict():
+    """ParseReport.to_dict() carries timings through to the API
+    response so the dropzone can render "parsed in 2.3s"."""
+    raw = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"))
+    payload = result.report.to_dict()
+    assert "timings_ms" in payload
+    assert "decode_ms" in payload["timings_ms"]
+    assert "transform_ms" in payload["timings_ms"]
