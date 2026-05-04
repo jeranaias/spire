@@ -113,34 +113,39 @@ vulnerability.''
 \textit{Marine Corps Concept for Logistics} (Dec~2024).
 \endgroup
 
-\section*{Approach}
+\section*{What SPIRE does}
+Four role-shaped surfaces over one canonical dataset:
 \begin{itemize}
-  \item \textbf{Universal Ingest.} 8 formats (CSV, TSV, XLSX, JSON, JSONL,
-    XML, fixed-width, EDI~X12) across 6 channels (drop, SFTP, IMAP, HTTP,
-    DB~CDC, Kafka). 4 pre-built adapters: GCSS-MC ECP / UTIL / SR-Header,
-    DRRS-MC C-Rating. A local Gemma~4 26B model proposes the column map for
-    non-canonical sources; mappings are saved per unit.
-  \item \textbf{Tamper-evident audit chain.} Every state change is SHA-256
-    hash-chained and Ed25519-signed; exports as CEF for Splunk / ArcSight /
-    QRadar. Inspector verification is offline, against a published key.
-  \item \textbf{Local-first.} Runs on a 2U CONEX box. Vector-clock conflict
-    resolution reconciles forward-node writes when SATCOM restores. No
-    cloud egress.
-  \item \textbf{Coalition-ready.} Live partner-scoped redaction (FVEY, JPN,
-    AUS, PHL). One-click ZIP with manifest hash and release~ID.
+  \item \textbf{Decision Bridge.} Home view --- five live signals on one
+    non-scrolling pane: mission clock + FPCON, top alerts, forecasted
+    Class~I~/~V~/~VIII~/~IX shortages, mission-capable rate by unit with
+    seven-day sparklines, audit-chain health.
+  \item \textbf{PULSE.} Readiness and risk. Monte Carlo demand forecast
+    over 200 paths; auto-drafted ranked actions (cannibalize, expedite,
+    cross-level) with impact-per-day; predicted-failure column drives
+    auto-draft requisitions before assets actually break.
+  \item \textbf{BASTION.} Common operating picture on real satellite
+    tiles with MIL-STD-2525D unit symbols; multi-sensor threat fusion
+    (PACS + ThermalHawk + SCADA + weather), QRF cordons, threat rings.
+    A natural-language copilot drives the map.
+  \item \textbf{SENTRY.} CUI auto-tagging pipeline. Tier-1 rule engine,
+    opt-in Tier-2 Gemma~4 explainer. Sanitized export and one-click
+    coalition release scoped per partner --- FVEY, JPN, AUS, PHL ---
+    with manifest hash and release~ID stamped to the audit chain.
 \end{itemize}
 
-\section*{Operational Impact}
+\section*{Under the hood}
 \begin{itemize}
-  \item \textbf{One pane across Class~I~/~V~/~VIII~/~IX} --- eliminates the
-    cross-system reconciliation step that consumes the forward planner's
-    first ten minutes of every Class~VIII~/~V surge.
-  \item \textbf{Forward decisions are auditable.} The decision an S-4 made
-    at H+0 is verifiable against the public key at H+30 days.
-  \item \textbf{No SATCOM dependency for forward planning} --- aligns with
-    the SIF requirement that sustainment be \textit{``light, flexible,
-    responsive, resilient, and redundant''} (HQMC, \textit{A Concept for
-    Stand-in Forces}, Dec~2021).
+  \item \textbf{Universal Ingest Service.} 8 formats $\times$ 6 channel
+    types (drop, SFTP, IMAP, HTTP, DB~CDC, Kafka), 4 pre-built GCSS-MC /
+    DRRS-MC adapters; a local Gemma~4 26B handles schema mapping for
+    everything else. Mappings save per unit.
+  \item \textbf{Tamper-evident audit chain.} Every state change SHA-256
+    hash-chained and Ed25519-signed; CEF export for Splunk / ArcSight /
+    QRadar; inspector verification offline against a published key.
+  \item \textbf{Local-first.} Runs on a 2U CONEX box; vector-clock
+    conflict resolution reconciles forward-node writes when SATCOM
+    restores; no cloud egress.
 \end{itemize}
 
 \section*{Maturity \& Risk}
@@ -176,7 +181,7 @@ is the FY27 POM cycle.
 {\fontsize{9.5pt}{11pt}\selectfont
 \textbf{POC:} Jesse Morgan {\textperiodcentered} Thornveil {\textperiodcentered}
 \href{mailto:jesse@thornveil.ai}{jesse@thornveil.ai}\\
-\textbf{Repo:} \texttt{jeranaias/spire} (private; access on request)\\
+\textbf{Repo:} \href{https://github.com/jeranaias/spire}{github.com/jeranaias/spire} (public)\\
 \textbf{Pilot install:} \texttt{docker-compose up} --- under~5~min, clean laptop to live demo\\[3pt]
 {\color{spireMuted}v1.1 {\textperiodcentered} 04~MAY 2026 {\textperiodcentered} Distribution unrestricted by author}
 }
