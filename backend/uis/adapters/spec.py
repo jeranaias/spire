@@ -122,6 +122,14 @@ class AdapterSpec:
     sample_path: Optional[str] = None               # for tests + UI preview
     auth_roles: Tuple[str, ...] = ("data_custodian", "security_manager")
     description: str = ""
+    # P4.4 — explicit format hint overrides auto-detection. Required
+    # for fixed_width (positions can't be inferred from content);
+    # also useful when an XML payload happens to contain CSV-like
+    # text that the heuristic sniffer might misclassify.
+    format_hint: Optional[str] = None               # "csv" / "tsv" / "xml" / "fixed_width"
+    # When format_hint == "fixed_width", supply the column layout.
+    # The pipeline passes this to stream_rows.
+    fixed_width_spec: Optional[Any] = None
 
     def field_names(self) -> List[str]:
         return [c.name for c in self.canonical_columns]

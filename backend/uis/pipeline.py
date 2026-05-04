@@ -437,7 +437,14 @@ def run_pipeline(
         ))
     timings["decode_ms"] = round(_now() - t0, 2)
     t0 = _now()
-    fmt = detect_format(raw[:4096])
+    # P4.4 — adapter.format_hint overrides auto-detection. Required
+    # for fixed_width (positions un-inferrable from content); also
+    # useful when an XML payload happens to contain CSV-like text.
+    adapter_hint = getattr(adapter, "format_hint", None)
+    if adapter_hint:
+        fmt = adapter_hint
+    else:
+        fmt = detect_format(raw[:4096])
     report.detected_format = fmt
     timings["detect_ms"] = round(_now() - t0, 2)
 
@@ -447,10 +454,10 @@ def run_pipeline(
 
     # Re-encode normalized text into bytes for stream_rows
     normalized = normalize_text(text)
-    if fmt in {"csv", "tsv", "jsonl"}:
+    if fmt in {"csv", "tsv", "jsonl", "xml"}:
         raw_for_stream = normalized.encode("utf-8")
     else:
-        # XLSX is binary; pass through original
+        # XLSX is binary; fixed_width passed as raw bytes too
         raw_for_stream = raw
 
     # 2. Stream rows. Walk the iterator manually so we can short-
@@ -463,7 +470,10 @@ def run_pipeline(
     source_rows: List[Dict[str, str]] = []
     t0 = _now()
     try:
-        stream = stream_rows(raw_for_stream, fmt)
+        stream = stream_rows(
+            raw_for_stream, fmt,
+            fixed_width_spec=getattr(adapter, "fixed_width_spec", None),
+        )
         for row in stream:
             source_rows.append(row)
             if len(source_rows) > max_rows:

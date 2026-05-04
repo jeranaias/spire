@@ -12,10 +12,16 @@ added. PDF-table is intentionally out of scope for Phase 1.
 from __future__ import annotations
 
 from .base import DuplicateHeaderError, RowStream, detect_format, stream_rows
+from .fixed_width import FixedWidthColumn, FixedWidthSpec, stream_fixed_width
+from .xml_format import stream_xml
 
 __all__ = [
     "DuplicateHeaderError",
     "RowStream",
     "detect_format",
     "stream_rows",
+    "FixedWidthColumn",
+    "FixedWidthSpec",
+    "stream_fixed_width",
+    "stream_xml",
 ]
