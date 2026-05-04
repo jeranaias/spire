@@ -21,11 +21,10 @@ coalition release. **TRL 4, validated at Modern Day Marine 2026 (1st place,
 
 ### The Operator's Problem
 
-A 3d MLR S-4 forward at Miyako-jima takes a Class VIII demand spike during a
-casualty event. SATCOM is degraded. The planner has three systems open and
-fifteen minutes to choose between cross-level, expedite, or emergency
-requisition. The current state of the art is a spreadsheet, a phone call,
-and an unauditable forward decision.
+Today, a forward unit taking a Class VIII demand spike under degraded SATCOM
+has three systems open and a phone call. The planner has minutes — not hours —
+to choose between cross-level, expedite, or emergency requisition. The
+decision is unauditable; the artifact is a spreadsheet.
 
 ### Capability Gap
 
