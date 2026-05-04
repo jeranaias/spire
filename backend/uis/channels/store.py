@@ -274,6 +274,25 @@ def build_channel(cfg: ChannelConfig):
             attachment_glob=c.get("attachment_glob", "*"),
             sender_allowlist=list(c.get("sender_allowlist", [])),
         )
+    if cfg.channel_type == "kafka":
+        from .kafka_stream import KafkaChannel
+        return KafkaChannel(
+            **common,
+            bootstrap_servers=c["bootstrap_servers"],
+            topic=c["topic"],
+            group_id=c["group_id"],
+            batch_size=int(c.get("batch_size", 500)),
+            poll_timeout_seconds=float(c.get("poll_timeout_seconds", 5.0)),
+            auto_offset_reset=c.get("auto_offset_reset", "latest"),
+            security_protocol=c.get("security_protocol", "PLAINTEXT"),
+            sasl_mechanism=c.get("sasl_mechanism", ""),
+            sasl_username=c.get("sasl_username", ""),
+            sasl_password_env=c.get("sasl_password_env", ""),
+            ssl_ca_path=c.get("ssl_ca_path", ""),
+            ssl_cert_path=c.get("ssl_cert_path", ""),
+            ssl_key_path=c.get("ssl_key_path", ""),
+            response_filename=c.get("response_filename", ""),
+        )
     if cfg.channel_type == "db_cdc":
         from .db_cdc import DbCdcChannel
         return DbCdcChannel(
