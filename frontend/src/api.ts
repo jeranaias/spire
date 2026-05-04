@@ -515,12 +515,18 @@ export const api = {
           auth_roles: string[];
         }[];
       }>("/ingest/status"),
-    ecp: (file: File, opts?: { apply?: boolean; confirm?: string }) => {
+    ecp: (
+      file: File,
+      opts?: { apply?: boolean; confirm?: string; state_token?: string },
+    ) => {
       const fd = new FormData();
       fd.append("file", file, file.name);
       const params = new URLSearchParams();
       if (opts?.apply) params.set("apply", "1");
       if (opts?.confirm) params.set("confirm", opts.confirm);
+      // UIS-29 — surface the state_token captured on dry-run so
+      // the apply path can detect concurrent changes (UIS-25).
+      if (opts?.state_token) params.set("state_token", opts.state_token);
       const qs = params.toString() ? `?${params.toString()}` : "";
       return jsonFetch<EcpUploadResult>(
         `/ingest/gcss-mc/ecp${qs}`,
@@ -528,12 +534,16 @@ export const api = {
         false,
       );
     },
-    util: (file: File, opts?: { apply?: boolean; confirm?: string }) => {
+    util: (
+      file: File,
+      opts?: { apply?: boolean; confirm?: string; state_token?: string },
+    ) => {
       const fd = new FormData();
       fd.append("file", file, file.name);
       const params = new URLSearchParams();
       if (opts?.apply) params.set("apply", "1");
       if (opts?.confirm) params.set("confirm", opts.confirm);
+      if (opts?.state_token) params.set("state_token", opts.state_token);
       const qs = params.toString() ? `?${params.toString()}` : "";
       return jsonFetch<UtilUploadResult>(
         `/ingest/gcss-mc/util${qs}`,
@@ -1094,6 +1104,10 @@ export interface EcpUploadResult {
     conflicts: { tamcn: string; serial_number: string; owner_uic: string; candidate_asset_ids: string[]; reason: string }[];
   };
   preview_token: string;
+  // UIS-25 — fingerprint of canonical asset state at dry-run.
+  // Frontend captures this and re-sends it on apply so the server
+  // can 409 if a concurrent operator has applied since dry-run.
+  state_token?: string;
   merge_target: string;
   applied: boolean;
   applied_counts?: { matched_changed: number; new: number; unchanged: number; stale: number; conflicts: number };

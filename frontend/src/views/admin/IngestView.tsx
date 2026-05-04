@@ -226,7 +226,13 @@ function EcpPanel() {
     setBusy("apply");
     setErr(null);
     try {
-      const r = await api.ingest.ecp(file, { apply: true, confirm: preview.preview_token });
+      const r = await api.ingest.ecp(file, {
+        apply: true,
+        confirm: preview.preview_token,
+        // UIS-29 — forward the state_token captured at dry-run so
+        // the apply path can detect concurrent canonical changes.
+        state_token: preview.state_token,
+      });
       setPreview(r);
       pushToast({
         tone: "ok",

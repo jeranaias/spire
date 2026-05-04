@@ -25,6 +25,7 @@ from .store import (
     find_profile,
     get_profile,
     list_profiles,
+    reset_connection_factory,
     set_connection_factory,
     update_profile,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "get_profile",
     "list_profiles",
     "propose_mapping",
+    "reset_connection_factory",
     "set_connection_factory",
     "update_profile",
 ]
