@@ -57,6 +57,13 @@ INGEST_ROLES = frozenset({"data_custodian", "security_manager"})
 # import time. Tests override via channels.set_audit_func.
 set_audit_func(audit_log)
 
+# P6.10 — also wire the audited_swap module so two-phase
+# attempt/commit emission goes through the same chain. The
+# routes/uis.py import does this too, but channel runner can
+# fire before any UIS route is hit, so wire it here as well.
+from ..uis.audited_swap import set_audit_func as _set_audited_swap_audit
+_set_audited_swap_audit(audit_log)
+
 
 def _ingest_enabled() -> bool:
     return (os.environ.get("SPIRE_INGEST_ENABLED", "") or "").strip().lower() in {

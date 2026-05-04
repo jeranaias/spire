@@ -617,12 +617,27 @@ async def stage_ingest(
             detail=f"stage-ingest parser failed: {exc}",
         )
 
-    swap_dataset(
-        new_ds,
-        source="stage-ingest",
-        ingested_by=actor_dodid or actor_role,
-        ingest_hash=ingest_hash,
-    )
+    # P6.10 — two-phase audited swap so a process death between
+    # the in-memory mutation and the audit chain write is detectable
+    # rather than silent.
+    from ..uis.audited_swap import audited_swap
+    with audited_swap(
+        kind="stage_ingest",
+        actor=actor_dodid or actor_role,
+        subject_id=ingest_hash,
+        payload={
+            "source": "stage-ingest",
+            "header_filename": header.filename,
+            "sr_parts_filename": sr_parts.filename,
+            "due_in_filename": due_in.filename,
+        },
+    ):
+        swap_dataset(
+            new_ds,
+            source="stage-ingest",
+            ingested_by=actor_dodid or actor_role,
+            ingest_hash=ingest_hash,
+        )
     # Bust the dataset-status micro-cache so polling clients see the
     # ingest immediately instead of waiting up to 3s for TTL expiry.
     _bust_dataset_status_cache()

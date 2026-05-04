@@ -56,7 +56,12 @@ from ..uis.pipeline import (
     run_pipeline,
 )
 from ..uis.writers import get_writer, has_writer
+from ..uis.audited_swap import audited_swap, set_audit_func as _set_audited_swap_audit
 from ..state import get_dataset, swap_dataset
+
+# Wire the audited_swap audit emitter to the persistence audit log
+# at module import. Tests override via set_audit_func.
+_set_audited_swap_audit(audit_log)
 
 
 log = logging.getLogger(__name__)
@@ -371,14 +376,11 @@ async def uis_upload(
         )
 
     apply_result = writer.apply(writer_diff, ds)
-    swap_dataset(
-        apply_result.new_dataset,
-        source=f"uis.{adapter_id}",
-        ingested_by=actor_dodid or actor_role or "ingest",
-        ingest_hash=preview_token,
-    )
-
-    audit_log(
+    # P6.10 — two-phase audited swap. attempt entry lands BEFORE
+    # the swap, commit entry lands AFTER. Process death between
+    # the two leaves an orphaned attempt that find_orphaned_attempts
+    # surfaces for operator reconciliation.
+    with audited_swap(
         kind="uis.apply",
         actor=actor_dodid or actor_role or "system",
         subject_id=preview_token,
@@ -390,7 +392,13 @@ async def uis_upload(
             "filename": file.filename,
             "actor_role": actor_role,
         },
-    )
+    ):
+        swap_dataset(
+            apply_result.new_dataset,
+            source=f"uis.{adapter_id}",
+            ingested_by=actor_dodid or actor_role or "ingest",
+            ingest_hash=preview_token,
+        )
     for row_audit in apply_result.audit_rows:
         audit_log(
             kind=row_audit["kind"],
