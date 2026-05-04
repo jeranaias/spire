@@ -1,0 +1,187 @@
+\documentclass[10.5pt]{extarticle}
+
+% ---------------------------------------------------------------------------
+% SPIRE — Commander brief, single-page LaTeX source
+%
+% Build:  tectonic docs/COMMANDER_BRIEF.tex
+%   or:   xelatex  docs/COMMANDER_BRIEF.tex
+%
+% Output: docs/COMMANDER_BRIEF.pdf
+% ---------------------------------------------------------------------------
+
+\usepackage[margin=0.6in,top=0.3in,bottom=0.4in]{geometry}
+\usepackage{fontspec}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{ragged2e}
+\usepackage{parskip}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+
+% Quiet, professional palette.
+\definecolor{spireRule}{HTML}{1f2937}      % cool dark gray
+\definecolor{spireAccent}{HTML}{0f766e}    % muted teal — used sparingly
+\definecolor{spireMuted}{HTML}{6b7280}     % gray for footer / metadata
+
+% Times body + Arial headings is the DoD-conventional staff-document
+% pairing. Times reads serious; Arial keeps headers crisp.
+\setmainfont{Times New Roman}[Ligatures=TeX]
+\setsansfont{Arial}[Ligatures=TeX]
+
+\setlength{\parskip}{2pt plus 0.5pt minus 0.5pt}
+\setlength{\parindent}{0pt}
+\linespread{1.02}
+
+% Tighter section heads in Arial for crisp contrast against Times body.
+\titleformat{\section}
+  {\sffamily\fontsize{10.5pt}{12pt}\bfseries\color{spireRule}}
+  {}{0pt}{}
+\titlespacing*{\section}{0pt}{4pt plus 0.5pt}{1pt}
+
+\setlist[itemize]{
+  leftmargin=*,
+  topsep=1pt,
+  partopsep=0pt,
+  itemsep=1pt,
+  parsep=0pt,
+  before=\justifying,
+}
+\setlist[enumerate]{
+  leftmargin=*,
+  topsep=1pt,
+  partopsep=0pt,
+  itemsep=1.5pt,
+  parsep=0pt,
+  before=\justifying,
+}
+
+% Centered classification banner. No internal negative vspace — the
+% caller controls the gap to the next element so the title doesn't
+% bleed into the banner.
+\newcommand{\classband}[0]{%
+  \begin{center}\textbf{UNCLASSIFIED}\end{center}%
+}
+
+\pagestyle{empty}
+
+\begin{document}
+\justifying
+
+\classband
+
+\vspace{6pt}
+\begin{center}
+  {\fontsize{22pt}{24pt}\selectfont\bfseries SPIRE}\\[2pt]
+  {\fontsize{11pt}{13pt}\selectfont\itshape A Contested-Logistics Decision Engine for the Stand-in Force}
+\end{center}
+
+\vspace{-2pt}
+\noindent\rule{\linewidth}{0.4pt}
+
+\vspace{2pt}
+\noindent\textbf{BLUF.} A 3d MLR S-4 forward in the First Island Chain today
+cannot see Class~I, V, and~VIII in a single pane --- those classes live in
+three incompatible systems while GCSS-MC focuses on Class~IX requisitioning.
+SPIRE collapses GCSS-MC, DRRS-MC, and forward sensor feeds into one
+role-shaped view that runs offline on a 2U box in a CONEX, with
+tamper-evident audit and one-click coalition release. \textbf{TRL~4,
+validated at Modern Day Marine 2026 (1st place, 30~APR 2026). Operational
+pilot is the next step.}
+
+\vspace{-2pt}
+\noindent\rule{\linewidth}{0.4pt}
+
+\section*{The Operator's Problem}
+Today, a forward unit taking a Class~VIII demand spike under degraded SATCOM
+has three systems open and a phone call. The planner has minutes --- not
+hours --- to choose between cross-level, expedite, or emergency
+requisition. The decision is unauditable; the artifact is a spreadsheet.
+
+\section*{Capability Gap}
+\begingroup
+\leftskip=12pt \rightskip=12pt
+\itshape\color{spireRule}
+``GCSS-MC now primarily focuses on requisitioning Class~IX repair parts.''
+Classes~I, V, and~VIII are managed by ``three separate incompatible
+systems.'' ``Conventional sustainment remain[s] the SIF concept's greatest
+vulnerability.''
+\par\vspace{2pt}
+\normalfont\color{spireMuted}\fontsize{9.5pt}{11pt}\selectfont
+--- \textit{Sustainment of the Stand-in Force}, War on the Rocks
+(Sept~2022). The same fragmentation is acknowledged in the
+\textit{Marine Corps Concept for Logistics} (Dec~2024).
+\endgroup
+
+\section*{Approach}
+\begin{itemize}
+  \item \textbf{Universal Ingest.} 8 formats (CSV, TSV, XLSX, JSON, JSONL,
+    XML, fixed-width, EDI~X12) across 6 channels (drop, SFTP, IMAP, HTTP,
+    DB~CDC, Kafka). 4 pre-built adapters: GCSS-MC ECP / UTIL / SR-Header,
+    DRRS-MC C-Rating. A local Gemma~4 26B model proposes the column map for
+    non-canonical sources; mappings are saved per unit.
+  \item \textbf{Tamper-evident audit chain.} Every state change is SHA-256
+    hash-chained and Ed25519-signed; exports as CEF for Splunk / ArcSight /
+    QRadar. Inspector verification is offline, against a published key.
+  \item \textbf{Local-first.} Runs on a 2U CONEX box. Vector-clock conflict
+    resolution reconciles forward-node writes when SATCOM restores. No
+    cloud egress.
+  \item \textbf{Coalition-ready.} Live partner-scoped redaction (FVEY, JPN,
+    AUS, PHL). One-click ZIP with manifest hash and release~ID.
+\end{itemize}
+
+\section*{Operational Impact}
+\begin{itemize}
+  \item \textbf{One pane across Class~I~/~V~/~VIII~/~IX} --- eliminates the
+    cross-system reconciliation step that consumes the forward planner's
+    first ten minutes of every Class~VIII~/~V surge.
+  \item \textbf{Forward decisions are auditable.} The decision an S-4 made
+    at H+0 is verifiable against the public key at H+30 days.
+  \item \textbf{No SATCOM dependency for forward planning} --- aligns with
+    the SIF requirement that sustainment be \textit{``light, flexible,
+    responsive, resilient, and redundant''} (HQMC, \textit{A Concept for
+    Stand-in Forces}, Dec~2021).
+\end{itemize}
+
+\section*{Maturity \& Risk}
+\textbf{TRL~4.} Validated against synthetic GCSS-MC ECP / UTIL / SR-Header
+data at MDM~2026; hash-chained audit verified offline. \textbf{TRL~5
+requires} a sanitized real GCSS-MC pull-through from a sponsoring MEF~G-4
+or MLR~S-4. ATO is not yet established; architecture is designed-in for
+IL5 (audit chain, hierarchical RBAC, CAC/PIV scaffolding, no cloud egress)
+but unaccredited.
+
+\section*{Why Now}
+The 39th Commandant has named logistics the \textbf{pacing function}. The
+\textit{Marine Corps Concept for Logistics} (Dec~2024) calls for resilience
+through redundancy, dispersion, and innovation. The data-fragmentation gap
+is named in published doctrine. The window to put SPIRE in operator hands
+is the FY27 POM cycle.
+
+\section*{Path Forward --- Ask}
+\begin{enumerate}
+  \item \textbf{90-day operational pilot} with one MEF~G-4 or MLR~S-4
+    willing to point a sanitized GCSS-MC export at the ingest path.
+  \item \textbf{An MCWL evaluator} to red-team SENTRY against
+    operator-malpractice patterns.
+  \item \textbf{A POC at MCSC PM-MC2I or DC~I\&L} to translate operator
+    requirements into a contract vehicle (SBIR Phase~II or OTA).
+\end{enumerate}
+
+\vfill
+
+\noindent\rule{\linewidth}{0.4pt}
+
+\begin{center}
+{\fontsize{9.5pt}{11pt}\selectfont
+\textbf{POC:} Jesse Morgan {\textperiodcentered} Thornveil {\textperiodcentered}
+\href{mailto:jesse@thornveil.ai}{jesse@thornveil.ai}\\
+\textbf{Repo:} \texttt{jeranaias/spire} (private; access on request)\\
+\textbf{Pilot install:} \texttt{docker-compose up} --- under~5~min, clean laptop to live demo\\[3pt]
+{\color{spireMuted}v1.1 {\textperiodcentered} 04~MAY 2026 {\textperiodcentered} Distribution unrestricted by author}
+}
+\end{center}
+
+\classband
+
+\end{document}
