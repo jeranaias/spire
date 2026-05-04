@@ -5,14 +5,12 @@
 # SPIRE
 ### A Contested-Logistics Decision Engine for the Stand-in Force
 
-*Sanitization · Prediction · Intelligence · Readiness*
-
 </div>
 
 ---
 
-**BLUF.** A MEF G-4 forward in the First Island Chain today cannot see Class I,
-V, and VIII in a single pane — those classes live in three incompatible
+**BLUF.** A 3d MLR S-4 forward in the First Island Chain today cannot see Class
+I, V, and VIII in a single pane — those classes live in three incompatible
 systems while GCSS-MC focuses on Class IX requisitioning. SPIRE collapses
 GCSS-MC, DRRS-MC, and forward sensor feeds into one role-shaped view that
 runs offline on a 2U box in a CONEX, with tamper-evident audit and one-click
@@ -36,10 +34,9 @@ and an unauditable forward decision.
 > systems."* "Conventional sustainment remain[s] the SIF concept's greatest
 > vulnerability."
 >
-> — *Sustainment of the Stand-in Force*, War on the Rocks (Sept 2022)
-
-This is the gap SPIRE was built to close. Commercial-off-the-shelf software
-exists for it; integration with Marine Corps systems is the bottleneck.
+> — *Sustainment of the Stand-in Force*, War on the Rocks (Sept 2022).
+> The same fragmentation is acknowledged in the *Marine Corps Concept for
+> Logistics* (Dec 2024).
 
 ### Approach
 
@@ -61,11 +58,12 @@ exists for it; integration with Marine Corps systems is the bottleneck.
 
 ### Operational Impact
 
-- **One pane across Class I / V / VIII / IX.** Eliminates the three-system
-  reconciliation loop a forward G-4 runs today.
-- **Decision latency, planner-tier, falls from minutes to seconds** on the
-  ranked-actions surface (cannibalize / expedite / cross-level), with the
-  decision chained to audit on commit.
+- **One pane across Class I / V / VIII / IX.** Eliminates the cross-system
+  reconciliation step that today consumes the forward planner's first ten
+  minutes of every Class VIII / V surge.
+- **Forward decisions are auditable.** Every cross-level / expedite /
+  requisition action commits to the hash-chained audit log; the decision
+  the S-4 made at H+0 is verifiable against the public key at H+30 days.
 - **Reduced rear-echelon footprint** — no SATCOM dependency for forward
   planning aligns with the SIF requirement that sustainment be *"light,
   flexible, responsive, resilient, and redundant"* (HQMC, *A Concept for
@@ -74,21 +72,20 @@ exists for it; integration with Marine Corps systems is the bottleneck.
 ### Maturity & Risk
 
 **TRL 4.** System prototype validated against synthetic GCSS-MC ECP / UTIL /
-SR-Header data at MDM 2026 — 526 backend tests passing, hash-chained audit
-verified offline against the published Ed25519 public key. **TRL 5 requires**
-a sanitized real GCSS-MC pull-through in a relevant environment from a
-sponsoring MEF G-4. ATO is not yet established; the architecture is
-designed-in for IL5 (audit chain, hierarchical RBAC, CAC/PIV scaffolding,
-no cloud egress) but unaccredited.
+SR-Header data at MDM 2026; hash-chained audit verified offline against the
+published Ed25519 public key. **TRL 5 requires** a sanitized real GCSS-MC
+pull-through in a relevant environment from a sponsoring MEF G-4 or MLR
+S-4. ATO is not yet established; the architecture is designed-in for IL5
+(audit chain, hierarchical RBAC, CAC/PIV scaffolding, no cloud egress) but
+unaccredited.
 
 ### Why Now
 
 The 39th Commandant has named logistics the **pacing function**. The *Marine
 Corps Concept for Logistics* (Dec 2024) calls for resilience through
 redundancy, dispersion, and innovation. The data-fragmentation gap is named
-in published doctrine; the COTS software exists; the integration is the
-bottleneck. SPIRE is the bridge — and the window to put it in operator
-hands is the FY27 POM cycle.
+in published doctrine. SPIRE is the bridge — and the window to put it in
+operator hands is the FY27 POM cycle.
 
 ### Path Forward — Ask
 
@@ -108,7 +105,7 @@ hands is the FY27 POM cycle.
 **Repo:** `jeranaias/spire` (private; access on request)
 **Pilot install:** `docker-compose up` — under 5 min, clean laptop to live demo
 
-DISTRIBUTION A — APPROVED FOR PUBLIC RELEASE · v1.0 · 04 MAY 2026
+v1.1 · 04 MAY 2026 · Distribution unrestricted by author
 
 **UNCLASSIFIED**
 
