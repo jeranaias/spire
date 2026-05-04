@@ -275,6 +275,46 @@ def test_profile_with_no_matching_columns_still_runs():
     assert result.report.column_map == {}
 
 
+def test_drrs_mc_adapter_end_to_end():
+    """UIS-28 — DRRS-MC adapter (target=CRating) proves the
+    framework extends to a non-Asset IDM entity. Same pipeline,
+    same auto-mapper, same transforms, same validation — different
+    canonical_columns.
+
+    If this test fails the framework has accidentally hard-coded
+    something Asset-specific.
+    """
+    raw = (
+        "UNIT_UIC,AS_OF_DATE,C_RATING,MET_SCORES,OPERATOR_ASSESSMENT\n"
+        'owner_uic_zZyYxXwWvVuUtTsSrRqQ,2026-04-26,C2,"{""defend"":85,""sustain"":78}",Sustain training shortfall — return to C1 by 15MAY26\n'
+        'owner_uic_aBcDeFgHiJkLmNoPqRsT,2026-04-26,c3,"",MET telemetry stale\n'
+    ).encode("utf-8")
+    result = run_pipeline(raw, get_adapter("drrs-mc/c-rating"))
+    assert result.report.rows_kept == 2
+    assert result.rows[0]["c_rating"] == "C2"
+    # enum alias collapses lowercase "c3" → canonical "C3"
+    assert result.rows[1]["c_rating"] == "C3"
+    # date type coerces ISO 8601
+    from datetime import date as _date
+    assert result.rows[0]["as_of_date"] == _date(2026, 4, 26)
+    # the pre-hashed UIC value passes through; second row's UIC also pre-hashed
+    assert result.rows[0]["unit_uic"].startswith("owner_uic_")
+
+
+def test_drrs_mc_messy_headers_via_source_aliases():
+    """source_aliases on the DRRS adapter let casual export
+    variants ("Reporting UIC", "Effective Date", "Cat", "MET
+    Scores", "Commander Remarks") all land cleanly without needing
+    a saved profile. Phase-0 zero-config support."""
+    raw = (
+        "Reporting UIC,Effective Date,Cat,MET Scores,Commander Remarks\n"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,2026-04-26,Cat 2,{},Stable\n"
+    ).encode("utf-8")
+    result = run_pipeline(raw, get_adapter("drrs-mc/c-rating"))
+    assert result.report.rows_kept == 1
+    assert result.rows[0]["c_rating"] == "C2"
+
+
 def test_pipeline_jsonl_input():
     """Pipeline handles a JSONL file with the same schema."""
     raw = (

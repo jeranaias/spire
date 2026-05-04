@@ -20,6 +20,7 @@ from .registry import ADAPTERS, get_adapter, register_adapter
 from . import gcss_mc_ecp        # noqa: F401
 from . import gcss_mc_util       # noqa: F401
 from . import gcss_mc_sr_header  # noqa: F401
+from . import drrs_mc            # noqa: F401
 
 __all__ = [
     "ADAPTERS",
