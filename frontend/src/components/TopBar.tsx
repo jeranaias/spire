@@ -11,6 +11,7 @@ import { MissionClock } from "./MissionClock";
 import { CommsControl } from "./CommsControl";
 import { SystemStatusChip } from "./SystemStatusChip";
 import { StageCluster } from "./StageCluster";
+import { IngestHealthChip } from "./IngestHealthChip";
 import { NotificationsChip } from "./NotificationsChip";
 import { Button, Pressable, useIdempotentAction } from "./ui";
 
@@ -227,6 +228,12 @@ export function TopBar() {
            * primary identity + escape hatch. */}
           <span className="hidden sm:inline-flex">
             <SystemStatusChip />
+          </span>
+          {/* P5.2 — ingest health roll-up. Auto-hides when ingest
+           * is disabled, when the caller can't see ingest routes,
+           * or when no channels are configured. */}
+          <span className="hidden sm:inline-flex">
+            <IngestHealthChip />
           </span>
           <span className="hidden sm:inline-flex">
             <CommsControl />

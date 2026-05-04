@@ -385,6 +385,46 @@ def test_circuit_reset_clears_breaker_state(channels_client, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_health_rollup_returns_zero_when_no_channels(channels_client):
+    r = channels_client.get("/api/uis/channels/health-rollup")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 0
+    assert body["enabled"] == 0
+    assert body["circuit_open"] == 0
+    assert body["failing"] == []
+
+
+def test_health_rollup_counts_enabled_channels(channels_client, tmp_path):
+    channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
+    channels_client.post(
+        "/api/uis/channels",
+        json=_fs_payload(tmp_path, channel_id="intake/share-a", enabled=False),
+    )
+    r = channels_client.get("/api/uis/channels/health-rollup")
+    body = r.json()
+    assert body["total"] == 2
+    assert body["enabled"] == 1
+
+
+def test_health_rollup_surfaces_open_breakers(channels_client, tmp_path):
+    """UIS-P5.2 — rollup is what the TopBar polls every 30s. A
+    tripped circuit must be visible without traversing all
+    channels individually."""
+    from backend.uis.channels.resilience import get_breaker
+    channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
+    br = get_breaker("intake/airgap", failure_threshold=1, cooldown_seconds=60)
+    br.record_failure("simulated outage")
+
+    r = channels_client.get("/api/uis/channels/health-rollup")
+    body = r.json()
+    assert body["circuit_open"] == 1
+    assert any(f["channel_id"] == "intake/airgap" for f in body["failing"])
+    failing = next(f for f in body["failing"] if f["channel_id"] == "intake/airgap")
+    assert failing["circuit_state"] == "open"
+    assert "simulated outage" in (failing["last_error"] or "")
+
+
 def test_channels_routes_role_gated(monkeypatch, tmp_path):
     monkeypatch.setenv("SPIRE_INGEST_ENABLED", "1")
     db_file = tmp_path / "x.sqlite"
