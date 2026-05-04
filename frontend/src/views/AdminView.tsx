@@ -451,7 +451,7 @@ function fmtAxis(iso?: string): string {
  * via TopBar deep-link; an inline tab strip on every /admin page makes
  * the SOC view discoverable from Flywheel and vice versa.
  */
-export type AdminTabKey = "flywheel" | "audit" | "economics";
+export type AdminTabKey = "flywheel" | "audit" | "economics" | "ingest" | "mapper" | "channels";
 
 export function AdminTabs({ active }: { active: AdminTabKey }) {
   const tab = (to: string, key: AdminTabKey, label: string, hint: string) => (
@@ -479,6 +479,7 @@ export function AdminTabs({ active }: { active: AdminTabKey }) {
       {tab("/admin/economics", "economics", "Inference Economics", "Per-call LLM cost telemetry + 180k-Marine extrapolation")}
       {tab("/admin/ingest",    "ingest",    "Real-Data Ingest",    "Drop a GCSS-MC export to dry-run + apply")}
       {tab("/admin/ingest/mapper", "mapper",  "Mapping Editor",      "Auto + LLM-assisted column-mapping editor; save profiles per unit/source")}
+      {tab("/admin/channels",  "channels",  "Ingest Channels",     "Pull-mode SFTP / IMAP / HTTP / DB / Kafka sources, health, DLQ, circuit reset")}
     </nav>
   );
 }

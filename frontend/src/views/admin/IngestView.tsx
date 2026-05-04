@@ -599,7 +599,7 @@ function StaleQueue() {
                   Defer
                 </Button>
                 <Button
-                  variant="danger"
+                  variant="warning"
                   onClick={() => resolve(s.asset_id, "remove")}
                   pending={busyId === s.asset_id}
                   disabled={!!busyId}
