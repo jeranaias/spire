@@ -38,6 +38,7 @@ from .routes.decision_bridge import router as decision_bridge_router
 from .routes.stage_ingest import router as stage_ingest_router
 from .routes.ingest import router as ingest_router
 from .routes.uis import router as uis_router
+from .routes.channels import router as uis_channels_router
 from .scoping import (
     BASTION_VIEW_ROLES,
     PULSE_VIEW_ROLES,
@@ -156,6 +157,7 @@ app.include_router(ingest_router, prefix="/api/ingest", tags=["ingest"])
 # /api/ingest/*. The legacy adapter-specific routes stay live for
 # backwards compat; new UI flows target /api/uis/*.
 app.include_router(uis_router, prefix="/api/uis", tags=["uis"])
+app.include_router(uis_channels_router, prefix="/api/uis/channels", tags=["uis-channels"])
 
 
 # Serve the built frontend bundle at /. Assets land at /assets/*, index.html
