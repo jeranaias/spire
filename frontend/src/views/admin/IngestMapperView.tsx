@@ -422,7 +422,13 @@ function MappingEditor({
 }
 
 function ConfidencePill({ value }: { value: number }) {
-  if (!value) {
+  // Treat values exactly 0 (no proposal exists) differently from
+  // small positives (e.g. 0.01 from a low-confidence LLM call).
+  // Earlier we showed "—" for anything that math.floor(value*100)
+  // rounded to 0%, which read as "no data" when really it was
+  // "very low confidence". Now: show "<1%" so the operator sees
+  // the LLM had an opinion but a weak one.
+  if (value === 0 || value === undefined || value === null) {
     return (
       <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
         —
@@ -434,12 +440,14 @@ function ConfidencePill({ value }: { value: number }) {
     value >= 0.7 ? "var(--color-primary)" :
     value >= 0.5 ? "var(--color-warning)" :
     "var(--color-text-muted)";
+  const pctRaw = value * 100;
+  const label = pctRaw < 1 ? "<1%" : `${pctRaw.toFixed(0)}%`;
   return (
     <span
       className="rounded-sm border px-1.5 py-[1px] font-mono text-[10px] uppercase tracking-widest tabular-nums"
       style={{ borderColor: `color-mix(in oklab, ${color} 40%, var(--color-border))`, color }}
     >
-      {(value * 100).toFixed(0)}%
+      {label}
     </span>
   );
 }
@@ -470,11 +478,54 @@ function SaveProfileBar({
   );
   const [unit, setUnit] = useState<string>(defaultUnit);
   const [notes, setNotes] = useState<string>("");
+  const [collisionWarning, setCollisionWarning] = useState<string | null>(null);
+  const [checkingCollision, setCheckingCollision] = useState(false);
 
   // Reset the proposed profile_id when adapter changes
   useEffect(() => {
     setProfileId(`${slug(unit)}/${adapter.id}/v${new Date().toISOString().slice(0, 7)}`);
+    setCollisionWarning(null);
   }, [adapter.id, unit]);
+
+  // Debounced collision pre-check: every time profile_id changes,
+  // wait 400ms then GET it. If it exists, surface a warning so the
+  // operator doesn't spend 10 minutes editing only to hit 409 on
+  // submit.
+  useEffect(() => {
+    const id = profileId.trim();
+    if (!id) {
+      setCollisionWarning(null);
+      return;
+    }
+    setCheckingCollision(true);
+    const t = setTimeout(async () => {
+      try {
+        const existing = await api.uis.getProfile(id);
+        if (existing) {
+          setCollisionWarning(
+            `Profile "${id}" already exists (created ${existing.created_at.slice(0, 10)}). ` +
+            "Save will overwrite it — choose a new id, or use the PUT endpoint to update."
+          );
+        }
+      } catch {
+        // 404 = available (good); other errors swallow silently
+        setCollisionWarning(null);
+      } finally {
+        setCheckingCollision(false);
+      }
+    }, 400);
+    return () => {
+      clearTimeout(t);
+      setCheckingCollision(false);
+    };
+  }, [profileId]);
+
+  function reset() {
+    setProfileId(`${slug(unit)}/${adapter.id}/v${new Date().toISOString().slice(0, 7)}`);
+    setUnit(defaultUnit);
+    setNotes("");
+    setCollisionWarning(null);
+  }
 
   async function save(confirm: boolean) {
     if (!profileId.trim()) {
@@ -496,6 +547,7 @@ function SaveProfileBar({
         confirm,
       });
       onSaved(p);
+      setCollisionWarning(null);
     } catch (e) {
       onError(formatApiError(e));
     } finally {
@@ -537,7 +589,25 @@ function SaveProfileBar({
           />
         </Field>
       </div>
+      {checkingCollision && (
+        <div className="mt-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+          checking profile_id…
+        </div>
+      )}
+      {collisionWarning && (
+        <div className="mt-2 rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_12%,var(--color-surface))] px-2 py-1 font-mono text-[11px] tracking-wide text-[var(--color-warning)]">
+          {collisionWarning}
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <Button
+          variant="secondary"
+          onClick={reset}
+          disabled={disabled}
+          size="sm"
+        >
+          Reset
+        </Button>
         <Button
           variant="secondary"
           onClick={() => save(false)}
