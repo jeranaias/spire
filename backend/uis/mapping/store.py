@@ -90,7 +90,7 @@ def find_profile(source_id: str, unit: Optional[str] = None) -> Optional[Mapping
                 """
                 SELECT * FROM uis_mapping_profiles
                 WHERE source_id = ? AND unit = ? AND confirmed_at IS NOT NULL
-                ORDER BY confirmed_at DESC LIMIT 1
+                ORDER BY confirmed_at DESC, profile_id ASC LIMIT 1
                 """,
                 (source_id, unit),
             ).fetchone()
@@ -100,7 +100,7 @@ def find_profile(source_id: str, unit: Optional[str] = None) -> Optional[Mapping
             """
             SELECT * FROM uis_mapping_profiles
             WHERE source_id = ? AND (unit IS NULL OR unit = '') AND confirmed_at IS NOT NULL
-            ORDER BY confirmed_at DESC LIMIT 1
+            ORDER BY confirmed_at DESC, profile_id ASC LIMIT 1
             """,
             (source_id,),
         ).fetchone()
