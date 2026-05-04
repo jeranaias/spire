@@ -89,7 +89,7 @@ def _config_to_dict(cfg: ChannelConfig) -> dict:
 # ---------------------------------------------------------------------------
 
 
-SUPPORTED_TYPES = {"filesystem", "sftp", "imap"}
+SUPPORTED_TYPES = {"filesystem", "sftp", "imap", "http_poll"}
 
 # Required keys per channel type. Validation up front so a malformed
 # config doesn't surface as an obscure crash three days later when
@@ -98,6 +98,7 @@ REQUIRED_CONFIG_KEYS = {
     "filesystem": {"root"},
     "sftp": {"host", "username", "base_path"},
     "imap": {"host", "username", "password_env"},
+    "http_poll": {"url"},
 }
 
 

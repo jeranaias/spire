@@ -36,6 +36,7 @@ from .base import (
     unregister_channel,
 )
 from .filesystem import FilesystemChannel
+from .http_poll import HttpPollChannel
 from .imap import IMAPChannel
 from .runner import (
     ChannelScheduler,
@@ -59,6 +60,7 @@ __all__ = [
     "FilesystemChannel",
     "SFTPChannel",
     "IMAPChannel",
+    "HttpPollChannel",
     "poll_channel",
     "PollResult",
     "FileResult",
