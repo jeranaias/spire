@@ -274,6 +274,27 @@ def build_channel(cfg: ChannelConfig):
             attachment_glob=c.get("attachment_glob", "*"),
             sender_allowlist=list(c.get("sender_allowlist", [])),
         )
+    if cfg.channel_type == "db_cdc":
+        from .db_cdc import DbCdcChannel
+        return DbCdcChannel(
+            **common,
+            dialect=c["dialect"],
+            table=c.get("table", ""),
+            watermark_column=c.get("watermark_column", "updated_at"),
+            primary_key_columns=list(c.get("primary_key_columns", [])),
+            dsn=c.get("dsn", ""),
+            host=c.get("host", ""),
+            port=int(c.get("port", 0) or 0),
+            database=c.get("database", ""),
+            username=c.get("username", ""),
+            password_env=c.get("password_env", ""),
+            max_rows_per_poll=int(c.get("max_rows_per_poll", 10000)),
+            select_sql=c.get("select_sql", ""),
+            extra_where=c.get("extra_where", ""),
+            watermark_state_path=c.get("watermark_state_path", ""),
+            initial_watermark=c.get("initial_watermark", ""),
+            response_filename=c.get("response_filename", ""),
+        )
     if cfg.channel_type == "http_poll":
         return HttpPollChannel(
             **common,
