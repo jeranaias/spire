@@ -8,6 +8,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def reset_breakers():
+    """Module-global circuit-breaker registry survives across tests
+    in the same session. Clear it between every test so per-test
+    breaker setup is deterministic."""
+    from backend.uis.channels.resilience import _BREAKERS
+    _BREAKERS.clear()
+    yield
+    _BREAKERS.clear()
+
+
 @pytest.fixture
 def channels_client(monkeypatch, tmp_path):
     """Authenticated, ingest-enabled test client with isolated SQLite."""
@@ -239,6 +250,101 @@ def test_channels_routes_503_when_ingest_disabled(monkeypatch, tmp_path):
     assert r.status_code == 200
     r = c.get("/api/uis/channels")
     assert r.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# DLQ list / replay / discard
+# ---------------------------------------------------------------------------
+
+
+def _drop_quarantined(tmp_path: Path, filename: str, body: bytes, reason: str):
+    """Manually plant a file in the channel's quarantine/ dir so we
+    can test the DLQ surface without driving a full poll cycle."""
+    qdir = tmp_path / "intake" / "quarantine"
+    qdir.mkdir(parents=True, exist_ok=True)
+    (qdir / filename).write_bytes(body)
+    sidecar = qdir / (filename + ".reason.txt")
+    sidecar.write_text(f"reason: {reason}\n", encoding="utf-8")
+
+
+def test_dlq_list_returns_quarantined_files(channels_client, tmp_path):
+    channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
+    _drop_quarantined(tmp_path, "bad_export.csv", b"x\n", "duplicate_header_columns")
+    r = channels_client.get("/api/uis/channels/intake/airgap/dlq")
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert len(items) == 1
+    assert items[0]["filename"] == "bad_export.csv"
+    assert "duplicate_header_columns" in items[0]["reason"]
+
+
+def test_dlq_replay_moves_file_back_to_incoming(channels_client, tmp_path):
+    channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
+    _drop_quarantined(tmp_path, "fixed.csv", b"a\n", "operator_re_extracted")
+    r = channels_client.post(
+        "/api/uis/channels/intake/airgap/dlq/fixed.csv/replay",
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["replayed"] == "fixed.csv"
+    # File now in incoming/, sidecar gone, quarantine empty
+    assert (tmp_path / "intake" / "incoming" / "fixed.csv").exists()
+    assert not (tmp_path / "intake" / "quarantine" / "fixed.csv").exists()
+    assert not (tmp_path / "intake" / "quarantine" / "fixed.csv.reason.txt").exists()
+
+
+def test_dlq_replay_404_when_file_not_quarantined(channels_client, tmp_path):
+    channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
+    r = channels_client.post(
+        "/api/uis/channels/intake/airgap/dlq/missing.csv/replay",
+    )
+    assert r.status_code == 404
+
+
+def test_dlq_replay_409_when_incoming_already_has_same_name(channels_client, tmp_path):
+    channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
+    _drop_quarantined(tmp_path, "x.csv", b"a\n", "reason")
+    (tmp_path / "intake" / "incoming" / "x.csv").write_bytes(b"already here")
+    r = channels_client.post(
+        "/api/uis/channels/intake/airgap/dlq/x.csv/replay",
+    )
+    assert r.status_code == 409
+    assert "already in incoming" in r.text
+
+
+def test_dlq_discard_permanently_removes_file(channels_client, tmp_path):
+    channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
+    _drop_quarantined(tmp_path, "garbage.csv", b"x\n", "corrupt")
+    r = channels_client.post(
+        "/api/uis/channels/intake/airgap/dlq/garbage.csv/discard",
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["discarded"] == "garbage.csv"
+    assert not (tmp_path / "intake" / "quarantine" / "garbage.csv").exists()
+
+
+# ---------------------------------------------------------------------------
+# Circuit reset
+# ---------------------------------------------------------------------------
+
+
+def test_circuit_reset_clears_breaker_state(channels_client, tmp_path):
+    from backend.uis.channels.resilience import get_breaker, CircuitState
+    channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
+
+    br = get_breaker("intake/airgap", failure_threshold=1, cooldown_seconds=60)
+    br.record_failure("simulated outage")
+    assert br.state == CircuitState.OPEN
+
+    r = channels_client.post("/api/uis/channels/intake/airgap/circuit/reset")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["circuit"]["state"] == "closed"
+    assert body["circuit"]["consecutive_failures"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 503 + role gates
+# ---------------------------------------------------------------------------
 
 
 def test_channels_routes_role_gated(monkeypatch, tmp_path):

@@ -36,6 +36,14 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .base import IngestChannel, PendingFile
+from .resilience import (
+    CircuitState,
+    IntegrityMismatchError,
+    RetryPolicy,
+    get_breaker,
+    verify_against_declared,
+    with_retry,
+)
 
 
 log = logging.getLogger(__name__)
@@ -114,6 +122,7 @@ def poll_channel(
     *,
     actor: str = "channel-runner",
     max_files: Optional[int] = None,
+    retry_policy: Optional[RetryPolicy] = None,
 ) -> PollResult:
     """Run one poll cycle on a channel.
 
@@ -126,16 +135,60 @@ def poll_channel(
     consumes. None = no limit (drain). Default of None matches
     operational expectations (process the backlog; the next cycle
     handles whatever arrives next).
+
+    ``retry_policy`` (P4.3) wraps transient channel I/O — fetch +
+    list_pending — with exponential backoff. Default policy is
+    3 attempts with 0.5s base delay, suitable for SFTP/IMAP blips.
+    File-level failures (parse errors, writer conflicts) do NOT
+    retry — those are deterministic and route straight to DLQ.
+
+    Circuit breaker (P4.3) — when a channel has been failing
+    consecutively, the runner short-circuits the cycle to avoid
+    hammering an upstream that's already known-bad. Operator
+    resets the breaker via /api/uis/channels/{id}/circuit/reset.
     """
     started = _utc_iso()
     t0 = time.perf_counter()
     file_results: List[FileResult] = []
+    breaker = get_breaker(channel.channel_id)
 
-    # Enumerate pending. Fail-fast if the channel itself can't list —
+    # Circuit breaker: if open + still in cooldown, skip the cycle
+    if not breaker.allow():
+        finished = _utc_iso()
+        _emit_audit(
+            kind="channel.poll",
+            actor=actor,
+            subject_id=channel.channel_id,
+            payload={
+                "outcome": "circuit_open",
+                "started_at": started,
+                "finished_at": finished,
+                "circuit_snapshot": breaker.snapshot(),
+            },
+        )
+        return PollResult(
+            channel_id=channel.channel_id,
+            started_at=started,
+            finished_at=finished,
+            duration_ms=(time.perf_counter() - t0) * 1000.0,
+            pending_count=0,
+        )
+
+    rp = retry_policy or RetryPolicy()
+
+    # Enumerate pending under retry. Fail-fast if all attempts fail —
     # that's a connectivity issue, not a per-file problem.
     try:
-        pending = list(channel.list_pending())
+        pending = with_retry(
+            lambda: list(channel.list_pending()),
+            policy=rp,
+            on_retry=lambda attempt, exc: log.info(
+                "Channel %s list_pending retry %d: %s",
+                channel.channel_id, attempt, exc,
+            ),
+        )
     except Exception as e:
+        breaker.record_failure(f"list_pending: {str(e)[:200]}")
         log.warning("Channel %s list_pending failed: %s", channel.channel_id, e)
         finished = _utc_iso()
         _emit_audit(
@@ -147,6 +200,7 @@ def poll_channel(
                 "error": str(e)[:500],
                 "started_at": started,
                 "finished_at": finished,
+                "circuit_snapshot": breaker.snapshot(),
             },
         )
         return PollResult(
@@ -161,8 +215,21 @@ def poll_channel(
         pending = pending[:max_files]
 
     for p in pending:
-        result = _process_one(channel, p, actor=actor)
+        result = _process_one(channel, p, actor=actor, retry_policy=rp)
         file_results.append(result)
+
+    # Cycle outcome → breaker
+    cycle_failed_count = sum(
+        1 for fr in file_results if fr.status in ("quarantined", "failed")
+    )
+    cycle_succeeded_count = sum(
+        1 for fr in file_results if fr.status in ("applied", "skipped")
+    )
+    if cycle_succeeded_count > 0 and cycle_failed_count == 0:
+        breaker.record_success()
+    elif file_results and cycle_succeeded_count == 0 and cycle_failed_count > 0:
+        # Every file failed — count as a cycle failure for the breaker
+        breaker.record_failure("all_files_failed")
 
     finished = _utc_iso()
     duration_ms = (time.perf_counter() - t0) * 1000.0
@@ -198,6 +265,7 @@ def _process_one(
     pending: PendingFile,
     *,
     actor: str,
+    retry_policy: Optional[RetryPolicy] = None,
 ) -> FileResult:
     """Single-file pipeline: fetch → pipeline → writer.apply → ack | quarantine."""
     from ..adapters import get_adapter
@@ -213,10 +281,18 @@ def _process_one(
 
     file_started = time.perf_counter()
     file_result = FileResult(filename=pending.filename, status="failed")
+    rp = retry_policy or RetryPolicy()
 
-    # 1. Fetch
+    # 1. Fetch (with retry — transient network blips shouldn't kill the file)
     try:
-        body = channel.fetch(pending)
+        body = with_retry(
+            lambda: channel.fetch(pending),
+            policy=rp,
+            on_retry=lambda attempt, exc: log.info(
+                "Channel %s fetch retry %d for %s: %s",
+                channel.channel_id, attempt, pending.filename, exc,
+            ),
+        )
     except Exception as e:
         file_result.error = f"fetch: {str(e)[:300]}"
         # Don't quarantine on fetch failure — connectivity issues
@@ -236,7 +312,33 @@ def _process_one(
         return file_result
 
     file_result.bytes_read = len(body)
-    file_result.file_sha256 = hashlib.sha256(body).hexdigest()
+
+    # 1b. File integrity verify — channel may have surfaced a
+    # declared sha256 (sidecar file, HTTP header, mailbox subject
+    # convention). Mismatch is a poison-message signal — quarantine.
+    try:
+        file_result.file_sha256 = verify_against_declared(
+            body, pending.content_hash_hint, filename=pending.filename,
+        )
+    except IntegrityMismatchError as e:
+        reason = f"integrity_mismatch: {e}"
+        _safe_quarantine(channel, pending, reason)
+        file_result.status = "quarantined"
+        file_result.error = reason
+        file_result.duration_ms = round((time.perf_counter() - file_started) * 1000.0, 2)
+        _emit_audit(
+            kind="channel.quarantined",
+            actor=actor,
+            subject_id=channel.channel_id,
+            payload={
+                "filename": pending.filename,
+                "reason": reason,
+                "expected_sha256": e.expected,
+                "actual_sha256": e.actual,
+            },
+        )
+        return file_result
+
     _emit_audit(
         kind="channel.fetched",
         actor=actor,
@@ -245,6 +347,7 @@ def _process_one(
             "filename": pending.filename,
             "size_bytes": file_result.bytes_read,
             "sha256": file_result.file_sha256,
+            "integrity_verified": pending.content_hash_hint is not None,
         },
     )
 
