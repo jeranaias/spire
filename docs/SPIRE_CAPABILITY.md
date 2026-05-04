@@ -145,7 +145,7 @@ trust anchors loaded from a configurable directory; revocation
 modes for OCSP and CRL are wired in as scaffolds awaiting
 deployment-time configuration. Hierarchical role-based access maps
 to the joint logistics command chain: a G-4 at CLR sees every CLB
-beneath, an SSgt at CLB doesn't see peer CLB data, write access is
+beneath, a SSgt at CLB doesn't see peer CLB data, write access is
 locked to the operator's home unit. Records retention is DoD
 5015.02-compliant with hard-delete capability for spillage cleanup,
 and every retention deletion gets its own audit chain entry — kind,
