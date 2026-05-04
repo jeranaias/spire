@@ -132,14 +132,19 @@ class SFTPChannel:
             "allow_agent": True,
             "look_for_keys": True,
         }
+        # P6.9 — secrets resolve through resolve_env_secret so a
+        # value like ``vault://secret/spire/dla#password`` routes
+        # to Vault automatically. Plain env values still work
+        # unchanged for dev / pilot.
+        from ..secrets import resolve_env_secret as _resolve
         if self.key_path:
             connect_kwargs["key_filename"] = self.key_path
             if self.key_passphrase_env:
-                phrase = os.environ.get(self.key_passphrase_env)
+                phrase = _resolve(self.key_passphrase_env)
                 if phrase:
                     connect_kwargs["passphrase"] = phrase
         elif self.password_env:
-            pwd = os.environ.get(self.password_env)
+            pwd = _resolve(self.password_env)
             if not pwd:
                 raise RuntimeError(
                     f"SFTPChannel {self.channel_id}: password_env "

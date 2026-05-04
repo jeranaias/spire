@@ -312,7 +312,9 @@ class DbCdcChannel:
     def _resolved_password(self) -> Optional[str]:
         if not self.password_env:
             return None
-        pwd = os.environ.get(self.password_env)
+        # P6.9 — Vault-aware secrets resolution
+        from ..secrets import resolve_env_secret as _resolve
+        pwd = _resolve(self.password_env)
         if pwd is None:
             raise RuntimeError(
                 f"DbCdcChannel {self.channel_id}: password_env "

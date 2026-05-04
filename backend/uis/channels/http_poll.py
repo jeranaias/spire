@@ -370,8 +370,10 @@ class HttpPollChannel:
         into ``headers`` (httpx doesn't ship a Bearer helper); basic
         auth returns a tuple httpx accepts directly. Returns the
         httpx auth value (None if header-based)."""
+        # P6.9 — Vault-aware secrets resolution
+        from ..secrets import resolve_env_secret as _resolve
         if self.bearer_token_env:
-            tok = os.environ.get(self.bearer_token_env)
+            tok = _resolve(self.bearer_token_env)
             if not tok:
                 raise RuntimeError(
                     f"HttpPollChannel {self.channel_id}: bearer_token_env "
@@ -380,7 +382,7 @@ class HttpPollChannel:
             headers["Authorization"] = f"Bearer {tok}"
             return None
         if self.basic_auth_username:
-            pwd = os.environ.get(self.basic_auth_password_env or "")
+            pwd = _resolve(self.basic_auth_password_env or "")
             if pwd is None:
                 raise RuntimeError(
                     f"HttpPollChannel {self.channel_id}: basic_auth_password_env "
