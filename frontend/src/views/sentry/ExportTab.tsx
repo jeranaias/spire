@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type ExportResult, type SentryExportManifest } from "../../api";
 import type { SentryContext } from "../SentryView";
 import { SegmentedControl } from "../../components/SegmentedControl";
@@ -50,6 +50,13 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
   const [manifestLoading, setManifestLoading] = useState(false);
   const [manifestError, setManifestError] = useState<string | null>(null);
   const pushToast = useSpireStore((s) => s.pushToast);
+  // Cold-start auto-preview: fire the manifest dry-run once on mount when
+  // a batch + authority are already in scope, so the operator immediately
+  // sees the bundle scope (counts, top units, release-block status) without
+  // clicking. Subsequent authority / batch changes do NOT auto-fire — the
+  // operator may be flipping authority deliberately and the manual "Preview
+  // Manifest" button is the explicit re-run path.
+  const autoPreviewedRef = useRef<boolean>(false);
 
   if (role !== "data_custodian" && role !== "security_manager" && role !== "mef_commander") {
     return (
@@ -177,6 +184,19 @@ export function ExportTab({ ctx }: { ctx: SentryContext }) {
     setManifest(null);
     setManifestError(null);
   }
+
+  useEffect(() => {
+    // One-shot auto-preview on the first mount where a batch is in scope.
+    // Guarded by a ref (not state) so the effect doesn't re-run when the
+    // manifest itself populates. Skips when an export already succeeded
+    // (operator is past the preview phase) or the panel is mid-load.
+    if (autoPreviewedRef.current) return;
+    if (!ctx.batchId) return;
+    if (manifestLoading || manifest || result) return;
+    autoPreviewedRef.current = true;
+    void loadManifest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx.batchId]);
 
   // The bundle classification is auto-inherited from the source records
   // server-side. Until the operator runs an export the marking is unknown;

@@ -240,6 +240,35 @@ export function MarkTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [release]);
 
+  // Cold-start auto-seed: drop the first sample remark into the textarea
+  // on first mount so a new operator immediately sees a working Tier-1
+  // recommendation (classification + caveats + REL TO + distribution
+  // statement) without clicking anything. Persists "seen" so the auto-
+  // seed never overwrites a returning operator's in-progress draft.
+  // Sample rotation: cycle through SAMPLES across visits so the operator
+  // sees variety on repeat dismissals.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const seenKey = "spire.sentry.mark.autoseed.seen.v1";
+    const idxKey = "spire.sentry.mark.autoseed.idx.v1";
+    if (window.localStorage.getItem(seenKey) === "1") return;
+    if ((textareaRef.current?.value ?? "").trim()) return;
+    const idx = Math.max(
+      0,
+      Number(window.localStorage.getItem(idxKey) ?? "0") % SAMPLES.length,
+    );
+    const sample = SAMPLES[idx];
+    if (!sample) return;
+    if (textareaRef.current) {
+      textareaRef.current.value = sample.text;
+      latestTextRef.current = sample.text;
+    }
+    scheduleMark(true);
+    window.localStorage.setItem(seenKey, "1");
+    window.localStorage.setItem(idxKey, String((idx + 1) % SAMPLES.length));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function loadSample(preset: string) {
     // Bug: this used to bump `textVersion` after writing the value,
     // which is the textarea's `key` prop — React unmounts the
