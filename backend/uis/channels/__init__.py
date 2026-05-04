@@ -36,6 +36,7 @@ from .base import (
     unregister_channel,
 )
 from .filesystem import FilesystemChannel
+from .sftp import SFTPChannel
 
 __all__ = [
     "IngestChannel",
@@ -48,4 +49,5 @@ __all__ = [
     "has_channel",
     "list_channels",
     "FilesystemChannel",
+    "SFTPChannel",
 ]
