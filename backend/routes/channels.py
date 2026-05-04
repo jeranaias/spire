@@ -34,6 +34,7 @@ from ..uis.channels import (
     set_audit_func,
     unregister_channel,
 )
+from ..uis.channels.paths import PathEscapeError, validate_state_path
 from ..uis.channels.store import (
     ChannelConfig,
     build_channel,
@@ -146,6 +147,18 @@ def _validate_channel_payload(payload: dict) -> None:
                 "actual secret stays out of the database."
             ),
         )
+    # P4.9 — state-file paths must resolve under SPIRE_CHANNEL_STATE_ROOT.
+    # Prevents an admin from configuring `watermark_state_path=/etc/passwd`
+    # or other path-traversal vectors. Filesystem channel's `root`
+    # is intentionally NOT containment-checked — that path IS the
+    # operator's chosen watch target.
+    state_path_keys = ("watermark_state_path", "processed_handles_path")
+    for key in state_path_keys:
+        if key in config:
+            try:
+                validate_state_path(config.get(key), label=key)
+            except PathEscapeError as e:
+                raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---------------------------------------------------------------------------

@@ -97,6 +97,44 @@ def test_create_rejects_missing_required_config_keys(channels_client, tmp_path):
     assert "config missing required keys" in r.text
 
 
+def test_create_rejects_state_path_outside_state_root(channels_client, tmp_path, monkeypatch):
+    """UIS-P4.9 — admin can't configure a watermark file at /etc/passwd."""
+    monkeypatch.setenv("SPIRE_CHANNEL_STATE_ROOT", str(tmp_path / "state-root"))
+    bad = {
+        "channel_id": "test/dba",
+        "channel_type": "db_cdc",
+        "adapter_id": "gcss-mc/sr-header",
+        "config": {
+            "dialect": "sqlite",
+            "database": str(tmp_path / "src.sqlite"),
+            "table": "srs",
+            "watermark_state_path": "/etc/passwd",  # ESCAPE
+        },
+    }
+    r = channels_client.post("/api/uis/channels", json=bad)
+    assert r.status_code == 400
+    assert "escapes the state root" in r.text
+
+
+def test_create_accepts_state_path_inside_state_root(channels_client, tmp_path, monkeypatch):
+    state_root = tmp_path / "state-root"
+    state_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("SPIRE_CHANNEL_STATE_ROOT", str(state_root))
+    payload = {
+        "channel_id": "test/dbb",
+        "channel_type": "db_cdc",
+        "adapter_id": "gcss-mc/sr-header",
+        "config": {
+            "dialect": "sqlite",
+            "database": str(tmp_path / "src.sqlite"),
+            "table": "srs",
+            "watermark_state_path": str(state_root / "test-dbb" / "wm.txt"),
+        },
+    }
+    r = channels_client.post("/api/uis/channels", json=payload)
+    assert r.status_code == 200, r.text
+
+
 def test_create_rejects_secret_in_config(channels_client, tmp_path):
     """Belt-and-suspenders — refuse a literal `password` field even
     if the operator made a mistake. Force them to use *_env."""
