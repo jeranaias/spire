@@ -30,6 +30,7 @@ from .base import (
 # fire at package-load time. Adding a new writer = drop the file in
 # this package + import it here.
 from . import asset_ecp  # noqa: F401  — side-effect: register
+from . import asset_util  # noqa: F401  — side-effect: register
 
 __all__ = [
     "EntityWriter",

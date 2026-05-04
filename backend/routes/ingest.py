@@ -551,16 +551,17 @@ async def ingest_gcss_mc_util(
             status_code=413,
             detail=f"Row count exceeds pipeline cap {e.limit}. Split the file or raise SPIRE_UIS_MAX_ROWS.",
         )
-    rows = to_parsed_util_rows(pipeline_result)
     legacy_report = map_pipeline_report_to_util_legacy(pipeline_result)
 
     try:
         ds = get_dataset()
-        canonical_assets = list(getattr(ds, "assets", []) or [])
     except Exception:
-        canonical_assets = []
+        ds = None
 
-    # Audit every upload (dry-run + apply, see ECP route comment).
+    # Phase 3 — apply path through the EntityWriter protocol.
+    writer = get_writer("gcss-mc/util")
+    writer_diff = writer.preview(pipeline_result, ds)
+
     audit_log(
         kind="ingest.util.upload",
         actor=actor_dodid or actor_role or "system",
@@ -581,15 +582,9 @@ async def ingest_gcss_mc_util(
     )
 
     if not apply:
-        # Dry-run preview: show how many rows would match without
-        # mutating anything. Shallow-copy assets so apply_latest_readings'
-        # in-place writes don't leak into the singleton.
-        from copy import copy as _copy
-        preview_assets = [_copy(a) for a in canonical_assets]
-        _, preview_counts = apply_latest_readings(rows, preview_assets)
         return {
             "report": legacy_report,
-            "preview_counts": preview_counts,
+            "preview_counts": writer_diff.counts,
             "preview_token": preview_token,
             "merge_target": "asset_current_hours_miles_status",
             "applied": False,
@@ -611,10 +606,9 @@ async def ingest_gcss_mc_util(
             ),
         )
 
-    updated_assets, applied_counts = apply_latest_readings(rows, canonical_assets)
-    new_ds = _replace_assets(ds, updated_assets)
+    apply_result = writer.apply(writer_diff, ds)
     swap_dataset(
-        new_ds,
+        apply_result.new_dataset,
         source="ingest.util",
         ingested_by=actor_dodid or actor_role or "ingest",
         ingest_hash=preview_token,
@@ -627,7 +621,7 @@ async def ingest_gcss_mc_util(
         payload={
             "source": "gcss-mc/util",
             "preview_token": preview_token,
-            "applied_counts": applied_counts,
+            "applied_counts": apply_result.summary_counts,
             "filename": file.filename,
             "actor_role": actor_role,
         },
@@ -638,7 +632,7 @@ async def ingest_gcss_mc_util(
         "preview_token": preview_token,
         "merge_target": "asset_current_hours_miles_status",
         "applied": True,
-        "applied_counts": applied_counts,
+        "applied_counts": apply_result.summary_counts,
     }
 
 

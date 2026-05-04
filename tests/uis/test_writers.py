@@ -174,6 +174,112 @@ def test_apply_is_pure_and_returns_new_dataset():
         assert "actor" not in row  # route adds it
 
 
+# ---------------------------------------------------------------------------
+# AssetUtilWriter
+# ---------------------------------------------------------------------------
+
+
+def _util_csv(*lines):
+    header = "ASSET_ID,READING_DATE,CURRENT_HOURS,CURRENT_MILES,CURRENT_STATUS"
+    return ("\n".join((header, *lines)) + "\n").encode("utf-8")
+
+
+def test_util_writer_registered_under_adapter_id():
+    assert has_writer("gcss-mc/util")
+    w = get_writer("gcss-mc/util")
+    assert w.target_entity == "Asset"
+
+
+def test_util_writer_preview_does_not_mutate_input_assets():
+    """UTIL apply_latest_readings writes in place. The writer's
+    preview must shield the live dataset from the dry-run merge.
+    """
+    from dataset.fleet import Asset
+    asset = Asset(
+        asset_id="A-1", equipment_type="JLTV", tamcn="D1196",
+        nsn="2320-01-540-2480", serial_number="serial_a",
+        nomenclature="JLTV", model="", fsc="2320",
+        unit_uic="owner_uic_test", unit_name="", unit_parent="",
+        location="", optempo="medium", deployment_status="garrison",
+        fielding_date=date(2026, 1, 1), initial_hours=0.0,
+        initial_miles=0, classification_risk="LOW",
+        allowance_qty=0, on_hand_qty=1,
+        last_inventory_date=date(2026, 3, 12),
+    )
+    asset.current_hours = 100.0
+    asset.current_miles = 5000
+    asset.current_status = "FMC"
+
+    ds = _empty_dataset()
+    ds.assets = [asset]
+
+    raw = _util_csv("A-1,2026-04-01,250.5,12000,FMC")
+    pipeline_result = run_pipeline(raw, get_adapter("gcss-mc/util"))
+    w = get_writer("gcss-mc/util")
+    diff = w.preview(pipeline_result, ds)
+
+    # Pre-check: preview returned counts
+    assert diff.counts.get("matched") == 1
+    # Live asset is unchanged — preview ran on a copy
+    assert asset.current_hours == 100.0
+    assert asset.current_miles == 5000
+
+
+def test_util_writer_apply_commits_readings():
+    from dataset.fleet import Asset
+    asset = Asset(
+        asset_id="A-1", equipment_type="JLTV", tamcn="D1196",
+        nsn="2320-01-540-2480", serial_number="serial_a",
+        nomenclature="JLTV", model="", fsc="2320",
+        unit_uic="owner_uic_test", unit_name="", unit_parent="",
+        location="", optempo="medium", deployment_status="garrison",
+        fielding_date=date(2026, 1, 1), initial_hours=0.0,
+        initial_miles=0, classification_risk="LOW",
+        allowance_qty=0, on_hand_qty=1,
+        last_inventory_date=date(2026, 3, 12),
+    )
+    asset.current_hours = 100.0
+    asset.current_miles = 5000
+    asset.current_status = "FMC"
+
+    ds = _empty_dataset()
+    ds.assets = [asset]
+
+    raw = _util_csv("A-1,2026-04-01,250.5,12000,NMC")
+    pipeline_result = run_pipeline(raw, get_adapter("gcss-mc/util"))
+    w = get_writer("gcss-mc/util")
+    diff = w.preview(pipeline_result, ds)
+    result = w.apply(diff, ds)
+    assert result.summary_counts["matched"] == 1
+    new_asset = result.new_dataset.assets[0]
+    assert new_asset.current_hours == 250.5
+    assert new_asset.current_miles == 12000
+    assert new_asset.current_status == "NMC"
+
+
+def test_util_state_token_includes_utilization_columns():
+    from dataset.fleet import Asset
+    asset = Asset(
+        asset_id="A-1", equipment_type="JLTV", tamcn="D1196",
+        nsn="2320-01-540-2480", serial_number="s",
+        nomenclature="JLTV", model="", fsc="2320",
+        unit_uic="u", unit_name="", unit_parent="",
+        location="", optempo="medium", deployment_status="garrison",
+        fielding_date=date(2026, 1, 1), initial_hours=0.0,
+        initial_miles=0, classification_risk="LOW",
+        allowance_qty=0, on_hand_qty=1,
+        last_inventory_date=date(2026, 3, 12),
+    )
+    asset.current_hours = 100.0
+    ds = _empty_dataset()
+    ds.assets = [asset]
+    w = get_writer("gcss-mc/util")
+    t0 = w.state_token(ds)
+    asset.current_hours = 200.0
+    t1 = w.state_token(ds)
+    assert t0 != t1
+
+
 def test_apply_propagates_field_changes_into_audit_rows():
     """Matched-row audit payloads carry the per-field before/after
     so the audit chain has a tamper-evident record of what changed.
