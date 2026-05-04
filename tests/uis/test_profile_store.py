@@ -153,6 +153,65 @@ def test_delete_unknown_returns_false(tmp_db):
     assert delete_profile("nope") is False
 
 
+def test_uis_extracts_without_backend_persistence(tmp_path, monkeypatch):
+    """UIS-24 — modularity guard: an open-source consumer should be
+    able to use the UIS profile store with their own connection
+    factory, no dependency on backend.persistence.
+
+    We simulate extraction by:
+      1. Wiring a stand-alone sqlite3 file via set_connection_factory
+      2. Calling ensure_schema() to create the table
+      3. Using the CRUD API like normal
+
+    If this fails, the UIS module is still coupled to the parent
+    backend module — extraction won't work.
+    """
+    import sqlite3
+    from contextlib import contextmanager
+    from datetime import datetime, timezone
+
+    from backend.uis.mapping import (
+        MappingProfile,
+        create_profile,
+        ensure_schema,
+        get_profile,
+        set_connection_factory,
+    )
+
+    db_path = tmp_path / "extracted.sqlite"
+
+    @contextmanager
+    def my_factory():
+        c = sqlite3.connect(str(db_path))
+        c.row_factory = sqlite3.Row
+        try:
+            yield c
+            c.commit()
+        finally:
+            c.close()
+
+    # Install the custom factory + schema before any CRUD call
+    set_connection_factory(my_factory)
+    try:
+        ensure_schema()
+
+        p = MappingProfile(
+            profile_id="standalone/x/v1",
+            source_id="any-source",
+            column_map={"src_col": "canon_col"},
+            created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        create_profile(p)
+        fetched = get_profile("standalone/x/v1")
+        assert fetched is not None
+        assert fetched.column_map == {"src_col": "canon_col"}
+    finally:
+        # Restore the default factory so subsequent tests using
+        # the tmp_db fixture aren't affected
+        from backend.uis.mapping.store import _default_connection_factory
+        set_connection_factory(_default_connection_factory)
+
+
 def test_find_profile_deterministic_on_same_second_confirmation(tmp_db):
     """Two profiles for the same (source, unit) confirmed in the
     same second must resolve deterministically. Without an explicit

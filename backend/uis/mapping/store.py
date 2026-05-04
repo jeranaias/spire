@@ -1,10 +1,12 @@
 """SQLite-backed CRUD for MappingProfile.
 
-The profiles table lives alongside the audit log (same SQLite file).
-Profiles are looked up at ingest time by (source_id, unit) — first
-match wins. When a confirmed profile exists for a (source, unit)
-pair, the pipeline skips the auto-mapper and uses the profile's
-column_map directly.
+Module is import-safe and standalone: it does NOT couple to the
+parent backend.persistence module. Callers either accept the
+default connection factory (which lazily delegates to
+backend.persistence.conn for the SPIRE deployment) or inject
+their own via `set_connection_factory`. An open-source consumer
+extracting just the UIS package can pass a sqlite3.connect()
+callable and the rest of the module Just Works.
 
 API
 ---
@@ -14,14 +16,85 @@ API
     list_profiles(source_id=None)  → List[MappingProfile]
     update_profile(profile)        → MappingProfile
     delete_profile(profile_id)     → bool
+
+For module extraction
+---------------------
+    from backend.uis.mapping.store import set_connection_factory, ensure_schema
+    set_connection_factory(my_conn_factory)
+    ensure_schema()  # CREATE TABLE IF NOT EXISTS
+
+That's the entire integration surface.
 """
 from __future__ import annotations
 
 import json
-from typing import List, Optional
+import sqlite3
+from contextlib import contextmanager
+from typing import Callable, ContextManager, List, Optional
 
-from ...persistence import conn
 from .profile import MappingProfile
+
+
+# Connection factory — a callable returning a context manager that
+# yields a sqlite3 connection. Defaults to a lazy delegate to
+# backend.persistence.conn for the in-tree SPIRE deployment;
+# callers can override via set_connection_factory().
+ConnectionFactory = Callable[[], ContextManager[sqlite3.Connection]]
+
+
+def _default_connection_factory():  # pragma: no cover — wired in production only
+    from ...persistence import conn  # late-bound to avoid coupling at import time
+    return conn()
+
+
+_connection_factory: ConnectionFactory = _default_connection_factory
+
+
+def set_connection_factory(factory: ConnectionFactory) -> None:
+    """Install a custom connection factory for embedded / extracted use.
+
+    The factory must yield a sqlite3.Connection from a context
+    manager (so `with factory() as c: ...` works). Schema is the
+    caller's responsibility — call `ensure_schema()` once at
+    startup if you're not inheriting backend.persistence.init_db.
+    """
+    global _connection_factory
+    _connection_factory = factory
+
+
+def conn() -> ContextManager[sqlite3.Connection]:
+    """Internal: open a connection via the active factory."""
+    return _connection_factory()
+
+
+# Schema for the uis_mapping_profiles table — same SQL as in
+# backend/persistence.py SCHEMA constant. Duplicated here so the
+# extracted package can `ensure_schema()` against an arbitrary
+# SQLite file without backend.persistence.
+PROFILES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS uis_mapping_profiles (
+    profile_id      TEXT PRIMARY KEY,
+    source_id       TEXT NOT NULL,
+    unit            TEXT,
+    source_version  TEXT,
+    column_map_json TEXT NOT NULL,
+    cell_transforms_json TEXT NOT NULL DEFAULT '{}',
+    operator_notes  TEXT NOT NULL DEFAULT '',
+    created_by      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    confirmed_at    TEXT,
+    confidence      REAL NOT NULL DEFAULT 1.0
+);
+CREATE INDEX IF NOT EXISTS idx_uis_profiles_source ON uis_mapping_profiles(source_id);
+CREATE INDEX IF NOT EXISTS idx_uis_profiles_unit ON uis_mapping_profiles(unit);
+"""
+
+
+def ensure_schema() -> None:
+    """Apply the profiles schema. Idempotent. Call once at startup
+    if you're using the UIS package outside of backend/."""
+    with conn() as c:
+        c.executescript(PROFILES_SCHEMA)
 
 
 def _row_to_profile(row) -> MappingProfile:
