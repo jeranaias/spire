@@ -672,6 +672,52 @@ async def dha_rescue_audit(request: Request, payload: dict = Body(default={})):
     return {"ok": True, "logged": True, "action": action}
 
 
+@router.get("/audit/integrity")
+async def audit_integrity_endpoint(request: Request):
+    """UIS-P6.3 — audit chain integrity status.
+
+    Returns chain_ok (hash links verified front-to-back), entry
+    count, head_hash, signing_enabled, plus pin-file consistency.
+    Operators / admin tools call this to confirm no tampering;
+    SIEM integrations alert on chain_ok=false or
+    pin_consistent=false.
+
+    Open to security_manager only (no role gate sub-broadening
+    since this exposes the entire chain head).
+    """
+    user = getattr(request.state, "user", None)
+    actor_role = (user or {}).get("role") if isinstance(user, dict) else None
+    require_role(actor_role, {"security_manager"}, "system.audit.integrity")
+    from ..uis.audit_integrity import audit_integrity_status, pin_chain_head
+    status = audit_integrity_status()
+    # Side-effect: pin the current head if pinning configured.
+    # Cheap (single file append); does on every check rather
+    # than via a separate cron job.
+    if status.chain_ok and status.head_hash:
+        pin_chain_head(entry_count=status.entries, head_hash=status.head_hash)
+    return status.to_dict()
+
+
+@router.get("/audit/public-key")
+async def audit_public_key_endpoint(request: Request):
+    """Return the audit-signing public key (PEM) for offline
+    verification. Anyone with this key can verify signed entries
+    without trusting the SPIRE process. Returns 404 when signing
+    is disabled."""
+    from ..uis.audit_integrity import public_key_pem, signing_enabled
+    if not signing_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Audit chain signing is disabled. Set "
+                "SPIRE_AUDIT_SIGNING_KEY_PATH or "
+                "SPIRE_AUDIT_SIGNING_KEY_HEX to enable."
+            ),
+        )
+    pem = public_key_pem()
+    return {"public_key_pem": pem.decode("ascii") if pem else None}
+
+
 @router.post("/audit/spillage")
 async def audit_spillage(request: Request, payload: dict = Body(default={})):
     """Frontend-side spillage record.
