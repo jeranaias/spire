@@ -426,13 +426,50 @@ def _build_dataset_from_report(
 
 
 def _safe_decode(raw: bytes, *, label: str) -> str:
+    """UIS-P5.0 — decode through the UIS normalize layer so stage-ingest
+    gets the same encoding hardening as channels (UTF-16 BOM detection,
+    silent-corruption guard, low-confidence flagging)."""
+    from ..uis.normalize import decode_bytes, is_low_confidence_encoding
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
     try:
-        return raw.decode("utf-8-sig", errors="replace")
+        text, encoding = decode_bytes(raw)
+        if is_low_confidence_encoding(encoding):
+            # Don't refuse — operator may legitimately have a non-UTF-8
+            # export. But surface a warning in the audit chain so a
+            # postmortem can spot silent-corruption candidates.
+            _log.warning(
+                "stage-ingest %s decoded as %s (low confidence) — verify the "
+                "file isn't a wrong-encoding silent corruption.",
+                label, encoding,
+            )
+        return text
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=422,
-            detail=f"{label}: could not decode as UTF-8 ({exc})",
+            detail=f"{label}: could not decode ({exc})",
         )
+
+
+def _refuse_duplicate_headers(raw: bytes, *, label: str) -> None:
+    """UIS-P5.0 — bring duplicate-header refusal to stage-ingest.
+    A CSV with `TAMCN,NSN,TAMCN,...` would otherwise silently lose
+    a column to csv.DictReader's same-key overwrite."""
+    from ..uis.formats import DuplicateHeaderError, stream_rows
+    try:
+        # Drain just enough to trip the header check
+        gen = stream_rows(raw, "csv")
+        next(gen, None)
+    except DuplicateHeaderError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label} has duplicate header columns: {e.duplicates}. "
+                   f"Rename or drop duplicates and re-upload.",
+        )
+    except Exception:
+        # Other errors propagate via the existing parser path; only
+        # the dup-header signal is hard-fail at this stage.
+        return
 
 
 def _validate_size(raw: bytes, *, label: str) -> None:
@@ -551,6 +588,11 @@ async def stage_ingest(
                 detail=f"{label} upload is empty — expected a non-zero CSV.",
             )
         _validate_size(raw, label=label)
+        # UIS-P5.0 — refuse duplicate-header CSVs at stage-ingest
+        # boundary. csv.DictReader silently merges same-named
+        # columns, which would have lost data through the bulk
+        # parser path.
+        _refuse_duplicate_headers(raw, label=label)
 
     header_text = _safe_decode(header_bytes, label="header")
     sr_parts_text = _safe_decode(sr_parts_bytes, label="sr_parts")

@@ -349,6 +349,28 @@ class TestStageIngestRobustness:
         assert resp.status_code in (400, 422), resp.text
         assert resp.status_code < 500
 
+    def test_stage_ingest_refuses_duplicate_header_columns(self, park_client):
+        """UIS-P5.0 — stage-ingest now goes through the same dup-header
+        check the channel pipeline uses. A CSV with two columns named
+        SERIAL_NUMBER would otherwise silently lose one to
+        csv.DictReader's same-key overwrite."""
+        files = _csv_files()
+        # Build a header.csv with a duplicated SERIAL_NUMBER column
+        bad_header = (
+            b"SERVICE_REQUEST_TYPE,SR_NUMBER,DEFECT_CODE,PROBLEM_SUMMARY,"
+            b"DATE_RECEIVED_IN_SHOP,ECHELON_OF_MAINT,SERIAL_NUMBER,TAMCN,"
+            b"DEADLINED_DATE,MASTER_PRIORITY_CODE,OWNER_UNIT_ADDRESS_CODE,"
+            b"JOB_STATUS_DATE,SERIAL_NUMBER\n"
+            b"Maintenance - CM,sr1,B12,desc,01-JAN-26,1,owner_serial_aBcDeFgHiJkLmNoPqRsT,"
+            b"D1196,,02,owner_uic_zZyYxXwWvVuUtTsSrRqQ,01-JAN-26,DUP\n"
+        )
+        files["header"] = ("header.csv", bad_header, "text/csv")
+        resp = park_client.post("/api/system/stage-ingest", files=files)
+        assert resp.status_code == 422, resp.text
+        assert "duplicate header" in resp.text.lower()
+        assert "serial_number" in resp.text.lower()
+
+
     def test_malformed_sr_parts_returns_422(self, park_client):
         """Whitespace-only sr_parts.csv must NOT silently fall through
         to a 200 with a partial dataset (round-5 review). The route
