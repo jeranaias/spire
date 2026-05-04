@@ -174,6 +174,39 @@ def _file_token(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()[:32]
 
 
+def _dataset_state_token(canonical_assets) -> str:
+    """A small fingerprint of the canonical asset roster's identity
+    set. Used for optimistic-concurrency on apply: dry-run captures
+    this, apply checks the current value still matches.
+
+    UIS-25 — without this, two operators applying different files
+    in parallel will both swap_dataset() and the second silently
+    wipes the first's writes (their diff was computed against a
+    pre-state that no longer exists). Returning a stable fingerprint
+    lets the apply path 409 if the dataset has moved on since the
+    dry-run.
+
+    Cheap: SHA-256 over sorted (asset_id, serial_number, on_hand_qty,
+    last_inventory_date) tuples. Sensitive to the columns ECP apply
+    actually touches. A 50k-asset roster fingerprints in single-
+    digit milliseconds.
+    """
+    h = hashlib.sha256()
+    items = []
+    for a in canonical_assets:
+        aid = getattr(a, "asset_id", "") or ""
+        sn = getattr(a, "serial_number", "") or ""
+        oh = str(getattr(a, "on_hand_qty", 0) or 0)
+        inv = getattr(a, "last_inventory_date", None)
+        inv_s = inv.isoformat() if inv else ""
+        items.append(f"{aid}|{sn}|{oh}|{inv_s}")
+    items.sort()
+    for i in items:
+        h.update(i.encode("utf-8"))
+        h.update(b"\n")
+    return h.hexdigest()[:16]
+
+
 def _ecp_row_to_asset(row: ECPParsedAssetRow) -> Any:
     """Build a `dataset.fleet.Asset` from one parsed ECP row.
 
@@ -221,6 +254,15 @@ async def ingest_gcss_mc_ecp(
     file: UploadFile = File(...),
     apply: bool = Query(False, description="Apply the diff to the canonical dataset (default: dry-run)"),
     confirm: Optional[str] = Query(None, description="Preview token from a prior dry-run (required when apply=true)"),
+    state_token: Optional[str] = Query(
+        None,
+        description=(
+            "Dataset state fingerprint from the prior dry-run. "
+            "Required on apply — protects against silent overwrite "
+            "when two operators apply concurrently. If the canonical "
+            "state has moved since dry-run, apply 409s."
+        ),
+    ),
 ):
     """Upload + parse one GCSS-MC Equipment Custodian Report.
 
@@ -276,6 +318,7 @@ async def ingest_gcss_mc_ecp(
     except Exception:
         canonical_assets = []
     diff = compute_diff(rows, canonical_assets)
+    current_state_token = _dataset_state_token(canonical_assets)
 
     # Audit every upload — dry-run included — so the chain has a
     # who-looked-at-what trace independent of whether the operator
@@ -289,6 +332,7 @@ async def ingest_gcss_mc_ecp(
         payload={
             "source": "gcss-mc/ecp",
             "preview_token": preview_token,
+            "state_token": current_state_token,
             "filename": file.filename,
             "actor_role": actor_role,
             "applied": apply,
@@ -309,6 +353,7 @@ async def ingest_gcss_mc_ecp(
             "rows": [_ecp_row_to_dict(r) for r in rows],
             "preview": diff_to_payload(diff),
             "preview_token": preview_token,
+            "state_token": current_state_token,
             "merge_target": "asset_roster",
             "applied": False,
             "pipeline_meta": {
@@ -328,6 +373,21 @@ async def ingest_gcss_mc_ecp(
                 "Confirm token mismatch. Re-run the dry-run upload, paste the "
                 "returned `preview_token` into ?confirm=<token>, and try again. "
                 "This guard prevents fat-finger applies of stale diffs."
+            ),
+        )
+    # UIS-25 — state-token check protects against parallel-apply race.
+    # If the canonical state moved since dry-run (another operator
+    # applied something between this operator's dry-run and apply),
+    # 409 with a clear message rather than silently overwriting
+    # their changes.
+    if state_token is not None and state_token != current_state_token:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Dataset state has changed since your dry-run. Another "
+                "operator may have applied changes. Re-run the dry-run "
+                "to see the current state, then re-apply. (state_token "
+                f"expected={state_token!r}, current={current_state_token!r})"
             ),
         )
     if diff.conflicts:
