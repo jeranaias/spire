@@ -628,6 +628,51 @@ export const api = {
         `/uis/profiles/${encodeURIComponent(profileId)}`,
         { method: "DELETE" },
       ),
+    // P5.1 — channels admin surface
+    listChannels: () => jsonFetch<{ channels: ChannelConfig[] }>("/uis/channels"),
+    getChannel: (id: string) =>
+      jsonFetch<ChannelConfig>(`/uis/channels/${encodeURIComponent(id)}`),
+    createChannel: (cfg: ChannelConfigCreate) =>
+      jsonFetch<ChannelConfig>("/uis/channels", {
+        method: "POST",
+        body: JSON.stringify(cfg),
+      }),
+    updateChannel: (id: string, cfg: ChannelConfigCreate) =>
+      jsonFetch<ChannelConfig>(`/uis/channels/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(cfg),
+      }),
+    deleteChannel: (id: string) =>
+      jsonFetch<{ deleted: boolean; channel_id: string }>(
+        `/uis/channels/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      ),
+    channelHealth: (id: string) =>
+      jsonFetch<ChannelHealth>(`/uis/channels/${encodeURIComponent(id)}/health`),
+    pollChannel: (id: string) =>
+      jsonFetch<ChannelPollResult>(
+        `/uis/channels/${encodeURIComponent(id)}/poll`,
+        { method: "POST" },
+      ),
+    listDlq: (id: string) =>
+      jsonFetch<{ channel_id: string; items: ChannelDlqItem[] }>(
+        `/uis/channels/${encodeURIComponent(id)}/dlq`,
+      ),
+    replayDlq: (id: string, filename: string) =>
+      jsonFetch<{ channel_id: string; replayed: string }>(
+        `/uis/channels/${encodeURIComponent(id)}/dlq/${encodeURIComponent(filename)}/replay`,
+        { method: "POST" },
+      ),
+    discardDlq: (id: string, filename: string) =>
+      jsonFetch<{ channel_id: string; discarded: string }>(
+        `/uis/channels/${encodeURIComponent(id)}/dlq/${encodeURIComponent(filename)}/discard`,
+        { method: "POST" },
+      ),
+    resetCircuit: (id: string) =>
+      jsonFetch<{ channel_id: string; circuit: CircuitSnapshot }>(
+        `/uis/channels/${encodeURIComponent(id)}/circuit/reset`,
+        { method: "POST" },
+      ),
   },
   pulse: {
     fleetOverview: () => jsonFetch<FleetOverview>("/pulse/fleet-overview"),
@@ -1256,6 +1301,80 @@ export interface UisProfileCreate {
   cell_transforms?: Record<string, string>;
   operator_notes?: string;
   confirm?: boolean;
+}
+
+// P5.1 — channels admin types
+export type ChannelType = "filesystem" | "sftp" | "imap" | "http_poll" | "db_cdc" | "kafka";
+
+export interface ChannelConfig {
+  channel_id: string;
+  channel_type: ChannelType;
+  adapter_id: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  poll_interval_seconds: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ChannelConfigCreate {
+  channel_id: string;
+  channel_type: ChannelType;
+  adapter_id: string;
+  config: Record<string, unknown>;
+  enabled?: boolean;
+  poll_interval_seconds?: number;
+}
+
+export interface ChannelHealth {
+  channel_id: string;
+  channel_type: string;
+  reachable: boolean;
+  pending_count?: number | null;
+  last_polled_at?: string | null;
+  last_success_at?: string | null;
+  last_error?: string | null;
+  consecutive_failures: number;
+  circuit_open?: boolean;
+  extra?: Record<string, unknown>;
+}
+
+export interface ChannelPollResult {
+  channel_id: string;
+  started_at: string;
+  finished_at: string;
+  duration_ms: number;
+  pending_count: number;
+  counts: { applied: number; skipped: number; quarantined: number; failed: number };
+  files: ChannelFileResult[];
+}
+
+export interface ChannelFileResult {
+  filename: string;
+  status: "applied" | "skipped" | "quarantined" | "failed";
+  rows_total: number;
+  rows_kept: number;
+  bytes_read: number;
+  sha256: string;
+  diff_counts: Record<string, number>;
+  error: string;
+  duration_ms: number;
+}
+
+export interface ChannelDlqItem {
+  filename: string;
+  size_bytes: number;
+  quarantined_at: string;
+  reason: string;
+}
+
+export interface CircuitSnapshot {
+  state: "closed" | "open" | "half_open";
+  consecutive_failures: number;
+  failure_threshold: number;
+  cooldown_seconds: number;
+  opened_at: number | null;
+  last_error: string | null;
 }
 
 // Domain endpoints can return an empty-state envelope under stage

@@ -259,6 +259,9 @@ export const VIEW_SCOPE: Record<string, Role[]> = {
   "/admin/ingest": ["security_manager", "data_custodian"],
   // UIS-15 — column-mapping editor. Same scope as /admin/ingest.
   "/admin/ingest/mapper": ["security_manager", "data_custodian"],
+  // UIS-P5.1 — channels admin (SFTP/IMAP/HTTP/DB/Kafka pull-mode
+  // sources). Same scope.
+  "/admin/channels": ["security_manager", "data_custodian"],
 };
 
 function uid(): string {
