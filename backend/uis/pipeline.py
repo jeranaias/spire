@@ -276,6 +276,25 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
 # ---------------------------------------------------------------------------
 
 
+import re as _re_module
+
+# Compiled-regex cache. Constraint patterns are AdapterSpec-static
+# but were being re-compiled on every row. For a 50k-row file with
+# 5 regex constraints that's 250k recompiles — costs add up. Cache
+# is keyed on the literal pattern string; cleared whenever the
+# process restarts (which is also when adapter specs reload).
+_REGEX_CACHE: Dict[str, "_re_module.Pattern"] = {}
+
+
+def _compiled(pattern: str) -> "_re_module.Pattern":
+    cached = _REGEX_CACHE.get(pattern)
+    if cached is not None:
+        return cached
+    compiled = _re_module.compile(pattern)
+    _REGEX_CACHE[pattern] = compiled
+    return compiled
+
+
 def _check_constraint(row: Dict[str, Any], constraint: RowConstraint) -> Optional[str]:
     """Return None if the row passes; an error message if not."""
     kind = constraint.kind
@@ -289,9 +308,8 @@ def _check_constraint(row: Dict[str, Any], constraint: RowConstraint) -> Optiona
             return constraint.message or f"row must have exactly one of {constraint.fields} (had {present})"
         return None
     if kind == "regex":
-        import re
         v = str(row.get(constraint.fields[0] if constraint.fields else "", ""))
-        if constraint.pattern and not re.match(constraint.pattern, v):
+        if constraint.pattern and not _compiled(constraint.pattern).match(v):
             return constraint.message or f"value {v!r} does not match {constraint.pattern!r}"
         return None
     if kind == "range":
