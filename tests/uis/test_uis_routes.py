@@ -154,6 +154,72 @@ def test_map_unknown_format_400(uis_client):
     assert r.status_code == 400
 
 
+def test_map_writes_audit_entry_deterministic_path(uis_client):
+    """UIS-33 — every /api/uis/map call lands an audit entry. The
+    deterministic path doesn't touch the LLM, but the operator's
+    intent (`look at this file`) is still a recorded event tied to
+    the file's preview_token."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = uis_client.post(
+        "/api/uis/map?adapter_id=gcss-mc/ecp&use_llm=false",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+
+    from backend.persistence import recent_entries
+    entries = recent_entries(limit=10, include_payload=True)
+    map_entry = next((e for e in entries if e["kind"] == "uis.map"), None)
+    assert map_entry is not None, f"audit log: {entries}"
+    assert map_entry["payload"]["use_llm"] is False
+    assert map_entry["payload"]["llm_invoked"] is False
+    assert map_entry["payload"]["adapter_id"] == "gcss-mc/ecp"
+    assert map_entry["payload"]["filename"] == "ecp.csv"
+
+
+def test_map_writes_audit_entry_llm_path(uis_client, monkeypatch):
+    """UIS-33 — the LLM path also audits, with llm_invoked + the
+    failure reason (if any) attached so a postmortem can tell
+    whether the LLM was hit and what it said."""
+    # Stub the LLM mapper so we don't actually call out
+    from backend.uis.mapping import auto_map
+    from backend.uis.mapping.llm_map import LlmMappingProposal
+    from backend.routes import uis as uis_routes
+
+    async def fake_llm(source_columns, adapter, sample_rows=None):
+        baseline = auto_map.propose_mapping(source_columns, adapter)
+        return LlmMappingProposal(
+            column_map=dict(baseline.column_map),
+            confidence_per_field=dict(baseline.confidence_per_field),
+            reasoning_per_field={},
+            unmapped_canonical=list(baseline.unmapped_canonical),
+            unmapped_source=list(baseline.unmapped_source),
+            llm_invoked=True,
+            llm_failed=False,
+            llm_failure_reason=None,
+            auto_baseline_confidence=baseline.average_confidence(),
+        )
+    monkeypatch.setattr(uis_routes, "propose_mapping_with_llm", fake_llm)
+
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = uis_client.post(
+        "/api/uis/map?adapter_id=gcss-mc/ecp&use_llm=true",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+
+    from backend.persistence import recent_entries
+    entries = recent_entries(limit=10, include_payload=True)
+    map_entry = next((e for e in entries if e["kind"] == "uis.map"), None)
+    assert map_entry is not None, f"audit log: {entries}"
+    assert map_entry["payload"]["use_llm"] is True
+    assert map_entry["payload"]["llm_invoked"] is True
+    assert map_entry["payload"]["llm_failed"] is False
+
+
 # ---------------------------------------------------------------------------
 # /api/uis/profiles CRUD
 # ---------------------------------------------------------------------------

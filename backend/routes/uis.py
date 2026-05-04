@@ -317,13 +317,23 @@ async def uis_propose_mapping(
     """
     _require_ingest_enabled()
     user = getattr(request.state, "user", None)
-    require_user_role(user, INGEST_ROLES, action=f"uis.map:{adapter_id}")
+    actor_role = require_user_role(user, INGEST_ROLES, action=f"uis.map:{adapter_id}")
+    actor_dodid = (user or {}).get("dodid") if isinstance(user, dict) else None
 
     try:
         adapter = get_adapter(adapter_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown adapter {adapter_id!r}")
 
+    declared_size = int(request.headers.get("content-length") or 0)
+    if declared_size and declared_size > INGEST_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Declared content-length {declared_size:,} exceeds limit "
+                f"{INGEST_FILE_MAX_BYTES:,}."
+            ),
+        )
     body = await file.read()
     if len(body) > INGEST_FILE_MAX_BYTES:
         raise HTTPException(
@@ -345,7 +355,27 @@ async def uis_propose_mapping(
         rows = list(stream_rows(raw_for_stream, fmt))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Stream error: {e}")
+    preview_token = _file_token(body)
     if not rows:
+        # UIS-33 — even the empty-file path gets an audit entry. The
+        # LLM mapper isn't invoked here, but the operator's intent
+        # ("look at this file") is still a recorded event.
+        audit_log(
+            kind="uis.map",
+            actor=actor_dodid or actor_role or "system",
+            subject_id=preview_token,
+            payload={
+                "adapter_id": adapter_id,
+                "filename": file.filename,
+                "actor_role": actor_role,
+                "use_llm": use_llm,
+                "llm_invoked": False,
+                "detected_format": fmt,
+                "detected_encoding": encoding,
+                "source_columns_count": 0,
+                "rows_sampled": 0,
+            },
+        )
         return {
             "adapter_id": adapter_id,
             "detected_format": fmt,
@@ -366,6 +396,29 @@ async def uis_propose_mapping(
         proposal = await propose_mapping_with_llm(
             source_columns, adapter, sample_rows=sample_rows,
         )
+        # UIS-33 — audit captures the LLM call. Sample rows are
+        # PII-sanitized before the LLM sees them (UIS-17), but the
+        # LLM is still an external dependency that touched the file
+        # — the audit chain needs to know who, what, when.
+        audit_log(
+            kind="uis.map",
+            actor=actor_dodid or actor_role or "system",
+            subject_id=preview_token,
+            payload={
+                "adapter_id": adapter_id,
+                "filename": file.filename,
+                "actor_role": actor_role,
+                "use_llm": True,
+                "llm_invoked": proposal.llm_invoked,
+                "llm_failed": proposal.llm_failed,
+                "llm_failure_reason": proposal.llm_failure_reason,
+                "detected_format": fmt,
+                "detected_encoding": encoding,
+                "source_columns_count": len(source_columns),
+                "rows_sampled": len(sample_rows),
+                "auto_baseline_confidence": round(proposal.auto_baseline_confidence, 3),
+            },
+        )
         return {
             "adapter_id": adapter_id,
             "detected_format": fmt,
@@ -384,6 +437,23 @@ async def uis_propose_mapping(
     # Deterministic-only path
     from ..uis.mapping.auto_map import propose_mapping
     auto = propose_mapping(source_columns, adapter)
+    audit_log(
+        kind="uis.map",
+        actor=actor_dodid or actor_role or "system",
+        subject_id=preview_token,
+        payload={
+            "adapter_id": adapter_id,
+            "filename": file.filename,
+            "actor_role": actor_role,
+            "use_llm": False,
+            "llm_invoked": False,
+            "detected_format": fmt,
+            "detected_encoding": encoding,
+            "source_columns_count": len(source_columns),
+            "rows_sampled": 0,
+            "auto_baseline_confidence": round(auto.average_confidence(), 3),
+        },
+    )
     return {
         "adapter_id": adapter_id,
         "detected_format": fmt,
