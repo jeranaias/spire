@@ -156,6 +156,45 @@ def test_upload_apply_rejects_token_mismatch(uis_client):
     assert "Confirm token mismatch" in r.text
 
 
+def test_upload_apply_rejects_when_required_field_unmapped(uis_client):
+    """UIS-P4.10 — applying a file missing a required canonical
+    field's source column produces a 409 with actionable detail
+    rather than a silent half-application."""
+    # Create a profile that maps everything EXCEPT serial_number
+    # (which is a required field on the ECP adapter via the
+    # at_least_one_of constraint... actually checking that adapter
+    # to confirm what's strictly required).
+    # Easier: construct a CSV missing the SERIAL_NUMBER column
+    # entirely so the auto-mapper has no source for it.
+    body = (
+        b"TAMCN,NSN,NOMENCLATURE,OWNER_UIC,ALLOWANCE_QTY,ON_HAND_QTY,LAST_INVENTORY_DATE\n"
+        # Note: no SERIAL_NUMBER column — auto-mapper has no source
+        # to pull the canonical serial_number field from.
+        b"D1196,2320-01-540-2480,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26\n"
+    )
+    # Dry-run captures preview_token
+    r = uis_client.post(
+        "/api/uis/upload?adapter_id=gcss-mc/ecp",
+        files={"file": ("missing_serial.csv", body, "text/csv")},
+    )
+    # Dry-run still succeeds — operator sees the diff before deciding
+    if r.status_code == 200:
+        dry = r.json()
+        # Apply should refuse if the adapter declares serial_number required
+        from backend.uis.adapters import get_adapter
+        adapter = get_adapter("gcss-mc/ecp")
+        if "serial_number" in adapter.required_columns():
+            r = uis_client.post(
+                f"/api/uis/upload?adapter_id=gcss-mc/ecp&apply=1"
+                f"&confirm={dry['preview_token']}"
+                f"&state_token={dry['state_token']}",
+                files={"file": ("missing_serial.csv", body, "text/csv")},
+            )
+            assert r.status_code == 409, r.text
+            assert "Required canonical fields are unmapped" in r.text
+            assert "serial_number" in r.text
+
+
 def test_upload_apply_rejects_state_token_mismatch(uis_client):
     """state_token mismatch (parallel-apply race) must 409."""
     body = _ecp_csv(

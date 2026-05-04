@@ -500,6 +500,33 @@ def _process_one(
         )
         return file_result
 
+    # P4.10 — refuse apply when a required canonical field is
+    # unmapped. Channel runs are unattended; quarantine + audit
+    # so the operator can spot the schema-drift on the next health
+    # check.
+    from ..pipeline import required_columns_unmapped as _required_unmapped
+    missing_required = _required_unmapped(pipeline_result, adapter)
+    if missing_required:
+        reason = (
+            f"required_canonical_fields_unmapped: {missing_required}. "
+            "Source file missing columns the adapter requires."
+        )
+        _safe_quarantine(channel, pending, reason)
+        file_result.status = "quarantined"
+        file_result.error = reason
+        file_result.duration_ms = round((time.perf_counter() - file_started) * 1000.0, 2)
+        _emit_audit(
+            kind="channel.quarantined",
+            actor=actor,
+            subject_id=channel.channel_id,
+            payload={
+                "filename": pending.filename,
+                "reason": reason,
+                "missing_required": missing_required,
+            },
+        )
+        return file_result
+
     writer = get_writer(channel.adapter_id)
     ds = get_dataset()
     try:
