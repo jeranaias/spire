@@ -179,6 +179,49 @@ def test_ecp_apply_with_stale_token_409(client_enabled):
     assert r.status_code == 409, r.text
 
 
+def test_ecp_dry_run_returns_state_token(client_enabled):
+    """UIS-25 — dry-run includes a state_token so the apply path can
+    detect concurrent changes."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = client_enabled.post(
+        "/api/ingest/gcss-mc/ecp",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert "state_token" in out
+    assert isinstance(out["state_token"], str)
+    assert len(out["state_token"]) == 16  # SHA-256 truncated
+
+
+def test_ecp_apply_with_stale_state_token_409(client_enabled):
+    """UIS-25 — parallel apply race: if the dataset moves between
+    dry-run and apply, the apply 409s instead of silently
+    overwriting another operator's changes."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r1 = client_enabled.post(
+        "/api/ingest/gcss-mc/ecp",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r1.status_code == 200, r1.text
+    token = r1.json()["preview_token"]
+
+    # Apply with a deliberately-wrong state_token (simulates
+    # another operator having applied something between the
+    # dry-run and this apply).
+    bogus_state = "ffffffffffffffff"  # 16 hex chars, won't match
+    r2 = client_enabled.post(
+        f"/api/ingest/gcss-mc/ecp?apply=1&confirm={token}&state_token={bogus_state}",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r2.status_code == 409, r2.text
+    assert "Dataset state has changed" in r2.text
+
+
 def test_ecp_apply_round_trip(client_enabled):
     """Dry-run → grab token → apply → response says applied=true with counts."""
     body = _ecp_csv(
