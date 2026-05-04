@@ -62,6 +62,28 @@ class PipelineRowLimitExceeded(Exception):
             f"Split the file or raise SPIRE_UIS_MAX_ROWS."
         )
 
+
+def required_columns_unmapped(pipeline_result: Any, adapter: Any) -> List[str]:
+    """UIS-P4.10 — return the list of canonical columns the
+    adapter declares as required but the mapping failed to populate.
+
+    Empty list = apply is safe to proceed (every required field
+    has a mapping). Non-empty = apply MUST refuse — applying with
+    a missing required field would write half-populated rows that
+    later joins / queries would silently misinterpret.
+
+    Common causes:
+      - operator uploaded a file shape the adapter doesn't expect
+        (auto-mapper couldn't find the source column for a
+        required canonical field)
+      - saved profile was authored against an older export schema
+        where the required field came from a column that's been
+        renamed / dropped (UIS-35 surfaces as profile_orphan)
+    """
+    unmapped = set(getattr(pipeline_result.report, "unmapped_canonical", []) or [])
+    required = set(adapter.required_columns()) if hasattr(adapter, "required_columns") else set()
+    return sorted(unmapped & required)
+
 from .adapters.spec import AdapterSpec, ColumnSpec, RowConstraint
 from .formats import DuplicateHeaderError, detect_format, stream_rows
 from .mapping.auto_map import propose_mapping, MappingProposal

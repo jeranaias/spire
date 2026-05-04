@@ -49,7 +49,12 @@ from ..uis.mapping import (
 )
 from ..uis.mapping.llm_map import propose_mapping_with_llm
 from ..uis.normalize import decode_bytes, normalize_text
-from ..uis.pipeline import ALLOWED_CELL_TRANSFORMS, PipelineRowLimitExceeded, run_pipeline
+from ..uis.pipeline import (
+    ALLOWED_CELL_TRANSFORMS,
+    PipelineRowLimitExceeded,
+    required_columns_unmapped,
+    run_pipeline,
+)
 from ..uis.writers import get_writer, has_writer
 from ..state import get_dataset, swap_dataset
 
@@ -345,6 +350,23 @@ async def uis_upload(
             detail=(
                 f"{len(writer_diff.conflicts)} conflict row(s) must be "
                 "resolved before apply."
+            ),
+        )
+
+    # P4.10 — refuse apply when a required canonical field is
+    # unmapped. Applying with a missing required field would write
+    # half-populated rows that later queries would misinterpret;
+    # the operator needs to fix the file shape or update the
+    # mapping profile before this can land.
+    missing_required = required_columns_unmapped(pipeline_result, adapter)
+    if missing_required:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Required canonical fields are unmapped: {missing_required}. "
+                "The file is missing source columns for fields the adapter "
+                "requires. Re-export with the missing columns, or update the "
+                "mapping profile to point them at existing columns."
             ),
         )
 
