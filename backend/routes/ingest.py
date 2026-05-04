@@ -59,6 +59,7 @@ from ..uis.route_helpers import (
     to_parsed_asset_rows,
     to_parsed_util_rows,
 )
+from ..uis.writers import get_writer
 
 
 router = APIRouter()
@@ -324,11 +325,17 @@ async def ingest_gcss_mc_ecp(
 
     try:
         ds = get_dataset()
-        canonical_assets = list(getattr(ds, "assets", []) or [])
     except Exception:
-        canonical_assets = []
-    diff = compute_diff(rows, canonical_assets)
-    current_state_token = _dataset_state_token(canonical_assets)
+        ds = None
+
+    # Phase 3 — apply path now flows through the EntityWriter
+    # protocol. The writer wraps the existing merge engine so the
+    # diff shape on the wire is unchanged; this is a refactor, not
+    # a behavior change.
+    writer = get_writer("gcss-mc/ecp")
+    writer_diff = writer.preview(pipeline_result, ds)
+    diff = writer_diff.native
+    current_state_token = writer.state_token(ds)
 
     # Audit every upload — dry-run included — so the chain has a
     # who-looked-at-what trace independent of whether the operator
@@ -410,34 +417,19 @@ async def ingest_gcss_mc_ecp(
             ),
         )
 
-    # Build the new asset list (pure function — no swap yet)
-    new_assets = apply_diff(diff, canonical_assets, asset_factory=_ecp_row_to_asset)
-
-    # RD6c — flag stale assets as needs_verification so the operator
-    # surface (`GET /api/ingest/stale`) lists them for review without
-    # auto-deleting. Stale = in canonical, not in this file.
-    stale_ids = {s.asset_id for s in diff.stale}
-    if stale_ids:
-        for a in new_assets:
-            if getattr(a, "asset_id", "") in stale_ids and hasattr(a, "needs_verification"):
-                a.needs_verification = True
-
-    # Construct the new CanonicalDataset by cloning the singleton with
-    # the asset list replaced. Other collections (snapshots, srs, etc.)
-    # are passed through unchanged — ECP only touches the roster.
-    new_ds = _replace_assets(ds, new_assets)
-
+    # Phase 3 — apply through the writer protocol. The writer is
+    # pure (returns new dataset + audit payloads); the route owns
+    # the swap_dataset call and audit fan-out so the side effects
+    # remain testable + colocated with auth context.
+    apply_result = writer.apply(writer_diff, ds)
     swap_dataset(
-        new_ds,
+        apply_result.new_dataset,
         source="ingest.ecp",
         ingested_by=actor_dodid or actor_role or "ingest",
         ingest_hash=preview_token,
     )
 
-    # Audit chain: one summary entry plus per-row entries (capped so a
-    # 5,000-row file doesn't write 5,000 chain entries — capping keeps
-    # the chain inspectable without losing the summary numbers).
-    counts = diff.counts()
+    counts = apply_result.summary_counts
     audit_log(
         kind="ingest.ecp.apply",
         actor=actor_dodid or actor_role or "system",
@@ -450,19 +442,12 @@ async def ingest_gcss_mc_ecp(
             "actor_role": actor_role,
         },
     )
-    for matched in diff.matched[:200]:
+    for row_audit in apply_result.audit_rows:
         audit_log(
-            kind="ingest.ecp.apply.row",
+            kind=row_audit["kind"],
             actor=actor_dodid or actor_role or "system",
-            subject_id=matched.asset_id,
-            payload={
-                "match_method": matched.match_method,
-                "changes": [
-                    {"field": c.field, "before": c.before, "after": _serialize_for_audit(c.after)}
-                    for c in matched.changes
-                ],
-                "preview_token": preview_token,
-            },
+            subject_id=row_audit["subject_id"],
+            payload={**row_audit["payload"], "preview_token": preview_token},
         )
 
     return {
