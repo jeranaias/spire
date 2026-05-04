@@ -143,7 +143,9 @@ class KafkaChannel:
         if self.sasl_username:
             conf["sasl.username"] = self.sasl_username
         if self.sasl_password_env:
-            pwd = os.environ.get(self.sasl_password_env)
+            # P6.9 — Vault-aware secrets resolution
+            from ..secrets import resolve_env_secret as _resolve
+            pwd = _resolve(self.sasl_password_env)
             if pwd is None:
                 raise RuntimeError(
                     f"KafkaChannel {self.channel_id}: sasl_password_env "

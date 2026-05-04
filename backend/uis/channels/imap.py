@@ -102,7 +102,9 @@ class IMAPChannel:
     # ------------------------------------------------------------------
 
     def _connect(self) -> imaplib.IMAP4:
-        pwd = os.environ.get(self.password_env)
+        # P6.9 — Vault-aware secrets resolution
+        from ..secrets import resolve_env_secret as _resolve
+        pwd = _resolve(self.password_env)
         if not pwd:
             raise RuntimeError(
                 f"IMAPChannel {self.channel_id}: password_env "
