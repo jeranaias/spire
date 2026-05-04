@@ -373,6 +373,44 @@ def test_update_profile_rejects_duplicate_canonical_targets(uis_client):
     assert "duplicate" in r.text
 
 
+def test_create_profile_rejects_bad_cell_transforms(uis_client):
+    """UIS-36 — cell_transforms keys must be canonical fields,
+    values must be known transform_ids."""
+    payload = _profile_payload()
+    payload["cell_transforms"] = {"not_a_field": "date_excel"}
+    r = uis_client.post("/api/uis/profiles", json=payload)
+    assert r.status_code == 400, r.text
+    assert "cell_transforms keys not in adapter spec" in r.text
+
+
+def test_create_profile_rejects_unknown_transform_id(uis_client):
+    payload = _profile_payload()
+    payload["cell_transforms"] = {"last_inventory_date": "not_a_transform"}
+    r = uis_client.post("/api/uis/profiles", json=payload)
+    assert r.status_code == 400, r.text
+    assert "cell_transforms ids not recognized" in r.text
+
+
+def test_create_profile_accepts_valid_cell_transforms(uis_client):
+    payload = _profile_payload()
+    payload["cell_transforms"] = {"last_inventory_date": "date_excel"}
+    r = uis_client.post("/api/uis/profiles", json=payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["cell_transforms"]["last_inventory_date"] == "date_excel"
+
+
+def test_update_profile_rejects_bad_cell_transforms(uis_client):
+    """PUT mirrors the same validation as POST."""
+    uis_client.post("/api/uis/profiles", json=_profile_payload())
+    r = uis_client.put(
+        "/api/uis/profiles/3d-mlr/gcss-mc-ecp/v1",
+        json={"cell_transforms": {"bogus_field": "date_excel"}},
+    )
+    assert r.status_code == 400, r.text
+    assert "cell_transforms keys" in r.text
+
+
 def test_update_profile_rejects_unknown_canonical_target(uis_client):
     uis_client.post("/api/uis/profiles", json=_profile_payload())
     r = uis_client.put(

@@ -190,11 +190,38 @@ class PipelineResult:
 # ---------------------------------------------------------------------------
 
 
-def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarning], row_idx: int) -> Any:
+# UIS-36 — known cell-transform IDs accepted in MappingProfile.cell_transforms.
+# Profile-level transform overrides let one canonical field (e.g.
+# `last_inventory_date`) accept different formats from different
+# source systems without spawning a parallel adapter. Saved at
+# profile create/update time with route-side validation; applied
+# per-row inside _coerce_value.
+ALLOWED_CELL_TRANSFORMS = frozenset({
+    "str", "int", "float", "bool",
+    "date", "date_oracle", "date_excel", "datetime", "enum",
+})
+
+
+def _coerce_value(
+    raw: str,
+    col: ColumnSpec,
+    ctx: dict,
+    warnings: List[RowWarning],
+    row_idx: int,
+    *,
+    type_override: Optional[str] = None,
+) -> Any:
     """Apply the column's declared transform to a raw cell value.
 
     Returns the coerced value (possibly None for missing/unparseable),
     appending a RowWarning when coercion fails on a non-empty input.
+
+    `type_override` (UIS-36) lets the saved profile substitute a
+    different transform for this canonical field (e.g. read
+    `last_inventory_date` as `date_excel` instead of the adapter's
+    declared `date`). Sensitive + custom_transform paths are NOT
+    overridable — those carry security/business logic that must
+    stay anchored to the adapter spec.
     """
     if col.custom_transform is not None:
         try:
@@ -212,10 +239,12 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
         ctx.setdefault("_sanitization", {})[col.name] = source_label
         return value if value else col.default
 
-    if col.type == "str":
+    effective_type = type_override or col.type
+
+    if effective_type == "str":
         s = (raw or "").strip()
         return s if s else col.default
-    if col.type == "int":
+    if effective_type == "int":
         v = parse_int(raw)
         if v is None and (raw or "").strip():
             warnings.append(RowWarning(
@@ -223,7 +252,7 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
                 raw_value=str(raw)[:200],
             ))
         return v if v is not None else col.default
-    if col.type == "float":
+    if effective_type == "float":
         v = parse_float(raw)
         if v is None and (raw or "").strip():
             warnings.append(RowWarning(
@@ -231,7 +260,7 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
                 raw_value=str(raw)[:200],
             ))
         return v if v is not None else col.default
-    if col.type == "bool":
+    if effective_type == "bool":
         v = parse_bool(raw)
         if v is None and (raw or "").strip():
             warnings.append(RowWarning(
@@ -239,7 +268,7 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
                 raw_value=str(raw)[:200],
             ))
         return v if v is not None else col.default
-    if col.type == "date":
+    if effective_type == "date":
         v = parse_date(raw)
         if v is None and (raw or "").strip():
             warnings.append(RowWarning(
@@ -247,7 +276,7 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
                 raw_value=str(raw)[:200],
             ))
         return v if v is not None else col.default
-    if col.type == "date_oracle":
+    if effective_type == "date_oracle":
         v = parse_date_oracle(raw)
         if v is None and (raw or "").strip():
             warnings.append(RowWarning(
@@ -255,7 +284,7 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
                 raw_value=str(raw)[:200],
             ))
         return v if v is not None else col.default
-    if col.type == "date_excel":
+    if effective_type == "date_excel":
         v = parse_date_excel(raw)
         if v is None and (raw or "").strip():
             warnings.append(RowWarning(
@@ -263,7 +292,7 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
                 raw_value=str(raw)[:200],
             ))
         return v if v is not None else col.default
-    if col.type == "datetime":
+    if effective_type == "datetime":
         v = parse_datetime(raw)
         if v is None and (raw or "").strip():
             warnings.append(RowWarning(
@@ -271,7 +300,7 @@ def _coerce_value(raw: str, col: ColumnSpec, ctx: dict, warnings: List[RowWarnin
                 raw_value=str(raw)[:200],
             ))
         return v if v is not None else col.default
-    if col.type == "enum":
+    if effective_type == "enum":
         aliases = col.enum_aliases or {}
         v = map_enum(raw, aliases)
         if v is None:
@@ -527,6 +556,16 @@ def run_pipeline(
         report.unmapped_source = list(proposal.unmapped_source)
 
     report.column_map = dict(column_map)
+    # UIS-36 — profile transform overrides per canonical field.
+    # Validation against ALLOWED_CELL_TRANSFORMS happens at profile
+    # create/update; we trust the dict here. If a profile carries
+    # unknown / invalid IDs we filter them down to the known set
+    # so a stale row in the DB can't crash a fresh upload.
+    cell_overrides: Dict[str, str] = {}
+    if profile is not None:
+        for canonical_field, transform_id in (profile.cell_transforms or {}).items():
+            if transform_id in ALLOWED_CELL_TRANSFORMS:
+                cell_overrides[canonical_field] = transform_id
     timings["map_ms"] = round(_now() - t0, 2)
 
     # 4. Per-row project + transform + validate
@@ -547,6 +586,7 @@ def run_pipeline(
             raw_value = source_row.get(source_col, "") or ""
             canonical_row[canonical_field] = _coerce_value(
                 raw_value, col_spec, ctx, warnings, row_idx,
+                type_override=cell_overrides.get(canonical_field),
             )
 
         # Defaults for unmapped canonical columns
