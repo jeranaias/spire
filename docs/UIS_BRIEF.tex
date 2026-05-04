@@ -1,0 +1,170 @@
+\documentclass[10pt]{extarticle}
+
+% ---------------------------------------------------------------------------
+% SPIRE Universal Ingest Service (UIS) — companion brief
+% Build: tectonic docs/UIS_BRIEF.tex
+% ---------------------------------------------------------------------------
+
+\usepackage[margin=0.55in,top=0.25in,bottom=0.35in]{geometry}
+\usepackage{fontspec}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{ragged2e}
+\usepackage{parskip}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{spireRule}{HTML}{1f2937}
+\definecolor{spireMuted}{HTML}{6b7280}
+
+\setmainfont{Times New Roman}[Ligatures=TeX]
+\setsansfont{Arial}[Ligatures=TeX]
+
+\setlength{\parskip}{1.5pt plus 0.5pt minus 0.5pt}
+\setlength{\parindent}{0pt}
+\linespread{1.0}
+
+\titleformat{\section}
+  {\sffamily\fontsize{10.5pt}{12pt}\bfseries\color{spireRule}}
+  {}{0pt}{}
+\titlespacing*{\section}{0pt}{4pt plus 0.5pt}{1pt}
+
+\setlist[itemize]{
+  leftmargin=*,
+  topsep=1pt,
+  partopsep=0pt,
+  itemsep=1pt,
+  parsep=0pt,
+  before=\justifying,
+}
+
+\newcommand{\classband}[0]{%
+  \begin{center}\textbf{UNCLASSIFIED}\end{center}%
+}
+
+\pagestyle{empty}
+
+\begin{document}
+\justifying
+
+\classband
+
+\vspace{4pt}
+\begin{center}
+  {\fontsize{20pt}{22pt}\selectfont\bfseries SPIRE Universal Ingest Service}\\[2pt]
+  {\fontsize{10.5pt}{12pt}\selectfont\itshape Companion to the SPIRE Commander Brief}
+\end{center}
+
+\vspace{-2pt}
+\noindent\rule{\linewidth}{0.4pt}
+
+\vspace{2pt}
+\noindent\textbf{BLUF.} The Universal Ingest Service (UIS) is the data
+intake layer underneath SPIRE: 8 file formats, 6 source channel types,
+4 pre-built Marine-Corps logistics adapters, and a local LLM that
+proposes column mappings for everything else. It is air-gap-deployable,
+audit-chained at the apply step, and extractable from SPIRE as a
+standalone Python package. None of the surveyed commercial or federal
+products combine all four of those properties.
+
+\vspace{-2pt}
+\noindent\rule{\linewidth}{0.4pt}
+
+\section*{What it does}
+\begin{itemize}
+  \item \textbf{8 formats:} CSV, TSV, XLSX, JSON, JSONL, XML, fixed-width,
+    EDI~X12.
+  \item \textbf{6 channels:} drop, SFTP, IMAP, HTTP poll, DB~CDC, Kafka.
+    Each carries retry / backoff, circuit breaker, byte-bounded caps,
+    path-prefix containment, and a dead-letter queue.
+  \item \textbf{4 adapters:} GCSS-MC ECP / UTIL / SR-Header, DRRS-MC
+    C-Rating --- declarative \texttt{AdapterSpec} with types, sensitivity,
+    keys, and constraints. Adding a new adapter is one Python file.
+  \item \textbf{Local LLM column mapper.} A 26B Gemma~4 on the same 2U
+    box proposes a mapping for non-canonical CSVs; sample rows are
+    PII-sanitised first; the operator confirms; the mapping persists as
+    a reusable per-unit profile.
+  \item \textbf{Audit-chained apply.} Every apply commits a SHA-256
+    hash-chained, Ed25519-signed audit entry; SIEM export in CEF for
+    Splunk / ArcSight / QRadar.
+\end{itemize}
+
+\section*{What is distinctive}
+A 2026 survey of commercial ETL stacks (Informatica, Talend, Airbyte,
+Fivetran), federal-targeted ingest (Palantir Foundry, ADVANA, Maven
+Smart System, CDAO Edge Data Mesh), and OSS (Apache NiFi, Singer,
+Meltano) found three SPIRE-specific differentiators:
+\begin{itemize}
+  \item \textbf{Marine-Corps canonical adapters as ship-with-the-product
+    defaults.} GCSS-MC ECP / UTIL / SR-Header and DRRS-MC C-Rating arrive
+    pre-mapped. No commercial or federal product surveyed ships these;
+    Foundry would build them as forward-deployed-engineer work; NiFi as
+    customer flow-files.
+  \item \textbf{Tamper-evident audit chain fused with the ingest path.}
+    Hash-chained + Ed25519-signed apply commits, end-to-end. NiFi has
+    tamper-\textit{resistant} provenance, not chained; Foundry has Apollo
+    audit, not chain-on-apply; commercial ETL has audit logs, not
+    cryptographic chains.
+  \item \textbf{Operator-tier (not admin-tier) schema mapping via a local
+    LLM.} A unit S-4 drops a strange XLSX; the on-box model proposes the
+    map; the operator confirms; it saves for next time. The combination of
+    on-box LLM, PII sanitisation before the model sees a sample, operator
+    targeting, and per-unit profile reuse is not present in any product
+    surveyed. Foundry AIP is closest; admin-tier and cloud-anchored.
+\end{itemize}
+
+\section*{Honest framing}
+The format $\times$ channel matrix is commodity (NiFi has covered it for a
+decade); air-gap ETL is commodity (NiFi, Airbyte OSS, Foundry on-prem,
+Informatica PowerCenter); LLM-assisted column mapping in general is
+commodity (Snowflake, Atlan, Informatica CLAIRE, Foundry AIP). UIS does
+\textit{not} replace Foundry, ADVANA, or CDAO Edge Data Mesh. It
+\textit{complements} them: UIS is the unit-side last-mile layer that
+turns operator-dropped artifacts into canonical rows; higher-tier
+platforms consume the rows.
+
+\section*{Extractability from SPIRE}
+UIS is built as a standalone Python package (\texttt{backend/uis/}) with
+dependency injection at every coupling point to the rest of SPIRE
+(\texttt{set\_audit\_func}, \texttt{set\_connection\_factory}). Two soft
+imports remain into the SPIRE audit-log helper (\texttt{verify\_chain},
+\texttt{recent\_entries}); both are read-only utilities, easy to inline or
+inject. Modularisation was a deliberate engineering goal (UIS-24), not
+an accident. Estimated effort to ship UIS as a separate
+\texttt{pip}-installable library --- vendor the package, inline the two
+helpers or wire to the consumer's audit log, install transitive deps
+(paramiko, kafka-python, openpyxl, charset\_normalizer, cryptography),
+publish wheel: \textbf{1 engineer-day}.
+
+\section*{Maturity}
+TRL~4 inside SPIRE; validated against synthetic GCSS-MC ECP / UTIL /
+SR-Header at MDM~2026. HTTP, DB~CDC, and Kafka channels are protocol-
+complete extension points pending production hardening. No ATO.
+
+\section*{Path forward}
+\begin{itemize}
+  \item \textbf{A sanitised real GCSS-MC export} from a sponsoring MEF~G-4
+    or MLR~S-4. The synthetic dataset proves shape; only a real pull
+    proves edge cases.
+  \item \textbf{An MCSC POC} to scope UIS as either a SPIRE-internal
+    component or a separately licensable Marine-Corps logistics ingest
+    library --- architecture supports either.
+\end{itemize}
+
+\vfill
+
+\noindent\rule{\linewidth}{0.4pt}
+
+\begin{center}
+{\fontsize{9.5pt}{11pt}\selectfont
+\textbf{POC:} Jesse Morgan {\textperiodcentered} Thornveil {\textperiodcentered}
+\href{mailto:jesse@thornveil.ai}{jesse@thornveil.ai}\\
+\textbf{Code:} \texttt{backend/uis/} within \texttt{jeranaias/spire} (private; access on request)\\[3pt]
+{\color{spireMuted}v1.0 {\textperiodcentered} 04~MAY 2026 {\textperiodcentered} Distribution unrestricted by author}
+}
+\end{center}
+
+\classband
+
+\end{document}
