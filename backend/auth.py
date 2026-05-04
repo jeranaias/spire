@@ -259,6 +259,16 @@ def list_users(request: Request) -> dict[str, Any]:
 
 @router.post("/login")
 def login(req: LoginRequest, response: Response) -> dict[str, Any]:
+    # When SPIRE_AUTH_MODE=cac the PIN endpoint hard-closes — every session
+    # MUST come through the cert path. The frontend redirects to the CAC
+    # screen on a 410 response.
+    from . import cac_auth  # local import; cac_auth imports MOCK_USERS_BY_DODID
+    if cac_auth.pin_path_disabled():
+        raise HTTPException(
+            status_code=410,
+            detail="pin_path_disabled",
+            headers={"X-Spire-Auth-Mode": cac_auth.auth_mode()},
+        )
     user = MOCK_USERS_BY_DODID.get(req.dodid)
     if not user:
         raise HTTPException(status_code=404, detail="cert_not_found")
@@ -275,6 +285,7 @@ def login(req: LoginRequest, response: Response) -> dict[str, Any]:
         # `jti` lets us spot replay in the audit log even though we don't
         # currently maintain a server-side revocation list.
         "jti": secrets.token_hex(8),
+        "auth_path": "pin",
     }
     token = sign_session(payload)
     response.set_cookie(
@@ -289,6 +300,106 @@ def login(req: LoginRequest, response: Response) -> dict[str, Any]:
         secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
     )
     return {"ok": True, "user": user, "expires_at": payload["exp"]}
+
+
+@router.post("/cac")
+def cac_login(request: Request, response: Response) -> dict[str, Any]:
+    """Cert-based sign-in. The TLS-terminating proxy handles the mTLS
+    handshake and forwards the client cert PEM in ``X-Client-Cert`` (URL-
+    encoded) or ``X-SSL-Client-Cert`` (raw PEM). On valid cert + EDIPI
+    match, mints the same session cookie shape as ``/login`` so every
+    downstream gate (middleware, role guards, audit chain) treats CAC and
+    PIN sessions identically.
+
+    Audit semantics: every attempt — success or failure — emits an
+    ``auth.cac`` chain entry with the structured rejection reason and
+    masked EDIPI. Operators can reconcile lockouts and probe attempts
+    from the audit log alone.
+    """
+    from . import cac_auth  # local import keeps module load order tidy
+
+    mode = cac_auth.auth_mode()
+    if mode == cac_auth.AUTH_MODE_MOCK:
+        # CAC endpoint is mounted but inert in mock mode so frontend
+        # capability probes get a stable 410 instead of a 500.
+        raise HTTPException(
+            status_code=410,
+            detail="cac_disabled_in_mock_mode",
+            headers={"X-Spire-Auth-Mode": mode},
+        )
+
+    pem = cac_auth.extract_forwarded_cert(
+        dict(request.headers),
+        scope_extensions=request.scope.get("extensions"),
+    )
+    if not pem:
+        result = cac_auth.CacAuthResult(
+            ok=False,
+            reason="no_cert",
+            message="No client certificate forwarded by the TLS proxy.",
+        )
+        cac_auth.audit_cac_attempt(result)
+        raise HTTPException(
+            status_code=401,
+            detail={"reason": result.reason, "message": result.message},
+            headers={"X-Spire-Auth-Mode": mode},
+        )
+
+    result = cac_auth.authenticate_cac(pem)
+    cac_auth.audit_cac_attempt(result)
+    if not result.ok or result.user is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"reason": result.reason, "message": result.message},
+            headers={"X-Spire-Auth-Mode": mode},
+        )
+
+    issued = int(time())
+    payload = {
+        "dodid": result.user["dodid"],
+        "iat": issued,
+        "exp": issued + SESSION_TTL_SECONDS,
+        "jti": secrets.token_hex(8),
+        "auth_path": "cac",
+        "cert_serial": result.cert.serial_hex if result.cert else None,
+    }
+    token = sign_session(payload)
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=SESSION_TTL_SECONDS,
+        path="/",
+        secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
+    )
+    return {
+        "ok": True,
+        "user": result.user,
+        "expires_at": payload["exp"],
+        "auth_path": "cac",
+        "cert": {
+            "subject_cn": result.cert.subject_cn if result.cert else None,
+            "issuer_cn": result.cert.issuer_cn if result.cert else None,
+            "serial_hex": result.cert.serial_hex if result.cert else None,
+            "not_after": result.cert.not_after.isoformat() if result.cert else None,
+        },
+    }
+
+
+@router.get("/mode")
+def auth_mode_info() -> dict[str, Any]:
+    """Capability probe so the splash UI knows whether to show the PIN
+    form (mock / hybrid) or jump straight to a cert prompt (cac)."""
+    from . import cac_auth
+    mode = cac_auth.auth_mode()
+    return {
+        "mode": mode,
+        "pin_enabled": not cac_auth.pin_path_disabled(),
+        "cac_enabled": mode in {cac_auth.AUTH_MODE_CAC, cac_auth.AUTH_MODE_HYBRID},
+        "trust_anchors_loaded": len(cac_auth.trust_anchors()),
+        "revocation_mode": cac_auth.revocation_mode(),
+    }
 
 
 @router.post("/logout")
