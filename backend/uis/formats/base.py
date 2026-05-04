@@ -13,7 +13,40 @@ from __future__ import annotations
 import csv
 import io
 import json
-from typing import Dict, Iterable, Iterator
+from typing import Dict, Iterable, Iterator, List
+
+
+class DuplicateHeaderError(ValueError):
+    """Raised when a CSV/TSV/XLSX file has duplicate header column names.
+
+    csv.DictReader silently overwrites prior values with the same key,
+    which means a file with `TAMCN, NSN, TAMCN` would lose the first
+    TAMCN column on every row with no signal to the operator. We refuse
+    the file so the operator can deduplicate it before re-uploading.
+    """
+
+    def __init__(self, *, duplicates: List[str]):
+        self.duplicates = list(duplicates)
+        super().__init__(
+            f"Duplicate header column(s) detected: {self.duplicates!r}. "
+            "csv.DictReader silently merges these — rename or drop "
+            "duplicates in the source file and re-upload."
+        )
+
+
+def _check_duplicate_headers(header: List[str]) -> None:
+    """Raise DuplicateHeaderError if any non-blank header is duplicated."""
+    seen: Dict[str, int] = {}
+    for col in header:
+        if col is None:
+            continue
+        name = str(col).strip()
+        if not name:
+            continue
+        seen[name] = seen.get(name, 0) + 1
+    dupes = sorted(k for k, v in seen.items() if v > 1)
+    if dupes:
+        raise DuplicateHeaderError(duplicates=dupes)
 
 
 # A RowStream is an iterator of dicts. Each dict has the source
@@ -148,6 +181,13 @@ def _stream_csv(raw: bytes, *, delimiter: str) -> RowStream:
             yield raw_line
 
     reader = csv.DictReader(_filtered_lines(), delimiter=delimiter)
+    # csv.DictReader doesn't materialize fieldnames until the first
+    # access — read it eagerly so we can detect duplicate columns
+    # BEFORE iterating rows. csv.DictReader merges duplicates by
+    # overwriting (last column wins) which silently loses data on
+    # malformed exports. Refuse those files.
+    if reader.fieldnames is not None:
+        _check_duplicate_headers(list(reader.fieldnames))
     for row in reader:
         # csv.DictReader yields Optional[str] values — coerce to ""
         yield {k: (v if v is not None else "") for k, v in row.items()}
@@ -237,6 +277,9 @@ def _xlsx_sheet_to_rows(ws) -> RowStream:
     except StopIteration:
         return iter([])
     header = [str(h) if h is not None else "" for h in header_row]
+    # XLSX surfaces the same duplicate-header silent-merge hazard as CSV
+    # because we build a dict keyed on header names. Refuse early.
+    _check_duplicate_headers(header)
     out: list = []
     for row in rows:
         d: Dict[str, str] = {}

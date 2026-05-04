@@ -11,9 +11,10 @@ added. PDF-table is intentionally out of scope for Phase 1.
 """
 from __future__ import annotations
 
-from .base import RowStream, detect_format, stream_rows
+from .base import DuplicateHeaderError, RowStream, detect_format, stream_rows
 
 __all__ = [
+    "DuplicateHeaderError",
     "RowStream",
     "detect_format",
     "stream_rows",

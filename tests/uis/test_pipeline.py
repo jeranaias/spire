@@ -327,6 +327,44 @@ def test_pipeline_jsonl_input():
     assert result.report.rows_kept == 1
 
 
+def test_duplicate_header_columns_rejected_with_clear_warning():
+    """UIS-34 — csv.DictReader silently merges columns sharing a
+    header name (last value wins). The pipeline detects duplicates
+    BEFORE iterating rows and emits a file-level warning with the
+    `duplicate_header_columns` code so the operator can dedup and
+    re-upload rather than silently lose a column's worth of data."""
+    raw = (
+        b"TAMCN,NSN,TAMCN,NOMENCLATURE,OWNER_UIC,SERIAL_NUMBER,"
+        b"ALLOWANCE_QTY,ON_HAND_QTY,LAST_INVENTORY_DATE\n"
+        b"D1196,2320-01-540-2480,DUPLICATE,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,"
+        b"owner_serial_aBcDeFgHiJkLmNoPqRsT,15,12,12-MAR-26\n"
+    )
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"))
+    assert result.report.rows_kept == 0
+    assert any(
+        w.code == "duplicate_header_columns" for w in result.warnings
+    ), [w.code for w in result.warnings]
+    msg = next(w.message for w in result.warnings if w.code == "duplicate_header_columns")
+    assert "TAMCN" in msg
+
+
+def test_duplicate_header_xlsx_rejected():
+    """Same protection applies to XLSX inputs — the dict-keyed row
+    builder would silently merge duplicate columns there too."""
+    import io
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["TAMCN", "NSN", "TAMCN", "NOMENCLATURE"])
+    ws.append(["D1196", "2320", "DUP", "JLTV"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    raw = buf.getvalue()
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"))
+    assert result.report.rows_kept == 0
+    assert any(w.code == "duplicate_header_columns" for w in result.warnings)
+
+
 def test_pipeline_records_per_stage_timings():
     """UIS-31 — every successful run reports per-stage wall-clock
     timings so an operator can tell which stage dominates a slow
