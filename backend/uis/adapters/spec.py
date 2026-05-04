@@ -126,10 +126,14 @@ class AdapterSpec:
     # for fixed_width (positions can't be inferred from content);
     # also useful when an XML payload happens to contain CSV-like
     # text that the heuristic sniffer might misclassify.
-    format_hint: Optional[str] = None               # "csv" / "tsv" / "xml" / "fixed_width"
+    format_hint: Optional[str] = None               # "csv" / "tsv" / "xml" / "fixed_width" / "x12"
     # When format_hint == "fixed_width", supply the column layout.
     # The pipeline passes this to stream_rows.
     fixed_width_spec: Optional[Any] = None
+    # P4.5 — X12 transaction parser config (transaction_set_id +
+    # line_segment + include_segments). Required when ingesting
+    # DLA X12 856/810/940/etc.
+    x12_spec: Optional[Any] = None
 
     def field_names(self) -> List[str]:
         return [c.name for c in self.canonical_columns]

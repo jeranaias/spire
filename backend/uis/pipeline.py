@@ -454,7 +454,7 @@ def run_pipeline(
 
     # Re-encode normalized text into bytes for stream_rows
     normalized = normalize_text(text)
-    if fmt in {"csv", "tsv", "jsonl", "xml"}:
+    if fmt in {"csv", "tsv", "jsonl", "xml", "x12"}:
         raw_for_stream = normalized.encode("utf-8")
     else:
         # XLSX is binary; fixed_width passed as raw bytes too
@@ -473,6 +473,7 @@ def run_pipeline(
         stream = stream_rows(
             raw_for_stream, fmt,
             fixed_width_spec=getattr(adapter, "fixed_width_spec", None),
+            x12_spec=getattr(adapter, "x12_spec", None),
         )
         for row in stream:
             source_rows.append(row)

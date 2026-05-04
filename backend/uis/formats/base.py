@@ -58,7 +58,8 @@ RowStream = Iterator[Dict[str, str]]
 def detect_format(head: bytes) -> str:
     """Sniff the first chunk of bytes for the file format.
 
-    Returns one of: "csv", "tsv", "jsonl", "xlsx", "xml", "unknown".
+    Returns one of: "csv", "tsv", "jsonl", "xlsx", "xml", "x12",
+    "unknown".
 
     Fixed-width is NOT auto-detected — its layout requires the
     adapter to declare column positions. Adapters that consume
@@ -75,6 +76,10 @@ def detect_format(head: bytes) -> str:
     # XLSX is a zip; check magic bytes
     if head[:4] == b"PK\x03\x04":
         return "xlsx"
+    # X12 envelopes start with "ISA*" (or "ISA|" if pipe-separated)
+    from .x12 import detect_x12 as _detect_x12
+    if _detect_x12(head):
+        return "x12"
     # UTF-16 BOM → assume CSV/TSV/XML inside (XLSX would be caught above)
     if head.startswith(b"\xff\xfe") or head.startswith(b"\xfe\xff"):
         try:
@@ -147,12 +152,20 @@ def _first_payload_line(text: str) -> str:
     return ""
 
 
-def stream_rows(raw: bytes, fmt: str, *, fixed_width_spec: Any = None) -> RowStream:
+def stream_rows(
+    raw: bytes,
+    fmt: str,
+    *,
+    fixed_width_spec: Any = None,
+    x12_spec: Any = None,
+) -> RowStream:
     """Dispatch to the format-specific row streamer.
 
     ``fixed_width_spec`` is required when ``fmt == "fixed_width"``;
-    it carries the column positions (start, length, name). For
-    other formats it's ignored.
+    it carries the column positions (start, length, name).
+    ``x12_spec`` is required when ``fmt == "x12"``; it declares
+    the transaction set + line/include segment ids. For other
+    formats both are ignored.
     """
     if fmt == "csv":
         return _stream_csv(raw, delimiter=",")
@@ -172,6 +185,13 @@ def stream_rows(raw: bytes, fmt: str, *, fixed_width_spec: Any = None) -> RowStr
                 "fixed_width format requires fixed_width_spec from AdapterSpec"
             )
         return stream_fixed_width(raw, fixed_width_spec)
+    if fmt == "x12":
+        from .x12 import stream_x12
+        if x12_spec is None:
+            raise ValueError(
+                "x12 format requires x12_spec from AdapterSpec"
+            )
+        return stream_x12(raw, x12_spec)
     raise ValueError(f"Unknown or unsupported format: {fmt!r}")
 
 

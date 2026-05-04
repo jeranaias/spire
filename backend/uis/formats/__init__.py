@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from .base import DuplicateHeaderError, RowStream, detect_format, stream_rows
 from .fixed_width import FixedWidthColumn, FixedWidthSpec, stream_fixed_width
+from .x12 import X12Spec, detect_x12, stream_x12
 from .xml_format import stream_xml
 
 __all__ = [
@@ -24,4 +25,7 @@ __all__ = [
     "FixedWidthSpec",
     "stream_fixed_width",
     "stream_xml",
+    "X12Spec",
+    "stream_x12",
+    "detect_x12",
 ]
