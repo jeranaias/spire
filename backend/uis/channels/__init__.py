@@ -37,6 +37,13 @@ from .base import (
 )
 from .filesystem import FilesystemChannel
 from .imap import IMAPChannel
+from .runner import (
+    ChannelScheduler,
+    FileResult,
+    PollResult,
+    poll_channel,
+    set_audit_func,
+)
 from .sftp import SFTPChannel
 
 __all__ = [
@@ -52,4 +59,9 @@ __all__ = [
     "FilesystemChannel",
     "SFTPChannel",
     "IMAPChannel",
+    "poll_channel",
+    "PollResult",
+    "FileResult",
+    "ChannelScheduler",
+    "set_audit_func",
 ]
