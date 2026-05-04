@@ -274,6 +274,49 @@ def test_update_profile_404(uis_client):
     assert r.status_code == 404
 
 
+def test_update_profile_rejects_empty_source_keys(uis_client):
+    """UIS-32 — PUT must apply the same key/value/dupe gauntlet as POST.
+    Without it, a clean profile can be PUT into an invalid state where
+    apply silently drops rows on the empty-key dict.get."""
+    uis_client.post("/api/uis/profiles", json=_profile_payload())
+    r = uis_client.put(
+        "/api/uis/profiles/3d-mlr/gcss-mc-ecp/v1",
+        json={"column_map": {"": "tamcn", "SerialNum": "serial_number"}},
+    )
+    assert r.status_code == 400, r.text
+    assert "empty source-side keys" in r.text
+
+
+def test_update_profile_rejects_empty_canonical_targets(uis_client):
+    uis_client.post("/api/uis/profiles", json=_profile_payload())
+    r = uis_client.put(
+        "/api/uis/profiles/3d-mlr/gcss-mc-ecp/v1",
+        json={"column_map": {"TAMCN_Code": "tamcn", "SerialNum": ""}},
+    )
+    assert r.status_code == 400, r.text
+    assert "empty canonical targets" in r.text
+
+
+def test_update_profile_rejects_duplicate_canonical_targets(uis_client):
+    uis_client.post("/api/uis/profiles", json=_profile_payload())
+    r = uis_client.put(
+        "/api/uis/profiles/3d-mlr/gcss-mc-ecp/v1",
+        json={"column_map": {"TAMCN_Code": "tamcn", "AnotherCol": "tamcn"}},
+    )
+    assert r.status_code == 400, r.text
+    assert "duplicate" in r.text
+
+
+def test_update_profile_rejects_unknown_canonical_target(uis_client):
+    uis_client.post("/api/uis/profiles", json=_profile_payload())
+    r = uis_client.put(
+        "/api/uis/profiles/3d-mlr/gcss-mc-ecp/v1",
+        json={"column_map": {"TAMCN_Code": "tamcn", "X": "nonexistent_field"}},
+    )
+    assert r.status_code == 400, r.text
+    assert "not in adapter spec" in r.text
+
+
 def test_delete_profile(uis_client):
     uis_client.post("/api/uis/profiles", json=_profile_payload())
     r = uis_client.delete("/api/uis/profiles/3d-mlr/gcss-mc-ecp/v1")
