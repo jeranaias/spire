@@ -49,8 +49,12 @@ function readBuildMode(): BuildMode {
   // VITE_SPIRE_BUILD=demo explicitly via build arg or Fly secret.
   const viteVal = (typeof import.meta !== "undefined" &&
     (import.meta as any).env?.VITE_SPIRE_BUILD) as string | undefined;
+  // Node-style fallback for non-Vite contexts. Reference via
+  // globalThis so this compiles in browser-typed builds where
+  // `process` is not declared (no @types/node dependency).
+  const proc = (globalThis as any).process;
   const procVal =
-    typeof process !== "undefined" ? (process as any).env?.SPIRE_BUILD : undefined;
+    typeof proc !== "undefined" ? proc?.env?.SPIRE_BUILD : undefined;
   const raw = (viteVal ?? procVal ?? "operational").toString().toLowerCase();
   return raw === "demo" ? "demo" : "operational";
 }

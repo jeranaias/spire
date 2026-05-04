@@ -143,7 +143,9 @@ function AdapterPicker({
 
 function Workspace({ adapter }: { adapter: UisAdapterSummary }) {
   const pushToast = useSpireStore((s) => s.pushToast);
-  const [file, setFile] = useState<File | null>(null);
+  // Only the setter is read — current state isn't used anywhere
+  // in render, the file lives on the input ref instead.
+  const [, setFile] = useState<File | null>(null);
   const [proposal, setProposal] = useState<UisMappingProposal | null>(null);
   const [columnMap, setColumnMap] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<"idle" | "propose" | "save">("idle");

@@ -86,7 +86,7 @@ export function ChannelsView() {
         </div>
       </header>
 
-      {error && <ErrorState message={error} onRetry={refresh} />}
+      {error && <ErrorState title="Channels load failed" description={error} onRetry={refresh} />}
 
       {channels === null ? (
         <LoadingState />
@@ -199,7 +199,6 @@ function ChannelRow({
       {expanded && (
         <div className="flex flex-col gap-3 border-t border-[var(--color-border)] p-3">
           <HealthPanel
-            channelId={channel.channel_id}
             health={health}
             error={healthErr}
             onRefresh={() => {
@@ -225,18 +224,16 @@ function ChannelRow({
 // ---------------------------------------------------------------------------
 
 function HealthPanel({
-  channelId,
   health,
   error,
   onRefresh,
 }: {
-  channelId: string;
   health: ChannelHealth | null;
   error: string | null;
   onRefresh: () => void;
 }) {
-  if (error) return <ErrorState message={error} onRetry={onRefresh} />;
-  if (!health) return <LoadingState message="Probing channel…" />;
+  if (error) return <ErrorState title="Health probe failed" description={error} onRetry={onRefresh} />;
+  if (!health) return <LoadingState label="Probing channel…" />;
 
   const reachableColor = health.reachable
     ? "text-emerald-400"
@@ -340,7 +337,7 @@ function ActionsPanel({
           Reset circuit breaker
         </Button>
       </div>
-      {pollErr && <ErrorState message={pollErr} />}
+      {pollErr && <ErrorState title="Action failed" description={pollErr} />}
       {pollResult && (
         <div className="flex flex-col gap-1 rounded border border-[var(--color-border)] bg-[var(--color-surface-elevated)] p-2 font-mono text-xs">
           <span className="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -401,7 +398,7 @@ function DlqPanel({ channelId }: { channelId: string }) {
     load();
   }, [load]);
 
-  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (error) return <ErrorState title="DLQ load failed" description={error} onRetry={load} />;
   if (items === null) return null;
 
   return (
@@ -556,7 +553,7 @@ function DangerPanel({
       <Button onClick={handleDelete} disabled={busy} variant="secondary">
         Delete channel
       </Button>
-      {err && <ErrorState message={err} />}
+      {err && <ErrorState title="Operation failed" description={err} />}
     </div>
   );
 }
@@ -721,7 +718,7 @@ function CreateChannelDialog({
           )}
         </div>
 
-        {err && <ErrorState message={err} />}
+        {err && <ErrorState title="Operation failed" description={err} />}
 
         <footer className="flex justify-end gap-2">
           <Button onClick={onClose} variant="secondary" disabled={busy}>
