@@ -92,16 +92,114 @@ def test_upload_dry_run_returns_preview(uis_client):
     assert out["profile_id"] is None  # no profile saved yet
 
 
-def test_upload_apply_routes_to_adapter_specific_endpoint(uis_client):
-    """/api/uis/upload?apply=1 currently 400s with a redirect message
-    pointing at the adapter-specific apply route."""
-    body = _ecp_csv()
+def test_upload_dry_run_returns_writer_diff(uis_client):
+    """Phase 3 — dry-run now carries the writer's diff payload +
+    state_token so the UI can preview changes before apply."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
     r = uis_client.post(
-        "/api/uis/upload?adapter_id=gcss-mc/ecp&apply=1",
+        "/api/uis/upload?adapter_id=gcss-mc/ecp",
         files={"file": ("ecp.csv", body, "text/csv")},
     )
-    assert r.status_code == 400, r.text
-    assert "/api/ingest/" in r.text
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["has_writer"] is True
+    assert out["target_entity"] == "Asset"
+    assert out["state_token"] is not None
+    assert out["diff"] is not None
+    assert out["diff_counts"]["new"] >= 0
+
+
+def test_upload_apply_via_generic_route_succeeds(uis_client):
+    """Phase 3 — /api/uis/upload?apply=1 now writes through the
+    EntityWriter dispatch. Same auth, audit, state_token semantics
+    as the legacy adapter-specific routes."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    # Dry-run captures preview_token + state_token
+    r = uis_client.post(
+        "/api/uis/upload?adapter_id=gcss-mc/ecp",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    dry = r.json()
+    preview_token = dry["preview_token"]
+    state_token = dry["state_token"]
+
+    # Apply with both tokens
+    r = uis_client.post(
+        f"/api/uis/upload?adapter_id=gcss-mc/ecp&apply=1"
+        f"&confirm={preview_token}&state_token={state_token}",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    applied = r.json()
+    assert applied["applied"] is True
+    assert "applied_counts" in applied
+
+
+def test_upload_apply_rejects_token_mismatch(uis_client):
+    """Confirm-token mismatch must 409 with anti-fat-finger message."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = uis_client.post(
+        "/api/uis/upload?adapter_id=gcss-mc/ecp&apply=1&confirm=wrongtoken",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 409
+    assert "Confirm token mismatch" in r.text
+
+
+def test_upload_apply_rejects_state_token_mismatch(uis_client):
+    """state_token mismatch (parallel-apply race) must 409."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = uis_client.post(
+        "/api/uis/upload?adapter_id=gcss-mc/ecp",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    preview_token = r.json()["preview_token"]
+    r = uis_client.post(
+        f"/api/uis/upload?adapter_id=gcss-mc/ecp&apply=1"
+        f"&confirm={preview_token}&state_token=stale_token_value",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 409
+    assert "Dataset state has changed" in r.text
+
+
+def test_upload_dry_run_no_writer_marks_has_writer_false(uis_client):
+    """An adapter with no writer registered (DRRS-MC at this point
+    in Phase 3) gets dry-run only. Apply will 501."""
+    raw = (
+        "Reporting UIC,Effective Date,Cat,MET Scores,Commander Remarks\n"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,2026-04-26,Cat 2,{},Stable\n"
+    ).encode("utf-8")
+    r = uis_client.post(
+        "/api/uis/upload?adapter_id=drrs-mc/c-rating",
+        files={"file": ("drrs.csv", raw, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["has_writer"] is False
+    assert out["diff"] is None
+
+    # Apply must 501
+    r = uis_client.post(
+        f"/api/uis/upload?adapter_id=drrs-mc/c-rating&apply=1"
+        f"&confirm={out['preview_token']}",
+        files={"file": ("drrs.csv", raw, "text/csv")},
+    )
+    assert r.status_code == 501
+    assert "no writer registered" in r.text
 
 
 def test_upload_503_when_disabled(monkeypatch, tmp_path):
