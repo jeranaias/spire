@@ -131,6 +131,14 @@ class ParseReport:
     profile_id: Optional[str] = None
     unmapped_canonical: List[str] = field(default_factory=list)
     unmapped_source: List[str] = field(default_factory=list)
+    # UIS-35 — when a saved profile references a source column that
+    # isn't in the current file (export schema drift, operator
+    # renamed a column, or the file came from a different system
+    # variant), the mapping silently dropped. We surface those keys
+    # so the operator gets a yellow banner: "your profile expected
+    # `TAMCN_Code`, this file has `TAMCN` — promote the saved
+    # mapping to a profile that matches the new shape."
+    profile_orphan_keys: List[str] = field(default_factory=list)
     sanitization_self_hashed: Dict[str, int] = field(default_factory=dict)
     constraint_failures_count: int = 0
     warnings_count: int = 0
@@ -150,6 +158,7 @@ class ParseReport:
             "profile_id": self.profile_id,
             "unmapped_canonical": list(self.unmapped_canonical),
             "unmapped_source": list(self.unmapped_source),
+            "profile_orphan_keys": list(self.profile_orphan_keys),
             "sanitization_self_hashed": dict(self.sanitization_self_hashed),
             "constraint_failures_count": self.constraint_failures_count,
             "warnings_count": self.warnings_count,
@@ -474,12 +483,42 @@ def run_pipeline(
         from .normalize.headers import canonical_header
         source_by_canon = {canonical_header(c): c for c in source_columns}
         column_map = {}
+        orphan_keys: List[str] = []
+        mapped_canonical: set[str] = set()
         for profile_src_key, canonical_field in profile.column_map.items():
             actual_src = source_by_canon.get(canonical_header(profile_src_key))
             if actual_src is not None:
                 column_map[actual_src] = canonical_field
+                mapped_canonical.add(canonical_field)
+            else:
+                # UIS-35 — profile references a source column that
+                # isn't in this file. Record it instead of silently
+                # dropping; route surfaces it as a yellow banner.
+                orphan_keys.append(profile_src_key)
+                warnings.append(RowWarning(
+                    row_index=-1, field=canonical_field,
+                    code="profile_source_orphan",
+                    message=(
+                        f"Profile {profile.profile_id!r} expects source column "
+                        f"{profile_src_key!r}, not found in this file. "
+                        f"Canonical field {canonical_field!r} will be unmapped."
+                    ),
+                ))
         report.profile_id = profile.profile_id
         report.auto_mapper_confidence = profile.confidence
+        report.profile_orphan_keys = sorted(orphan_keys)
+        # Symmetric with auto-mapper path: surface canonical fields
+        # the profile failed to populate so the dropzone can render
+        # "missing: tamcn, owner_uic" alongside the orphan banner.
+        report.unmapped_canonical = sorted(
+            c.name for c in adapter.canonical_columns
+            if c.name not in mapped_canonical
+        )
+        mapped_source_canon = {canonical_header(s) for s in column_map.keys()}
+        report.unmapped_source = sorted(
+            c for c in source_columns
+            if canonical_header(c) not in mapped_source_canon
+        )
     else:
         proposal = propose_mapping(source_columns, adapter)
         column_map = dict(proposal.column_map)

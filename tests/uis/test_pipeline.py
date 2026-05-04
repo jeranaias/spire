@@ -365,6 +365,73 @@ def test_duplicate_header_xlsx_rejected():
     assert any(w.code == "duplicate_header_columns" for w in result.warnings)
 
 
+def test_profile_orphan_key_surfaces_warning_and_unmapped_canonical():
+    """UIS-35 — when a saved profile references a source column
+    missing from the current file (export schema drift), the
+    pipeline records the orphan + the canonical field that ended
+    up unmapped + a row warning. The dropzone uses these to render
+    a 'profile expected X, file has Y' banner so the operator can
+    re-confirm the mapping."""
+    from backend.uis.mapping.profile import MappingProfile
+    profile = MappingProfile(
+        profile_id="test/orphan",
+        source_id="gcss-mc/ecp",
+        unit="3d MLR",
+        column_map={
+            # File will have these:
+            "TAMCN": "tamcn",
+            "NSN": "nsn",
+            "SERIAL_NUMBER": "serial_number",
+            "NOMENCLATURE": "nomenclature",
+            "OWNER_UIC": "owner_uic",
+            "ALLOWANCE_QTY": "allowance_qty",
+            "ON_HAND_QTY": "on_hand_qty",
+            "LAST_INVENTORY_DATE": "last_inventory_date",
+            # Orphan — file won't have this column:
+            "RetiredColumn": "tamcn",
+        },
+        confirmed_at="2026-04-01T00:00:00+00:00",
+        confidence=1.0,
+    )
+    raw = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"), profile=profile)
+    assert "RetiredColumn" in result.report.profile_orphan_keys
+    assert any(
+        w.code == "profile_source_orphan" for w in result.warnings
+    ), [w.code for w in result.warnings]
+
+
+def test_profile_path_populates_unmapped_canonical_when_columns_missing():
+    """When a profile only maps a subset of canonical fields, the
+    report's unmapped_canonical now lists the gaps (previously this
+    field was only populated on the auto-mapper path)."""
+    from backend.uis.mapping.profile import MappingProfile
+    profile = MappingProfile(
+        profile_id="test/partial",
+        source_id="gcss-mc/ecp",
+        unit="3d MLR",
+        column_map={
+            "TAMCN": "tamcn",
+            "NSN": "nsn",
+            "SERIAL_NUMBER": "serial_number",
+            "OWNER_UIC": "owner_uic",
+            # Deliberately drop nomenclature/qty/date mappings
+        },
+        confirmed_at="2026-04-01T00:00:00+00:00",
+        confidence=1.0,
+    )
+    raw = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,"
+        "owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"), profile=profile)
+    assert "nomenclature" in result.report.unmapped_canonical
+    assert "allowance_qty" in result.report.unmapped_canonical
+
+
 def test_pipeline_records_per_stage_timings():
     """UIS-31 — every successful run reports per-stage wall-clock
     timings so an operator can tell which stage dominates a slow
