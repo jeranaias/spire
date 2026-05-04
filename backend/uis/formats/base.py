@@ -58,7 +58,12 @@ RowStream = Iterator[Dict[str, str]]
 def detect_format(head: bytes) -> str:
     """Sniff the first chunk of bytes for the file format.
 
-    Returns one of: "csv", "tsv", "jsonl", "xlsx", "unknown".
+    Returns one of: "csv", "tsv", "jsonl", "xlsx", "xml", "unknown".
+
+    Fixed-width is NOT auto-detected — its layout requires the
+    adapter to declare column positions. Adapters that consume
+    fixed-width data set ``format_hint="fixed_width"`` on
+    AdapterSpec and pipeline.run_pipeline honors the hint.
 
     Skips leading comment lines (lines starting with `#` or `--`)
     and blank lines so an Oracle export with a comment header like
@@ -70,15 +75,25 @@ def detect_format(head: bytes) -> str:
     # XLSX is a zip; check magic bytes
     if head[:4] == b"PK\x03\x04":
         return "xlsx"
-    # UTF-16 BOM → assume CSV/TSV inside (XLSX would be caught above)
+    # UTF-16 BOM → assume CSV/TSV/XML inside (XLSX would be caught above)
     if head.startswith(b"\xff\xfe") or head.startswith(b"\xfe\xff"):
-        # Decode the head to look at content
         try:
             text_head = head.decode("utf-16", errors="replace")[:4096]
         except UnicodeDecodeError:
             return "unknown"
     else:
         text_head = head[:4096].decode("utf-8", errors="replace")
+
+    # XML: starts with <?xml or a tag like <Root>. Detect before
+    # falling into the delimiter-counting CSV/TSV heuristics — XML
+    # could otherwise misread as TSV when attributes have whitespace.
+    stripped = text_head.lstrip("﻿").lstrip()
+    if stripped.startswith("<?xml") or (
+        stripped.startswith("<")
+        and not stripped.startswith("<!--")
+        and ">" in stripped
+    ):
+        return "xml"
 
     # JSONL: first non-comment non-blank line is `{...}` parseable
     first_payload_line = _first_payload_line(text_head)
@@ -132,8 +147,13 @@ def _first_payload_line(text: str) -> str:
     return ""
 
 
-def stream_rows(raw: bytes, fmt: str) -> RowStream:
-    """Dispatch to the format-specific row streamer."""
+def stream_rows(raw: bytes, fmt: str, *, fixed_width_spec: Any = None) -> RowStream:
+    """Dispatch to the format-specific row streamer.
+
+    ``fixed_width_spec`` is required when ``fmt == "fixed_width"``;
+    it carries the column positions (start, length, name). For
+    other formats it's ignored.
+    """
     if fmt == "csv":
         return _stream_csv(raw, delimiter=",")
     if fmt == "tsv":
@@ -142,6 +162,16 @@ def stream_rows(raw: bytes, fmt: str) -> RowStream:
         return _stream_jsonl(raw)
     if fmt == "xlsx":
         return _stream_xlsx(raw)
+    if fmt == "xml":
+        from .xml_format import stream_xml
+        return stream_xml(raw)
+    if fmt == "fixed_width":
+        from .fixed_width import stream_fixed_width
+        if fixed_width_spec is None:
+            raise ValueError(
+                "fixed_width format requires fixed_width_spec from AdapterSpec"
+            )
+        return stream_fixed_width(raw, fixed_width_spec)
     raise ValueError(f"Unknown or unsupported format: {fmt!r}")
 
 
