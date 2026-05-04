@@ -80,14 +80,14 @@
 \noindent\rule{\linewidth}{0.4pt}
 
 \vspace{2pt}
-\noindent\textbf{BLUF.} A 3d MLR S-4 forward in the First Island Chain today
-cannot see Class~I, V, and~VIII in a single pane --- those classes live in
-three incompatible systems while GCSS-MC focuses on Class~IX requisitioning.
-SPIRE collapses GCSS-MC, DRRS-MC, and forward sensor feeds into one
-role-shaped view that runs offline on a 2U box in a CONEX, with
-tamper-evident audit and one-click coalition release. \textbf{TRL~4,
-validated at Modern Day Marine 2026 (1st place, 30~APR 2026). Operational
-pilot is the next step.}
+\noindent\textbf{BLUF.} A Marine S-4 forward in the First Island Chain
+today cannot see Class~I, V, and~VIII supply on one screen --- those
+classes live in three separate systems while GCSS-MC handles Class~IX
+parts. SPIRE collapses every Marine logistics feed into one role-shaped
+view, runs offline on a 2U box in a CONEX, records every decision in an
+audit trail that cannot be quietly edited, and shares with coalition
+partners in one click. \textbf{TRL~4, 1st place at Modern Day Marine 2026
+(30~APR 2026). Operational pilot is the next step.}
 
 \vspace{-2pt}
 \noindent\rule{\linewidth}{0.4pt}
@@ -114,47 +114,49 @@ vulnerability.''
 \endgroup
 
 \section*{What SPIRE does}
-Four role-shaped surfaces over one canonical dataset:
+Four role-shaped surfaces over one common picture of the unit:
 \begin{itemize}
-  \item \textbf{Decision Bridge.} Home view --- five live signals on one
-    non-scrolling pane: mission clock + FPCON, top alerts, forecasted
-    Class~I~/~V~/~VIII~/~IX shortages, mission-capable rate by unit with
-    seven-day sparklines, audit-chain health.
-  \item \textbf{PULSE.} Readiness and risk. Monte Carlo demand forecast
-    over 200 paths; auto-drafted ranked actions (cannibalize, expedite,
-    cross-level) with impact-per-day; predicted-failure column drives
-    auto-draft requisitions before assets actually break.
+  \item \textbf{Decision Bridge.} The home view. Five live signals on
+    one screen: mission clock and FPCON, top alerts, forecasted Class~I
+    /~V~/~VIII~/~IX shortages, mission-capable rate by unit with
+    seven-day trends, and the health of the audit log itself.
+  \item \textbf{PULSE.} Forecasts where shortages will hit and when,
+    then drafts ranked options for the planner --- cannibalize,
+    expedite, or cross-level --- sorted by which gets readiness back
+    fastest. Predicts equipment failures days ahead and drafts the
+    requisition before the asset breaks.
   \item \textbf{BASTION.} Common operating picture on real satellite
-    tiles with MIL-STD-2525D unit symbols; multi-sensor threat fusion
-    (PACS + ThermalHawk + SCADA + weather), QRF cordons, threat rings.
-    A natural-language copilot drives the map.
-  \item \textbf{SENTRY.} CUI auto-tagging pipeline. Tier-1 rule engine,
-    opt-in Tier-2 Gemma~4 explainer. Sanitized export and one-click
-    coalition release scoped per partner --- FVEY, JPN, AUS, PHL ---
-    with manifest hash and release~ID stamped to the audit chain.
+    imagery with standard military symbols. Fuses access-control,
+    drone, base-utility, and weather sensors into one threat picture.
+    The operator drives the map by typing what they want to see.
+  \item \textbf{SENTRY.} Automated classification of every record, with
+    operator override at every step. Sanitized exports and one-click
+    coalition release for FVEY, Japan, Australia, and the Philippines
+    --- the receiving partner verifies they got exactly what was sent.
 \end{itemize}
 
 \section*{Under the hood}
 \begin{itemize}
-  \item \textbf{Universal Ingest Service.} 8 formats $\times$ 6 channel
-    types (drop, SFTP, IMAP, HTTP, DB~CDC, Kafka), 4 pre-built GCSS-MC /
-    DRRS-MC adapters; a local Gemma~4 26B handles schema mapping for
-    everything else. Mappings save per unit.
-  \item \textbf{Tamper-evident audit chain.} Every state change SHA-256
-    hash-chained and Ed25519-signed; CEF export for Splunk / ArcSight /
-    QRadar; inspector verification offline against a published key.
-  \item \textbf{Local-first.} Runs on a 2U CONEX box; vector-clock
-    conflict resolution reconciles forward-node writes when SATCOM
-    restores; no cloud egress.
+  \item \textbf{Accepts data from any common source} --- file drops,
+    secure transfer, email, polled web services, polled databases,
+    streaming feeds. The four core Marine logistics systems (GCSS-MC,
+    DRRS-MC) are pre-mapped. An on-board AI model handles unfamiliar
+    files; mappings save per unit so the work isn't redone.
+  \item \textbf{Audit by design.} Every change is cryptographically
+    chained so an inspector can prove offline nothing has been altered.
+    Feeds existing security monitoring tools.
+  \item \textbf{Runs offline.} Fits on a 2U box in a CONEX. Decisions
+    made forward during a SATCOM blackout reconcile automatically when
+    comms restore. No cloud, ever.
 \end{itemize}
 
 \section*{Maturity \& Risk}
-\textbf{TRL~4.} Validated against synthetic GCSS-MC ECP / UTIL / SR-Header
-data at MDM~2026; hash-chained audit verified offline. \textbf{TRL~5
-requires} a sanitized real GCSS-MC pull-through from a sponsoring MEF~G-4
-or MLR~S-4. ATO is not yet established; architecture is designed-in for
-IL5 (audit chain, hierarchical RBAC, CAC/PIV scaffolding, no cloud egress)
-but unaccredited.
+\textbf{TRL~4.} Validated at MDM~2026 against a synthetic GCSS-MC
+dataset built to mirror the live export shape. The next step ---
+TRL~5 --- requires a sanitized real GCSS-MC export from a sponsoring
+MEF~G-4 or MLR~S-4. No ATO yet; the system is built to IL5 standards
+(tamper-evident audit, role-based access, smartcard authentication,
+no cloud) but is not formally accredited.
 
 \section*{Why Now}
 The 39th Commandant has named logistics the \textbf{pacing function}. The
