@@ -63,7 +63,7 @@ class PipelineRowLimitExceeded(Exception):
         )
 
 from .adapters.spec import AdapterSpec, ColumnSpec, RowConstraint
-from .formats import detect_format, stream_rows
+from .formats import DuplicateHeaderError, detect_format, stream_rows
 from .mapping.auto_map import propose_mapping, MappingProposal
 from .mapping.profile import MappingProfile
 from .normalize import decode_bytes, is_low_confidence_encoding, normalize_text
@@ -433,6 +433,18 @@ def run_pipeline(
                 raise PipelineRowLimitExceeded(limit=max_rows, observed=max_rows + 1)
     except PipelineRowLimitExceeded:
         raise
+    except DuplicateHeaderError as e:
+        # UIS-34 — distinct warning code so the operator gets actionable
+        # detail ("dedup TAMCN in your export") rather than a generic
+        # "format_stream_error". The pipeline returns empty rows; the
+        # route surfaces the warning in the dry-run preview.
+        warnings.append(RowWarning(
+            row_index=-1, field="", code="duplicate_header_columns",
+            message=str(e)[:300],
+        ))
+        timings["stream_ms"] = round(_now() - t0, 2)
+        report.timings_ms = timings
+        return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
     except Exception as e:  # noqa: BLE001
         warnings.append(RowWarning(
             row_index=-1, field="", code="format_stream_error",
