@@ -207,9 +207,9 @@ def test_uis_extracts_without_backend_persistence(tmp_path, monkeypatch):
         assert fetched.column_map == {"src_col": "canon_col"}
     finally:
         # Restore the default factory so subsequent tests using
-        # the tmp_db fixture aren't affected
-        from backend.uis.mapping.store import _default_connection_factory
-        set_connection_factory(_default_connection_factory)
+        # the tmp_db fixture aren't affected. Public API surface.
+        from backend.uis.mapping import reset_connection_factory
+        reset_connection_factory()
 
 
 def test_find_profile_deterministic_on_same_second_confirmation(tmp_db):

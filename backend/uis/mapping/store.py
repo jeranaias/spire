@@ -57,9 +57,20 @@ def set_connection_factory(factory: ConnectionFactory) -> None:
     manager (so `with factory() as c: ...` works). Schema is the
     caller's responsibility — call `ensure_schema()` once at
     startup if you're not inheriting backend.persistence.init_db.
+
+    Use `reset_connection_factory()` to restore the in-tree default
+    (lazy delegate to backend.persistence.conn).
     """
     global _connection_factory
     _connection_factory = factory
+
+
+def reset_connection_factory() -> None:
+    """Restore the default connection factory (lazy delegate to
+    backend.persistence.conn). Useful in tests that have set a
+    custom factory and want to reset state for the next test."""
+    global _connection_factory
+    _connection_factory = _default_connection_factory
 
 
 def conn() -> ContextManager[sqlite3.Connection]:
