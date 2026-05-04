@@ -21,9 +21,11 @@ from .profile import MappingProfile
 from .store import (
     create_profile,
     delete_profile,
+    ensure_schema,
     find_profile,
     get_profile,
     list_profiles,
+    set_connection_factory,
     update_profile,
 )
 
@@ -31,9 +33,11 @@ __all__ = [
     "MappingProfile",
     "create_profile",
     "delete_profile",
+    "ensure_schema",
     "find_profile",
     "get_profile",
     "list_profiles",
     "propose_mapping",
+    "set_connection_factory",
     "update_profile",
 ]
