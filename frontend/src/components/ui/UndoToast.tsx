@@ -32,6 +32,9 @@ export interface PushUndoToastOptions {
   ttlMs?: number;
   /** Tone defaults to "warn" for destructive actions. */
   tone?: ToastTone;
+  /** Optional click-through links rendered alongside the Undo affordance —
+   *  typically a deep-link to the audit chain entry the action wrote. */
+  links?: { label: string; href: string }[];
 }
 
 const DESTRUCTIVE_TTL_FLOOR_MS = 5000;
@@ -46,6 +49,7 @@ export function pushUndoToast(opts: PushUndoToastOptions): string {
       label: opts.undoLabel ?? "Undo",
       onUndo: opts.onUndo,
     },
+    links: opts.links,
   });
 }
 
@@ -66,6 +70,7 @@ export function useUndoToast(): (opts: PushUndoToastOptions) => string {
         label: opts.undoLabel ?? "Undo",
         onUndo: opts.onUndo,
       },
+      links: opts.links,
     });
   };
 }

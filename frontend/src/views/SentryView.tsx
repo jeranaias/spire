@@ -18,6 +18,11 @@ export interface SentryContext {
   setJob: (j: string | null) => void;
 }
 
+// Pipeline stages — the order is load-bearing. The numeric prefix in
+// SentrySubnav reads from this array's index, and the operator's mental
+// model of "step 1 → step 6" depends on it. New stages get appended; do
+// not insert in the middle without rewiring the operator-facing copy
+// in MarkTab / ExportTab / CoalitionTab next-step hints.
 const tabs = [
   { to: "/sentry/upload",     label: "Upload" },
   { to: "/sentry/processing", label: "Processing" },
@@ -91,43 +96,66 @@ function SentrySubnav() {
   return (
     <div className="h-10 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
       <div className="flex h-full items-center gap-0">
-        {tabs.map((t) => (
-          <NavLink
-            key={t.to}
-            to={t.to}
-            onClick={(e) => {
-              if (t.to === "/sentry/upload") {
-                e.preventDefault();
-                nav("/sentry/upload");
+        {tabs.map((t, i) => (
+          <div key={t.to} className="flex h-full items-center">
+            <NavLink
+              to={t.to}
+              onClick={(e) => {
+                if (t.to === "/sentry/upload") {
+                  e.preventDefault();
+                  nav("/sentry/upload");
+                }
+              }}
+              className={({ isActive }) =>
+                clsx(
+                  "relative flex h-full items-center gap-2 px-3 py-2 font-mono text-sm font-semibold uppercase tracking-wider transition-colors",
+                  isActive
+                    ? "text-[var(--color-text)]"
+                    : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
+                )
               }
-            }}
-            className={({ isActive }) =>
-              clsx(
-                "relative px-4 py-2 font-mono text-sm font-semibold uppercase tracking-wider transition-colors",
-                isActive
-                  ? "text-[var(--color-text)]"
-                  : "text-[var(--color-text-secondary)] hover:text-[var(--color-text)]",
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {t.label}
-                {isActive && (
-                  <>
-                    <span
-                      className="absolute inset-x-2 -bottom-[1px] h-[2px]"
-                      style={{
-                        background: "var(--color-primary)",
-                        boxShadow: "0 0 8px var(--color-primary)",
-                      }}
-                    />
-                    <span className="absolute left-1 top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-[var(--color-primary)]" />
-                  </>
-                )}
-              </>
+            >
+              {({ isActive }) => (
+                <>
+                  {/* Step number — load-bearing for the pipeline narrative.
+                     Active step gets the primary accent; others stay muted
+                     so the flow reads at a glance without competing with
+                     the active-tab signal. */}
+                  <span
+                    className={clsx(
+                      "inline-flex h-4 min-w-[1rem] items-center justify-center rounded-sm border px-1 text-[10px] tabular-nums leading-none",
+                      isActive
+                        ? "border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] text-[var(--color-primary)]"
+                        : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-muted)]",
+                    )}
+                    aria-hidden
+                  >
+                    {i + 1}
+                  </span>
+                  <span>{t.label}</span>
+                  {isActive && (
+                    <>
+                      <span
+                        className="absolute inset-x-2 -bottom-[1px] h-[2px]"
+                        style={{
+                          background: "var(--color-primary)",
+                          boxShadow: "0 0 8px var(--color-primary)",
+                        }}
+                      />
+                    </>
+                  )}
+                </>
+              )}
+            </NavLink>
+            {i < tabs.length - 1 && (
+              <span
+                aria-hidden
+                className="select-none px-0.5 font-mono text-xs text-[var(--color-text-muted)]"
+              >
+                ›
+              </span>
             )}
-          </NavLink>
+          </div>
         ))}
       </div>
     </div>
