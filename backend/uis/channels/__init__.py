@@ -42,6 +42,7 @@ from .db_cdc import DbCdcChannel
 from .filesystem import FilesystemChannel
 from .http_poll import HttpPollChannel
 from .imap import IMAPChannel
+from .kafka_stream import KafkaChannel
 from .runner import (
     ChannelScheduler,
     FileResult,
@@ -66,6 +67,7 @@ __all__ = [
     "IMAPChannel",
     "HttpPollChannel",
     "DbCdcChannel",
+    "KafkaChannel",
     "poll_channel",
     "PollResult",
     "FileResult",
