@@ -118,7 +118,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     subject_id  TEXT,                     -- sr_number, asset_id, incident_number, etc.
     payload     TEXT NOT NULL,            -- JSON body describing the event
     prev_hash   TEXT NOT NULL,            -- hex digest of previous row's self_hash (genesis = 64 zeros)
-    self_hash   TEXT NOT NULL             -- SHA-256(prev_hash || row-canonical-bytes)
+    self_hash   TEXT NOT NULL,            -- SHA-256(prev_hash || row-canonical-bytes)
+    signature   TEXT                      -- P6.3 — Ed25519(self_hash) hex; NULL when signing disabled or low-value entry
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_kind  ON audit_log(kind);
@@ -252,8 +253,13 @@ def init_db() -> None:
                     f"ALTER TABLE sentry_decisions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
                 )
             except sqlite3.OperationalError:
-                # Column already exists — first install or already migrated.
                 pass
+        # P6.3 — `signature` column on audit_log for Ed25519 sign of
+        # high-value entries. Same idempotent ALTER pattern.
+        try:
+            c.execute("ALTER TABLE audit_log ADD COLUMN signature TEXT")
+        except sqlite3.OperationalError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +275,15 @@ def _canonical(row: dict) -> str:
 
 
 def log(kind: str, *, actor: str = "system", subject_id: Optional[str] = None, payload: Optional[dict] = None) -> dict:
-    """Append an audit entry. Returns the stored row (including self_hash)."""
+    """Append an audit entry. Returns the stored row (including self_hash).
+
+    P6.3 — high-value entries (matching SIGN_PREFIXES from
+    backend.uis.audit_integrity) are signed with the operator's
+    Ed25519 private key when one is configured. Signature is
+    stored alongside in the ``signature`` column and survives an
+    SQLite-file rewrite (signature can be verified offline against
+    the public key).
+    """
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     body = payload or {}
     with conn() as c:
@@ -285,9 +299,20 @@ def log(kind: str, *, actor: str = "system", subject_id: Optional[str] = None, p
             "prev_hash": prev_hash,
         }
         self_hash = hashlib.sha256((prev_hash + _canonical(entry)).encode()).hexdigest()
+        # P6.3 — sign high-value entries (Ed25519). Best-effort:
+        # signing failures don't crash the audit_log call — chain
+        # still records the entry; missing signature is recoverable.
+        signature: Optional[str] = None
+        try:
+            from .uis.audit_integrity import should_sign, sign_entry_hash
+            if should_sign(kind):
+                signature = sign_entry_hash(self_hash)
+        except Exception:  # noqa: BLE001
+            signature = None
         cur = c.execute(
-            "INSERT INTO audit_log(ts, actor, kind, subject_id, payload, prev_hash, self_hash) VALUES (?,?,?,?,?,?,?)",
-            (ts, actor, kind, subject_id or "", entry["payload"], prev_hash, self_hash),
+            "INSERT INTO audit_log(ts, actor, kind, subject_id, payload, prev_hash, self_hash, signature) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (ts, actor, kind, subject_id or "", entry["payload"], prev_hash, self_hash, signature),
         )
         # `id` is the chain index — the position of this entry in the
         # append-only audit table. Surfaces in returned dicts so callers can
@@ -296,6 +321,7 @@ def log(kind: str, *, actor: str = "system", subject_id: Optional[str] = None, p
             "id": cur.lastrowid, "ts": ts, "actor": actor, "kind": kind,
             "subject_id": subject_id or "",
             "prev_hash": prev_hash, "self_hash": self_hash,
+            "signature": signature,
         }
 
 
