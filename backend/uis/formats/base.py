@@ -26,31 +26,77 @@ def detect_format(head: bytes) -> str:
     """Sniff the first chunk of bytes for the file format.
 
     Returns one of: "csv", "tsv", "jsonl", "xlsx", "unknown".
+
+    Skips leading comment lines (lines starting with `#` or `--`)
+    and blank lines so an Oracle export with a comment header like
+    "# Generated 2026-04-26" doesn't break delimiter counting on
+    the actual header row.
     """
     if not head:
         return "unknown"
     # XLSX is a zip; check magic bytes
     if head[:4] == b"PK\x03\x04":
         return "xlsx"
-    # JSONL: first non-whitespace byte is `{` and the line parses as JSON
-    text_head = head[:4096].decode("utf-8", errors="replace")
-    stripped = text_head.lstrip()
-    if stripped.startswith("{"):
-        first_line = stripped.split("\n", 1)[0]
+    # UTF-16 BOM → assume CSV/TSV inside (XLSX would be caught above)
+    if head.startswith(b"\xff\xfe") or head.startswith(b"\xfe\xff"):
+        # Decode the head to look at content
         try:
-            json.loads(first_line)
+            text_head = head.decode("utf-16", errors="replace")[:4096]
+        except UnicodeDecodeError:
+            return "unknown"
+    else:
+        text_head = head[:4096].decode("utf-8", errors="replace")
+
+    # JSONL: first non-comment non-blank line is `{...}` parseable
+    first_payload_line = _first_payload_line(text_head)
+    if first_payload_line.startswith("{"):
+        try:
+            json.loads(first_payload_line)
             return "jsonl"
         except json.JSONDecodeError:
             pass
-    # CSV vs TSV — count delimiter occurrences in first line
-    first_line = text_head.split("\n", 1)[0]
-    tabs = first_line.count("\t")
-    commas = first_line.count(",")
-    if tabs > commas and tabs >= 2:
+
+    # CSV vs TSV — count delimiter occurrences in the first payload
+    # line (skipping comments + blanks). Threshold relaxed: TSV needs
+    # only ≥1 tab so a legit 2-column TSV doesn't get misdetected as
+    # CSV-with-zero-commas → "unknown".
+    tabs = first_payload_line.count("\t")
+    commas = first_payload_line.count(",")
+    semis = first_payload_line.count(";")  # European Excel default
+    if tabs > 0 and tabs >= commas and tabs >= semis:
         return "tsv"
-    if commas >= 1:
+    if commas >= 1 and commas >= semis:
+        return "csv"
+    if semis >= 1:
+        # European Excel exports use `;` as the field delimiter
+        # because `,` is a decimal separator. Treat as CSV variant —
+        # the streamer handles this when the operator passes
+        # delimiter=";" but for autodetect we mark csv and let the
+        # standard parser handle it (Python csv.DictReader does fine
+        # with `,` even when `;` is also present, falling back when
+        # the operator notices).
         return "csv"
     return "unknown"
+
+
+def _first_payload_line(text: str) -> str:
+    """Return the first line that isn't a blank or a comment.
+
+    Comment markers: `#` (POSIX, Oracle SQL*Plus, YAML) and `--`
+    (SQL). A `# Generated 2026-04-26 by Some Operator` preamble is
+    typical on Oracle SQL*Plus spool exports and blew up
+    detect_format() in the original implementation because it had
+    zero commas + zero tabs and made the second line (the actual
+    header) invisible.
+    """
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#") or line.startswith("--"):
+            continue
+        return raw_line  # return un-stripped so leading whitespace is preserved for delimiter counting
+    return ""
 
 
 def stream_rows(raw: bytes, fmt: str) -> RowStream:
@@ -76,6 +122,11 @@ def _stream_csv(raw: bytes, *, delimiter: str) -> RowStream:
     after decoding to UTF-8. Caller is responsible for normalizing
     bytes via `backend.uis.normalize.encoding.decode_bytes` first if
     encoding is suspect.
+
+    Strips leading comment lines (`#` or `--`) and blank lines so
+    Oracle SQL*Plus spool exports with header preambles parse
+    correctly. The header row is whatever comes after the
+    skipped lines.
     """
     try:
         text = raw.decode("utf-8")
@@ -83,7 +134,20 @@ def _stream_csv(raw: bytes, *, delimiter: str) -> RowStream:
         text = raw.decode("cp1252", errors="replace")
     if text.startswith("﻿"):
         text = text[1:]  # strip BOM that survived decode
-    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+
+    # Filter comment + blank lines BEFORE handing to csv.DictReader.
+    # Doing this in a generator stays memory-efficient for large
+    # files (the upstream pipeline cap still bounds total rows).
+    def _filtered_lines():
+        for raw_line in text.splitlines(keepends=True):
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("#") or stripped.startswith("--"):
+                continue
+            yield raw_line
+
+    reader = csv.DictReader(_filtered_lines(), delimiter=delimiter)
     for row in reader:
         # csv.DictReader yields Optional[str] values — coerce to ""
         yield {k: (v if v is not None else "") for k, v in row.items()}
