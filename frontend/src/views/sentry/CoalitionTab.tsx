@@ -479,6 +479,14 @@ export function CoalitionTab() {
             </div>
           </div>
 
+          {/* Before/after redaction preview — picks the first redaction span
+              from the sampled records and shows the partner-facing transform
+              up front so the operator sees what this profile actually does
+              without scrolling to the sample-records panel below. Skipped
+              when the sampled records carry zero redactions (a clean
+              FVEY-BASE pull, for example). */}
+          <CoalitionRedactionPreview view={view} />
+
           {/* Scope summary */}
           <div className="mb-4 grid grid-cols-3 gap-3">
             <ScopeStat
@@ -1083,6 +1091,95 @@ function CoalitionSampleRecord({ record }: { record: SampleRecord }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * One-shot before/after redaction snippet pinned above the scope grid.
+ *
+ * Scans the sampled records for the first non-trivial redaction span,
+ * picks one example per redaction kind (up to 3), and renders them as a
+ * compact "at ceiling → per profile" diff. The aim is to put the value
+ * proposition of the partner profile in the operator's eye-line on first
+ * paint — the sample-records panel below the fold has more depth, but
+ * this strip answers "what does this profile actually do?" without a
+ * scroll.
+ *
+ * Renders nothing when no sampled record carries a redaction (e.g. a
+ * clean FVEY-BASE pull where every field is releasable as-is).
+ */
+function CoalitionRedactionPreview({ view }: { view: CoalitionView }) {
+  const samples: { kind: string; before: string; after: string; field: string }[] = [];
+  const seenKinds = new Set<string>();
+  for (const rec of view.sample_records) {
+    for (const span of rec.redaction_spans ?? []) {
+      // Skip identity / no-op rewrites (would render as before==after).
+      if (!span.before || !span.after || span.before === span.after) continue;
+      if (seenKinds.has(span.kind)) continue;
+      seenKinds.add(span.kind);
+      samples.push(span);
+      if (samples.length >= 3) break;
+    }
+    if (samples.length >= 3) break;
+  }
+  if (samples.length === 0) return null;
+  return (
+    <section
+      aria-label="Partner-profile redaction preview"
+      className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3"
+    >
+      <div className="mb-2 flex items-baseline justify-between font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+        <span>Profile rewrites — at ceiling → per partner</span>
+        <span>{samples.length} of {view.field_redactions.length} field{view.field_redactions.length === 1 ? "" : "s"} shown</span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+        {samples.map((s, i) => {
+          const accent = REDACTION_COLORS[s.kind] ?? "var(--color-warning)";
+          return (
+            <div
+              key={i}
+              className="flex flex-col gap-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-xs"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className="rounded-sm border px-1 py-[1px] text-[10px] uppercase tracking-wider"
+                  style={{
+                    color: accent,
+                    borderColor: `color-mix(in oklab, ${accent} 50%, transparent)`,
+                    background: `color-mix(in oklab, ${accent} 10%, transparent)`,
+                  }}
+                >
+                  {s.kind.replace(/_/g, " ")}
+                </span>
+                <span className="text-[10px] uppercase text-[var(--color-text-muted)] tracking-wider">
+                  {s.field}
+                </span>
+              </div>
+              <div
+                className="truncate rounded-sm px-1 py-0.5 line-through"
+                style={{
+                  background: "color-mix(in oklab, var(--color-danger) 12%, transparent)",
+                  color: "var(--color-danger)",
+                }}
+                title={`At ceiling: ${s.before}`}
+              >
+                {s.before}
+              </div>
+              <div
+                className="truncate rounded-sm px-1 py-0.5 font-semibold"
+                style={{
+                  background: `color-mix(in oklab, ${accent} 18%, transparent)`,
+                  color: accent,
+                }}
+                title={`Per ${view.display_name}: ${s.after}`}
+              >
+                {s.after}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
