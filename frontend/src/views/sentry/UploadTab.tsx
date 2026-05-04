@@ -6,6 +6,7 @@ import { formatApiError } from "../../api-retry";
 import { DemoOnly } from "../../state/buildMode";
 import type { SentryContext } from "../SentryView";
 import { Button, fireIdempotent } from "../../components/ui";
+import { UniversalIngestStrip } from "./UniversalIngestStrip";
 
 export function UploadTab({ ctx }: { ctx: SentryContext }) {
   const nav = useNavigate();
@@ -266,14 +267,18 @@ export function UploadTab({ ctx }: { ctx: SentryContext }) {
     // shorter viewports. min-h-0 + pb-12 gutter keeps the action row
     // reachable; outer is the explicit scroll container.
     <div className="flex h-full min-h-0 flex-col overflow-y-auto p-6 pb-12">
-      <div className="mb-4">
+      <div className="mb-3">
         <h2 className="text-lg font-semibold">Data ingestion</h2>
         <DemoOnly>
           <div className="text-xs text-[var(--color-text-muted)]">
-            Upload CSV / XLSX / JSON from GCSS-MC or DRRS-MC exports. For the live demo the canonical synthetic dataset seeds automatically.
+            For the live demo the canonical synthetic dataset seeds
+            automatically. Real deployments accept the formats and sources
+            below.
           </div>
         </DemoOnly>
       </div>
+
+      <UniversalIngestStrip />
 
       <div
         onDragOver={(e) => {
