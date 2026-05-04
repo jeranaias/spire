@@ -50,6 +50,8 @@ from ..uis.mapping import (
 from ..uis.mapping.llm_map import propose_mapping_with_llm
 from ..uis.normalize import decode_bytes, normalize_text
 from ..uis.pipeline import ALLOWED_CELL_TRANSFORMS, PipelineRowLimitExceeded, run_pipeline
+from ..uis.writers import get_writer, has_writer
+from ..state import get_dataset, swap_dataset
 
 
 log = logging.getLogger(__name__)
@@ -151,6 +153,13 @@ async def uis_upload(
     profile_id: Optional[str] = Query(None, description="Confirmed MappingProfile id to apply"),
     apply: bool = Query(False, description="Apply to canonical (default: dry-run only)"),
     confirm: Optional[str] = Query(None, description="preview_token from a prior dry-run"),
+    state_token: Optional[str] = Query(
+        None,
+        description=(
+            "Dataset state fingerprint from the prior dry-run. "
+            "Required on apply for parallel-apply protection."
+        ),
+    ),
 ):
     """Generic UIS upload — drives any adapter through one code path.
 
@@ -158,15 +167,19 @@ async def uis_upload(
 
       * Dry-run (default): parse + run pipeline + return canonical rows
         + the parse report + the column map that fired + the
-        preview_token.
-      * Apply (`?apply=1&confirm=<token>`): re-runs the pipeline and
-        — for adapters with a write path wired (ECP, UTIL) — pushes
-        canonical rows into the dataset via the existing diff/apply
-        engines. SR-header and read-only adapters remain dry-run only.
+        preview_token + state_token.
+      * Apply (``?apply=1&confirm=<token>&state_token=<token>``):
+        dispatches through the EntityWriter registered for the
+        adapter's id. Validates the confirm token (anti-fat-finger),
+        validates state_token (parallel-apply protection), refuses
+        when conflicts exist, swaps the dataset, fans out per-row
+        audit entries.
+      * No-writer adapters (read-only sources): apply returns 501
+        with a clear pointer.
 
     Profile lookup precedence:
-      1. `profile_id` query arg if supplied
-      2. find_profile(adapter_id, unit=current_user.unit) if any
+      1. ``profile_id`` query arg if supplied
+      2. ``find_profile(adapter_id, unit=current_user.unit)`` if any
       3. None (auto-mapper baseline)
     """
     _require_ingest_enabled()
@@ -226,6 +239,29 @@ async def uis_upload(
                 f"or raise SPIRE_UIS_MAX_ROWS."
             ),
         )
+    # Phase 3 — when a writer is registered for this adapter, run
+    # the dry-run preview now so the response includes a diff +
+    # state_token regardless of apply mode. Adapters without a
+    # writer skip this step (read-only).
+    writer = None
+    writer_diff = None
+    current_state_token: Optional[str] = None
+    try:
+        ds = get_dataset()
+    except Exception:
+        ds = None
+    if has_writer(adapter_id):
+        writer = get_writer(adapter_id)
+        try:
+            writer_diff = writer.preview(pipeline_result, ds)
+            current_state_token = writer.state_token(ds)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Writer preview failed for %s", adapter_id)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Writer preview failed: {e}",
+            )
+
     # Audit every upload — dry-run included — so the chain
     # captures who looked at what file when, regardless of whether
     # they applied. Distinct kind so audit filters can separate
@@ -237,6 +273,7 @@ async def uis_upload(
         payload={
             "adapter_id": adapter_id,
             "preview_token": preview_token,
+            "state_token": current_state_token,
             "filename": file.filename,
             "actor_role": actor_role,
             "applied": apply,
@@ -247,48 +284,110 @@ async def uis_upload(
             "detected_encoding": pipeline_result.report.detected_encoding,
             "encoding_low_confidence": pipeline_result.report.encoding_low_confidence,
             "auto_mapper_confidence": pipeline_result.report.auto_mapper_confidence,
+            "writer_counts": writer_diff.counts if writer_diff else None,
         },
     )
 
     payload: Dict[str, Any] = {
         "adapter_id": adapter_id,
+        "target_entity": adapter.target_entity,
         "rows_total": pipeline_result.report.rows_total,
         "rows_kept": pipeline_result.report.rows_kept,
         "report": pipeline_result.report.to_dict(),
         "rows": pipeline_result.rows[:50],  # sample only
         "preview_token": preview_token,
+        "state_token": current_state_token,
         "applied": False,
         "profile_id": profile.profile_id if profile else None,
+        "has_writer": writer is not None,
+        "diff": writer_diff.payload if writer_diff else None,
+        "diff_counts": writer_diff.counts if writer_diff else None,
     }
 
     if not apply:
         return payload
 
-    # Apply path is currently delegated to the adapter-specific
-    # routes (/api/ingest/gcss-mc/ecp, .../util) which know how to
-    # diff against the canonical roster + audit. The generic apply
-    # would duplicate that logic — until we extract a shared diff/
-    # apply primitive (Phase 3), this surface returns 501 with a
-    # clear pointer.
-    if adapter_id == "gcss-mc/sr-header":
+    # ---- Apply path ----
+    if writer is None:
         raise HTTPException(
             status_code=501,
-            detail="SR-header is dry-run only. Full bundle apply: /api/system/stage-ingest.",
-        )
-    if adapter_id in {"gcss-mc/ecp", "gcss-mc/util"}:
-        raise HTTPException(
-            status_code=400,
             detail=(
-                f"Use the adapter-specific apply route: "
-                f"/api/ingest/{adapter_id}?apply=1&confirm=<token>. "
-                "The generic /api/uis/upload?apply=1 will share the apply path "
-                "in Phase 3 once the diff engine is generalized."
+                f"Adapter {adapter_id!r} has no writer registered — "
+                f"dry-run only. Adapters with writers: "
+                f"{sorted(_writers_for_adapters())}."
             ),
         )
-    raise HTTPException(
-        status_code=501,
-        detail=f"Apply path not yet wired for adapter {adapter_id!r}.",
+
+    if confirm != preview_token:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Confirm token mismatch. Re-run the dry-run upload, paste the "
+                "returned `preview_token` into ?confirm=<token>, and try again. "
+                "This guard prevents fat-finger applies of stale diffs."
+            ),
+        )
+
+    if state_token is not None and state_token != current_state_token:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Dataset state has changed since your dry-run. Another "
+                "operator may have applied changes. Re-run the dry-run "
+                f"and re-apply. (state_token expected={state_token!r}, "
+                f"current={current_state_token!r})"
+            ),
+        )
+
+    if writer_diff.has_conflicts():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{len(writer_diff.conflicts)} conflict row(s) must be "
+                "resolved before apply."
+            ),
+        )
+
+    apply_result = writer.apply(writer_diff, ds)
+    swap_dataset(
+        apply_result.new_dataset,
+        source=f"uis.{adapter_id}",
+        ingested_by=actor_dodid or actor_role or "ingest",
+        ingest_hash=preview_token,
     )
+
+    audit_log(
+        kind="uis.apply",
+        actor=actor_dodid or actor_role or "system",
+        subject_id=preview_token,
+        payload={
+            "adapter_id": adapter_id,
+            "target_entity": adapter.target_entity,
+            "preview_token": preview_token,
+            "counts": apply_result.summary_counts,
+            "filename": file.filename,
+            "actor_role": actor_role,
+        },
+    )
+    for row_audit in apply_result.audit_rows:
+        audit_log(
+            kind=row_audit["kind"],
+            actor=actor_dodid or actor_role or "system",
+            subject_id=row_audit["subject_id"],
+            payload={**row_audit["payload"], "preview_token": preview_token},
+        )
+
+    return {
+        **payload,
+        "applied": True,
+        "applied_counts": apply_result.summary_counts,
+    }
+
+
+def _writers_for_adapters() -> list:
+    """Helper for the 501 message — list known writer adapter_ids."""
+    from ..uis.writers import WRITERS
+    return list(WRITERS.keys())
 
 
 # ---------------------------------------------------------------------------
