@@ -176,9 +176,10 @@ def test_upload_apply_rejects_state_token_mismatch(uis_client):
     assert "Dataset state has changed" in r.text
 
 
-def test_upload_dry_run_no_writer_marks_has_writer_false(uis_client):
-    """An adapter with no writer registered (DRRS-MC at this point
-    in Phase 3) gets dry-run only. Apply will 501."""
+def test_upload_drrs_mc_apply_via_generic_route(uis_client):
+    """Phase 3 final piece — CRatingWriter lets DRRS-MC apply
+    through the same generic route as ECP. Different entity
+    (CRating, not Asset), same protocol, same code path."""
     raw = (
         "Reporting UIC,Effective Date,Cat,MET Scores,Commander Remarks\n"
         "owner_uic_zZyYxXwWvVuUtTsSrRqQ,2026-04-26,Cat 2,{},Stable\n"
@@ -189,17 +190,20 @@ def test_upload_dry_run_no_writer_marks_has_writer_false(uis_client):
     )
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["has_writer"] is False
-    assert out["diff"] is None
+    assert out["has_writer"] is True
+    assert out["target_entity"] == "CRating"
+    assert out["diff_counts"]["new"] == 1
 
-    # Apply must 501
+    # Apply succeeds through the generic route
     r = uis_client.post(
         f"/api/uis/upload?adapter_id=drrs-mc/c-rating&apply=1"
-        f"&confirm={out['preview_token']}",
+        f"&confirm={out['preview_token']}&state_token={out['state_token']}",
         files={"file": ("drrs.csv", raw, "text/csv")},
     )
-    assert r.status_code == 501
-    assert "no writer registered" in r.text
+    assert r.status_code == 200, r.text
+    applied = r.json()
+    assert applied["applied"] is True
+    assert applied["applied_counts"]["new"] == 1
 
 
 def test_upload_503_when_disabled(monkeypatch, tmp_path):
