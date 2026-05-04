@@ -227,6 +227,7 @@ def build_channel(cfg: ChannelConfig):
       3. Add an import to channels/__init__.py.
     """
     from .filesystem import FilesystemChannel
+    from .http_poll import HttpPollChannel
     from .imap import IMAPChannel
     from .sftp import SFTPChannel
 
@@ -272,6 +273,29 @@ def build_channel(cfg: ChannelConfig):
             use_ssl=bool(c.get("use_ssl", True)),
             attachment_glob=c.get("attachment_glob", "*"),
             sender_allowlist=list(c.get("sender_allowlist", [])),
+        )
+    if cfg.channel_type == "http_poll":
+        return HttpPollChannel(
+            **common,
+            url=c["url"],
+            method=c.get("method", "GET"),
+            bearer_token_env=c.get("bearer_token_env", ""),
+            basic_auth_username=c.get("basic_auth_username", ""),
+            basic_auth_password_env=c.get("basic_auth_password_env", ""),
+            mtls_cert_path=c.get("mtls_cert_path", ""),
+            mtls_key_path=c.get("mtls_key_path", ""),
+            soap_action=c.get("soap_action", ""),
+            request_body=c.get("request_body", ""),
+            content_type=c.get("content_type", ""),
+            headers=dict(c.get("headers", {}) or {}),
+            watermark_param=c.get("watermark_param", ""),
+            watermark_header=c.get("watermark_header", ""),
+            watermark_jsonpath=c.get("watermark_jsonpath", ""),
+            watermark_state_path=c.get("watermark_state_path", ""),
+            verify_tls=bool(c.get("verify_tls", True)),
+            ca_bundle_path=c.get("ca_bundle_path", ""),
+            timeout_seconds=float(c.get("timeout_seconds", 30.0)),
+            response_filename=c.get("response_filename", ""),
         )
     raise ValueError(
         f"Unknown channel_type {cfg.channel_type!r} for channel {cfg.channel_id!r}"
