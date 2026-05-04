@@ -500,7 +500,21 @@ def run_pipeline(
 
     # 3. Determine column mapping
     t0 = _now()
-    source_columns = list(source_rows[0].keys())
+    # UIS-37 — column union across all rows. CSV/TSV/XLSX use a
+    # consistent header so source_rows[0].keys() is enough, but
+    # JSONL is per-row freeform: line 1 has {a, b}, line 2 has
+    # {a, c}, and `c` would have been invisible to the mapper.
+    # Now we union (preserving first-seen order so deterministic
+    # auto-mapper tie-breaks stay stable). For homogeneous files
+    # this is identical to the original first-row behavior.
+    seen_columns: List[str] = []
+    seen_set: set = set()
+    for source_row in source_rows:
+        for k in source_row.keys():
+            if k not in seen_set:
+                seen_set.add(k)
+                seen_columns.append(k)
+    source_columns = seen_columns
     if profile is not None:
         # UIS-26 — match profile keys against source columns using
         # canonical-form comparison so a profile saved with "TAMCN"

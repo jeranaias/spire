@@ -365,6 +365,29 @@ def test_duplicate_header_xlsx_rejected():
     assert any(w.code == "duplicate_header_columns" for w in result.warnings)
 
 
+def test_jsonl_heterogeneous_rows_union_all_keys():
+    """UIS-37 — JSONL allows each line to have a different key set.
+    Earlier the pipeline assumed source_columns = source_rows[0].keys(),
+    so a key only present on later rows was invisible to the mapper
+    and silently dropped on every row. Now we union all rows.
+    """
+    raw = (
+        # Row 1: missing NOMENCLATURE
+        b'{"TAMCN":"D1196","NSN":"NSN1","SERIAL_NUMBER":"owner_serial_aBcDeFgHiJkLmNoPqRsT",'
+        b'"OWNER_UIC":"owner_uic_zZyYxXwWvVuUtTsSrRqQ",'
+        b'"ALLOWANCE_QTY":"15","ON_HAND_QTY":"12","LAST_INVENTORY_DATE":"12-MAR-26"}\n'
+        # Row 2: HAS NOMENCLATURE — should be picked up by the mapper
+        b'{"TAMCN":"D1197","NSN":"NSN2","SERIAL_NUMBER":"owner_serial_zYxWvUtSrQpOnMlKjIhG",'
+        b'"NOMENCLATURE":"MTVR-CARGO","OWNER_UIC":"owner_uic_aAbBcCdDeEfFgGhHiIjJ",'
+        b'"ALLOWANCE_QTY":"10","ON_HAND_QTY":"8","LAST_INVENTORY_DATE":"15-MAR-26"}\n'
+    )
+    result = run_pipeline(raw, get_adapter("gcss-mc/ecp"))
+    assert result.report.detected_format == "jsonl"
+    assert result.report.rows_kept == 2
+    # Row 2's NOMENCLATURE landed because the union catches the late key
+    assert result.rows[1]["nomenclature"] == "MTVR-CARGO"
+
+
 def test_cell_transforms_override_field_type_per_profile():
     """UIS-36 — saved profile can override the adapter's declared
     transform for a canonical field. Use case: ECP adapter's
