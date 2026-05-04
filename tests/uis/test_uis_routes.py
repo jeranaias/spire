@@ -261,6 +261,28 @@ def test_delete_profile_404(uis_client):
     assert r.status_code == 404
 
 
+def test_upload_writes_audit_entry_on_dry_run(uis_client):
+    """Every upload (dry-run included) writes one audit entry. Lets
+    the auditor reconstruct who-looked-at-what without
+    requiring an apply."""
+    body = _ecp_csv(
+        "D1196,2320-01-540-2480,owner_serial_aBcDeFgHiJkLmNoPqRsT,JLTV,owner_uic_zZyYxXwWvVuUtTsSrRqQ,15,12,12-MAR-26"
+    )
+    r = uis_client.post(
+        "/api/uis/upload?adapter_id=gcss-mc/ecp",
+        files={"file": ("ecp.csv", body, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+
+    # Inspect the audit chain — the recent entry should be a
+    # uis.upload kind tied to the file's preview_token.
+    from backend.persistence import recent_entries
+    entries = recent_entries(limit=10, include_payload=True)
+    upload_entry = next((e for e in entries if e["kind"] == "uis.upload"), None)
+    assert upload_entry is not None, f"audit log: {entries}"
+    assert upload_entry["subject_id"] == r.json()["preview_token"]
+
+
 def test_role_gate_denies_g4(monkeypatch, tmp_path):
     monkeypatch.setenv("SPIRE_INGEST_ENABLED", "1")
     db_file = tmp_path / "x.sqlite"

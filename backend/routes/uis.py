@@ -214,6 +214,30 @@ async def uis_upload(
                 f"or raise SPIRE_UIS_MAX_ROWS."
             ),
         )
+    # Audit every upload — dry-run included — so the chain
+    # captures who looked at what file when, regardless of whether
+    # they applied. Distinct kind so audit filters can separate
+    # generic-route uploads from adapter-specific routes.
+    audit_log(
+        kind="uis.upload",
+        actor=actor_dodid or actor_role or "system",
+        subject_id=preview_token,
+        payload={
+            "adapter_id": adapter_id,
+            "preview_token": preview_token,
+            "filename": file.filename,
+            "actor_role": actor_role,
+            "applied": apply,
+            "profile_id": profile.profile_id if profile else None,
+            "rows_total": pipeline_result.report.rows_total,
+            "rows_kept": pipeline_result.report.rows_kept,
+            "detected_format": pipeline_result.report.detected_format,
+            "detected_encoding": pipeline_result.report.detected_encoding,
+            "encoding_low_confidence": pipeline_result.report.encoding_low_confidence,
+            "auto_mapper_confidence": pipeline_result.report.auto_mapper_confidence,
+        },
+    )
+
     payload: Dict[str, Any] = {
         "adapter_id": adapter_id,
         "rows_total": pipeline_result.report.rows_total,

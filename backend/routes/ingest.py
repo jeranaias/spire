@@ -277,6 +277,32 @@ async def ingest_gcss_mc_ecp(
         canonical_assets = []
     diff = compute_diff(rows, canonical_assets)
 
+    # Audit every upload — dry-run included — so the chain has a
+    # who-looked-at-what trace independent of whether the operator
+    # applied. Auditor can reconstruct intent (someone uploaded a
+    # bad file twice and applied neither time = different signal
+    # than someone applying once and walking away).
+    audit_log(
+        kind="ingest.ecp.upload",
+        actor=actor_dodid or actor_role or "system",
+        subject_id=preview_token,
+        payload={
+            "source": "gcss-mc/ecp",
+            "preview_token": preview_token,
+            "filename": file.filename,
+            "actor_role": actor_role,
+            "applied": apply,
+            "rows_total": pipeline_result.report.rows_total,
+            "rows_kept": pipeline_result.report.rows_kept,
+            "detected_format": pipeline_result.report.detected_format,
+            "detected_encoding": pipeline_result.report.detected_encoding,
+            "encoding_low_confidence": pipeline_result.report.encoding_low_confidence,
+            "auto_mapper_confidence": pipeline_result.report.auto_mapper_confidence,
+            "sanitization_self_hashed": dict(pipeline_result.report.sanitization_self_hashed),
+            "diff_counts": diff.counts(),
+        },
+    )
+
     if not apply:
         return {
             "report": legacy_report,
@@ -288,6 +314,7 @@ async def ingest_gcss_mc_ecp(
             "pipeline_meta": {
                 "detected_format": pipeline_result.report.detected_format,
                 "detected_encoding": pipeline_result.report.detected_encoding,
+                "encoding_low_confidence": pipeline_result.report.encoding_low_confidence,
                 "auto_mapper_confidence": pipeline_result.report.auto_mapper_confidence,
                 "column_map": pipeline_result.report.column_map,
             },
@@ -468,6 +495,26 @@ async def ingest_gcss_mc_util(
     except Exception:
         canonical_assets = []
 
+    # Audit every upload (dry-run + apply, see ECP route comment).
+    audit_log(
+        kind="ingest.util.upload",
+        actor=actor_dodid or actor_role or "system",
+        subject_id=preview_token,
+        payload={
+            "source": "gcss-mc/util",
+            "preview_token": preview_token,
+            "filename": file.filename,
+            "actor_role": actor_role,
+            "applied": apply,
+            "rows_total": pipeline_result.report.rows_total,
+            "rows_kept": pipeline_result.report.rows_kept,
+            "detected_format": pipeline_result.report.detected_format,
+            "detected_encoding": pipeline_result.report.detected_encoding,
+            "encoding_low_confidence": pipeline_result.report.encoding_low_confidence,
+            "auto_mapper_confidence": pipeline_result.report.auto_mapper_confidence,
+        },
+    )
+
     if not apply:
         # Dry-run preview: show how many rows would match without
         # mutating anything. Shallow-copy assets so apply_latest_readings'
@@ -484,6 +531,7 @@ async def ingest_gcss_mc_util(
             "pipeline_meta": {
                 "detected_format": pipeline_result.report.detected_format,
                 "detected_encoding": pipeline_result.report.detected_encoding,
+                "encoding_low_confidence": pipeline_result.report.encoding_low_confidence,
                 "auto_mapper_confidence": pipeline_result.report.auto_mapper_confidence,
                 "column_map": pipeline_result.report.column_map,
             },
