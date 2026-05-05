@@ -712,10 +712,30 @@ async def audit_public_key_endpoint(request: Request):
                 "Audit chain signing is disabled. Set "
                 "SPIRE_AUDIT_SIGNING_KEY_PATH or "
                 "SPIRE_AUDIT_SIGNING_KEY_HEX to enable."
-            ),
+                ),
         )
     pem = public_key_pem()
     return {"public_key_pem": pem.decode("ascii") if pem else None}
+
+
+@router.get("/security-posture")
+async def security_posture_endpoint(request: Request):
+    """UIS-P6.2 — security posture diagnostic.
+
+    Returns the runtime configuration that affects security: FIPS mode
+    flag, auth mode, CAC revocation mode, audit-signing posture,
+    cookie attributes, security-header settings. STIG / IATT reviewers
+    read this once to see every knob; operators verify the deployment
+    matches what they configured. Restricted to security_manager role.
+    """
+    actor_role = (request.state.user or {}).get("role") if getattr(request.state, "user", None) else None
+    if actor_role != "security_manager":
+        raise HTTPException(
+            status_code=403,
+            detail="security_manager role required for /security-posture",
+        )
+    from .. import security_posture as sp
+    return sp.posture_status().to_dict()
 
 
 @router.post("/audit/spillage")
