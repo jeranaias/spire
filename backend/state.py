@@ -149,7 +149,11 @@ def _dataset_source_fingerprint() -> str:
     code edit transparently invalidates the pickle. Cheap — stat'ing
     20-ish files takes microseconds vs the 1-2 s of full regeneration.
     """
-    h = hashlib.sha1()
+    # SHA-1 used here purely as a cache-invalidation key (mtime + path
+    # digest), not for security. FIPS-enabled OpenSSL refuses sha1()
+    # without the usedforsecurity=False hint; pass it so a FIPS
+    # deployment doesn't bounce a non-security hash. UIS-P6.2.
+    h = hashlib.sha1(usedforsecurity=False)
     dataset_dir = ROOT / "dataset"
     for p in sorted(dataset_dir.glob("**/*.py")):
         try:

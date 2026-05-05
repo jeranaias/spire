@@ -111,6 +111,16 @@ app.add_middleware(
 # Registered before routers so it wraps every request.
 app.middleware("http")(session_middleware)
 
+# UIS-P6.2 — STIG-friendly security headers + FIPS-mode self-check.
+# Self-check runs at import time so a misconfigured FIPS deployment
+# fails before serving traffic. Headers middleware stamps every
+# response with HSTS / X-Frame-Options / CSP / etc.
+from . import security_posture  # noqa: E402
+security_posture.assert_fips_safe_config()
+_security_headers = security_posture.security_headers_middleware_factory()
+if _security_headers is not None:
+    app.middleware("http")(_security_headers)
+
 app.include_router(auth_router,   prefix="/api/auth",   tags=["auth"])
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 # Stage live-ingest mode (Task #183). Mounted under /api/system so the
