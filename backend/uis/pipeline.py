@@ -25,30 +25,41 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Callable, Dict, List, Optional
+from itertools import chain as _iter_chain
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 
 
-# Hard cap on rows per pipeline run. Default 500k — a full-MEF ECP
-# is ~50k assets so this is 10x headroom. Override via env for
-# scaled-up deployments. The cap is enforced at the row-stream
-# stage so we don't materialize a multi-million-row CSV in RAM
-# and OOM the box.
-DEFAULT_MAX_ROWS = 500_000
+# Soft policy ceiling on rows per pipeline run. UIS-P6.4 made the
+# pipeline row-streaming end-to-end so this is no longer an OOM
+# guard — it's a sanity check that catches operator errors (a
+# 100M-row CSV almost certainly means somebody pointed the
+# adapter at the wrong source). Default 5M is well above any
+# real GCSS-MC export shape we've seen; raise via env when
+# evaluating against larger pulls. Set to 0 to disable.
+DEFAULT_MAX_ROWS = 5_000_000
 
 
 def _max_rows_per_pipeline() -> int:
+    """Resolve the row-count soft policy from env. 0 disables the check."""
     raw = (os.environ.get("SPIRE_UIS_MAX_ROWS") or "").strip()
     if not raw:
         return DEFAULT_MAX_ROWS
     try:
         n = int(raw)
-        return n if n > 0 else DEFAULT_MAX_ROWS
+        if n < 0:
+            return DEFAULT_MAX_ROWS
+        return n  # 0 means disabled
     except ValueError:
         return DEFAULT_MAX_ROWS
 
 
 class PipelineRowLimitExceeded(Exception):
-    """Raised when the file has more rows than the pipeline cap.
+    """Raised when the file has more rows than the pipeline policy cap.
+
+    UIS-P6.4: this is a soft policy check, not an OOM guard. Memory is
+    bounded by the row-streaming refactor — the cap exists to catch
+    operator errors (wrong source pointed at adapter) before a
+    multi-day backfill silently runs.
 
     Surfaced as HTTP 413 by the route layer so the operator gets a
     clear "file too big — split it or raise SPIRE_UIS_MAX_ROWS".
@@ -59,7 +70,7 @@ class PipelineRowLimitExceeded(Exception):
         self.observed = observed
         super().__init__(
             f"Row count {observed} exceeds pipeline cap {limit}. "
-            f"Split the file or raise SPIRE_UIS_MAX_ROWS."
+            f"Split the file or raise SPIRE_UIS_MAX_ROWS (set to 0 to disable)."
         )
 
 
@@ -407,8 +418,314 @@ def _check_constraint(row: Dict[str, Any], constraint: RowConstraint) -> Optiona
 
 
 # ---------------------------------------------------------------------------
-# Public entrypoint
+# Streaming primitives (UIS-P6.4)
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class StreamedRow:
+    """One row's worth of streaming pipeline output.
+
+    Yielded by :func:`iter_pipeline`. ``canonical_row`` is None when the
+    row was dropped (missing required field or constraint failure);
+    ``drop_reason`` carries the structured code in that case.
+    """
+
+    row_idx: int
+    canonical_row: Optional[Dict[str, Any]]
+    sanitization: Dict[str, str] = field(default_factory=dict)
+    warning_codes: List[str] = field(default_factory=list)
+    drop_reason: Optional[str] = None  # "missing_required" | "constraint_failure"
+
+
+def _decode_and_detect_format(
+    raw: bytes,
+    adapter: AdapterSpec,
+    report: "ParseReport",
+    warnings: List["RowWarning"],
+    timings: Dict[str, float],
+) -> Tuple[Optional[str], Optional[bytes]]:
+    """Decode + detect format. Returns (fmt, raw_for_stream) or (None, None)
+    if format is unknown (caller should return an empty result).
+
+    Mutates report (encoding, format) and warnings (encoding_low_confidence)
+    and timings (decode_ms, detect_ms) in place.
+    """
+    def _now() -> float:
+        return time.perf_counter() * 1000.0
+
+    t0 = _now()
+    text, encoding = decode_bytes(raw)
+    report.detected_encoding = encoding
+    report.encoding_low_confidence = is_low_confidence_encoding(encoding)
+    if report.encoding_low_confidence:
+        warnings.append(RowWarning(
+            row_index=-1,
+            field="",
+            code="encoding_low_confidence",
+            message=f"Decoded as {encoding}; verify the file isn't a wrong-encoding silent corruption.",
+        ))
+    timings["decode_ms"] = round(_now() - t0, 2)
+
+    t0 = _now()
+    adapter_hint = getattr(adapter, "format_hint", None)
+    fmt = adapter_hint if adapter_hint else detect_format(raw[:4096])
+    report.detected_format = fmt
+    timings["detect_ms"] = round(_now() - t0, 2)
+
+    if fmt == "unknown":
+        return None, None
+
+    normalized = normalize_text(text)
+    if fmt in {"csv", "tsv", "jsonl", "xml", "x12"}:
+        raw_for_stream = normalized.encode("utf-8")
+    else:
+        raw_for_stream = raw
+    return fmt, raw_for_stream
+
+
+def _resolve_column_map(
+    source_columns: List[str],
+    adapter: AdapterSpec,
+    profile: Optional[MappingProfile],
+    report: "ParseReport",
+    warnings: List["RowWarning"],
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Given the source-column inventory, resolve the column_map and the
+    per-canonical-field cell-transform overrides. Mutates report
+    (auto_mapper_confidence, profile_id, profile_orphan_keys,
+    column_map, unmapped_canonical, unmapped_source) and warnings in place.
+
+    Returns (column_map, cell_overrides).
+    """
+    if profile is not None:
+        from .normalize.headers import canonical_header
+        source_by_canon = {canonical_header(c): c for c in source_columns}
+        column_map: Dict[str, str] = {}
+        orphan_keys: List[str] = []
+        mapped_canonical: set = set()
+        for profile_src_key, canonical_field in profile.column_map.items():
+            actual_src = source_by_canon.get(canonical_header(profile_src_key))
+            if actual_src is not None:
+                column_map[actual_src] = canonical_field
+                mapped_canonical.add(canonical_field)
+            else:
+                orphan_keys.append(profile_src_key)
+                warnings.append(RowWarning(
+                    row_index=-1, field=canonical_field,
+                    code="profile_source_orphan",
+                    message=(
+                        f"Profile {profile.profile_id!r} expects source column "
+                        f"{profile_src_key!r}, not found in this file. "
+                        f"Canonical field {canonical_field!r} will be unmapped."
+                    ),
+                ))
+        report.profile_id = profile.profile_id
+        report.auto_mapper_confidence = profile.confidence
+        report.profile_orphan_keys = sorted(orphan_keys)
+        report.unmapped_canonical = sorted(
+            c.name for c in adapter.canonical_columns
+            if c.name not in mapped_canonical
+        )
+        mapped_source_canon = {canonical_header(s) for s in column_map.keys()}
+        report.unmapped_source = sorted(
+            c for c in source_columns
+            if canonical_header(c) not in mapped_source_canon
+        )
+    else:
+        proposal = propose_mapping(source_columns, adapter)
+        column_map = dict(proposal.column_map)
+        report.auto_mapper_confidence = proposal.average_confidence()
+        report.unmapped_canonical = list(proposal.unmapped_canonical)
+        report.unmapped_source = list(proposal.unmapped_source)
+
+    report.column_map = dict(column_map)
+
+    cell_overrides: Dict[str, str] = {}
+    if profile is not None:
+        for canonical_field, transform_id in (profile.cell_transforms or {}).items():
+            if transform_id in ALLOWED_CELL_TRANSFORMS:
+                cell_overrides[canonical_field] = transform_id
+
+    return column_map, cell_overrides
+
+
+def _transform_one_row(
+    source_row: Dict[str, str],
+    row_idx: int,
+    adapter: AdapterSpec,
+    column_map: Dict[str, str],
+    cell_overrides: Dict[str, str],
+    warnings: List["RowWarning"],
+    constraint_failures: List["ConstraintFailure"],
+    report: "ParseReport",
+) -> StreamedRow:
+    """Project one source row through column_map, coerce values, check
+    constraints. Mutates warnings + constraint_failures + report in place.
+
+    Returns a StreamedRow. canonical_row is None when the row was dropped.
+    """
+    warnings_before = len(warnings)
+    ctx: dict = {"row_idx": row_idx, "filename": None}
+    canonical_row: Dict[str, Any] = {}
+
+    for source_col, canonical_field in column_map.items():
+        try:
+            col_spec = adapter.column(canonical_field)
+        except KeyError:
+            continue
+        raw_value = source_row.get(source_col, "") or ""
+        canonical_row[canonical_field] = _coerce_value(
+            raw_value, col_spec, ctx, warnings, row_idx,
+            type_override=cell_overrides.get(canonical_field),
+        )
+
+    for col in adapter.canonical_columns:
+        if col.name not in canonical_row:
+            canonical_row[col.name] = col.default
+
+    sanitization = dict(ctx.get("_sanitization") or {})
+    for field_name, source_label in sanitization.items():
+        if source_label == "self_hashed":
+            report.sanitization_self_hashed[field_name] = (
+                report.sanitization_self_hashed.get(field_name, 0) + 1
+            )
+
+    missing_required = [
+        c.name for c in adapter.canonical_columns
+        if c.required and not canonical_row.get(c.name)
+    ]
+    if missing_required:
+        report.rows_dropped_required_missing += 1
+        for f in missing_required:
+            warnings.append(RowWarning(
+                row_index=row_idx, field=f, code="missing_required",
+            ))
+        return StreamedRow(
+            row_idx=row_idx, canonical_row=None,
+            sanitization=sanitization,
+            warning_codes=[w.code for w in warnings[warnings_before:]],
+            drop_reason="missing_required",
+        )
+
+    constraint_violations = []
+    for constraint in adapter.constraints:
+        err = _check_constraint(canonical_row, constraint)
+        if err:
+            constraint_violations.append(err)
+            constraint_failures.append(ConstraintFailure(
+                row_index=row_idx, constraint_kind=constraint.kind, message=err,
+            ))
+    if constraint_violations:
+        report.rows_dropped_constraint_failure += 1
+        return StreamedRow(
+            row_idx=row_idx, canonical_row=None,
+            sanitization=sanitization,
+            warning_codes=[w.code for w in warnings[warnings_before:]],
+            drop_reason="constraint_failure",
+        )
+
+    return StreamedRow(
+        row_idx=row_idx, canonical_row=canonical_row,
+        sanitization=sanitization,
+        warning_codes=[w.code for w in warnings[warnings_before:]],
+        drop_reason=None,
+    )
+
+
+def iter_pipeline(
+    raw: bytes,
+    adapter: AdapterSpec,
+    *,
+    profile: Optional[MappingProfile] = None,
+) -> Iterator[StreamedRow]:
+    """Streaming variant of :func:`run_pipeline`.
+
+    Yields one :class:`StreamedRow` per source row, transforming and
+    validating each row as it arrives without ever materializing the
+    full source-row list. Memory during the row-transform stage is
+    bounded by the per-row dict size — independent of input file size.
+
+    Use this when applying a large file via a writer that consumes
+    rows incrementally. The diff-engine path still wants the
+    materialized list, so :func:`run_pipeline` remains the right
+    entry point there.
+
+    The streaming variant deliberately does NOT enforce the row
+    policy cap (``SPIRE_UIS_MAX_ROWS``) — streaming consumers are
+    expected to have their own per-output bounds. Use
+    :func:`run_pipeline` when you want the cap.
+
+    JSONL files trigger a two-pass key-union over the input bytes
+    (UIS-37 union semantics preserved). Other formats use a single
+    pass with the first row's keys as the source-column inventory.
+    """
+    report = ParseReport()
+    warnings: List[RowWarning] = []
+    constraint_failures: List[ConstraintFailure] = []
+    timings: Dict[str, float] = {}
+
+    fmt, raw_for_stream = _decode_and_detect_format(raw, adapter, report, warnings, timings)
+    if fmt is None or raw_for_stream is None:
+        return
+
+    fixed_width_spec = getattr(adapter, "fixed_width_spec", None)
+    x12_spec = getattr(adapter, "x12_spec", None)
+
+    if fmt == "jsonl":
+        # UIS-37 — JSONL is per-row freeform; a key absent on row 0 may
+        # appear on row N. Two-pass over bytes (cheap; bytes already in
+        # memory) so the auto-mapper sees the full key universe.
+        seen_columns: List[str] = []
+        seen_set: set = set()
+        try:
+            for row in stream_rows(raw_for_stream, fmt, fixed_width_spec=fixed_width_spec, x12_spec=x12_spec):
+                for k in row.keys():
+                    if k not in seen_set:
+                        seen_set.add(k)
+                        seen_columns.append(k)
+        except Exception:
+            return
+        source_columns = seen_columns
+        if not source_columns:
+            return
+        column_map, cell_overrides = _resolve_column_map(
+            source_columns, adapter, profile, report, warnings,
+        )
+        for row_idx, source_row in enumerate(stream_rows(
+            raw_for_stream, fmt, fixed_width_spec=fixed_width_spec, x12_spec=x12_spec,
+        )):
+            yield _transform_one_row(
+                source_row, row_idx, adapter, column_map, cell_overrides,
+                warnings, constraint_failures, report,
+            )
+        return
+
+    # All other formats: single pass. Peek the first row to discover
+    # source columns, then chain it back into the iterator so we don't
+    # have to re-stream.
+    try:
+        stream = stream_rows(
+            raw_for_stream, fmt,
+            fixed_width_spec=fixed_width_spec, x12_spec=x12_spec,
+        )
+        first_row = next(stream, None)
+    except DuplicateHeaderError:
+        return
+    except Exception:
+        return
+    if first_row is None:
+        return
+
+    source_columns = list(first_row.keys())
+    column_map, cell_overrides = _resolve_column_map(
+        source_columns, adapter, profile, report, warnings,
+    )
+    for row_idx, source_row in enumerate(_iter_chain([first_row], stream)):
+        yield _transform_one_row(
+            source_row, row_idx, adapter, column_map, cell_overrides,
+            warnings, constraint_failures, report,
+        )
 
 
 def run_pipeline(
@@ -436,6 +753,24 @@ def run_pipeline(
     -------
     PipelineResult with canonical rows, ParseReport, per-row
     warnings, and per-row constraint failures.
+
+    Implementation notes (UIS-P6.4 streaming refactor):
+        * Source rows are NOT materialized into an intermediate list.
+          Each row flows from the format streamer through transform +
+          validate before the next row is read. Memory during the
+          row-transform stage is bounded by per-row dict size,
+          independent of file size.
+        * The materialized output (``canonical_rows``,
+          ``sanitization_per_row``, ``warnings_per_row``) is kept for
+          callers that want the full set (the diff engine and route
+          preview depend on it). Use :func:`iter_pipeline` to avoid
+          this last buffer if you have a writer that consumes rows
+          incrementally.
+        * The row count cap (``SPIRE_UIS_MAX_ROWS``) is now a soft
+          policy — set to 0 to disable. It catches operator errors
+          (wrong source pointed at the adapter) rather than guarding
+          against OOM, which the streaming refactor handles
+          structurally.
     """
     report = ParseReport()
     warnings: List[RowWarning] = []
@@ -445,70 +780,48 @@ def run_pipeline(
     def _now() -> float:
         return time.perf_counter() * 1000.0
 
-    # 1. Decode + format detect
-    t0 = _now()
-    text, encoding = decode_bytes(raw)
-    report.detected_encoding = encoding
-    report.encoding_low_confidence = is_low_confidence_encoding(encoding)
-    if report.encoding_low_confidence:
-        warnings.append(RowWarning(
-            row_index=-1,
-            field="",
-            code="encoding_low_confidence",
-            message=f"Decoded as {encoding}; verify the file isn't a wrong-encoding silent corruption.",
-        ))
-    timings["decode_ms"] = round(_now() - t0, 2)
-    t0 = _now()
-    # P4.4 — adapter.format_hint overrides auto-detection. Required
-    # for fixed_width (positions un-inferrable from content); also
-    # useful when an XML payload happens to contain CSV-like text.
-    adapter_hint = getattr(adapter, "format_hint", None)
-    if adapter_hint:
-        fmt = adapter_hint
-    else:
-        fmt = detect_format(raw[:4096])
-    report.detected_format = fmt
-    timings["detect_ms"] = round(_now() - t0, 2)
-
-    if fmt == "unknown":
+    # 1. Decode + format detect (mutates report/warnings/timings).
+    fmt, raw_for_stream = _decode_and_detect_format(raw, adapter, report, warnings, timings)
+    if fmt is None or raw_for_stream is None:
         report.timings_ms = timings
         return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
 
-    # Re-encode normalized text into bytes for stream_rows
-    normalized = normalize_text(text)
-    if fmt in {"csv", "tsv", "jsonl", "xml", "x12"}:
-        raw_for_stream = normalized.encode("utf-8")
-    else:
-        # XLSX is binary; fixed_width passed as raw bytes too
-        raw_for_stream = raw
+    fixed_width_spec = getattr(adapter, "fixed_width_spec", None)
+    x12_spec = getattr(adapter, "x12_spec", None)
+    max_rows = _max_rows_per_pipeline()  # 0 disables the cap
 
-    # 2. Stream rows. Walk the iterator manually so we can short-
-    #    circuit on the row cap before materializing more memory
-    #    than the pipeline budget allows. The cap protects against
-    #    OOM on very large uploads — a 10M-row CSV at ~200 bytes/row
-    #    is 2GB of dict objects in Python; we'd rather reject early
-    #    with 413 than tip the whole backend over.
-    max_rows = _max_rows_per_pipeline()
-    source_rows: List[Dict[str, str]] = []
+    # 2. Resolve source columns. JSONL needs a key-union pre-pass
+    #    (UIS-37); other formats use the first row as the header.
     t0 = _now()
+    source_columns: List[str] = []
+    primed_first_row: Optional[Dict[str, str]] = None
+
     try:
-        stream = stream_rows(
-            raw_for_stream, fmt,
-            fixed_width_spec=getattr(adapter, "fixed_width_spec", None),
-            x12_spec=getattr(adapter, "x12_spec", None),
-        )
-        for row in stream:
-            source_rows.append(row)
-            if len(source_rows) > max_rows:
-                # Drain & raise — the route catches this and 413s.
-                raise PipelineRowLimitExceeded(limit=max_rows, observed=max_rows + 1)
-    except PipelineRowLimitExceeded:
-        raise
+        if fmt == "jsonl":
+            seen_set: set = set()
+            for row in stream_rows(
+                raw_for_stream, fmt,
+                fixed_width_spec=fixed_width_spec, x12_spec=x12_spec,
+            ):
+                for k in row.keys():
+                    if k not in seen_set:
+                        seen_set.add(k)
+                        source_columns.append(k)
+        else:
+            stream = stream_rows(
+                raw_for_stream, fmt,
+                fixed_width_spec=fixed_width_spec, x12_spec=x12_spec,
+            )
+            primed_first_row = next(stream, None)
+            if primed_first_row is not None:
+                source_columns = list(primed_first_row.keys())
+            # Note: we don't drain the rest here — the transform
+            # loop below re-streams (or chains in primed_first_row)
+            # so we keep memory bounded.
     except DuplicateHeaderError as e:
         # UIS-34 — distinct warning code so the operator gets actionable
         # detail ("dedup TAMCN in your export") rather than a generic
-        # "format_stream_error". The pipeline returns empty rows; the
-        # route surfaces the warning in the dry-run preview.
+        # "format_stream_error".
         warnings.append(RowWarning(
             row_index=-1, field="", code="duplicate_header_columns",
             message=str(e)[:300],
@@ -526,162 +839,79 @@ def run_pipeline(
         return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
     timings["stream_ms"] = round(_now() - t0, 2)
 
-    report.rows_total = len(source_rows)
-    if not source_rows:
+    if not source_columns:
         report.timings_ms = timings
         return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
 
-    # 3. Determine column mapping
+    # 3. Resolve column mapping (UIS-26 / UIS-35 / UIS-36 logic
+    #    extracted to _resolve_column_map).
     t0 = _now()
-    # UIS-37 — column union across all rows. CSV/TSV/XLSX use a
-    # consistent header so source_rows[0].keys() is enough, but
-    # JSONL is per-row freeform: line 1 has {a, b}, line 2 has
-    # {a, c}, and `c` would have been invisible to the mapper.
-    # Now we union (preserving first-seen order so deterministic
-    # auto-mapper tie-breaks stay stable). For homogeneous files
-    # this is identical to the original first-row behavior.
-    seen_columns: List[str] = []
-    seen_set: set = set()
-    for source_row in source_rows:
-        for k in source_row.keys():
-            if k not in seen_set:
-                seen_set.add(k)
-                seen_columns.append(k)
-    source_columns = seen_columns
-    if profile is not None:
-        # UIS-26 — match profile keys against source columns using
-        # canonical-form comparison so a profile saved with "TAMCN"
-        # still matches a file whose header is "tamcn" (or vice
-        # versa, or "Tamcn", or "TAMCN_Code" if that variant was
-        # also confirmed). Look up by canonical key, store the
-        # ACTUAL source-column name in the effective column_map
-        # so downstream stages still index source_row correctly.
-        from .normalize.headers import canonical_header
-        source_by_canon = {canonical_header(c): c for c in source_columns}
-        column_map = {}
-        orphan_keys: List[str] = []
-        mapped_canonical: set[str] = set()
-        for profile_src_key, canonical_field in profile.column_map.items():
-            actual_src = source_by_canon.get(canonical_header(profile_src_key))
-            if actual_src is not None:
-                column_map[actual_src] = canonical_field
-                mapped_canonical.add(canonical_field)
-            else:
-                # UIS-35 — profile references a source column that
-                # isn't in this file. Record it instead of silently
-                # dropping; route surfaces it as a yellow banner.
-                orphan_keys.append(profile_src_key)
-                warnings.append(RowWarning(
-                    row_index=-1, field=canonical_field,
-                    code="profile_source_orphan",
-                    message=(
-                        f"Profile {profile.profile_id!r} expects source column "
-                        f"{profile_src_key!r}, not found in this file. "
-                        f"Canonical field {canonical_field!r} will be unmapped."
-                    ),
-                ))
-        report.profile_id = profile.profile_id
-        report.auto_mapper_confidence = profile.confidence
-        report.profile_orphan_keys = sorted(orphan_keys)
-        # Symmetric with auto-mapper path: surface canonical fields
-        # the profile failed to populate so the dropzone can render
-        # "missing: tamcn, owner_uic" alongside the orphan banner.
-        report.unmapped_canonical = sorted(
-            c.name for c in adapter.canonical_columns
-            if c.name not in mapped_canonical
-        )
-        mapped_source_canon = {canonical_header(s) for s in column_map.keys()}
-        report.unmapped_source = sorted(
-            c for c in source_columns
-            if canonical_header(c) not in mapped_source_canon
-        )
-    else:
-        proposal = propose_mapping(source_columns, adapter)
-        column_map = dict(proposal.column_map)
-        report.auto_mapper_confidence = proposal.average_confidence()
-        report.unmapped_canonical = list(proposal.unmapped_canonical)
-        report.unmapped_source = list(proposal.unmapped_source)
-
-    report.column_map = dict(column_map)
-    # UIS-36 — profile transform overrides per canonical field.
-    # Validation against ALLOWED_CELL_TRANSFORMS happens at profile
-    # create/update; we trust the dict here. If a profile carries
-    # unknown / invalid IDs we filter them down to the known set
-    # so a stale row in the DB can't crash a fresh upload.
-    cell_overrides: Dict[str, str] = {}
-    if profile is not None:
-        for canonical_field, transform_id in (profile.cell_transforms or {}).items():
-            if transform_id in ALLOWED_CELL_TRANSFORMS:
-                cell_overrides[canonical_field] = transform_id
+    column_map, cell_overrides = _resolve_column_map(
+        source_columns, adapter, profile, report, warnings,
+    )
     timings["map_ms"] = round(_now() - t0, 2)
 
-    # 4. Per-row project + transform + validate
+    # 4. Stream-transform: read rows from the source iterator
+    #    one at a time, project + transform + validate per row,
+    #    accumulate the materialized output for the diff engine.
     t0 = _now()
     canonical_rows: List[Dict[str, Any]] = []
     sanitization_per_row: List[Dict[str, str]] = []
     warnings_per_row: List[List[str]] = []
-    for row_idx, source_row in enumerate(source_rows):
-        ctx: dict = {"row_idx": row_idx, "filename": None}
-        warnings_before = len(warnings)
-        canonical_row: Dict[str, Any] = {}
-        for source_col, canonical_field in column_map.items():
-            try:
-                col_spec = adapter.column(canonical_field)
-            except KeyError:
-                # mapping references a field not on the spec — skip
-                continue
-            raw_value = source_row.get(source_col, "") or ""
-            canonical_row[canonical_field] = _coerce_value(
-                raw_value, col_spec, ctx, warnings, row_idx,
-                type_override=cell_overrides.get(canonical_field),
+
+    if fmt == "jsonl":
+        # Re-stream from byte 0; bytes already in memory so cheap.
+        row_iter: Iterable[Dict[str, str]] = stream_rows(
+            raw_for_stream, fmt,
+            fixed_width_spec=fixed_width_spec, x12_spec=x12_spec,
+        )
+    else:
+        # Chain primed_first_row back into the original iterator so
+        # we don't have to re-stream non-JSONL formats. xlsx in
+        # particular is expensive to re-open via openpyxl.
+        # primed_first_row may be None only when source_columns
+        # is empty, which we already short-circuited above.
+        row_iter = _iter_chain([primed_first_row] if primed_first_row is not None else [], stream)
+
+    rows_total = 0
+    try:
+        for row_idx, source_row in enumerate(row_iter):
+            if max_rows and row_idx >= max_rows:
+                # Soft policy cap exceeded. Streaming consumers don't
+                # need this guard; here it catches operator-pointed-
+                # at-wrong-source errors.
+                raise PipelineRowLimitExceeded(limit=max_rows, observed=row_idx + 1)
+            rows_total += 1
+
+            streamed = _transform_one_row(
+                source_row, row_idx, adapter, column_map, cell_overrides,
+                warnings, constraint_failures, report,
             )
+            if streamed.canonical_row is not None:
+                canonical_rows.append(streamed.canonical_row)
+                sanitization_per_row.append(streamed.sanitization)
+                warnings_per_row.append(streamed.warning_codes)
+                report.rows_kept += 1
+    except PipelineRowLimitExceeded:
+        raise
+    except DuplicateHeaderError as e:
+        warnings.append(RowWarning(
+            row_index=-1, field="", code="duplicate_header_columns",
+            message=str(e)[:300],
+        ))
+        timings["transform_ms"] = round(_now() - t0, 2)
+        report.timings_ms = timings
+        return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
+    except Exception as e:  # noqa: BLE001
+        warnings.append(RowWarning(
+            row_index=-1, field="", code="format_stream_error",
+            message=str(e)[:200],
+        ))
+        timings["transform_ms"] = round(_now() - t0, 2)
+        report.timings_ms = timings
+        return PipelineResult(rows=[], report=report, warnings=warnings, constraint_failures=constraint_failures)
 
-        # Defaults for unmapped canonical columns
-        for col in adapter.canonical_columns:
-            if col.name not in canonical_row:
-                canonical_row[col.name] = col.default
-
-        # Sanitization counts (aggregate) + per-row labels (parallel
-        # to the row list so callers like the legacy route handler
-        # can reconstruct ParsedAssetRow.serial_number_source).
-        sanitization = dict(ctx.get("_sanitization") or {})
-        for field_name, source_label in sanitization.items():
-            if source_label == "self_hashed":
-                report.sanitization_self_hashed[field_name] = (
-                    report.sanitization_self_hashed.get(field_name, 0) + 1
-                )
-
-        # 5. Required-field check
-        missing_required = [
-            c.name for c in adapter.canonical_columns
-            if c.required and not canonical_row.get(c.name)
-        ]
-        if missing_required:
-            report.rows_dropped_required_missing += 1
-            for f in missing_required:
-                warnings.append(RowWarning(
-                    row_index=row_idx, field=f, code="missing_required",
-                ))
-            continue
-
-        # 6. Cross-field constraints
-        constraint_violations = []
-        for constraint in adapter.constraints:
-            err = _check_constraint(canonical_row, constraint)
-            if err:
-                constraint_violations.append(err)
-                constraint_failures.append(ConstraintFailure(
-                    row_index=row_idx, constraint_kind=constraint.kind, message=err,
-                ))
-        if constraint_violations:
-            report.rows_dropped_constraint_failure += 1
-            continue
-
-        canonical_rows.append(canonical_row)
-        sanitization_per_row.append(sanitization)
-        warnings_per_row.append([w.code for w in warnings[warnings_before:]])
-        report.rows_kept += 1
-
+    report.rows_total = rows_total
     timings["transform_ms"] = round(_now() - t0, 2)
 
     # Aggregate warning count: unique row indices that hit at least
