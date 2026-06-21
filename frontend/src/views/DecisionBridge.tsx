@@ -759,21 +759,21 @@ function AuditTile({
           ariaLabel={`Audit chain ${statusLabel} · ${data.events_per_minute.toFixed(1)} events/min — open ADMIN`}
           className="gap-2"
         >
-          {/* Events/min as the hero figure; everything else collapses into
-           * a single quiet caption row underneath. The 3-column "label /
-           * big number / sub-caption" grid was the loudest tile on the
-           * bridge for what is, in steady state, a green-light heartbeat. */}
+          {/* Lead with the cumulative entry count — a real, growing number
+           * that reads as "the chain is alive and recording." The prior
+           * hero was events/min, which sits at 0.0 in steady state and
+           * read like a flatline. Rate/last/head fold into the caption. */}
           <div className="flex items-baseline gap-2">
             <span className="font-mono text-3xl font-semibold tabular-nums text-[var(--color-text)]">
-              {data.events_per_minute.toFixed(1)}
+              {data.total_entries.toLocaleString()}
             </span>
             <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-              events / min
+              audit entries
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
             <span>
-              {data.total_entries.toLocaleString()} entries
+              {data.events_per_minute.toFixed(1)} / min
             </span>
             <span aria-hidden>·</span>
             <span>last {relTime(data.last_entry_at)}</span>
