@@ -1895,7 +1895,7 @@ async def admin_telemetry(role: str | None = None):
 
 
 @router.get("/admin/outcomes")
-async def admin_list_outcomes(limit: int = 50, decision_kind: Optional[str] = None, role: str | None = None):
+async def admin_list_outcomes(limit: int = 50, decision_kind: str | None = None, role: str | None = None):
     """List recent outcomes for the AdminTab activity log.
 
     Gated server-side to security_manager — see admin_telemetry."""

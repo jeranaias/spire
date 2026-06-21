@@ -46,6 +46,12 @@ def _jittered_timestamp(base_date, key: str) -> str:
     return dt.isoformat(timespec="seconds") + "Z"
 
 
+# Mission-capable readiness bands, shared across the COP, the alert-fusion
+# engine, and the ThermalHawk sim so a unit reads the same condition on
+# every surface. RED below the floor; AMBER/warn below the threshold.
+MC_RED_FLOOR = 0.60
+MC_AMBER_THRESHOLD = 0.70
+
 # Pool of varied readiness-alert title templates so every row doesn't read
 # "X readiness below threshold". Picked deterministically per (unit, band).
 _READINESS_TITLE_TEMPLATES_HIGH = [
@@ -63,7 +69,7 @@ _READINESS_TITLE_TEMPLATES_MOD = [
 
 
 def _readiness_title(unit: str, mc_rate: float, nmcs: int, total: int) -> str:
-    pool = _READINESS_TITLE_TEMPLATES_HIGH if mc_rate < 0.60 else _READINESS_TITLE_TEMPLATES_MOD
+    pool = _READINESS_TITLE_TEMPLATES_HIGH if mc_rate < MC_RED_FLOOR else _READINESS_TITLE_TEMPLATES_MOD
     idx = int(hashlib.sha256(f"{unit}:rd".encode()).hexdigest(), 16) % len(pool)
     return pool[idx].format(unit=unit, pct=mc_rate * 100, nmcs=nmcs, total=total)
 
@@ -138,9 +144,9 @@ async def cop(role: Optional[str] = None):
         mc_rate = c.get("MC", 0) / total if total else 0.0
         lat, lon = UNIT_COORDS.get(u.name, (34.658, -77.398))
         alerts: list[dict] = []
-        if mc_rate < 0.60:
+        if mc_rate < MC_RED_FLOOR:
             alerts.append({"kind": "readiness_collapse", "severity": "HIGH"})
-        elif mc_rate < 0.70:
+        elif mc_rate < MC_AMBER_THRESHOLD:
             alerts.append({"kind": "readiness_warning", "severity": "MODERATE"})
 
         # Data-integrity flags: SRs with data_quality_flag tied to this unit
@@ -225,7 +231,7 @@ def _compose_raw_alerts(ds) -> list[dict]:
         if not total:
             continue
         mc_rate = c.get("MC", 0) / total
-        if mc_rate < 0.70:
+        if mc_rate < MC_AMBER_THRESHOLD:
             nmcs = c.get("NMCS", 0)
             mc = c.get("MC", 0)
             pmc = c.get("PMC", 0)
@@ -238,7 +244,7 @@ def _compose_raw_alerts(ds) -> list[dict]:
             out.append({
                 "id": f"pulse-readiness-{unit_name}",
                 "source": "PULSE",
-                "severity": "HIGH" if mc_rate < 0.60 else "MODERATE",
+                "severity": "HIGH" if mc_rate < MC_RED_FLOOR else "MODERATE",
                 "timestamp": _jittered_timestamp(last_day, f"readiness:{unit_name}"),
                 "title": _readiness_title(unit_name, mc_rate, nmcs, total),
                 "body": (
@@ -577,12 +583,12 @@ async def fused_threats(role: Optional[str] = None):
         if not total:
             continue
         mc_rate = c.get("MC", 0) / total
-        if mc_rate < 0.70:
+        if mc_rate < MC_AMBER_THRESHOLD:
             nmcs = c.get("NMCS", 0)
             out.append({
                 "id": f"pulse-readiness-{unit_name}",
                 "source": "PULSE",
-                "severity": "HIGH" if mc_rate < 0.60 else "MODERATE",
+                "severity": "HIGH" if mc_rate < MC_RED_FLOOR else "MODERATE",
                 "timestamp": _jittered_timestamp(last_day, f"readiness:{unit_name}"),
                 "title": _readiness_title(unit_name, mc_rate, nmcs, total),
                 "body": f"{unit_name} MC rate {mc_rate:.1%}",
@@ -884,14 +890,16 @@ async def simulate_thermalhawk_detection(
         readiness_note = (
             f"{target_unit} readiness prior to detection: dataset has no end-of-day snapshot."
         )
-    elif unit_mc_rate < 0.60:
+    elif unit_mc_rate < MC_RED_FLOOR:
         readiness_note = (
-            f"{target_unit} was already RED ({unit_mc_rate*100:.1f}% MC, below the 60% floor) "
+            f"{target_unit} was already RED ({unit_mc_rate*100:.1f}% MC, "
+            f"below the {MC_RED_FLOOR*100:.0f}% floor) "
             f"prior to detection — UAS over the motor pool compounds an existing readiness gap."
         )
-    elif unit_mc_rate < 0.75:
+    elif unit_mc_rate < MC_AMBER_THRESHOLD:
         readiness_note = (
-            f"{target_unit} was AMBER ({unit_mc_rate*100:.1f}% MC, below the 75% threshold) "
+            f"{target_unit} was AMBER ({unit_mc_rate*100:.1f}% MC, "
+            f"below the {MC_AMBER_THRESHOLD*100:.0f}% threshold) "
             f"prior to detection."
         )
     else:
