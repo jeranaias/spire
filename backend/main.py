@@ -10,6 +10,7 @@ Run:
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -94,6 +95,17 @@ async def lifespan(app: FastAPI):
     scheduler_task = start_scheduler()
     if scheduler_task is not None:
         print("[SPIRE] DR scheduler armed.")
+
+    # Warm the /status SWR cache in the background so the first page load
+    # doesn't pay the LLM-probe + torch-import cost on its critical path.
+    async def _warm_status() -> None:
+        try:
+            from .routes.system import _refresh_status
+            await _refresh_status()
+            print("[SPIRE] status cache warm.")
+        except Exception as e:  # noqa: BLE001
+            print(f"[SPIRE] status warm-up skipped: {e}")
+    asyncio.create_task(_warm_status())
 
     print("[SPIRE] Ready.")
     try:

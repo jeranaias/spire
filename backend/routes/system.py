@@ -1,10 +1,12 @@
 """System-level endpoints: status, audit, secure wipe (stubbed)."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import sys as _sys
+import time as _time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -192,8 +194,47 @@ async def build_mode():
     }
 
 
+# /status is polled continuously by every page's status strip, but its
+# inputs (LLM reachability, model-weight presence, audit head) change on
+# the order of seconds, not per-request. Computing it cost ~6.5s/call
+# (cold torch import in _model_status + the LLM probes), which gated every
+# page. Cache it with stale-while-revalidate: serve the last snapshot
+# instantly and refresh in the background, so no request ever blocks once
+# the cache is warm (warmed in main.py lifespan at startup).
+_STATUS_TTL_S = 8.0
+_status_cache: dict = {"ts": 0.0, "payload": None}
+_status_refresh_lock = asyncio.Lock()
+
+
+async def _refresh_status() -> dict:
+    async with _status_refresh_lock:
+        # Another coroutine may have refreshed while we waited for the lock.
+        if (
+            _status_cache["payload"] is not None
+            and (_time.monotonic() - _status_cache["ts"]) < _STATUS_TTL_S
+        ):
+            return _status_cache["payload"]
+        payload = await _compute_status()
+        _status_cache["payload"] = payload
+        _status_cache["ts"] = _time.monotonic()
+        return payload
+
+
 @router.get("/status")
 async def status():
+    cached = _status_cache["payload"]
+    if cached is not None:
+        age = _time.monotonic() - _status_cache["ts"]
+        if age < _STATUS_TTL_S:
+            return cached
+        # Stale: serve it now, refresh in the background (no one waits).
+        asyncio.create_task(_refresh_status())
+        return cached
+    # Cold (first call before the lifespan warm-up completes): compute once.
+    return await _refresh_status()
+
+
+async def _compute_status():
     ds = get_dataset()
     err = sum(1 for v in ds.violations if v.severity == "error")
     chain = verify_chain()
@@ -253,12 +294,22 @@ async def status():
     }
 
 
+_model_status_cache: dict | None = None
+
+
 def _model_status() -> dict:
+    # Model-weight presence is fixed for the process lifetime (weights are
+    # loaded once at import, not hot-swapped), and importing model_hooks
+    # pulls torch — expensive. Compute once, then reuse.
+    global _model_status_cache
+    if _model_status_cache is not None:
+        return _model_status_cache
     try:
         from ..model_hooks import STATE as MS
-        return MS.status()
+        _model_status_cache = MS.status()
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e)}
+        _model_status_cache = {"error": str(e)}
+    return _model_status_cache
 
 
 def _network_egress_summary() -> dict:
