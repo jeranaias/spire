@@ -589,9 +589,10 @@ def _sr_to_record(sr) -> dict:
 
 
 @router.get("/demo-batch")
-async def demo_batch(limit: int = 500):
+async def demo_batch(request: Request, limit: int = 500):
     """Seed a batch from the canonical dataset. Called by the SENTRY view when
     the user clicks "Use canonical dataset" instead of uploading a file."""
+    require_role(session_role(request), SENTRY_MARK_ROLES, "sentry.demo_batch")
     records = _records_from_canonical(limit=limit)
     batch = _new_batch(record_source="canonical_demo", records=records)
     return _public_batch(batch)
@@ -680,7 +681,7 @@ def _records_from_gcss_ingest(report) -> list[dict]:
 
 
 @router.post("/upload")
-async def upload(file: UploadFile = File(...)):
+async def upload(request: Request, file: UploadFile = File(...)):
     """Accept a CSV/XLSX/JSON upload, parse it, detect schema, and stage as
     a batch.
 
@@ -703,6 +704,7 @@ async def upload(file: UploadFile = File(...)):
     Raw bytes persist to SQLite for both paths so a uvicorn restart
     between Upload and Processing does not strand the operator.
     """
+    require_role(session_role(request), SENTRY_MARK_ROLES, "sentry.upload")
     raw = await file.read()
     filename = file.filename or "upload.bin"
     if len(raw) > UPLOAD_MAX_BYTES:
@@ -812,7 +814,7 @@ def _detect_bundle_role(filename: str) -> Optional[str]:
 
 
 @router.post("/upload-bundle")
-async def upload_bundle(files: list[UploadFile] = File(...)):
+async def upload_bundle(request: Request, files: list[UploadFile] = File(...)):
     """Multi-file SENTRY ingest — drop a folder of GCSS-MC exports at once.
 
     The operator ctrl+clicks (or drag-drops) every file from the GCSS-MC
@@ -834,6 +836,7 @@ async def upload_bundle(files: list[UploadFile] = File(...)):
     singleton; until then, every record sits in the review queue
     exactly like the single-file upload path.
     """
+    require_role(session_role(request), SENTRY_MARK_ROLES, "sentry.upload_bundle")
     if not files:
         raise HTTPException(
             status_code=400,
@@ -1301,7 +1304,8 @@ async def mark_text(payload: dict, request: Request):
 # ---------------------------------------------------------------------------
 
 @router.post("/process/{batch_id}")
-async def start_processing(batch_id: str):
+async def start_processing(batch_id: str, request: Request):
+    require_role(session_role(request), SENTRY_MARK_ROLES, "sentry.process")
     # Task #67 — _get_batch hydrates from SQLite if the in-memory cache
     # was wiped by a uvicorn restart. Without this, /sentry/process
     # returned 404 mid-demo because the batch only ever lived in `_BATCHES`.

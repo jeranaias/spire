@@ -16,20 +16,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-# g4 — in SENTRY_REVIEW_ROLES (scoping.py), so the remark gate admits it.
-G4_DODID = "1234567890"
-# maintenance_chief — NOT in SENTRY_REVIEW_ROLES.
+# security_manager — in BOTH SENTRY_MARK_ROLES (can ingest/process) and
+# SENTRY_REVIEW_ROLES (can aggregation-remark), so it drives the full flow.
+SECURITY_MANAGER_DODID = "3456789012"
+# maintenance_chief — in NEITHER set; used to prove the gates 403.
 MAINT_CHIEF_DODID = "2345678901"
 
 
 @pytest.fixture
 def sentry_client():
     """Fully-booted client (lifespan loads the seed-42 dataset) logged in
-    as g4, with a processed canonical batch ready to re-mark."""
+    as security_manager, with a processed canonical batch ready to re-mark."""
     from backend.main import app
 
     with TestClient(app) as c:
-        r = c.post("/api/auth/login", json={"dodid": G4_DODID, "pin": "000000"})
+        r = c.post(
+            "/api/auth/login",
+            json={"dodid": SECURITY_MANAGER_DODID, "pin": "000000"},
+        )
         assert r.status_code == 200, r.text
         yield c
 
@@ -81,9 +85,9 @@ def test_aggregation_remark_persists_decisions(sentry_client):
     for sr_num in matched:
         assert sr_num in rows
         assert rows[sr_num]["action"] == "aggregation_remark"
-        assert rows[sr_num]["actor_role"] == "g4"
+        assert rows[sr_num]["actor_role"] == "security_manager"
         # actor identity must be anchored to the Marine, not blank.
-        assert rows[sr_num]["actor_dodid"] == G4_DODID
+        assert rows[sr_num]["actor_dodid"] == SECURITY_MANAGER_DODID
 
 
 def test_aggregation_remark_requires_review_role(sentry_client):
