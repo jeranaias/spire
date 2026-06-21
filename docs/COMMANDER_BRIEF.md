@@ -13,7 +13,7 @@
 I, V, and VIII in a single pane — those classes live in three incompatible
 systems while GCSS-MC focuses on Class IX requisitioning. SPIRE collapses
 GCSS-MC, DRRS-MC, and forward sensor feeds into one role-shaped view that
-runs offline on a 2U box in a CONEX, with tamper-evident audit and one-click
+runs offline on a backpack-portable AI device (NVIDIA GB10, 128GB unified memory, ~$4K, 2.6 lbs), with tamper-evident audit and one-click
 coalition release. **TRL 4, validated at Modern Day Marine 2026 (1st place,
 30 APR 2026). Operational pilot is the next step.**
 
@@ -48,7 +48,7 @@ decision is unauditable; the artifact is a spreadsheet.
   and Ed25519-signed. Exports as Common Event Format (CEF) for Splunk /
   ArcSight / QRadar. Inspector verification is offline, against a published
   public key.
-- **Local-first deployment.** Runs offline on a 2U CONEX box. Vector-clock
+- **Local-first deployment.** Runs offline on a backpack-portable AI device (NVIDIA GB10, 2.6 lbs, ~$4K). Vector-clock
   conflict resolution reconciles forward-node writes when SATCOM restores.
   No cloud egress.
 - **Coalition-ready.** Live partner-scoped redaction profiles (FVEY, JPN,
