@@ -1416,10 +1416,14 @@ export function DecisionBridgeView() {
        * Each tile is a @container so the tile's own internal layout
        * adapts to its actual rendered width, not the viewport. */}
       <div
-        className="grid flex-1 gap-4 sm:gap-5"
+        className="grid min-h-0 flex-1 gap-4 sm:gap-5"
         style={{
           gridTemplateColumns: "repeat(auto-fit, minmax(min(22rem, 100%), 1fr))",
-          gridAutoRows: "minmax(15rem, auto)",
+          // Rows divide the available flex height (minmax floor keeps tiles
+          // legible on short windows). On the standard wide layout this makes
+          // the 3x2 grid fill the viewport exactly — no page scroll — instead
+          // of a fixed 15rem-per-row that spilled just past the fold.
+          gridAutoRows: "minmax(11rem, 1fr)",
         }}
       >
         <div className="@container min-h-0">

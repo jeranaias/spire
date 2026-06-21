@@ -108,12 +108,14 @@ export function pollWithBackoff<T>(
   let lastFp: string | null = null;
   let stopped = false;
   let timer: number | null = null;
+  let errorStreak = 0;
 
   const tick = async () => {
     if (stopped) return;
     try {
       const v = await fn();
       if (stopped) return;
+      errorStreak = 0;
       const f = fp(v);
       if (lastFp !== null && f === lastFp) {
         interval = Math.min(Math.round(interval * mult), cap);
@@ -123,9 +125,14 @@ export function pollWithBackoff<T>(
       lastFp = f;
       opts.onResult?.(v);
     } catch (err) {
-      // Errors don't reset the back-off — a steadily-failing endpoint should
-      // back off too, not hammer.
-      interval = Math.min(Math.round(interval * mult), cap);
+      // Fast retry on errors so a transient blip — especially a failed
+      // FIRST fetch right after sign-in — doesn't strand a tile in its
+      // error state for the full steady-state cadence (the 60s tiles
+      // would otherwise show "Network error" for a whole minute). Retry
+      // quickly, easing toward the cap only if the endpoint is genuinely
+      // down.
+      errorStreak += 1;
+      interval = Math.min(1500 * 2 ** (errorStreak - 1), cap);
       opts.onError?.(err);
     }
     if (stopped) return;
