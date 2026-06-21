@@ -30,6 +30,8 @@ import {
   type DecisionBridgeMission,
   type DecisionBridgeShortage,
   type DecisionBridgeShortages,
+  type RecommendActionsResponse,
+  type RecommendedAction,
   isEmptyEnvelope,
 } from "../api";
 import { pollWithBackoff, formatApiError } from "../api-retry";
@@ -1094,6 +1096,108 @@ function StageGrid() {
 }
 
 // ---------------------------------------------------------------------------
+// Tile 6 — Recommended actions (GC-1). Closes the decision loop the other
+// tiles open: alerts/shortages name the problem, this names the fix.
+// ---------------------------------------------------------------------------
+const ACTION_BADGE: Record<RecommendedAction["kind"], { label: string; tone: string }> = {
+  cannibalize: { label: "CANNIB", tone: "var(--color-warning)" },
+  expedite: { label: "EXPEDITE", tone: "var(--color-info)" },
+  cross_level: { label: "X-LEVEL", tone: "var(--color-primary)" },
+  redistribute: { label: "REDIST", tone: "var(--color-primary)" },
+};
+
+type RankedAction = RecommendedAction & { asset_id: string; unit_name: string };
+
+function RecommendTile({
+  data,
+  error,
+}: {
+  data: RecommendActionsResponse | null;
+  error: string | null;
+}) {
+  const nav = useNavigate();
+  const drill = () => nav("/pulse/forecast");
+
+  // One best action per asset, ranked across the fleet, top 3.
+  const top: RankedAction[] = (data?.assets ?? [])
+    .map((a) => {
+      const best = [...a.actions].sort((x, y) => y.score - x.score)[0];
+      return best ? { ...best, asset_id: a.asset_id, unit_name: a.unit_name } : null;
+    })
+    .filter((x): x is RankedAction => x !== null)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  return (
+    <Tile label="Recommended Actions" drillLabel="PULSE" onDrill={drill}>
+      {error && !data ? (
+        <ErrorState title="Recommendations unavailable" description={error} />
+      ) : !data ? (
+        <TileChromePressable onDrill={drill} ariaLabel="Recommendations loading — open PULSE forecast">
+          <LoadingState label="Computing actions" />
+        </TileChromePressable>
+      ) : top.length === 0 ? (
+        <TileChromePressable onDrill={drill} ariaLabel="No recommended actions — open PULSE forecast">
+          <EmptyState title="No actions recommended" description="No in-scope asset is forecast past its readiness threshold." />
+        </TileChromePressable>
+      ) : (
+        <>
+          <ul className="flex flex-col gap-1.5">
+            {top.map((a) => {
+              // Tolerate any kind the backend emits beyond the known set —
+              // an unmapped kind must degrade, not crash the whole view.
+              const badge = ACTION_BADGE[a.kind] ?? {
+                label: (a.kind ?? "action").replace(/_/g, " ").toUpperCase(),
+                tone: "var(--color-primary)",
+              };
+              const deltaPts = Math.round((a.mc_delta_pct ?? 0) * 100);
+              return (
+                <li key={`${a.asset_id}-${a.kind}`}>
+                  <Pressable
+                    onClick={drill}
+                    aria-label={`${badge.label}: ${a.title} · ${a.unit_name} · +${deltaPts}pp MC in ~${a.time_to_effect_hours}h — open in PULSE`}
+                    className="flex items-center gap-2 rounded-sm border-l-2 px-2 py-1 hover:bg-[color-mix(in_oklab,var(--color-text)_8%,transparent)]"
+                    style={{
+                      borderLeftColor: badge.tone,
+                      background: "color-mix(in oklab, var(--color-bg) 60%, transparent)",
+                    }}
+                  >
+                    <span
+                      className="rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest"
+                      style={{ color: badge.tone, border: `1px solid ${badge.tone}` }}
+                      aria-hidden
+                    >
+                      {badge.label}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+                        {a.title}
+                      </div>
+                      <div className="truncate font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                        {a.unit_name} · ~{a.time_to_effect_hours}h
+                      </div>
+                    </div>
+                    {deltaPts > 0 && (
+                      <div
+                        className="font-mono text-[12px] font-semibold tabular-nums tracking-wider text-[var(--color-success)]"
+                        aria-hidden
+                      >
+                        +{deltaPts}pp
+                      </div>
+                    )}
+                  </Pressable>
+                </li>
+              );
+            })}
+          </ul>
+          <TileBodyFiller onDrill={drill} />
+        </>
+      )}
+    </Tile>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // View root
 // ---------------------------------------------------------------------------
 export function DecisionBridgeView() {
@@ -1129,6 +1233,8 @@ export function DecisionBridgeView() {
   const [mcErr, setMcErr] = useState<string | null>(null);
   const [audit, setAudit] = useState<DecisionBridgeAudit | null>(null);
   const [auditErr, setAuditErr] = useState<string | null>(null);
+  const [recs, setRecs] = useState<RecommendActionsResponse | null>(null);
+  const [recsErr, setRecsErr] = useState<string | null>(null);
   // Wall-clock of the most recent successful tile fetch — feeds the link
   // strip's "LAST SYNC Ns AGO" line. Updated by every poller below.
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
@@ -1239,6 +1345,20 @@ export function DecisionBridgeView() {
     return () => ctl.stop();
   }, [cadenceMult]);
 
+  // Recommended actions (GC-1) — 60s cadence; same slow-logistics tempo as
+  // shortages. Role-scoped server-side, so it reflects the operator's units.
+  useEffect(() => {
+    const interval = 60_000 * cadenceMult;
+    const ctl = pollWithBackoff(() => api.pulse.recommendActions({ top: 6 }), {
+      baseMs: interval,
+      maxMs: interval,
+      multiplier: 1,
+      onResult: (v) => { setRecs(v); setRecsErr(null); noteSuccess(); },
+      onError: (err) => setRecsErr(formatApiError(err)),
+    });
+    return () => ctl.stop();
+  }, [role, cadenceMult]);
+
   const fallbackPath = useMemo(() => ROLE_DEFAULT_VIEW[role] ?? "/bastion", [role]);
 
   return (
@@ -1316,6 +1436,9 @@ export function DecisionBridgeView() {
         </div>
         <div className="@container min-h-0">
           <AuditTile data={audit} error={auditErr} />
+        </div>
+        <div className="@container min-h-0">
+          <RecommendTile data={recs} error={recsErr} />
         </div>
       </div>
     </div>
