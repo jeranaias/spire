@@ -149,8 +149,8 @@ html, body, #root {
  * No JS class manipulation in components — pure CSS variable rotation.
  * ------------------------------------------------------------------ */
 :root {
-  /* Card layout tokens consumed by RecommendPanel, FusedThreatsPanel,
-   * MetricCard headers, etc. Sparse mode bumps these. */
+  /* Card layout tokens consumed by RecommendPanel, MetricCard headers,
+   * etc. Sparse mode bumps these. */
   --pad-card: 0.75rem;       /* 12px — current dense cards */
   --pad-card-sm: 0.5rem;     /* 8px */
   --gap-card: 0.5rem;        /* 8px between rows */
