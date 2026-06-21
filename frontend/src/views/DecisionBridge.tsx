@@ -433,9 +433,19 @@ function AlertsTile({
 
   const drillToAlert = (a?: BastionAlert) => {
     if (a) {
+      // Drill straight to the alert's unit on the map. The live
+      // OkinawaMapCanvas keys its deep-link off the `?unit=` query
+      // param (the same contract PULSE's "On Map" button uses), so a
+      // unit-scoped alert flies the camera to that marker. Writing the
+      // store-selection fields too keeps state coherent for any
+      // consumer that reads them.
       const target = resolveAlertTarget(a, cop);
       setSelectedBuildingId(target.buildingId);
       setSelectedUnitId(a.unit ?? null);
+      if (a.unit) {
+        nav(`/bastion?unit=${encodeURIComponent(a.unit)}`);
+        return;
+      }
     }
     nav("/bastion");
   };
@@ -617,7 +627,14 @@ function McTile({
   const setSelectedUnitId = useSpireStore((s) => s.setSelectedUnitId);
 
   const drill = (u?: DecisionBridgeMcUnit) => {
-    if (u) setSelectedUnitId(u.unit);
+    if (u) {
+      // Land on the unit's Risk Board (the per-unit readiness deep-dive),
+      // which keys off `?unit=` — a bare nav('/pulse') drops the operator
+      // on an unfocused fleet view that never reads the selection.
+      setSelectedUnitId(u.unit);
+      nav(`/pulse/risk?unit=${encodeURIComponent(u.unit)}`);
+      return;
+    }
     nav("/pulse");
   };
 

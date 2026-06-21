@@ -1840,7 +1840,11 @@ async def review_bulk(request: Request, payload: dict):
         )
     column = str((payload or {}).get("column", "") or "")
     note = str((payload or {}).get("note", "") or "")
-    role = session_role(request) or "data_custodian"
+    # Clearing records in bulk edits marking records — same authority as
+    # single-review. Never default an absent session to a write-capable
+    # role; require_role 403s + audits an out-of-scope attempt.
+    role = session_role(request)
+    require_role(role, SENTRY_REVIEW_ROLES, "sentry.review.bulk")
     result = record_sentry_bulk_decision(
         sr_numbers,
         action,
@@ -2185,19 +2189,16 @@ async def aggregation_remark(payload: dict, request: Request):
             # mid-demo doesn't lose the mark.
             r["aggregation_remarked_to"] = target
             r["detected_classification_oracle"] = target
-            try:
-                record_sentry_decision(
-                    batch_id=batch_id,
-                    sr_number=sr_num,
-                    actor=role or "unknown",
-                    action="aggregation_remark",
-                    target_classification=target,
-                    notes=note or f"aggregation: {unit}/{equipment}",
-                )
-            except TypeError:
-                # Older record_sentry_decision signature without kwargs;
-                # fall back to bulk persistence if available.
-                pass
+            record_sentry_decision(
+                sr_num,
+                "aggregation_remark",
+                actor_role=role or "unknown",
+                actor_dodid=str(user.get("dodid", "")),
+                actor_name=str(user.get("name", "")),
+                actor_unit=str(user.get("unit", "")),
+                actor_cert_serial=str(user.get("cert_serial", "")),
+                note=note or f"aggregation: {unit}/{equipment} → {target}",
+            )
 
     audit_log(
         "sentry_aggregation_remark",
