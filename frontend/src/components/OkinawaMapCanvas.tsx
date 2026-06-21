@@ -9,7 +9,7 @@
  * GCSS-MC ingest (the "lay of the land" view) and after (where the
  * unit positions overlay alongside readiness data).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import ms from "milsymbol";
@@ -66,16 +66,36 @@ const SYMBOL_BASE_OPTS = {
   infoFields: true,
 };
 
-function renderSymbolHTML(m: Marker): HTMLElement {
-  // milsymbol v3 default export carries the `Symbol` constructor.
+// milsymbol v3 default export carries the `Symbol` constructor.
+// `withLabel=false` renders just the icon glyph (no text fields) — the
+// decluttering pass uses this to hide labels that would collide.
+function symbolSVG(m: Marker, withLabel: boolean): string {
   const sym = new ms.Symbol(m.sidc, {
     ...SYMBOL_BASE_OPTS,
-    additionalInformation: m.additionalInfo ?? "",
-    uniqueDesignation: m.label,
-    higherFormation: m.parent ?? "",
+    ...(withLabel
+      ? {
+          additionalInformation: m.additionalInfo ?? "",
+          uniqueDesignation: m.label,
+          higherFormation: m.parent ?? "",
+        }
+      : {}),
     ...(m.echelon ? { echelon: m.echelon } : {}),
   });
+  return sym.asSVG();
+}
 
+function styleSymbolSvg(svgEl: SVGElement | null): void {
+  if (!svgEl) return;
+  svgEl.style.display = "block";
+  // milsymbol estimates label width slightly short, so long designations
+  // (e.g. "JGSDF Miyako", "7 SSM Regiment") run past the computed viewBox
+  // and the SVG's default overflow:hidden clips them mid-word. Let the
+  // labels paint outside the box. Base contrast shadow + MC-state glow
+  // live in index.css (.spire-milsymbol-inner svg).
+  svgEl.style.overflow = "visible";
+}
+
+function renderSymbolHTML(m: Marker, withLabel: boolean): HTMLElement {
   // Outer element is what MapLibre positions on the map (its transform
   // is mlbr-managed). Inner element wraps the milsymbol SVG and is
   // what *we* scale on zoom changes — keeping our scale separate
@@ -86,27 +106,53 @@ function renderSymbolHTML(m: Marker): HTMLElement {
   wrap.style.userSelect = "none";
   // Mark this element so the zoom listener can find it cheaply.
   wrap.dataset.spireMilsymbol = "1";
+  wrap.dataset.labeled = withLabel ? "1" : "0";
 
   const inner = document.createElement("div");
   inner.className = "spire-milsymbol-inner";
   inner.style.transformOrigin = "center center";
   inner.style.transition = "transform 120ms ease-out";
-  inner.innerHTML = sym.asSVG();
-  const svgEl = inner.querySelector("svg");
-  if (svgEl) {
-    svgEl.style.display = "block";
-    // milsymbol estimates label width slightly short, so long
-    // designations (e.g. "JGSDF Miyako", "7 SSM Regiment") run past
-    // the computed viewBox and the SVG's default overflow:hidden
-    // clips them mid-word. Let the labels paint outside the box.
-    svgEl.style.overflow = "visible";
-    // NB: the base contrast drop-shadow + MC-state readiness glow are
-    // applied in CSS (index.css, .spire-milsymbol-inner svg) so the
-    // data-mc-state rules can layer the colored glow on top. Setting
-    // `filter` inline here would override those rules.
-  }
+  inner.innerHTML = symbolSVG(m, withLabel);
+  styleSymbolSvg(inner.querySelector("svg"));
   wrap.appendChild(inner);
   return wrap;
+}
+
+// Swap an existing marker between labeled / symbol-only in place,
+// preserving the inner element (so its zoom transform survives).
+function setMarkerLabeled(el: HTMLElement, m: Marker, withLabel: boolean): void {
+  if (el.dataset.labeled === (withLabel ? "1" : "0")) return;
+  const inner = el.querySelector<HTMLElement>(".spire-milsymbol-inner");
+  if (!inner) return;
+  inner.innerHTML = symbolSVG(m, withLabel);
+  styleSymbolSvg(inner.querySelector("svg"));
+  el.dataset.labeled = withLabel ? "1" : "0";
+}
+
+type LabelBox = { left: number; top: number; right: number; bottom: number };
+
+// Estimate a marker's on-screen label box (screen px) for collision
+// decluttering. milsymbol draws text to the right of the symbol; we
+// approximate the extent from the projected position, the zoom scale,
+// and the longest label line. Tuned against the live COP.
+function estimateLabelBox(cx: number, cy: number, m: Marker, scale: number): LabelBox {
+  const lines = [m.label, m.additionalInfo ?? "", m.parent ?? ""].filter(Boolean);
+  const longest = lines.reduce((n, l) => Math.max(n, l.length), 0);
+  const charW = 36 * scale * 0.21; // infoSize 36, ~0.21 px/char/unit on-screen
+  const lineH = 36 * scale * 0.5;
+  const symbolHalf = 11 * scale;
+  const labelW = symbolHalf + 4 + longest * charW;
+  const labelH = Math.max(symbolHalf * 2, lines.length * lineH);
+  return {
+    left: cx - symbolHalf,
+    top: cy - labelH / 2,
+    right: cx + labelW,
+    bottom: cy + labelH / 2,
+  };
+}
+
+function boxesIntersect(a: LabelBox, b: LabelBox): boolean {
+  return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
 }
 
 /**
@@ -226,6 +272,15 @@ export function OkinawaMapCanvas({
     () => markers.find((m) => m.id === selectedId) ?? null,
     [markers, selectedId],
   );
+
+  // Hovered marker — its label is always shown (and raised above
+  // neighbors) so an operator can pull up a name in a dense cluster
+  // without clicking. Ref mirror keeps the relayout closure current.
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const hoveredIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    hoveredIdRef.current = hoveredId;
+  }, [hoveredId]);
 
   // Threat-rings toggle. Off by default; visible distractor when on.
   const [showThreatRings, setShowThreatRings] = useState(false);
@@ -404,7 +459,10 @@ export function OkinawaMapCanvas({
         }
         continue;
       }
-      const el = renderSymbolHTML(m);
+      // Mount symbol-only; the declutter pass below adds labels where
+      // they fit (and on hover/selection), so dense clusters don't pile
+      // overlapping text on first paint.
+      const el = renderSymbolHTML(m, false);
       // Stamp readiness halo on first mount so newly-rendered
       // markers don't flash unhalo'd before the COP fetch completes.
       if (m.pulseUnit) {
@@ -428,6 +486,13 @@ export function OkinawaMapCanvas({
         ev.stopPropagation();
         setSelectedId(m.id);
       });
+
+      // Hover surfaces this marker's label (and raises it) even in a
+      // crowded cluster where the declutter pass otherwise hid it.
+      el.addEventListener("mouseenter", () => setHoveredId(m.id));
+      el.addEventListener("mouseleave", () =>
+        setHoveredId((cur) => (cur === m.id ? null : cur)),
+      );
 
       marker.on("dragstart", () => {
         el.style.cursor = "grabbing";
@@ -457,6 +522,57 @@ export function OkinawaMapCanvas({
     // first paint instead of flashing in at native size.
     applyZoomScale(map);
   }, [markers, ready, moveMarker, currentUser?.initials, locked, mcByUnit]);
+
+  // Label decluttering. Greedy collision pass: walk markers by priority
+  // (selected > hovered > PULSE-backed > other); a label shows only if
+  // its estimated screen box doesn't overlap an already-placed label.
+  // Selected/hovered always win and are raised. Re-runs on zoom/pan and
+  // whenever selection/hover changes. Keeps the COP readable from
+  // theater scale down to a single dense base cluster.
+  const relayoutLabels = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const scale = scaleForZoom(map.getZoom());
+    const sel = selectedIdRef.current;
+    const hov = hoveredIdRef.current;
+    const entries = markers
+      .map((m) => {
+        const marker = markerRefs.current.get(m.id);
+        if (!marker) return null;
+        const ll = marker.getLngLat();
+        const p = map.project([ll.lng, ll.lat]);
+        const pr = m.id === sel ? 3 : m.id === hov ? 2 : m.pulseUnit ? 1 : 0;
+        return { m, el: marker.getElement() as HTMLElement, x: p.x, y: p.y, pr };
+      })
+      .filter((e): e is { m: Marker; el: HTMLElement; x: number; y: number; pr: number } => e !== null);
+    entries.sort((a, b) => b.pr - a.pr || a.m.id.localeCompare(b.m.id));
+    const placed: LabelBox[] = [];
+    for (const e of entries) {
+      const box = estimateLabelBox(e.x, e.y, e.m, scale);
+      const show = e.pr >= 2 || !placed.some((p) => boxesIntersect(box, p));
+      if (show) placed.push(box);
+      setMarkerLabeled(e.el, e.m, show);
+      e.el.style.zIndex = e.pr >= 2 ? "6" : show ? "3" : "1";
+    }
+  }, [markers]);
+
+  // Re-declutter on selection/hover changes and after markers (re)mount.
+  useEffect(() => {
+    if (ready) relayoutLabels();
+  }, [ready, markers, selectedId, hoveredId, mcByUnit, relayoutLabels]);
+
+  // Re-declutter when the camera settles (zoom/pan changes which labels fit).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    const onSettle = () => relayoutLabels();
+    map.on("zoomend", onSettle);
+    map.on("moveend", onSettle);
+    return () => {
+      map.off("zoomend", onSettle);
+      map.off("moveend", onSettle);
+    };
+  }, [ready, relayoutLabels]);
 
   // Apply lock/unlock to every existing marker so the user toggling
   // the chip flips draggability for every already-rendered icon.
