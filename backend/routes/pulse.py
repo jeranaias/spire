@@ -779,6 +779,217 @@ async def recommend_actions(
     return {"assets": out, "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z"}
 
 
+# ---------------------------------------------------------------------------
+# Unit-summary endpoint — backs the BASTION marker drawer.
+#
+# A commander clicks a unit symbol on the map; the drawer needs ONE
+# round-trip to render every primary readiness signal for that unit:
+#
+#   - MC rate + counts (drives the halo color on the map symbol too)
+#   - Per-supply-class status (Class I / III / V / VIII / IX) — Class IX
+#     comes from live SR + snapshot data; the other classes derive from
+#     incident / stream signals where present, or report "no_signal" so
+#     the commander sees an honest "we don't have data here" rather
+#     than fake-green.
+#   - Top 3 unit-scoped alerts (so the commander sees WHY the readiness
+#     state is what it is without leaving the drawer)
+#   - Inbound TMRs (transportation movement requests) — anything bound
+#     for this unit so the commander sees what's en route
+#   - Deep-link URLs into PULSE Forecast / Risk Board for this unit
+# ---------------------------------------------------------------------------
+
+
+# Class IX is direct from MC rate. Other classes use a "derived signal
+# or no_signal" model — there's no per-class fact table in the dataset
+# beyond Class IX (the system primarily models GCSS-MC repair parts).
+# Honest framing for the commander: signals we have come from incidents
+# and stream feeds; absent signals are explicit, not assumed-green.
+def _supply_status_from_mc(mc_rate: float) -> str:
+    if mc_rate >= 0.85:
+        return "green"
+    if mc_rate >= 0.60:
+        return "amber"
+    return "red"
+
+
+_CLASS_KEYWORDS = {
+    "class_i":   ("class i", "ration", "food", "subsist"),
+    "class_iii": ("class iii", "fuel", "diesel", "jp-8", "jp8"),
+    "class_v":   ("class v", "ammo", "ammunition", "ordnance"),
+    "class_viii": ("class viii", "blood", "medical", "med supply"),
+}
+
+
+def _scan_class_signals(unit_alerts: list[dict]) -> dict[str, dict]:
+    """For each non-IX class, look through unit-scoped alerts for any
+    keyword hit. A hit downgrades that class's status from no_signal
+    to amber (or red for HIGH-severity alerts).
+
+    Honest derivation — the system doesn't store per-class facts for
+    most non-IX supply, so the only signal we have is "did an alert
+    or incident mention this class?". If yes, surface it; if no,
+    surface "no_signal" rather than green.
+    """
+    out: dict[str, dict] = {}
+    for klass, kws in _CLASS_KEYWORDS.items():
+        hits: list[dict] = []
+        worst = "no_signal"
+        for a in unit_alerts:
+            blob = (
+                f"{a.get('title') or ''} {a.get('body') or ''} "
+                f"{a.get('kind') or ''}"
+            ).lower()
+            if any(kw in blob for kw in kws):
+                hits.append({
+                    "id": a.get("id"),
+                    "severity": a.get("severity"),
+                    "title": a.get("title"),
+                })
+                sev = (a.get("severity") or "").upper()
+                if sev == "HIGH":
+                    worst = "red"
+                elif worst == "no_signal":
+                    worst = "amber"
+        out[klass] = {"status": worst, "hits": hits[:3]}
+    return out
+
+
+def _unit_alerts_from_bastion(ds, unit_name: str, limit: int = 3) -> list[dict]:
+    """Borrow the bastion module's raw alert composition and filter
+    to the unit. Lazy import keeps PULSE's module-load decoupled
+    from BASTION; the `unit` field is part of the contract _compose_raw_alerts
+    promises (see bastion.py)."""
+    try:
+        from .bastion import _compose_raw_alerts
+    except Exception:  # noqa: BLE001
+        return []
+    raw = _compose_raw_alerts(ds)
+    matched = [a for a in raw if (a.get("unit") or "") == unit_name]
+    severity_rank = {"HIGH": 0, "MODERATE": 1, "LOW": 2, "INFO": 3}
+
+    def _key(a: dict) -> tuple[int, str]:
+        return (severity_rank.get((a.get("severity") or "").upper(), 9),
+                str(a.get("timestamp") or ""))
+
+    matched.sort(key=_key)
+    return matched[:limit]
+
+
+def _unit_tmrs(ds, unit_name: str, limit: int = 5) -> list[dict]:
+    """Inbound TMRs for the unit. We surface both:
+      * TMRs the unit IS the requester for (outbound moves they own)
+      * TMRs whose destination matches the unit name or a parent
+
+    Dataset's TMR.destination is a free-form string; for honest
+    matching we use ``unit_name in destination`` (case-insensitive).
+    """
+    if not getattr(ds, "tmrs", None):
+        return []
+    out: list[dict] = []
+    needle = (unit_name or "").lower()
+    for t in ds.tmrs:
+        if not t:
+            continue
+        is_requester = (t.requesting_unit or "") == unit_name
+        is_inbound = needle and needle in (t.destination or "").lower()
+        if not (is_requester or is_inbound):
+            continue
+        out.append({
+            "tmr_number": t.tmr_number,
+            "submitted_date": t.submitted_date.isoformat(),
+            "scheduled_date": t.scheduled_date.isoformat(),
+            "origin": t.origin,
+            "destination": t.destination,
+            "priority": t.priority,
+            "status": t.status,
+            "purpose": t.purpose,
+            "is_outbound": is_requester,
+        })
+    out.sort(key=lambda x: x["scheduled_date"], reverse=True)
+    return out[:limit]
+
+
+@router.get("/unit/{unit_name}/summary")
+async def unit_summary(unit_name: str, request: Request):
+    """Single-call commander summary for a unit.
+
+    Powers the BASTION marker drawer (click symbol → drawer). Designed
+    so one round-trip renders MC state, supply-class chips, top
+    alerts, inbound TMRs, and deep-link URLs into PULSE for the unit.
+    """
+    ds = get_dataset()
+    role = session_role(request)
+    allowed = allowed_units(ds, role)
+    if allowed is not None and unit_name not in allowed:
+        raise HTTPException(status_code=403, detail="unit out of scope")
+
+    unit = next((u for u in ds.units if u.name == unit_name), None)
+    if unit is None:
+        raise HTTPException(status_code=404, detail="unit not found")
+
+    last = last_day_snapshots(ds)
+    last_day = last[0].snapshot_date if last else None
+    counts: Counter = Counter()
+    for s in last:
+        if s.unit_name == unit_name:
+            counts[s.readiness_code] += 1
+    total = sum(counts.values())
+    mc_rate = (counts.get("MC", 0) / total) if total else 0.0
+    mc_state = _supply_status_from_mc(mc_rate) if total else "no_signal"
+
+    # Open Deadlined SRs for this unit — the headline Class IX number a
+    # commander wants alongside MC rate.
+    open_deadlined = sum(
+        1 for sr in ds.srs
+        if sr.unit_name == unit_name
+        and sr.close_date is None
+        and sr.condition == "Deadlined"
+    )
+
+    alerts = _unit_alerts_from_bastion(ds, unit_name, limit=5)
+    class_signals = _scan_class_signals(alerts)
+
+    supply = {
+        "class_i":    class_signals.get("class_i", {"status": "no_signal", "hits": []}),
+        "class_iii":  class_signals.get("class_iii", {"status": "no_signal", "hits": []}),
+        "class_v":    class_signals.get("class_v", {"status": "no_signal", "hits": []}),
+        "class_viii": class_signals.get("class_viii", {"status": "no_signal", "hits": []}),
+        "class_ix":   {
+            "status": mc_state,
+            "open_deadlined_srs": open_deadlined,
+            "mc_rate": round(mc_rate, 3),
+            "primary_metric": (
+                f"MC {mc_rate*100:.1f}%" if total else "no snapshot data"
+            ),
+        },
+    }
+
+    return {
+        "unit": unit.name,
+        "uic": unit.uic,
+        "parent": unit.parent,
+        "location": unit.location,
+        "as_of": last_day.isoformat() if last_day else None,
+        "mc_rate": round(mc_rate, 3),
+        "mc_state": mc_state,
+        "asset_counts": {
+            "total": total,
+            "mc": counts.get("MC", 0),
+            "pmc": counts.get("PMC", 0),
+            "nmcm": counts.get("NMCM", 0),
+            "nmcs": counts.get("NMCS", 0),
+        },
+        "supply": supply,
+        "alerts": alerts[:3],
+        "tmrs": _unit_tmrs(ds, unit_name, limit=5),
+        "links": {
+            "forecast":   f"/pulse/forecast?unit={unit.name}",
+            "risk_board": f"/pulse/risk?unit={unit.name}",
+            "bastion":    f"/bastion?unit={unit.name}",
+        },
+    }
+
+
 @router.get("/assets/{asset_id}")
 async def asset_deep_dive(asset_id: str, request: Request):
     ds = get_dataset()

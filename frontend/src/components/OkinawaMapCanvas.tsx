@@ -23,7 +23,7 @@ import {
 import { useSpireStore } from "../state/store";
 import { registerMapBridge } from "../state/mapBridge";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, type BastionCOPUnit } from "../api";
+import { api, type SupplyClassStatus, type UnitSummary } from "../api";
 
 // PLA anti-ship missile coverage rings — doctrinal published ranges,
 // drawn from the published CSIS / DoD AMR open-source assessments. The
@@ -237,32 +237,27 @@ export function OkinawaMapCanvas({
     if (map) map.flyTo({ center: m.coords, zoom: 12, duration: 1100 });
   }, [ready, queryUnit]);
 
-  // Live readiness fetch for the selected marker's pulseUnit. The
-  // /bastion/cop response carries every populated unit's MC% +
-  // counts; we filter to the one we care about. Falls back gracefully
-  // when the dataset is empty (drawer just shows marker metadata).
-  const [pulseReadiness, setPulseReadiness] = useState<BastionCOPUnit | null>(null);
+  // PULSE×BASTION-A2 — single-call commander summary for the selected
+  // unit. Replaces the previous /bastion/cop filter pattern; one round
+  // trip carries MC state, supply chips, alerts, TMRs, and PULSE
+  // deep-link URLs the drawer renders below.
+  const [unitSummary, setUnitSummary] = useState<UnitSummary | null>(null);
   const [pulseLoading, setPulseLoading] = useState(false);
   useEffect(() => {
     if (!selectedMarker?.pulseUnit) {
-      setPulseReadiness(null);
+      setUnitSummary(null);
       return;
     }
     let cancelled = false;
     setPulseLoading(true);
-    api.bastion
-      .cop()
-      .then((c) => {
+    api.pulse
+      .unitSummary(selectedMarker.pulseUnit)
+      .then((s) => {
         if (cancelled) return;
-        if ((c as unknown as { empty?: boolean }).empty) {
-          setPulseReadiness(null);
-          return;
-        }
-        const u = c.units.find((x) => x.unit === selectedMarker.pulseUnit);
-        setPulseReadiness(u ?? null);
+        setUnitSummary(s);
       })
       .catch(() => {
-        if (!cancelled) setPulseReadiness(null);
+        if (!cancelled) setUnitSummary(null);
       })
       .finally(() => {
         if (!cancelled) setPulseLoading(false);
@@ -271,6 +266,42 @@ export function OkinawaMapCanvas({
       cancelled = true;
     };
   }, [selectedMarker?.pulseUnit]);
+
+  // PULSE×BASTION-A1 — fleet-wide MC state map for marker halos.
+  // One /bastion/cop round-trip at mount gives us every unit's
+  // mc_rate; we project that into a {pulseUnit → state} dict and
+  // the marker reconciliation effect (below) writes data-mc-state
+  // on each marker's DOM. Halo CSS in index.css picks up the attr.
+  // Refresh cadence: once on map ready + whenever the operator
+  // returns to BASTION (re-mounted). For the live demo this is
+  // adequate; a "tick" toast or scheduled refetch can layer on if
+  // we ever want second-by-second telemetry.
+  const [mcByUnit, setMcByUnit] = useState<Record<string, SupplyClassStatus>>({});
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    api.bastion
+      .cop()
+      .then((c) => {
+        if (cancelled) return;
+        if ((c as unknown as { empty?: boolean }).empty) {
+          setMcByUnit({});
+          return;
+        }
+        const out: Record<string, SupplyClassStatus> = {};
+        for (const u of c.units) {
+          const r = u.mc_rate ?? 0;
+          out[u.unit] = r >= 0.85 ? "green" : r >= 0.60 ? "amber" : "red";
+        }
+        setMcByUnit(out);
+      })
+      .catch(() => {
+        if (!cancelled) setMcByUnit({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready]);
 
   // Initial-mount: build the map once, attach controls.
   useEffect(() => {
@@ -354,9 +385,24 @@ export function OkinawaMapCanvas({
         if (cur.lng !== lng || cur.lat !== lat) {
           prev.setLngLat([lng, lat]);
         }
+        // PULSE×BASTION-A1 — keep the readiness halo in sync as the
+        // map's MC dictionary refreshes. Cheap to set unconditionally
+        // (DOM attribute write is a no-op when the value is unchanged).
+        const prevEl = prev.getElement() as HTMLElement | null;
+        if (prevEl && m.pulseUnit) {
+          const state = mcByUnit[m.pulseUnit];
+          if (state) prevEl.dataset.mcState = state;
+          else delete prevEl.dataset.mcState;
+        }
         continue;
       }
       const el = renderSymbolHTML(m);
+      // Stamp readiness halo on first mount so newly-rendered
+      // markers don't flash unhalo'd before the COP fetch completes.
+      if (m.pulseUnit) {
+        const state = mcByUnit[m.pulseUnit];
+        if (state) el.dataset.mcState = state;
+      }
       const marker = new maplibregl.Marker({
         element: el,
         draggable: !locked,
@@ -402,7 +448,7 @@ export function OkinawaMapCanvas({
     // Make sure newly-added markers pick up the current zoom scale on
     // first paint instead of flashing in at native size.
     applyZoomScale(map);
-  }, [markers, ready, moveMarker, currentUser?.initials, locked]);
+  }, [markers, ready, moveMarker, currentUser?.initials, locked, mcByUnit]);
 
   // Apply lock/unlock to every existing marker so the user toggling
   // the chip flips draggability for every already-rendered icon.
@@ -641,10 +687,17 @@ export function OkinawaMapCanvas({
         {selectedMarker && (
           <MarkerDrawer
             marker={selectedMarker}
-            readiness={pulseReadiness}
+            summary={unitSummary}
             loading={pulseLoading}
             onClose={() => setSelectedId(null)}
-            onOpenInPulse={() => {
+            onOpenForecast={() => {
+              if (selectedMarker.pulseUnit) {
+                navigate(`/pulse/forecast?unit=${encodeURIComponent(selectedMarker.pulseUnit)}`);
+              } else {
+                navigate("/pulse/forecast");
+              }
+            }}
+            onOpenRiskBoard={() => {
               if (selectedMarker.pulseUnit) {
                 navigate(`/pulse/risk?unit=${encodeURIComponent(selectedMarker.pulseUnit)}`);
               } else {
@@ -669,34 +722,98 @@ export function OkinawaMapCanvas({
   );
 }
 
-// Right-edge slide-in drawer that opens when an operator clicks a
-// marker. Surfaces the marker's metadata + live readiness from PULSE
-// (when the marker has a pulseUnit alias and the dataset is populated).
+// PULSE×BASTION-A — readiness-first drawer.
+//
+// Click a unit symbol → drawer slides in from the right with the
+// commander's full picture for that unit in one round-trip:
+//
+//   - MC state (color-coded, mirrors the map halo)
+//   - Asset counts (MC / PMC / NMCM / NMCS) with totals
+//   - Five supply classes as chips (Class I / III / V / VIII / IX)
+//   - Top 3 unit-scoped alerts
+//   - Inbound / outbound TMRs (transportation movement requests)
+//   - Three CTAs: "Forecast" → 14d Monte Carlo for this unit;
+//     "Risk Board" → asset-level cannibalization candidates;
+//     "Ask SPIRO" → opens the planner pre-loaded with the marker.
+function _toneForState(state?: SupplyClassStatus | null): string {
+  switch (state) {
+    case "green":     return "var(--color-success)";
+    case "amber":     return "var(--color-warning)";
+    case "red":       return "var(--color-danger)";
+    default:          return "var(--color-text-muted)";
+  }
+}
+
+function _classLabel(klass: keyof UnitSummary["supply"]): string {
+  switch (klass) {
+    case "class_i":    return "I — Subsist";
+    case "class_iii":  return "III — Fuel";
+    case "class_v":    return "V — Ammo";
+    case "class_viii": return "VIII — Med";
+    case "class_ix":   return "IX — Parts";
+  }
+}
+
+function SupplyChip({
+  klass, cell,
+}: {
+  klass: keyof UnitSummary["supply"];
+  cell: UnitSummary["supply"]["class_ix"] | UnitSummary["supply"]["class_i"];
+}) {
+  const tone = _toneForState(cell.status);
+  const label = _classLabel(klass);
+  const detail =
+    cell.status === "no_signal"
+      ? "no signal"
+      : cell.primary_metric
+        ? cell.primary_metric
+        : (cell.hits && cell.hits[0]?.title) || cell.status;
+  return (
+    <div
+      className="flex items-baseline justify-between gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5"
+      title={
+        cell.hits && cell.hits.length
+          ? cell.hits.map((h) => h.title || "").filter(Boolean).join("\n")
+          : undefined
+      }
+    >
+      <span className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-secondary)]">
+        {label}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          aria-hidden
+          className="inline-block size-2 rounded-full"
+          style={{ background: tone }}
+        />
+        <span className="font-mono text-[10px] tabular-nums text-[var(--color-text)]">
+          {detail}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function MarkerDrawer({
   marker,
-  readiness,
+  summary,
   loading,
   onClose,
-  onOpenInPulse,
+  onOpenForecast,
+  onOpenRiskBoard,
   onAskSpiro,
 }: {
   marker: Marker;
-  readiness: BastionCOPUnit | null;
+  summary: UnitSummary | null;
   loading: boolean;
   onClose: () => void;
-  onOpenInPulse: () => void;
+  onOpenForecast: () => void;
+  onOpenRiskBoard: () => void;
   onAskSpiro: () => void;
 }) {
   const moves = marker.history?.length ?? 0;
-  const mc = readiness?.mc_rate;
-  const tone =
-    mc == null
-      ? "var(--color-text-muted)"
-      : mc >= 0.85
-        ? "var(--color-success)"
-        : mc >= 0.55
-          ? "var(--color-warning)"
-          : "var(--color-danger)";
+  const tone = _toneForState(summary?.mc_state);
+  const mc = summary?.mc_rate;
   return (
     <div
       role="dialog"
@@ -771,7 +888,7 @@ function MarkerDrawer({
             <div className="mt-1 font-mono text-[11px] text-[var(--color-text-muted)]">
               Loading {marker.pulseUnit}…
             </div>
-          ) : !readiness ? (
+          ) : !summary ? (
             <div className="mt-1 font-mono text-[11px] italic text-[var(--color-text-muted)]">
               Aliased to {marker.pulseUnit} · readiness unavailable (dataset empty?).
             </div>
@@ -779,59 +896,168 @@ function MarkerDrawer({
             <div className="mt-1">
               <div className="flex items-baseline justify-between">
                 <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
-                  {readiness.unit}
+                  {summary.unit}
                 </span>
                 <span
                   className="font-mono text-base font-semibold tabular-nums"
                   style={{ color: tone }}
                 >
-                  {((readiness.mc_rate ?? 0) * 100).toFixed(1)}% MC
+                  {mc != null ? `${(mc * 100).toFixed(1)}% MC` : "—"}
                 </span>
               </div>
               <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-sm bg-[var(--color-bg)]">
                 <div
                   className="h-full"
                   style={{
-                    width: `${Math.min(100, Math.max(0, (readiness.mc_rate ?? 0) * 100))}%`,
+                    width: `${Math.min(100, Math.max(0, (mc ?? 0) * 100))}%`,
                     background: tone,
                   }}
                 />
               </div>
-              <dl className="mt-2 grid grid-cols-3 gap-2 font-mono text-[10px] tabular-nums text-[var(--color-text-secondary)]">
+              <dl className="mt-2 grid grid-cols-4 gap-2 font-mono text-[10px] tabular-nums text-[var(--color-text-secondary)]">
                 <div>
                   <dt className="text-[var(--color-text-muted)]">Assets</dt>
-                  <dd className="text-[var(--color-text)]">{readiness.total_equipment ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt className="text-[var(--color-text-muted)]">NMCS</dt>
-                  <dd className="text-[var(--color-text)]">{readiness.nmcs_count ?? "—"}</dd>
+                  <dd className="text-[var(--color-text)]">{summary.asset_counts.total}</dd>
                 </div>
                 <div>
                   <dt className="text-[var(--color-text-muted)]">PMC</dt>
-                  <dd className="text-[var(--color-text)]">{readiness.pmc_count ?? "—"}</dd>
+                  <dd className="text-[var(--color-text)]">{summary.asset_counts.pmc}</dd>
+                </div>
+                <div>
+                  <dt className="text-[var(--color-text-muted)]">NMCM</dt>
+                  <dd className="text-[var(--color-text)]">{summary.asset_counts.nmcm}</dd>
+                </div>
+                <div>
+                  <dt className="text-[var(--color-text-muted)]">NMCS</dt>
+                  <dd className="text-[var(--color-text)]">{summary.asset_counts.nmcs}</dd>
                 </div>
               </dl>
             </div>
           )}
         </section>
+
+        {/* PULSE×BASTION-A — five-class supply chips. Class IX is direct
+         * from MC math; the other four light up only when an alert or
+         * incident mentions that supply class (honest "no_signal" when
+         * the system has no data, rather than fake green). */}
+        {summary && marker.pulseUnit && (
+          <section>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+              Supply
+            </div>
+            <div className="mt-1.5 grid grid-cols-1 gap-1">
+              <SupplyChip klass="class_i" cell={summary.supply.class_i} />
+              <SupplyChip klass="class_iii" cell={summary.supply.class_iii} />
+              <SupplyChip klass="class_v" cell={summary.supply.class_v} />
+              <SupplyChip klass="class_viii" cell={summary.supply.class_viii} />
+              <SupplyChip klass="class_ix" cell={summary.supply.class_ix} />
+            </div>
+          </section>
+        )}
+
+        {/* PULSE×BASTION-A — top unit-scoped alerts. We surface the
+         * three highest-severity alerts the bastion module composed
+         * for this unit; tapping the title opens SPIRO scoped to the
+         * alert (a cheaper "what is this?" path than the alerts feed). */}
+        {summary?.alerts && summary.alerts.length > 0 && (
+          <section>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+              Alerts ({summary.alerts.length})
+            </div>
+            <ul className="mt-1.5 space-y-1">
+              {summary.alerts.map((a) => (
+                <li
+                  key={a.id ?? `${a.source}-${a.title}`}
+                  className="flex items-start gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5"
+                >
+                  <span
+                    aria-hidden
+                    className="mt-1 inline-block size-1.5 shrink-0 rounded-full"
+                    style={{
+                      background:
+                        (a.severity || "").toUpperCase() === "HIGH"
+                          ? "var(--color-danger)"
+                          : (a.severity || "").toUpperCase() === "MODERATE"
+                            ? "var(--color-warning)"
+                            : "var(--color-text-muted)",
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-mono text-[11px] text-[var(--color-text)]">
+                      {a.title || a.id}
+                    </div>
+                    {a.body && (
+                      <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+                        {a.body}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* PULSE×BASTION-A — TMRs touching this unit. Inbound first
+         * (the commander cares more about what's arriving than what
+         * they're sending out). Empty list = silent section. */}
+        {summary?.tmrs && summary.tmrs.length > 0 && (
+          <section>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+              Transportation ({summary.tmrs.length})
+            </div>
+            <ul className="mt-1.5 space-y-1">
+              {summary.tmrs.slice(0, 5).map((t) => (
+                <li
+                  key={t.tmr_number}
+                  className="rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-mono text-[11px] text-[var(--color-text)]">
+                      {t.tmr_number}
+                    </span>
+                    <span className="font-mono text-[9px] uppercase tracking-widest text-[var(--color-text-muted)]">
+                      {t.is_outbound ? "outbound" : "inbound"} · {t.priority}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+                    {t.origin} → {t.destination}
+                  </div>
+                  <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+                    sched {t.scheduled_date} · {t.status}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
-      <div className="grid grid-cols-2 gap-2 border-t border-[var(--color-border)] p-3">
+      <div className="grid grid-cols-3 gap-2 border-t border-[var(--color-border)] p-3">
         <button
           type="button"
-          onClick={onOpenInPulse}
+          onClick={onOpenForecast}
           disabled={!marker.pulseUnit}
-          className="rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_12%,var(--color-surface))] px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_22%,var(--color-surface))] disabled:cursor-not-allowed disabled:opacity-40"
-          title={marker.pulseUnit ? `Open PULSE Risk Board for ${marker.pulseUnit}` : "No PULSE unit aliased"}
+          className="rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_12%,var(--color-surface))] px-2 py-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_22%,var(--color-surface))] disabled:cursor-not-allowed disabled:opacity-40"
+          title={marker.pulseUnit ? `Open PULSE Forecast for ${marker.pulseUnit}` : "No PULSE unit aliased"}
         >
-          Open in PULSE
+          Forecast
+        </button>
+        <button
+          type="button"
+          onClick={onOpenRiskBoard}
+          disabled={!marker.pulseUnit}
+          className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text)] hover:border-[var(--color-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+          title={marker.pulseUnit ? `Open Risk Board for ${marker.pulseUnit}` : "No PULSE unit aliased"}
+        >
+          Risk Board
         </button>
         <button
           type="button"
           onClick={onAskSpiro}
-          className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-[var(--color-text)] hover:border-[var(--color-primary)]"
+          className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-2 py-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text)] hover:border-[var(--color-primary)]"
           title="Open SPIRO with this marker pre-selected"
         >
-          ◆ Ask SPIRO
+          ◆ SPIRO
         </button>
       </div>
     </div>
