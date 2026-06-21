@@ -94,13 +94,16 @@ function renderSymbolHTML(m: Marker): HTMLElement {
   inner.innerHTML = sym.asSVG();
   const svgEl = inner.querySelector("svg");
   if (svgEl) {
-    svgEl.style.filter = "drop-shadow(0 0 3px rgba(0,0,0,0.85))";
     svgEl.style.display = "block";
     // milsymbol estimates label width slightly short, so long
     // designations (e.g. "JGSDF Miyako", "7 SSM Regiment") run past
     // the computed viewBox and the SVG's default overflow:hidden
     // clips them mid-word. Let the labels paint outside the box.
     svgEl.style.overflow = "visible";
+    // NB: the base contrast drop-shadow + MC-state readiness glow are
+    // applied in CSS (index.css, .spire-milsymbol-inner svg) so the
+    // data-mc-state rules can layer the colored glow on top. Setting
+    // `filter` inline here would override those rules.
   }
   wrap.appendChild(inner);
   return wrap;
