@@ -296,8 +296,9 @@ the title trailing `· Demo · Judge Walkthrough`, labels showing
 - **"Path to production?"** — Three pilot rotations through the year,
   then HQMC I&L decides program of record. Architecture is already
   IL5-fit; ATO review starts after pilot one.
-- **"Cost?"** — Zero per seat. Local-first means a 2U server in a conex
-  serves a battalion. Compare to SaaS-priced competitors at
+- **"Cost?"** — Zero per seat. Local-first means a backpack-portable AI
+  device (NVIDIA GB10, ~$4K, 2.6 lbs) serves a battalion. Compare to
+  SaaS-priced competitors at
   $150-400/seat/year.
 - **"What about Palantir Gotham / Anduril Lattice?"** — Different
   problem. Those are surveillance. This is logistics. SPIRE is what

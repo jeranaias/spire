@@ -2,7 +2,7 @@
 ## A Contested-Logistics Operating System
 
 SPIRE collapses the data layer underneath military logistics into one
-role-shaped view. It runs offline on a 2U box in a CONEX, with on-board
+role-shaped view. It runs offline on a backpack-portable AI device (NVIDIA GB10, 128GB unified memory, ~$4K, 2.6 lbs), with on-board
 AI, tamper-evident audit, and one-click coalition release. Built by
 serving Marines for joint and partnered force employment in degraded,
 disconnected, intermittent, and limited (DDIL) communications.
@@ -103,7 +103,7 @@ one-day engineering task per adapter.
 ### On-board AI for unfamiliar files
 When an operator drops a non-canonical file — a unit-specific
 spreadsheet, a partner-provided extract, a one-off report from a
-contractor — a language model running entirely on the same 2U box
+contractor — a language model running entirely on the same compact device
 reads the headers and proposes how each column should map to the
 canonical schema. Sample data is scrubbed of PII before the model
 sees it; no row leaves the box. The operator confirms the proposal
@@ -157,7 +157,7 @@ never persists resolved secrets to disk.
 
 ### Local-first, no cloud, ever
 The whole stack — backend, frontend, database, on-board AI model,
-audit chain — runs on a single 2U server in a CONEX with no outbound
+audit chain — runs on a single backpack-portable device (NVIDIA GB10, 2.6 lbs) with no outbound
 network connectivity required. When a forward node and a rear node
 both write during a SATCOM blackout, vector-clock reconciliation
 merges their state on link restore: writes that don't conflict apply
@@ -178,7 +178,7 @@ regardless of which service's data flows through the pipe. A coalition
 partner gets exactly what their release authority allows, signed and
 verifiable. An inspector walks the audit chain offline against a
 public key. The whole thing runs without satellite, without cloud, on
-a single 2U box. From a clean laptop with Docker installed,
+a single backpack-portable device. From a clean laptop with Docker installed,
 `docker-compose up` brings the whole stack live in under five
 minutes — no registration, no license server, no cloud dependency.
 
