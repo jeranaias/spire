@@ -449,29 +449,43 @@ body {
  * data-mc-state attribute is set by OkinawaMapCanvas on the wrap div
  * once readiness data has loaded; absent attribute means "unknown" —
  * no halo, no false-positive green. */
+/* Base contrast shadow so symbols + labels read on light terrain.
+ * The MC-state readiness glow stacks colored drop-shadows on top of
+ * this. We use `filter: drop-shadow()` (not box-shadow) so the glow
+ * follows the actual symbol glyph + text outlines instead of drawing
+ * a rectangular/oval ring around the SVG bounding box. */
 .spire-milsymbol-marker .spire-milsymbol-inner svg {
-  border-radius: 50%;
-  transition: box-shadow 200ms ease-out;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.85));
+  transition: filter 220ms ease-out;
 }
 .spire-milsymbol-marker[data-mc-state="green"] .spire-milsymbol-inner svg {
-  box-shadow:
-    0 0 0 2.5px rgba(20, 184, 100, 0.85),
-    0 0 12px 2px rgba(20, 184, 100, 0.45);
+  filter:
+    drop-shadow(0 0 3px rgba(0, 0, 0, 0.85))
+    drop-shadow(0 0 4px rgba(20, 184, 100, 0.9))
+    drop-shadow(0 0 8px rgba(20, 184, 100, 0.5));
 }
 .spire-milsymbol-marker[data-mc-state="amber"] .spire-milsymbol-inner svg {
-  box-shadow:
-    0 0 0 2.5px rgba(217, 165, 35, 0.90),
-    0 0 14px 3px rgba(217, 165, 35, 0.50);
+  filter:
+    drop-shadow(0 0 3px rgba(0, 0, 0, 0.85))
+    drop-shadow(0 0 4px rgba(217, 165, 35, 0.95))
+    drop-shadow(0 0 8px rgba(217, 165, 35, 0.55));
 }
 .spire-milsymbol-marker[data-mc-state="red"] .spire-milsymbol-inner svg {
-  box-shadow:
-    0 0 0 3px rgba(220, 70, 70, 0.95),
-    0 0 16px 4px rgba(220, 70, 70, 0.55);
   animation: spire-mc-red-pulse 2.4s ease-in-out infinite;
 }
 @keyframes spire-mc-red-pulse {
-  0%, 100% { filter: brightness(1); }
-  50%      { filter: brightness(1.2); }
+  0%, 100% {
+    filter:
+      drop-shadow(0 0 3px rgba(0, 0, 0, 0.85))
+      drop-shadow(0 0 5px rgba(220, 70, 70, 1))
+      drop-shadow(0 0 9px rgba(220, 70, 70, 0.6));
+  }
+  50% {
+    filter:
+      drop-shadow(0 0 3px rgba(0, 0, 0, 0.85))
+      drop-shadow(0 0 8px rgba(220, 70, 70, 1))
+      drop-shadow(0 0 16px rgba(220, 70, 70, 0.78));
+  }
 }
 
 /* MapLibre popup chrome — default skin is a white box with a white callout
