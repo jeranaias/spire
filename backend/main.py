@@ -85,8 +85,21 @@ async def lifespan(app: FastAPI):
         for e in ms["errors"]:
             print(f"[SPIRE]   model load: {e}")
 
+    # UIS-P6.6+ — opt-in scheduled backups. Stays dormant unless
+    # SPIRE_BACKUP_SCHEDULE_HOURS is set in the environment, so
+    # local dev and the demo presenter never see a surprise
+    # backup task. Operators set the env var (and optionally
+    # SPIRE_BACKUP_KEEP_COUNT / SPIRE_BACKUP_KEEP_DAYS) to enable.
+    from .uis.dr_scheduler import start_scheduler, stop_scheduler
+    scheduler_task = start_scheduler()
+    if scheduler_task is not None:
+        print("[SPIRE] DR scheduler armed.")
+
     print("[SPIRE] Ready.")
-    yield
+    try:
+        yield
+    finally:
+        await stop_scheduler()
 
 
 app = FastAPI(

@@ -718,6 +718,276 @@ async def audit_public_key_endpoint(request: Request):
     return {"public_key_pem": pem.decode("ascii") if pem else None}
 
 
+# ---------------------------------------------------------------------------
+# UIS-P6.6 — DR / backup primitives
+# ---------------------------------------------------------------------------
+
+
+def _dr_backup_dir() -> Path:
+    """Where ``POST /dr/backup`` writes archives. Override via
+    ``SPIRE_BACKUP_DIR``; defaults to ``runtime/backups/`` next
+    to the live SQLite."""
+    raw = os.environ.get("SPIRE_BACKUP_DIR", "").strip()
+    if raw:
+        return Path(raw)
+    return Path(__file__).resolve().parent.parent.parent / "runtime" / "backups"
+
+
+def _dr_require_security_manager(request: Request, op: str) -> str:
+    """Shared role gate for DR endpoints. Returns the actor role
+    so callers can include it in audit_log entries."""
+    user = getattr(request.state, "user", None) or {}
+    role = user.get("role") if isinstance(user, dict) else None
+    require_role(role, {"security_manager"}, f"system.dr.{op}")
+    return role or "security_manager"
+
+
+@router.post("/dr/backup")
+async def dr_backup_create(request: Request, payload: dict = Body(default={})):
+    """Create a SPIRE state backup archive.
+
+    Body (optional)::
+
+        {
+          "label":       "pre-MDM rehearsal",   # free-text annotation
+          "include_pin": true                   # default true
+        }
+
+    Writes ``backup_<UTC-timestamp>_<short-uuid>.tar.gz`` into
+    ``SPIRE_BACKUP_DIR`` (or ``runtime/backups/``). Restricted to
+    ``security_manager`` — same gate as ``/audit/integrity``.
+    Each create is recorded to the audit chain so an inspector
+    can prove WHO captured WHICH archive.
+    """
+    actor = _dr_require_security_manager(request, "backup")
+    label = str((payload or {}).get("label") or "")[:200]
+    include_pin = bool((payload or {}).get("include_pin", True))
+
+    backup_dir = _dr_backup_dir()
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    out_path = backup_dir / f"backup_{ts}_{uuid.uuid4().hex[:8]}.tar.gz"
+
+    from ..uis.dr import create_backup
+    try:
+        manifest = create_backup(out_path, label=label, include_pin=include_pin)
+    except Exception as e:  # noqa: BLE001
+        audit_log(
+            "system.dr.backup.failed",
+            actor=actor, subject_id=str(out_path),
+            payload={"error": str(e)[:300]},
+        )
+        raise HTTPException(status_code=500, detail=f"backup failed: {e}")
+
+    audit_log(
+        "system.dr.backup.created",
+        actor=actor, subject_id=str(out_path.name),
+        payload={
+            "archive_path": str(out_path),
+            "label": label,
+            "audit_entry_count": manifest.audit_entry_count,
+            "audit_head_hash": manifest.audit_head_hash,
+            "db_sha256": manifest.db_sha256,
+            "manifest_self_hash": manifest.manifest_self_hash,
+        },
+    )
+
+    return {
+        "ok": True,
+        "archive_path": str(out_path),
+        "archive_name": out_path.name,
+        "manifest": manifest.to_dict(),
+    }
+
+
+@router.get("/dr/backups")
+async def dr_backups_list(request: Request):
+    """Inventory archives present in ``SPIRE_BACKUP_DIR``.
+
+    Returns a list of summaries with archive bytecount, SHA-256,
+    and (when readable) the embedded manifest. Unreadable
+    archives are surfaced with ``readable=false`` rather than
+    omitted, so an operator sees them and can investigate.
+    """
+    _dr_require_security_manager(request, "list")
+    from ..uis.dr import list_backups
+    backup_dir = _dr_backup_dir()
+    summaries = list_backups(backup_dir)
+    return {
+        "ok": True,
+        "directory": str(backup_dir),
+        "archives": [s.to_dict() for s in summaries],
+    }
+
+
+@router.post("/dr/verify")
+async def dr_backup_verify(request: Request, payload: dict = Body(default={})):
+    """Verify a backup archive end-to-end without restoring.
+
+    Body::
+
+        { "archive_path": "<path>" }
+
+    Pure read-only: nothing on disk is modified. Refuses paths
+    that escape ``SPIRE_BACKUP_DIR`` to keep the endpoint from
+    becoming an arbitrary file-read primitive.
+    """
+    _dr_require_security_manager(request, "verify")
+    raw = str((payload or {}).get("archive_path") or "")
+    if not raw:
+        raise HTTPException(status_code=400, detail="archive_path is required")
+
+    backup_dir = _dr_backup_dir().resolve()
+    archive_path = Path(raw).resolve()
+    if backup_dir not in archive_path.parents:
+        raise HTTPException(
+            status_code=400,
+            detail=f"archive_path must reside inside {backup_dir}",
+        )
+
+    from ..uis.dr import verify_backup
+    result = verify_backup(archive_path)
+    return result.to_dict()
+
+
+@router.post("/dr/restore")
+async def dr_backup_restore(request: Request, payload: dict = Body(default={})):
+    """Restore a backup archive into the live runtime.
+
+    Body::
+
+        {
+          "archive_path": "<path>",
+          "confirm":      "RESTORE",   // required; matches /secure-wipe pattern
+          "dry_run":      false        // optional — extracts + validates, no move
+        }
+
+    The endpoint is destructive — overwriting the live SQLite
+    means audit-chain history beyond the snapshot is lost. The
+    ``confirm`` token forces a deliberate two-step UI: read the
+    plan, type the magic word, then submit. A pre-restore
+    snapshot is captured automatically so a regretted restore
+    can be rolled back.
+
+    NOT safe to call while the server is serving heavy traffic —
+    the live SQLite file is replaced underneath open connections
+    and uvicorn must be restarted afterwards.
+    """
+    actor = _dr_require_security_manager(request, "restore")
+    body = payload or {}
+    raw = str(body.get("archive_path") or "")
+    if not raw:
+        raise HTTPException(status_code=400, detail="archive_path is required")
+    if body.get("confirm") != "RESTORE":
+        raise HTTPException(
+            status_code=400,
+            detail="Send {confirm: 'RESTORE'} to execute (destructive operation)",
+        )
+    dry_run = bool(body.get("dry_run", False))
+
+    backup_dir = _dr_backup_dir().resolve()
+    archive_path = Path(raw).resolve()
+    if backup_dir not in archive_path.parents:
+        raise HTTPException(
+            status_code=400,
+            detail=f"archive_path must reside inside {backup_dir}",
+        )
+
+    from ..uis.dr import restore_backup
+    try:
+        result = restore_backup(archive_path, verify=True, dry_run=dry_run)
+    except Exception as e:  # noqa: BLE001
+        audit_log(
+            "system.dr.restore.failed",
+            actor=actor, subject_id=str(archive_path.name),
+            payload={"error": str(e)[:300], "dry_run": dry_run},
+        )
+        raise HTTPException(status_code=500, detail=f"restore failed: {e}")
+
+    # Restoring rewrites the audit chain — the audit_log call
+    # below appends to the *post-restore* chain, so an inspector
+    # walking the chain sees the restore event as the first
+    # operator action after the snapshot.
+    audit_log(
+        "system.dr.restore.completed" if result.ok else "system.dr.restore.rejected",
+        actor=actor, subject_id=str(archive_path.name),
+        payload={
+            "archive_path": str(archive_path),
+            "dry_run": dry_run,
+            "ok": result.ok,
+            "issues": list(result.issues),
+            "pre_state_archive": (
+                str(result.pre_state_archive) if result.pre_state_archive else None
+            ),
+            "post_state": result.post_state,
+        },
+    )
+
+    if not result.ok:
+        raise HTTPException(
+            status_code=400,
+            detail={"ok": False, "issues": result.issues, "result": result.to_dict()},
+        )
+    return {"ok": True, "result": result.to_dict()}
+
+
+@router.post("/dr/prune")
+async def dr_backup_prune(request: Request, payload: dict = Body(default={})):
+    """Apply a retention policy to ``SPIRE_BACKUP_DIR``.
+
+    Body::
+
+        {
+          "keep_count": 7,        // optional - keep N most recent
+          "keep_days":  30,       // optional - keep within N days
+          "dry_run":    false     // optional - report only, no deletes
+        }
+
+    At least one of ``keep_count`` / ``keep_days`` is required.
+    When both are set, an archive survives if EITHER policy keeps
+    it (union, not intersection). Unreadable archives are NEVER
+    auto-deleted — they're surfaced in ``skipped_unreadable`` for
+    operator triage.
+    """
+    actor = _dr_require_security_manager(request, "prune")
+    body = payload or {}
+    keep_count = body.get("keep_count")
+    keep_days = body.get("keep_days")
+    if keep_count is None and keep_days is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide keep_count and/or keep_days",
+        )
+    dry_run = bool(body.get("dry_run", False))
+
+    backup_dir = _dr_backup_dir()
+    from ..uis.dr import prune_backups
+    try:
+        result = prune_backups(
+            backup_dir,
+            keep_count=int(keep_count) if keep_count is not None else None,
+            keep_days=int(keep_days) if keep_days is not None else None,
+            dry_run=dry_run,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    audit_log(
+        "system.dr.prune",
+        actor=actor, subject_id=str(backup_dir.name),
+        payload={
+            "directory": str(backup_dir),
+            "keep_count": keep_count,
+            "keep_days": keep_days,
+            "dry_run": dry_run,
+            "pruned_count": len(result.pruned),
+            "kept_count": len(result.kept),
+            "skipped_unreadable_count": len(result.skipped_unreadable),
+        },
+    )
+    return {"ok": True, "result": result.to_dict()}
+
+
 @router.get("/security-posture")
 async def security_posture_endpoint(request: Request):
     """UIS-P6.2 — security posture diagnostic.
