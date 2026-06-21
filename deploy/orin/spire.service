@@ -1,0 +1,40 @@
+# SPIRE — systemd unit for NVIDIA Jetson Orin Nano (JetPack 6 / Ubuntu 22.04, ARM64)
+#
+# One uvicorn process serves BOTH the REST API and the built React UI
+# (backend/main.py mounts frontend/dist), so there is no nginx in this
+# deployment. The UI is reachable LAN-wide at http://<orin-ip>:8000/.
+#
+# This file ships with placeholder paths. Either:
+#   (a) run deploy/orin/setup.sh, which templates these values from the
+#       current repo location + invoking user and installs the unit, or
+#   (b) edit the four __PLACEHOLDER__ tokens below by hand and copy this
+#       file to /etc/systemd/system/spire.service.
+#
+# Placeholders to set:
+#   __SPIRE_USER__  -> the non-root user that owns the repo + venv (e.g. orin)
+#   __SPIRE_DIR__   -> absolute repo root         (e.g. /home/orin/spire)
+#   __SPIRE_VENV__  -> absolute venv path         (e.g. /home/orin/spire/.venv)
+
+[Unit]
+Description=SPIRE contested-logistics OS (FastAPI + bundled UI)
+# Ollama serves the on-device Gemma model SPIRE falls back to; start it first.
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__SPIRE_USER__
+WorkingDirectory=__SPIRE_DIR__
+# .env at the repo root is ALSO auto-loaded by backend/__init__.py, but we
+# point systemd at it too so the values are present in the process env for
+# any code that reads os.environ before the app package imports.
+EnvironmentFile=__SPIRE_DIR__/.env
+ExecStart=__SPIRE_VENV__/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+# Give the deterministic dataset boot (RANDOM_SEED=42) room to complete.
+TimeoutStartSec=120
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target
