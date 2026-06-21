@@ -309,7 +309,7 @@ function MoreMenu() {
     { to: "https://marlog-mdm.fly.dev", label: "MARLOG · Logistics Calculator", external: true },
     { to: "/demo", label: "Demo cockpit", hide: stageMode },
     { to: "/about/team", label: "About / Team", hide: stageMode },
-    { to: "/transition", label: "Transition" },
+    { to: "/about/transition", label: "Transition" },
   ].filter((i) => !i.hide);
 
   // Admin hides for non-security_manager. The primary nav already shows
