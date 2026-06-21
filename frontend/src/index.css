@@ -434,6 +434,46 @@ body {
   filter: hue-rotate(-18deg) saturate(0.55) brightness(0.94);
 }
 
+/* PULSE×BASTION-A1 — readiness halo on MIL-STD-2525D markers.
+ *
+ * Doctrinal MIL-STD-2525D affiliation color (blue=friend) is encoded
+ * INSIDE the symbol fill, so we don't override it. Instead we render
+ * a soft outer ring around the marker DOM that color-codes the unit's
+ * MC (mission-capable) readiness state. Commander glances at the map
+ * and sees both:
+ *   - which units are friendly / hostile / neutral (symbol fill)
+ *   - which friendly units are degraded (halo)
+ *
+ * Halo is applied via box-shadow on the inner SVG so it follows the
+ * milsymbol size + transform without a separate DOM element. The
+ * data-mc-state attribute is set by OkinawaMapCanvas on the wrap div
+ * once readiness data has loaded; absent attribute means "unknown" —
+ * no halo, no false-positive green. */
+.spire-milsymbol-marker .spire-milsymbol-inner svg {
+  border-radius: 50%;
+  transition: box-shadow 200ms ease-out;
+}
+.spire-milsymbol-marker[data-mc-state="green"] .spire-milsymbol-inner svg {
+  box-shadow:
+    0 0 0 2.5px rgba(20, 184, 100, 0.85),
+    0 0 12px 2px rgba(20, 184, 100, 0.45);
+}
+.spire-milsymbol-marker[data-mc-state="amber"] .spire-milsymbol-inner svg {
+  box-shadow:
+    0 0 0 2.5px rgba(217, 165, 35, 0.90),
+    0 0 14px 3px rgba(217, 165, 35, 0.50);
+}
+.spire-milsymbol-marker[data-mc-state="red"] .spire-milsymbol-inner svg {
+  box-shadow:
+    0 0 0 3px rgba(220, 70, 70, 0.95),
+    0 0 16px 4px rgba(220, 70, 70, 0.55);
+  animation: spire-mc-red-pulse 2.4s ease-in-out infinite;
+}
+@keyframes spire-mc-red-pulse {
+  0%, 100% { filter: brightness(1); }
+  50%      { filter: brightness(1.2); }
+}
+
 /* MapLibre popup chrome — default skin is a white box with a white callout
  * tip, which clashes with the SPIRE dark surfaces. Walkthrough caught the
  * white outline + tip on every unit / ECP / building popover. Override the

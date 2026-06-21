@@ -708,6 +708,11 @@ export const api = {
       ),
     forecast: (unit?: string, window = 14) =>
       jsonFetch<Forecast>(`/pulse/forecast?window=${window}${unit ? `&unit=${encodeURIComponent(unit)}` : ""}`),
+    // PULSE×BASTION-A2 — consolidated commander view of a single
+    // unit. Backs the BASTION marker drawer; one round-trip carries
+    // MC state, supply chips, alerts, TMRs, and PULSE deep-link URLs.
+    unitSummary: (unit: string) =>
+      jsonFetch<UnitSummary>(`/pulse/unit/${encodeURIComponent(unit)}/summary`),
     feedback: (assetId: string, correct: boolean, note = "") =>
       jsonFetch<{ ok: boolean }>(`/pulse/feedback/${encodeURIComponent(assetId)}`, {
         method: "POST",
@@ -2535,6 +2540,78 @@ export interface ExportResult {
     caveats: string[];
   };
   release_warnings?: string[];
+}
+
+// PULSE×BASTION-A — single-call drawer payload. The shape mirrors
+// the /api/pulse/unit/{unit}/summary backend; new fields land here
+// when the endpoint grows. Used by OkinawaMapCanvas.MarkerDrawer
+// and any other surface that wants a consolidated unit posture
+// without a fan-out of read endpoints.
+export type SupplyClassStatus = "green" | "amber" | "red" | "no_signal";
+
+export interface UnitSupplyClass {
+  status: SupplyClassStatus;
+  hits?: { id?: string; severity?: string; title?: string }[];
+  // Class IX carries extra fields — direct from MC math, not a
+  // keyword-derived signal like the other classes.
+  open_deadlined_srs?: number;
+  mc_rate?: number;
+  primary_metric?: string;
+}
+
+export interface UnitSupply {
+  class_i:    UnitSupplyClass;
+  class_iii:  UnitSupplyClass;
+  class_v:    UnitSupplyClass;
+  class_viii: UnitSupplyClass;
+  class_ix:   UnitSupplyClass;
+}
+
+export interface UnitTMR {
+  tmr_number: string;
+  submitted_date: string;
+  scheduled_date: string;
+  origin: string;
+  destination: string;
+  priority: string;
+  status: string;
+  purpose: string;
+  is_outbound: boolean;
+}
+
+export interface UnitAlert {
+  id?: string;
+  source?: string;
+  severity?: string;
+  timestamp?: string;
+  title?: string;
+  body?: string;
+  unit?: string;
+}
+
+export interface UnitSummary {
+  unit: string;
+  uic: string;
+  parent: string;
+  location: string;
+  as_of: string | null;
+  mc_rate: number;
+  mc_state: SupplyClassStatus;
+  asset_counts: {
+    total: number;
+    mc: number;
+    pmc: number;
+    nmcm: number;
+    nmcs: number;
+  };
+  supply: UnitSupply;
+  alerts: UnitAlert[];
+  tmrs: UnitTMR[];
+  links: {
+    forecast: string;
+    risk_board: string;
+    bastion: string;
+  };
 }
 
 export interface BastionCOPUnit {
