@@ -114,6 +114,25 @@ function fmtUtc(iso: string): string {
  *   #    pinned to TOP_SECRET because the 500-row export window is the
  *   #    same regardless of which page the operator is viewing.
  */
+// Demo classification ceiling — the build caps the visible model at CUI
+// (CLASS_ORDER). The full rank hierarchy stays in levels.ts for SENTRY's
+// release engine, but on this surface every artifact is ≤ CUI.
+const DEMO_CEILING: Classification = CLASS_ORDER[CLASS_ORDER.length - 1];
+
+// Raw DoDIDs are PII — never render the full 10 digits in the SOC view.
+// Mask to the last 4 so an investigator can still correlate without the
+// page itself becoming a PII spill.
+function maskDodid(d: string | null | undefined): string {
+  const s = String(d ?? "").trim();
+  return s.length >= 4 ? `••••${s.slice(-4)}` : s || "—";
+}
+
+// A facet "actor" is usually a role string, but some legacy entries logged a
+// raw DoDID. Mask those so the filter rail doesn't list bare DoDIDs.
+function actorFacetLabel(actor: string): string {
+  return /^\d{7,}$/.test(actor.trim()) ? `DoDID ${maskDodid(actor)}` : actor;
+}
+
 function computeBundleClassification(rows: AuditEntry[]): {
   level: Classification;
   counts: Partial<Record<Classification, number>>;
@@ -131,8 +150,16 @@ function computeBundleClassification(rows: AuditEntry[]): {
       maxLevel = lvl;
     }
   }
+  // Clamp to the demo ceiling. Stale fixtures that claim a higher rank would
+  // otherwise stamp the bundle above CUI and show a CUI-cleared operator a
+  // contradictory "BLOCKED · REQUIRES CUI" — the labels are all masked to CUI
+  // anyway, so the gate must agree.
+  if (CLASS_RANK[maxLevel] > CLASS_RANK[DEMO_CEILING]) maxLevel = DEMO_CEILING;
   const total = rows.length;
-  const atLevel = counts[maxLevel] ?? 0;
+  const atLevel = rows.reduce(
+    (n, r) => n + (CLASS_RANK[normalizeClassification(r.classification)] >= CLASS_RANK[maxLevel] ? 1 : 0),
+    0,
+  );
   const provenance =
     total === 0
       ? `stamped ${classificationLabel(maxLevel)} (empty bundle — defaulted to UNCLASSIFIED)`
@@ -312,6 +339,10 @@ export function AuditView() {
   // happened to scroll to. Refreshing whenever the filter changes keeps
   // the gate in lock-step with what `onExport` will actually fetch.
   const [exportBundle, setExportBundle] = useState<ReturnType<typeof computeBundleClassification> | null>(null);
+  // The facet rail (actors / resource / classification / the long kind list)
+  // pushed the actual entries table below the fold. Collapse it by default so
+  // the log is the star; the search + time + anomalies row stays always-on.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -408,6 +439,7 @@ export function AuditView() {
   }
 
   const totalPages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
+  const facetFilterCount = actors.length + kinds.length + resource.length + (classification ? 1 : 0);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -513,13 +545,18 @@ export function AuditView() {
             </div>
           </div>
 
-          {/* Anomalies toggle */}
+          {/* Anomalies toggle + facet-rail expander */}
           <div className="col-span-12 lg:col-span-4 flex items-end gap-2">
             <Chip
               active={onlyAnoms}
               onClick={() => setOnlyAnoms((v) => !v)}
               label={onlyAnoms ? "ANOMALIES ONLY ✓" : "ANOMALIES ONLY"}
               tone={onlyAnoms ? "warn" : "default"}
+            />
+            <Chip
+              active={filtersOpen || facetFilterCount > 0}
+              onClick={() => setFiltersOpen((v) => !v)}
+              label={`FILTERS${facetFilterCount > 0 ? ` · ${facetFilterCount}` : ""} ${filtersOpen ? "▴" : "▾"}`}
             />
             <Button
               variant="secondary"
@@ -533,6 +570,7 @@ export function AuditView() {
             </Button>
           </div>
 
+          {filtersOpen && (<>
           {/* Actors */}
           <div className="col-span-12 lg:col-span-4">
             <FilterLabel>Actor / role</FilterLabel>
@@ -542,7 +580,7 @@ export function AuditView() {
                   key={a.actor}
                   active={actors.includes(a.actor)}
                   onClick={() => setActors((prev) => prev.includes(a.actor) ? prev.filter((x) => x !== a.actor) : [...prev, a.actor])}
-                  label={`${a.actor} · ${a.count}`}
+                  label={`${actorFacetLabel(a.actor)} · ${a.count}`}
                 />
               ))}
             </div>
@@ -583,7 +621,7 @@ export function AuditView() {
           {/* Action (kinds) — long list, render as collapsing chip cluster */}
           <div className="col-span-12">
             <FilterLabel>Action (kind)</FilterLabel>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
               {data.facets.kinds.map((k) => (
                 <Chip
                   key={k.kind}
@@ -594,6 +632,7 @@ export function AuditView() {
               ))}
             </div>
           </div>
+          </>)}
         </div>
       </div>
 
@@ -758,7 +797,7 @@ function AuditRow({
               background: "color-mix(in oklab, currentColor 12%, transparent)",
             }}
           >
-            {row.classification.replace(/_/g, " ")}
+            {classificationLabel(row.classification)}
           </span>
         ) : (
           <span className="text-[var(--color-text-muted)]">—</span>
@@ -851,7 +890,7 @@ function IdentityCell({ row }: { row: AuditEntry }) {
           {row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name}
         </div>
         <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
-          DODID {row.identity.dodid} · {row.identity.role || row.actor}
+          DODID {maskDodid(row.identity.dodid)} · {row.identity.role || row.actor}
         </div>
       </>
     );
