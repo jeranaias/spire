@@ -729,7 +729,9 @@ function AuditTile({
   const nav = useNavigate();
   const tone = data?.chain_ok ? "var(--color-success)" : "var(--color-danger)";
   const statusLabel = data?.chain_ok ? "INTACT" : "BROKEN";
-  const drill = () => nav("/admin");
+  // Land directly on the audit chain (SOC view), not the Training Flywheel
+  // default tab — a tile labeled "Audit Health" should open the audit log.
+  const drill = () => nav("/admin/audit");
 
   return (
     <Tile
