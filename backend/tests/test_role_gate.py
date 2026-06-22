@@ -121,7 +121,10 @@ def test_require_user_role_allows_in_role():
 
 # ---------------------------------------------------------------------------
 # End-to-end: each of the four mock CACs hits /export AND /download with
-# the right verdict. Park = 200, the other three = 403 InsufficientRole.
+# the right verdict. Park (security_manager) + Hayes (mef_commander, release
+# authority) = 200; Reyes (g4) + Kowalski (maintenance_chief) = 403
+# InsufficientRole. (mef_commander was added to SENTRY_EXPORT_ROLES in
+# commit 9f48ae5 — release authority; see test_joint_release_authority.)
 # ---------------------------------------------------------------------------
 
 def _post_export(client: TestClient):
@@ -152,17 +155,32 @@ def test_export_security_manager_park_returns_200(client):
     _logout(client)
 
 
+def test_export_mef_commander_hayes_returns_200(client):
+    """MajGen Hayes (mef_commander) is the demo role — CUI-cleared with
+    release authority (commit 9f48ae5 added mef_commander to
+    SENTRY_EXPORT_ROLES). Export + download both return 200, same as the
+    custodian, so the demo persona can walk the full pipeline."""
+    _login(client, DODID_HAYES)
+    r = _post_export(client)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    dl = client.get(body["download_url"])
+    assert dl.status_code == 200, dl.text
+    _logout(client)
+
+
 @pytest.mark.parametrize(
     "dodid,role_label",
     [
         (DODID_REYES,    "g4"),
         (DODID_KOWALSKI, "maintenance_chief"),
-        (DODID_HAYES,    "mef_commander"),
     ],
 )
 def test_export_off_role_users_get_403_insufficient_role(client, dodid, role_label):
-    """The three non-custodian roles must be blocked — even Hayes whose
-    TS//SCI clearance is high enough for the bundle. The role gate runs
+    """The non-custodian roles (g4, maintenance_chief) are blocked. The MEF
+    commander is NOT here — export was extended to the commander as release
+    authority (SENTRY_EXPORT_ROLES; commit 9f48ae5). The role gate runs
     before require_clearance, so the wire error is `InsufficientRole`,
     not `InsufficientClearance`.
     """
@@ -183,7 +201,6 @@ def test_export_off_role_users_get_403_insufficient_role(client, dodid, role_lab
     [
         (DODID_REYES,    "g4"),
         (DODID_KOWALSKI, "maintenance_chief"),
-        (DODID_HAYES,    "mef_commander"),
     ],
 )
 def test_download_off_role_users_get_403_even_with_leaked_export_id(client, dodid, role_label):
