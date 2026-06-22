@@ -54,7 +54,20 @@ _DB_PASSPHRASE = os.environ.get("SPIRE_DB_PASSPHRASE")  # None == plain mode for
 _KDF_SALT = b"spire-v0-at-rest-salt-7b3d4f61"
 
 
+# Derived keys are deterministic from (passphrase, salt). Re-running the
+# 200k-iteration PBKDF2 on every call was the dominant cost of conn() —
+# called TWICE per connection (decrypt + re-encrypt), it added ~4-5s per DB
+# touch on the shared-CPU cloud box, so every DB-backed endpoint (audit
+# tile, drafts, sentry) stalled. The KDF result is a secret held only in
+# this process's memory (same trust boundary as the passphrase env var), so
+# memoizing it is safe and cuts conn() from seconds to milliseconds.
+_DERIVED_KEY_CACHE: dict[str, bytes] = {}
+
+
 def _derive_key(passphrase: str) -> bytes:
+    cached = _DERIVED_KEY_CACHE.get(passphrase)
+    if cached is not None:
+        return cached
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -64,7 +77,9 @@ def _derive_key(passphrase: str) -> bytes:
     key = kdf.derive(passphrase.encode("utf-8"))
     # Fernet requires urlsafe b64 32-byte key
     import base64
-    return base64.urlsafe_b64encode(key)
+    out = base64.urlsafe_b64encode(key)
+    _DERIVED_KEY_CACHE[passphrase] = out
+    return out
 
 
 def _unlock_db() -> None:
