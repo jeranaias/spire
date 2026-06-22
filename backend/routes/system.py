@@ -234,10 +234,32 @@ async def status():
     return await _refresh_status()
 
 
+# Audit-chain verification is O(n) Ed25519 over the whole chain — on a
+# long-lived box (the Fly mirror accrues entries for days) it runs multiple
+# seconds and, being synchronous, would block the single uvicorn event loop
+# for that whole time, stalling every concurrent request on a page load
+# ("nothing loads"). Two guards: (1) run it in a worker thread so the loop
+# stays responsive, and (2) cache the result on a long TTL — chain integrity
+# changes on the order of minutes, not the 8s status cadence, so re-verifying
+# every poll just burns a core.
+_CHAIN_TTL_S = 60.0
+_chain_cache: dict = {"ts": 0.0, "value": None}
+
+
+async def _verify_chain_cached() -> dict:
+    cached = _chain_cache["value"]
+    if cached is not None and (_time.monotonic() - _chain_cache["ts"]) < _CHAIN_TTL_S:
+        return cached
+    value = await asyncio.to_thread(verify_chain)
+    _chain_cache["value"] = value
+    _chain_cache["ts"] = _time.monotonic()
+    return value
+
+
 async def _compute_status():
     ds = get_dataset()
     err = sum(1 for v in ds.violations if v.severity == "error")
-    chain = verify_chain()
+    chain = await _verify_chain_cached()
     llm_probe = await _probe_llm_brief()
     llm_local = await _probe_local_brief()
     # active_tier — what call_llm_chat would land on for the next call.
