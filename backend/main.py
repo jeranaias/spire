@@ -107,6 +107,22 @@ async def lifespan(app: FastAPI):
             print(f"[SPIRE] status warm-up skipped: {e}")
     asyncio.create_task(_warm_status())
 
+    # Warm the fleet-wide risk scoring in a worker thread. score_all() is
+    # ~11M ops and feeds top_risk / recommend-actions / the risk board /
+    # forecast; cold, the first page load pays it on the critical path and
+    # — being synchronous — freezes the event loop for seconds on the cloud
+    # box, cascading every other request. Compute it once off-loop at boot so
+    # those endpoints are served from the score_all cache and never block.
+    async def _warm_scoring() -> None:
+        try:
+            from .scoring import score_all
+            from .state import get_dataset
+            await asyncio.to_thread(score_all, get_dataset())
+            print("[SPIRE] fleet scoring warm.")
+        except Exception as e:  # noqa: BLE001
+            print(f"[SPIRE] scoring warm-up skipped: {e}")
+    asyncio.create_task(_warm_scoring())
+
     print("[SPIRE] Ready.")
     try:
         yield
