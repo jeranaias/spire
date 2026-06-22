@@ -537,12 +537,16 @@ export function ForecastTab() {
         <LegendDot color="var(--color-primary)" label="p10 / p90 envelope" opacity={0.55} />
         <LegendDot color="var(--color-primary)" label="sample paths" opacity={0.18} />
         <LegendDot color={dataLoaded ? kpiColorVar : "var(--color-danger)"} label={`${(thresholdSafe * 100).toFixed(0)}% threshold`} dashed />
-        <a
-          href={data?.model_card_url ?? "/#/admin/models/pulse-risk"}
-          className="text-[var(--color-primary)] underline-offset-2 hover:underline"
-        >
-          model card →
-        </a>
+        {data?.model_card_url ? (
+          <a
+            href={data.model_card_url}
+            className="text-[var(--color-primary)] underline-offset-2 hover:underline"
+          >
+            model card →
+          </a>
+        ) : (
+          <span className="text-[var(--color-text-secondary)]">model card</span>
+        )}
         <span className="ml-auto">
           {dataLoaded ? `${visiblePaths.length} of ${data!.paths.length} sample paths summarized` : ""}
         </span>

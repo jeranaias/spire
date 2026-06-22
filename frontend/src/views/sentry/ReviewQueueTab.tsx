@@ -1718,13 +1718,12 @@ function InspectorPane({
              * the roles that can actually reach it (others would land
              * on InsufficientPrivilege). */}
             {(role === "security_manager" || role === "mef_commander") && (
-              <a
-                href="#/admin/models/sentry-classifier"
-                className="font-mono text-xs uppercase tracking-widest text-[var(--color-primary)] hover:underline"
-                title="Open the SENTRY classifier model card (supply chain, FedRAMP, validation history)"
+              <span
+                className="font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)]"
+                title="SENTRY classifier model card (supply chain, FedRAMP, validation history)"
               >
-                Model card →
-              </a>
+                Model card
+              </span>
             )}
             {record.routing_locked && (
               <span
