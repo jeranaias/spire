@@ -493,7 +493,13 @@ async def audit_health(window_minutes: int = Query(5, ge=1, le=60)):
     """Audit-chain pulse for the bridge tile: chain integrity, total
     entries, events/min over the last N minutes, latest entry timestamp,
     and the last detected anomaly (if the chain has ever broken)."""
-    chain = verify_chain()
+    # verify_chain() is an O(n) SHA-256 walk of the whole audit table — on
+    # the long-lived Fly box the chain is large and this took ~15s, freezing
+    # the single event loop and stalling the rest of the home page. Reuse the
+    # shared cached + thread-offloaded helper (60s TTL, pre-warmed by the
+    # status warm task) so this bridge tile is fast and never blocks.
+    from .system import _verify_chain_cached
+    chain = await _verify_chain_cached()
     rate, count_in_window = _events_per_minute(window_minutes)
     latest = recent_entries(limit=1)
     last_entry_ts = latest[0]["ts"] if latest else None
