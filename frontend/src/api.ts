@@ -916,11 +916,6 @@ export const api = {
   llm: {
     status: () => jsonFetch<{ reachable: boolean; model_id?: string; max_context?: number }>("/llm/status"),
   },
-  joint: {
-    omsUci: () => jsonFetch<JointOmsUciExport>("/joint/oms-uci/export"),
-    link16: () => jsonFetch<JointLink16Export>("/joint/link16/export"),
-    conformance: () => jsonFetch<JointConformance>("/joint/conformance"),
-  },
   decisionBridge: {
     mission: () => jsonFetch<DecisionBridgeMission>("/decision-bridge/mission"),
     alerts: (limit = 3) =>

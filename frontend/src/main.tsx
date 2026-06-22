@@ -87,8 +87,6 @@ const ChannelsView = lazyWithRecovery(() => import("./views/admin/ChannelsView")
 // currently scoped to GCSS-MC. No role-gate — every operator can read the
 // adapter posture as part of the inoculation-via-honesty narrative.
 const IntegrationsView = lazyWithRecovery(() => import("./views/IntegrationsView").then((m) => ({ default: m.IntegrationsView })));
-// Joint COP export — sister-service partner viewer (no SPIRE chrome).
-const JointPreviewView      = lazyWithRecovery(() => import("./views/JointPreviewView").then((m) => ({ default: m.JointPreviewView })));
 // Task-24 — "15-second decision" hero dashboard. Lives at `/`. The
 // previous role-default redirect is preserved at `/home` as a fallback
 // + escape hatch for operators who prefer landing directly on their
@@ -260,18 +258,6 @@ createRoot(document.getElementById("root")!).render(
           {/* Cert-selection splash — outside the App shell so no chrome
            * leaks onto the surface. */}
           <Route path="/auth" element={<AuthView />} />
-          {/* Joint COP partner view — opened in a new tab from the SPIRE
-           * topbar, intentionally rendered without SPIRE chrome so judges
-           * see the data in a sister-service shell, not the parent app.
-           *
-           * NOT wrapped in RequireAuth: the HttpOnly session cookie IS
-           * shared across tabs (cross-tab) but the same-tab sessionStorage
-           * cache the auth gate consults is NOT. Without this exception,
-           * "Push to Joint COP" opens a new tab that bounces straight to
-           * /auth even though the operator is signed in. The view itself
-           * calls /api/joint/oms-uci/export which still re-checks the
-           * cookie + clearance gate server-side. */}
-          <Route path="/joint/preview" element={<ViewSuspense><JointPreviewView /></ViewSuspense>} />
           <Route
             path="/"
             element={
