@@ -296,7 +296,6 @@ function MoreMenu() {
   const items: { to: string; label: string; hide?: boolean; external?: boolean }[] = [
     { to: "/", label: "Decision Bridge" },
     { to: "/dha-rescue", label: "DHA Rescue", hide: stageMode },
-    { to: "/integrations/gcss-mc", label: "Integrations" },
     { to: "https://marlog-mdm.fly.dev", label: "MARLOG · Logistics Calculator", external: true },
   ].filter((i) => !i.hide);
 
