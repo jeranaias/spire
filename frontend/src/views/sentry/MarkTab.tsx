@@ -772,7 +772,11 @@ function MarkingBanner({ result }: { result: MarkResult }) {
   return (
     <div
       className={clsx(
-        "mb-4 overflow-hidden rounded-sm border-l-[6px]",
+        // shrink-0: this banner has overflow-hidden (for the rounded corners
+        // + colored left bar). Without shrink-0 it's a flex child in the
+        // panel's flex-col, so when the result content overflows, flexbox
+        // shrinks it and overflow-hidden clips the hero text to a 2px sliver.
+        "mb-4 shrink-0 overflow-hidden rounded-sm border-l-[6px]",
       )}
       style={{
         borderLeftColor: color,
