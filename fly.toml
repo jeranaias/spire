@@ -45,7 +45,14 @@ primary_region = "iad"
   # Keep ONE machine warm so demo traffic always lands in <500ms.
   # Cost: ~$2/mo for a shared-1x-1gb idle machine vs. the demo
   # being broken under load.
-  auto_stop_machines = "stop"
+  #
+  # auto_stop=false (was "stop"): with "stop", the single machine still
+  # idle-stopped despite min_machines_running=1, so the first request
+  # after idle ate a ~9s cold wake (machine boot + dataset bootstrap of
+  # 6k SRs / 128k snapshots) while warm requests are ~100ms. For a live
+  # demo a 9s hang on first load is a showstopper; false pins the machine
+  # on so the dataset stays resident in memory and every load is snappy.
+  auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
   processes = ["app"]
