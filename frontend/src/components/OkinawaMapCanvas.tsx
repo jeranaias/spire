@@ -290,30 +290,54 @@ export function OkinawaMapCanvas({
   // we ever want second-by-second telemetry.
   const [mcByUnit, setMcByUnit] = useState<Record<string, SupplyClassStatus>>({});
   useEffect(() => {
-    if (!ready) return;
+    // Fetch the readiness halo data on MOUNT, in parallel with the map
+    // tiles — not gated on `ready` — so the MC dict is usually in hand by
+    // the time the map paints and markers light up on first frame instead
+    // of flashing plain. The marker-sync effect (deps include mcByUnit)
+    // stamps data-mc-state as soon as BOTH the map is ready and this lands.
+    //
+    // Retry-until-data: a single /cop that hits a cold/warming machine
+    // (Fly auto-stop wakes one on the first hit) returns an empty COP, and
+    // a one-shot fetch would leave every icon unhalo'd until the operator
+    // re-entered BASTION. Poll a few times so the halos reliably appear
+    // once the dataset is live.
     let cancelled = false;
-    api.bastion
-      .cop()
-      .then((c) => {
-        if (cancelled) return;
-        if ((c as unknown as { empty?: boolean }).empty) {
-          setMcByUnit({});
-          return;
-        }
-        const out: Record<string, SupplyClassStatus> = {};
-        for (const u of c.units) {
-          const r = u.mc_rate ?? 0;
-          out[u.unit] = r >= 0.85 ? "green" : r >= 0.60 ? "amber" : "red";
-        }
-        setMcByUnit(out);
-      })
-      .catch(() => {
-        if (!cancelled) setMcByUnit({});
-      });
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const MAX_ATTEMPTS = 8;
+
+    const load = () => {
+      attempts += 1;
+      api.bastion
+        .cop()
+        .then((c) => {
+          if (cancelled) return;
+          const empty = (c as unknown as { empty?: boolean }).empty;
+          const units = empty ? [] : c.units ?? [];
+          if (units.length === 0) {
+            if (attempts < MAX_ATTEMPTS) timer = setTimeout(load, 1500);
+            else setMcByUnit({});
+            return;
+          }
+          const out: Record<string, SupplyClassStatus> = {};
+          for (const u of units) {
+            const r = u.mc_rate ?? 0;
+            out[u.unit] = r >= 0.85 ? "green" : r >= 0.6 ? "amber" : "red";
+          }
+          setMcByUnit(out);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (attempts < MAX_ATTEMPTS) timer = setTimeout(load, 1500);
+          else setMcByUnit({});
+        });
+    };
+    load();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-  }, [ready]);
+  }, []);
 
   // Initial-mount: build the map once, attach controls.
   useEffect(() => {
