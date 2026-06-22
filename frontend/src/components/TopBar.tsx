@@ -296,20 +296,14 @@ function MoreMenu() {
     };
   }, [open]);
 
-  // Surface list — every page reachable with one click. Stage mode hides
-  // the operator-only chrome (Pitch / Demo cockpit / About / Transition)
-  // since those are presenter-room artifacts, not on-stage surfaces.
-  // DHA RESCUE only appears here in operator mode (it's already a primary
-  // tab in stage mode).
+  // Surface list — every page reachable with one click. DHA RESCUE only
+  // appears here in operator mode (it's already a primary tab in stage mode).
   const items: { to: string; label: string; hide?: boolean; external?: boolean }[] = [
     { to: "/", label: "Decision Bridge" },
     { to: "/dha-rescue", label: "DHA Rescue", hide: stageMode },
     { to: "/joint/preview", label: "Joint COP" },
     { to: "/integrations/gcss-mc", label: "Integrations" },
     { to: "https://marlog-mdm.fly.dev", label: "MARLOG · Logistics Calculator", external: true },
-    { to: "/demo", label: "Demo cockpit", hide: stageMode },
-    { to: "/about/team", label: "About / Team", hide: stageMode },
-    { to: "/about/transition", label: "Transition" },
   ].filter((i) => !i.hide);
 
   // Admin hides for non-security_manager. The primary nav already shows
@@ -670,11 +664,6 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
     }
   }
 
-  function openPresenterRoute(path: string) {
-    setOpen(false);
-    nav(path);
-  }
-
   // Click-outside + Escape to close.
   useEffect(() => {
     if (!open) return;
@@ -893,24 +882,6 @@ function IdentityPill({ user, role }: { user: User | null; role: Role }) {
               })}
             </div>
           )}
-
-          {/* Presenter shortcut — Demo cockpit only (pitch deck retired
-           * since the live walkthrough IS the pitch). Suppressed in
-           * stage mode where the 4 hero tabs own the nav surface. */}
-          {!stageMode && <div className="border-b border-[var(--color-border)] py-1">
-            <div className="px-4 pt-2 pb-1 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-              Presenter
-            </div>
-            <Pressable
-              role="menuitem"
-              onClick={() => openPresenterRoute("/demo")}
-              aria-label="Open the SPIRE demo cockpit"
-              className="flex w-full items-center justify-between gap-2 px-4 py-2 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-primary)_8%,transparent)] hover:text-[var(--color-text)]"
-            >
-              <span>Open demo cockpit</span>
-              <span className="font-mono text-[10px] tracking-widest text-[var(--color-text-muted)]">/#/demo</span>
-            </Pressable>
-          </div>}
 
           {/* Operator settings — TopBar declutter (Task #184). The Air-gap
            * toggle, density preference, and comms-posture summary used to

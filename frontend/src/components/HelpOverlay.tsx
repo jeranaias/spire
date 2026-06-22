@@ -7,7 +7,7 @@
  * shortcut lands.
  */
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useSpireStore, ROLE_LABELS, VIEW_SCOPE } from "../state/store";
 import { DemoOnly } from "../state/buildMode";
 import { IconButton, Pressable } from "./ui";
@@ -220,24 +220,9 @@ export function HelpOverlay() {
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3 font-mono text-xs text-[var(--color-text-muted)] tracking-wider">
           <span>
             File issues with the floating button bottom-right (or press g then f) ·
-            See SPIRE_INSTALL.md + CONTRIBUTING.md in the repo root for setup ·{" "}
-            <Link
-              to="/about/team"
-              onClick={() => setOpen(false)}
-              className="text-[var(--color-primary)] underline-offset-2 hover:underline"
-            >
-              Warfighter customer & team →
-            </Link>
+            See SPIRE_INSTALL.md + CONTRIBUTING.md in the repo root for setup
           </span>
           <div className="flex shrink-0 items-center gap-2">
-            <Link
-              to="/about/transition"
-              onClick={() => setOpen(false)}
-              title="SBIR Phase II → MTA-Rapid Prototyping pathway, IP, sustainment, fielding plan, risks"
-              className="rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-text)]"
-            >
-              Transition pathway
-            </Link>
             <Pressable
               onClick={() => {
                 setOpen(false);
