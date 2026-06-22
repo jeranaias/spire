@@ -395,6 +395,27 @@ def test_health_rollup_returns_zero_when_no_channels(channels_client):
     assert body["failing"] == []
 
 
+def test_health_rollup_disabled_ingest_returns_200_not_503(monkeypatch):
+    """The rollup is the TopBar's 30s status poller, not an action
+    endpoint. When SPIRE_INGEST_ENABLED is off it must return a clean
+    200 with disabled=true + zero counts — a 503 here is a config state,
+    not a fault, and would spam the browser console on every tick. The
+    chip hides itself on enabled==0."""
+    monkeypatch.delenv("SPIRE_INGEST_ENABLED", raising=False)
+    from backend.main import app
+    c = TestClient(app)
+    c.post("/api/auth/login", json={"dodid": "3456789012", "pin": "000000"})
+    r = c.get("/api/uis/channels/health-rollup")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["disabled"] is True
+    assert body["total"] == 0
+    assert body["enabled"] == 0
+    assert body["circuit_open"] == 0
+    assert body["failing"] == []
+    assert body["stale"] == []
+
+
 def test_health_rollup_counts_enabled_channels(channels_client, tmp_path):
     channels_client.post("/api/uis/channels", json=_fs_payload(tmp_path))
     channels_client.post(
