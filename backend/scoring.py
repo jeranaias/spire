@@ -197,8 +197,26 @@ def _band(score: float) -> str:
     return "LOW"
 
 
+# Fleet-wide scoring is ~350 assets × several full O(len(srs)) scans each —
+# ~11M ops. It's deterministic for a given dataset build, but top_risk,
+# recommend-actions, the risk board and the forecast all call it, so
+# recomputing per request burned seconds of CPU AND (being synchronous)
+# blocked the single uvicorn event loop, cascading every other request on a
+# page load into multi-second waits on the cloud box. Cache the result keyed
+# on the dataset's build identity; a stage-ingest swap builds a new
+# CanonicalDataset (new id + generated_at) and transparently recomputes.
+_score_all_cache: dict = {"key": None, "result": None}
+
+
+def _ds_key(ds: CanonicalDataset):
+    return (id(ds), getattr(ds, "generated_at", None), len(ds.assets), len(ds.srs))
+
+
 def score_all(ds: CanonicalDataset) -> list[dict]:
-    """Score every asset (slow: ~350 × scoring)."""
+    """Score every asset (slow: ~350 × scoring). Cached per dataset build."""
+    key = _ds_key(ds)
+    if _score_all_cache["result"] is not None and _score_all_cache["key"] == key:
+        return _score_all_cache["result"]
     # Insufficient-data threshold: need >= 3 CM events in last 12 months
     scored = []
     for asset in ds.assets:
@@ -216,6 +234,8 @@ def score_all(ds: CanonicalDataset) -> list[dict]:
             })
             continue
         scored.append(risk_score(ds, asset.asset_id))
+    _score_all_cache["key"] = key
+    _score_all_cache["result"] = scored
     return scored
 
 
