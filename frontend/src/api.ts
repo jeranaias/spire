@@ -295,22 +295,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(detail),
       }),
-    /**
-     * MDM 2026 stage-pivot — append an audit chain entry for a DHA
-     * RESCUE operator action (Advance to H+72, approve market
-     * sourcing, etc.). Backend at `POST /api/system/dha-rescue/audit`
-     * stamps the entry with the session DODID + role.
-     */
-    dhaRescueAudit: (detail: {
-      action: string;
-      advance_to_hour?: number;
-      recommendation_id?: string;
-      subject_id?: string;
-    }) =>
-      jsonFetch<{ ok: boolean; logged: boolean; action: string }>(
-        "/system/dha-rescue/audit",
-        { method: "POST", body: JSON.stringify(detail) },
-      ),
     datasetInfo: () => jsonFetch<DatasetInfo>("/system/dataset-info"),
     commsState: () => jsonFetch<CommsStateResponse>("/system/comms/state"),
     setAirGap: (enable: boolean, reason?: string) =>
