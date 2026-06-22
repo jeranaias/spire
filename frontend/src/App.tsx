@@ -8,7 +8,6 @@ import { ToastLane } from "./components/ToastLane";
 import { NarrationOverlay } from "./components/NarrationOverlay";
 import { ScenarioPlayerHost } from "./components/ScenarioPlayerHost";
 import { ScenarioSyncBanner } from "./components/ScenarioSyncBanner";
-import { FeedbackDrawer } from "./components/FeedbackDrawer";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Spiro } from "./components/Spiro";
 import { Onboarding } from "./components/Onboarding";
@@ -301,7 +300,6 @@ export default function App() {
       <ScenarioPlayerHost />
       <ScenarioSyncBanner />
       <NarrationOverlay />
-      <FeedbackDrawer />
       <HelpOverlay />
       <Spiro />
       {/* Onboarding is the hackathon "judge-facing 60-second intro" —
