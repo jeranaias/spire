@@ -175,7 +175,13 @@ def _validate_channel_payload(payload: dict) -> None:
 
 @router.get("")
 async def list_channels_endpoint(request: Request):
-    _require_ingest_enabled()
+    # The Ingest Channels admin tab auto-loads this list on mount. When UIS
+    # ingest is disabled (demo/cloud posture) return a clean empty 200 with a
+    # ``disabled`` marker rather than 503 — a status poll shouldn't spam the
+    # console; the tab renders its "ingest disabled" state from the flag.
+    # Mutating endpoints (create/update/poll/...) keep their 503 gate.
+    if not _ingest_enabled():
+        return {"channels": [], "disabled": True}
     user = getattr(request.state, "user", None)
     require_user_role(user, INGEST_ROLES, action="uis.channels.list")
     cfgs = list_channel_configs()

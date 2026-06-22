@@ -286,8 +286,19 @@ def test_channels_routes_503_when_ingest_disabled(monkeypatch, tmp_path):
     c = TestClient(app)
     r = c.post("/api/auth/login", json={"dodid": "3456789012", "pin": "000000"})
     assert r.status_code == 200
+    # List poll → graceful empty 200 (status poll, not 503 console noise).
     r = c.get("/api/uis/channels")
-    assert r.status_code == 503
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["channels"] == []
+    assert body["disabled"] is True
+    # Mutation → still gated 503.
+    r = c.post(
+        "/api/uis/channels",
+        json={"channel_id": "x", "channel_type": "filesystem",
+              "adapter_id": "gcss-mc/ecp", "config": {"root": "/tmp/x"}},
+    )
+    assert r.status_code == 503, r.text
 
 
 # ---------------------------------------------------------------------------

@@ -666,8 +666,15 @@ VALID_STALE_ACTIONS = frozenset({"remove", "confirm", "defer"})
 
 @router.get("/stale")
 async def list_stale_assets(request: Request):
-    """List canonical assets currently flagged needs_verification."""
-    _require_ingest_enabled()
+    """List canonical assets currently flagged needs_verification.
+
+    The Real-Data Ingest admin tab auto-loads this on mount. When UIS ingest
+    is disabled (the demo/cloud posture) return a clean empty 200 with a
+    ``disabled`` marker rather than 503 — a status poll shouldn't log a
+    console error on every visit; the tab renders its disabled state from
+    the flag. Mutating endpoints below keep their 503 gate."""
+    if not _ingest_enabled():
+        return {"stale": [], "count": 0, "disabled": True}
     user = getattr(request.state, "user", None)
     require_user_role(user, INGEST_ROLES, action="ingest.stale.list")
 
