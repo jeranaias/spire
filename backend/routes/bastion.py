@@ -1,10 +1,8 @@
-"""BASTION endpoints: COP, alerts, response, ThermalHawk sim, NL TMR."""
+"""BASTION endpoints: COP, readiness alerts, incident response, NL TMR."""
 from __future__ import annotations
 
 import hashlib
 import json
-import time as _time
-import uuid
 from collections import Counter
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -14,16 +12,12 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ..auth import session_role
 from ..scoping import (
-    BASTION_SIMULATE_ROLES,
     allowed_sectors,
     allowed_units,
     filter_buildings,
     filter_perimeter,
-    require_role,
 )
 from ..state import get_dataset, last_day_snapshots
-from .streams import all_streams
-from ..fusion import fuse_alerts
 from ..persistence import log as audit_log
 
 router = APIRouter()
@@ -202,20 +196,16 @@ async def cop(role: Optional[str] = None):
 
 
 # ---------------------------------------------------------------------------
-# Alert feed: unified stream from SENTRY + PULSE + BASTION + ThermalHawk
+# Alert feed: readiness + cannibalization + SENTRY classification alerts
 # ---------------------------------------------------------------------------
 
 def _compose_raw_alerts(ds) -> list[dict]:
-    """Compose the unscoped, sorted, sim-prepended raw alert list /alerts
-    serves before role-scoping and before fusion.
+    """Compose the unscoped, sorted raw alert list /alerts serves before
+    role-scoping.
 
     Centralizing the composition lets `alert_action` (task #54) feed the
-    EXACT same list to `fuse_alerts` so fused IDs visible in the feed
-    can be matched on mutation — otherwise an operator who sees a
-    `FUS-MGATE-*` row in /alerts would 404 on ack because the universe
-    builder fed fusion a different input order. Also has the side-effect
-    of expiring sims older than SIM_TTL — kept inside the composer so
-    /alerts and the universe builder agree on which sims still exist.
+    EXACT same list the alert universe builder uses, so an id visible in
+    /alerts can always be matched on mutation rather than 404-ing on ack.
     """
     out: list[dict] = []
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
@@ -302,24 +292,8 @@ def _compose_raw_alerts(ds) -> list[dict]:
             "unit": sr.unit_name,
         })
 
-    # Multi-stream feeds (gate access, utilities, weather)
-    out.extend(all_streams(ds))
-
     # Sort newest-first
     out.sort(key=lambda a: a["timestamp"], reverse=True)
-
-    # Prepend any active BASTION incidents from the sim queue.
-    # Expire sims older than SIM_TTL so a ThermalHawk trigger doesn't stick in
-    # the feed as 11 identical CRITICAL rows for an hour.
-    now = datetime.utcnow()
-    expired: list[str] = []
-    for sim_id, sim in _ACTIVE_SIMS.items():
-        if now - sim["started"] > SIM_TTL:
-            expired.append(sim_id)
-            continue
-        out.insert(0, sim["alert"])
-    for sid in expired:
-        del _ACTIVE_SIMS[sid]
     return out
 
 
@@ -338,14 +312,6 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
     allowed = allowed_units(ds, role)
     out = _compose_raw_alerts(ds)
     out = _scope_alerts(out, allowed)
-
-    # GC-4: run sensor fusion on the post-scoped alert window. Fused threats
-    # are prepended above the raw alerts so an operator sees "the chain"
-    # before the individual events. Same TTL semantics as raw alerts via
-    # the fused_id stability — re-running fusion on the same chain emits
-    # the same id, so poll-based callers don't get dupes.
-    fused = fuse_alerts(out, window_minutes=60)
-    fused_records = [t.to_alert_dict() for t in fused]
 
     # Apply per-alert state (ack / snooze / resolve) so the front-end can
     # render canonical groups + drop resolved rows. Snoozes auto-expire
@@ -375,7 +341,6 @@ async def alerts(limit: int = 30, role: Optional[str] = None):
 
     return {
         "alerts": visible[:limit],
-        "fused_threats": fused_records,
         "total": len(visible),
         "severity_counts": sev_counts,
     }
@@ -418,14 +383,6 @@ def _collect_alert_universe(ds, allowed: Optional[set[str]] = None) -> dict[str,
     operator's URL-hack against another battalion's id falls into the
     explicit 403 OutOfScope branch (with audit row) rather than 404,
     which makes the spoof attempt visible in the chain.
-
-    Fused threats, however, are computed by /alerts on the SCOPED list
-    (so `FUS-MGATE-...` ids depend on which alerts the operator could
-    see). We therefore re-run fusion on the same scoped+composed list
-    /alerts feeds it — `_compose_raw_alerts` followed by `_scope_alerts`
-    with the operator's allowed_units. Without this the universe builder
-    fed fusion a different input order and an operator could see a
-    fused row in /alerts but 404 on ack.
     """
     universe: dict[str, dict] = {}
 
@@ -437,18 +394,6 @@ def _collect_alert_universe(ds, allowed: Optional[set[str]] = None) -> dict[str,
         if not aid:
             continue
         universe[aid] = {"id": aid, "unit": a.get("unit"), "source": a.get("source")}
-
-    # Fused threats — must mirror /alerts exactly so feed-visible fused
-    # IDs are actionable. /alerts fuses AFTER scoping; do the same here.
-    try:
-        scoped = _scope_alerts(composed_unscoped, allowed)
-        for t in fuse_alerts(scoped, window_minutes=60):
-            d = t.to_alert_dict()
-            universe[d["id"]] = {"id": d["id"], "unit": d.get("unit"), "source": "FUSION"}
-    except Exception:
-        # Fusion is best-effort; an exception here must never make a
-        # legitimate raw-alert mutation 404 because a fusion bug threw.
-        pass
 
     return universe
 
@@ -509,10 +454,8 @@ async def alert_action(alert_id: str, action: str, request: Request):
     ds = get_dataset()
     allowed = allowed_units(ds, actor_role)
 
-    # Universe is built with the operator's scope so fused threat ids
-    # match the ones /alerts surfaced to them. Raw-alert ids are still
-    # full-universe so cross-tenant probes 403 with an audit row instead
-    # of 404 silently.
+    # Raw-alert ids are indexed full-universe so cross-tenant probes 403
+    # with an audit row instead of 404 silently.
     universe = _collect_alert_universe(ds, allowed=allowed)
     alert = universe.get(alert_id)
     if alert is None:
@@ -561,50 +504,6 @@ async def alert_action(alert_id: str, action: str, request: Request):
     elif action == "unack":
         _ALERT_STATE.pop(alert_id, None)
     return {"ok": True, "alert_id": alert_id, "state": _ALERT_STATE.get(alert_id)}
-
-
-@router.get("/fused-threats")
-async def fused_threats(role: Optional[str] = None):
-    """Return the current fused-threat list independently. Useful for the
-    BASTION fused-threats panel that polls more aggressively than the full
-    alert stream."""
-    ds = get_dataset()
-    allowed = allowed_units(ds, role)
-    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
-    out: list[dict] = []
-
-    last = last_day_snapshots(ds)
-    unit_counts: dict = {}
-    for s in last:
-        uc = unit_counts.setdefault(s.unit_name, Counter())
-        uc[s.readiness_code] += 1
-    for unit_name, c in unit_counts.items():
-        total = sum(c.values())
-        if not total:
-            continue
-        mc_rate = c.get("MC", 0) / total
-        if mc_rate < MC_AMBER_THRESHOLD:
-            nmcs = c.get("NMCS", 0)
-            out.append({
-                "id": f"pulse-readiness-{unit_name}",
-                "source": "PULSE",
-                "severity": "HIGH" if mc_rate < MC_RED_FLOOR else "MODERATE",
-                "timestamp": _jittered_timestamp(last_day, f"readiness:{unit_name}"),
-                "title": _readiness_title(unit_name, mc_rate, nmcs, total),
-                "body": f"{unit_name} MC rate {mc_rate:.1%}",
-                "unit": unit_name,
-            })
-    out.extend(all_streams(ds))
-    now = datetime.utcnow()
-    for sim_id, sim in _ACTIVE_SIMS.items():
-        if now - sim["started"] <= SIM_TTL:
-            out.insert(0, sim["alert"])
-
-    if allowed is not None:
-        out = [a for a in out if a.get("unit") is None or a.get("unit") in allowed]
-
-    fused = fuse_alerts(out, window_minutes=60)
-    return {"fused_threats": [t.to_alert_dict() for t in fused]}
 
 
 # ---------------------------------------------------------------------------
@@ -712,292 +611,6 @@ async def list_incidents(limit: int = 50):
     return {"incidents": out}
 
 
-# ---------------------------------------------------------------------------
-# ThermalHawk simulation — the demo's wow finish
-# ---------------------------------------------------------------------------
-
-_ACTIVE_SIMS: dict = {}
-# Sims expire from the alert feed after this window, preventing duplicate
-# "UAS DETECTED — CRITICAL" rows from piling up on the 5-second poll.
-SIM_TTL = timedelta(minutes=30)
-
-
-def _build_thermalhawk_model_info() -> dict:
-    """Public model card for the BASTION sim alert.
-
-    Capability + outcome only — no architecture mechanism, no training
-    methodology, no internal codenames. Mechanism details stay with
-    Thornveil's private ML package per LICENSE.md §2 / §4.
-
-    Three load states the chrome reflects honestly:
-      - live              — Thornveil-licensed inference active
-      - weights_present   — proprietary weights deployed; inference
-                            disabled in this public build
-      - rule_based_sim    — no weights; scripted alert path
-
-    Finding F5 split: the operator response panel only renders `note`
-    (operator-facing copy). Vendor licensing / contact strings are now
-    namespaced under `admin_note` + the existing `license` / `contact`
-    keys so the admin model registry can surface them, but the Marine
-    in the response panel sees plain operator copy — no vendor email,
-    no license clause, no "available under separate license".
-    """
-    from ..model_hooks import STATE as MS
-    base = {
-        "model": "ThermalHawk (Thornveil)",
-        "capability": "thermal infrared drone detection",
-        "deployment_target": "edge accelerator",
-        # license + contact are admin-registry fields — surfaced by
-        # /admin model surfaces, suppressed by the operator panel.
-        "license": "Thornveil proprietary — see LICENSE.md §2",
-        "contact": "jesse@thornveil.ai",
-    }
-    if MS.thermalhawk_model is not None:
-        base["load_state"] = "live"
-    elif MS.thermalhawk_path:
-        base["load_state"] = "weights_present"
-        # Operator copy on the response panel.
-        base["note"] = "Live thermal inference disabled in this build."
-        # Admin-only context for the model registry.
-        base["admin_note"] = (
-            "Thornveil-licensed weights deployed; "
-            "live inference disabled in this public build."
-        )
-    else:
-        base["load_state"] = "rule_based_sim"
-        # Operator copy: short, plain, actionable (no vendor email,
-        # no separate-license language).
-        base["note"] = (
-            "Scripted incident profile — live thermal inference "
-            "model not deployed in this build."
-        )
-        # Admin-only context for the model registry / licensing review.
-        base["admin_note"] = (
-            "Scripted sim — Thornveil ThermalHawk inference is "
-            "available under separate license (jesse@thornveil.ai)."
-        )
-    return base
-
-
-@router.post("/simulate/thermalhawk-detection")
-async def simulate_thermalhawk_detection(
-    request: Request, payload: Optional[dict] = None
-):
-    """Kicks off the scripted demo beat: drone detected over the operator's
-    motor pool with ThermalHawk-Nano; auto-correlates with PULSE's readiness
-    state; escalates to CRITICAL; emits response checklist.
-
-    Authorization (task #54 / critique F1):
-      * Role-gated to `mef_commander`, `security_manager`, `g4` — the
-        same set the FE Sim Controls pill is shown to (BastionView.tsx
-        L674). Maintenance Chief and Data Custodian get 403.
-      * `target_unit` is derived from the operator's authenticated
-        identity, NOT the request body. Prior behaviour trusted
-        `payload.unit` and let any session escalate FPCON CHARLIE on any
-        unit's motor pool. We still accept the field on the wire for
-        backward-compat with the FE button (which doesn't send one), but
-        we ignore it for routing and emit an audit row if it disagrees
-        with the derived unit so cross-tenant probes are observable.
-
-    Round-4 hardening also writes a `bastion.thermalhawk_simulate`
-    audit row keyed on sim_id so the SOC AUDIT pill reflects every
-    invocation alongside the SENTRY/PULSE/DHA per-module rows.
-    """
-    payload = payload or {}
-    user = getattr(request.state, "user", None) or {}
-    actor_role = session_role(request) or user.get("role")
-    require_role(actor_role, BASTION_SIMULATE_ROLES, "bastion.simulate_thermalhawk")
-
-    ds = get_dataset()
-    inst = _load_installation()
-
-    ds_unit_names = {u.name for u in ds.units}
-    allowed = allowed_units(ds, actor_role)
-    user_unit = user.get("unit")
-    # Derive target unit from operator identity. Order:
-    #   1. User's home unit if it's a leaf BASTION unit AND in scope.
-    #   2. "CLB-6" (canonical demo target) if in scope. Catches identities
-    #      whose home unit is a parent command or a non-dataset unit
-    #      (e.g. Reyes/Kowalski "CLB-Det", Hayes "III MEF").
-    #   3. Lowest-name unit in scope (deterministic) if CLB-6 is filtered out.
-    #   4. "CLB-6" as a final fallback when no scope is computed.
-    if user_unit in ds_unit_names and (allowed is None or user_unit in allowed):
-        target_unit = user_unit
-    elif allowed is None or "CLB-6" in allowed:
-        target_unit = "CLB-6"
-    elif allowed:
-        target_unit = sorted(allowed)[0]
-    else:
-        target_unit = "CLB-6"
-
-    # If the caller tried to spoof a different unit on the wire, surface
-    # it in the audit chain. Not a 403 (the role gate already passed and
-    # the derived unit is authoritative); the audit row is the forensic
-    # breadcrumb that says "they asked for X, we routed to Y".
-    requested_unit = payload.get("unit")
-    if requested_unit and requested_unit != target_unit:
-        try:
-            audit_log(
-                "bastion_simulate_unit_override",
-                actor=actor_role or "unknown",
-                subject_id=target_unit,
-                payload={
-                    "action": "bastion.simulate_thermalhawk",
-                    "requested_unit": requested_unit,
-                    "routed_to_unit": target_unit,
-                    "user_dodid": user.get("dodid"),
-                    "user_role": actor_role,
-                    "decision": "override",
-                    "reason": "wire_supplied_unit_ignored",
-                    "surface": "backend",
-                },
-            )
-        except Exception:
-            pass
-
-    # Find the target motor pool building. Walkthrough audit: prior fallback
-    # was inst['buildings'][3] (positional, brittle). If buildings get
-    # reordered the fallback could land on a barracks. Look up by the
-    # canonical unit -> home_building edge from the dataset, then by any
-    # motor_pool, and only fall back to the first building if neither
-    # exists (dataset would be malformed).
-    motor_pool = next(
-        (b for b in inst["buildings"] if target_unit in b.get("name", "") and b["type"] == "motor_pool"),
-        None,
-    )
-    if motor_pool is None:
-        unit_obj = next((u for u in ds.units if u.name == target_unit), None)
-        home_id = unit_obj.home_building if unit_obj else None
-        if home_id:
-            motor_pool = next((b for b in inst["buildings"] if b.get("id") == home_id), None)
-    if motor_pool is None:
-        motor_pool = next((b for b in inst["buildings"] if b.get("type") == "motor_pool"), None)
-    if motor_pool is None:
-        motor_pool = inst["buildings"][0]
-
-    # PULSE correlation: read the unit's actual end-of-day MC state so the
-    # 'amber readiness prior to detection' note is honest. Walkthrough
-    # audit: prior text claimed amber regardless of the unit's real state
-    # — would read 'amber' for a unit running 96% MC.
-    from collections import Counter as _C
-    last = last_day_snapshots(ds)
-    unit_snaps = [s for s in last if s.unit_name == target_unit]
-    unit_counts = _C(s.readiness_code for s in unit_snaps)
-    unit_total = sum(unit_counts.values())
-    unit_mc = unit_counts.get("MC", 0)
-    unit_mc_rate = (unit_mc / unit_total) if unit_total else None
-    if unit_mc_rate is None:
-        readiness_note = (
-            f"{target_unit} readiness prior to detection: dataset has no end-of-day snapshot."
-        )
-    elif unit_mc_rate < MC_RED_FLOOR:
-        readiness_note = (
-            f"{target_unit} was already RED ({unit_mc_rate*100:.1f}% MC, "
-            f"below the {MC_RED_FLOOR*100:.0f}% floor) "
-            f"prior to detection — UAS over the motor pool compounds an existing readiness gap."
-        )
-    elif unit_mc_rate < MC_AMBER_THRESHOLD:
-        readiness_note = (
-            f"{target_unit} was AMBER ({unit_mc_rate*100:.1f}% MC, "
-            f"below the {MC_AMBER_THRESHOLD*100:.0f}% threshold) "
-            f"prior to detection."
-        )
-    else:
-        readiness_note = (
-            f"{target_unit} was GREEN ({unit_mc_rate*100:.1f}% MC) prior to detection — "
-            f"a UAS strike on the motor pool would directly degrade an otherwise nominal unit."
-        )
-
-    # Walkthrough audit: prior body said 'operational vehicles' but the
-    # count multiplied total fleet (including NMC) by 60%, which over-
-    # counts. Use MC + PMC for the 'operational' base so the number
-    # actually maps to vehicles that could roll out tonight.
-    operational_count = sum(unit_counts.get(k, 0) for k in ("MC", "PMC"))
-    asset_pct_in_mp = 0.60  # spec states 60% of an MTVR-sized unit's fleet stages in the motor pool
-
-    sim_id = f"SIM-{uuid.uuid4().hex[:8]}"
-    now = datetime.utcnow()
-
-    alert = {
-        "id": sim_id,
-        "source": "ThermalHawk",
-        "severity": "CRITICAL",
-        "timestamp": now.isoformat(timespec="seconds") + "Z",
-        "title": "UAS DETECTED — auto-escalated to CRITICAL",
-        "body": (
-            f"Small UAS detected by ThermalHawk-Nano over {motor_pool['name']} "
-            f"({motor_pool['grid']}). Altitude ~200ft AGL, heading east. "
-            f"Auto-correlated: facility contains ~{asset_pct_in_mp*100:.0f}% of {target_unit}'s "
-            f"operational vehicles ({int(operational_count * asset_pct_in_mp)} assets)."
-        ),
-        "unit": target_unit,
-        "location": motor_pool["name"],
-        "grid": motor_pool["grid"],
-        "correlated_with": [
-            {"source": "PULSE", "note": readiness_note},
-        ],
-        "fpcon_recommended": "CHARLIE",
-        # Walkthrough audit: model_info was hardcoded prose. When
-        # SPIRE_THERMALHAWK_WEIGHTS is set and the .pt file is on disk,
-        # source the metadata from model_hooks.STATE so the alert
-        # advertises whichever model the deploy actually has —
-        # 'rule-based fallback' otherwise.
-        "model_info": _build_thermalhawk_model_info(),
-        "response_available": True,
-    }
-
-    _ACTIVE_SIMS[sim_id] = {
-        "alert": alert,
-        "incident_type": "UAS_INCURSION",
-        "started": now,
-    }
-
-    # When Thornveil-licensed inference is enabled (private package
-    # installed + weights deployed), the alert advertises the real
-    # outcome via load_state="live". Public builds always run the
-    # scripted alert path — no mechanism disclosure.
-
-    response = {
-        "sim_id": sim_id,
-        "alert": alert,
-        "checklist": _response_checklist_for("UAS_INCURSION", "CRITICAL", location=motor_pool["name"]),
-        "cordon_zones": [
-            {"radius_m": 300, "label": "Inner cordon — evacuate, secure"},
-            {"radius_m": 500, "label": "Outer cordon — restrict access"},
-            {"radius_m": 1000, "label": "Awareness zone — alert"},
-        ],
-        "response_forces_dispatched": ["WATCHDOG-3", "RAIDER-1", "IRONHORSE-2 (standby)"],
-    }
-
-    # Hash-chain the BASTION simulate event so the AUDIT closing beat can
-    # show a `bastion.thermalhawk_simulate` entry alongside SENTRY,
-    # PULSE, and DHA writes. Anchored to the sim_id as the subject so
-    # subsequent /simulate/clear/{sim_id} requests refer to the same
-    # subject in the chain.
-    audit_log(
-        "bastion.thermalhawk_simulate",
-        actor=session_role(request) or "unknown",
-        subject_id=sim_id,
-        payload={
-            "unit": target_unit,
-            "incident_type": "UAS_INCURSION",
-            "severity": "CRITICAL",
-            "location": motor_pool.get("name"),
-            "cordon_zones_m": [c["radius_m"] for c in response["cordon_zones"]],
-            "readiness_note": readiness_note,
-        },
-    )
-
-    return response
-
-
-@router.post("/simulate/clear/{sim_id}")
-async def clear_simulation(sim_id: str):
-    if sim_id in _ACTIVE_SIMS:
-        del _ACTIVE_SIMS[sim_id]
-    return {"ok": True}
-
-
 def reset_demo_state() -> dict:
     """Wipe all ephemeral BASTION scenario state back to t=0.
 
@@ -1006,64 +619,10 @@ def reset_demo_state() -> dict:
     of what was cleared.
     """
     cleared_alerts = len(_ALERT_STATE)
-    cleared_sims = len(_ACTIVE_SIMS)
     _ALERT_STATE.clear()
-    _ACTIVE_SIMS.clear()
     return {
         "alert_states_cleared": cleared_alerts,
-        "active_sims_cleared": cleared_sims,
-    }
-
-
-# ---------------------------------------------------------------------------
-# ThermalHawk live video feed
-# ---------------------------------------------------------------------------
-
-@router.get("/thermalhawk/feed")
-async def thermalhawk_feed(frame: int = 0):
-    """Live thermal feed endpoint — gated behind a Thornveil license.
-
-    Public builds return 503. Production deploys with Thornveil's
-    private ML package installed serve a per-frame inference payload.
-    Mechanism is not exposed in this repo."""
-    try:
-        from thornveil_ml.thermal_feed import get_thermal_frame_with_detections  # type: ignore
-    except Exception:
-        raise HTTPException(
-            status_code=503,
-            detail="ThermalHawk live feed requires the Thornveil ML package (license: jesse@thornveil.ai).",
-        )
-    payload = get_thermal_frame_with_detections(frame_idx=int(frame))
-    if payload is None:
-        raise HTTPException(status_code=503, detail="ThermalHawk model not loaded.")
-    return payload
-
-
-@router.get("/thermalhawk/feed/info")
-async def thermalhawk_feed_info():
-    """Public-facing live-feed metadata. Capability + license boundary
-    only — no source-dataset specifics, no threshold tuning, no model
-    architecture. Production deploys with the Thornveil ML package
-    installed surface the richer detail privately."""
-    from ..model_hooks import STATE as MS
-    try:
-        from thornveil_ml.thermal_feed import (  # type: ignore
-            list_frames as _list_antiuav_frames,
-            BUNDLED_FRAMES_DIR as _BUNDLED_FRAMES_DIR,
-        )
-    except Exception:
-        return {
-            "model_loaded": False,
-            "available": False,
-            "license": "Thornveil proprietary — see LICENSE.md §2",
-            "contact": "jesse@thornveil.ai",
-        }
-    frames = _list_antiuav_frames()
-    return {
-        "model_loaded": MS.thermalhawk_model is not None,
-        "available": True,
-        "frame_count_in_loop": len(frames) if frames else None,
-        "model_metadata": MS.thermalhawk_metadata,
+        "active_sims_cleared": 0,
     }
 
 
@@ -1254,9 +813,5 @@ def _build_grounding_context(role: str | None) -> str:
             )
     else:
         lines.append("No currently deadlined assets in scope.")
-
-    if _ACTIVE_SIMS:
-        lines.append("")
-        lines.append(f"Active simulated incidents: {len(_ACTIVE_SIMS)}")
 
     return "\n".join(lines)

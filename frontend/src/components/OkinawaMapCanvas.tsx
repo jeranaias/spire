@@ -25,27 +25,6 @@ import { registerMapBridge } from "../state/mapBridge";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, type SupplyClassStatus, type UnitSummary } from "../api";
 
-// PLA anti-ship missile coverage rings — doctrinal published ranges,
-// drawn from the published CSIS / DoD AMR open-source assessments. The
-// rings are toggled by the operator from the header; off by default
-// because they steal visual attention from the markers themselves.
-const PLA_THREAT_RINGS = [
-  {
-    name: "DF-21D · ASBM",
-    rangeKm: 1500,
-    centerLngLat: [121.66, 25.04] as [number, number], // Taipei vicinity
-    color: "#C8102E",
-    opacity: 0.10,
-  },
-  {
-    name: "YJ-12 · ASCM",
-    rangeKm: 400,
-    centerLngLat: [121.66, 25.04] as [number, number],
-    color: "#FF8C00",
-    opacity: 0.14,
-  },
-];
-
 // CartoDB Dark Matter — free vector tile style, no key, IL5-OK as a
 // public-internet base for the demo. Production swap target is a
 // PMTiles file bundled with the build for the air-gap path.
@@ -156,33 +135,6 @@ function boxesIntersect(a: LabelBox, b: LabelBox): boolean {
 }
 
 /**
- * Build a 64-vertex GeoJSON Polygon approximating a circle of the given
- * radius (km) around a [lng, lat] center. Fine enough resolution that
- * the visible curve doesn't read as a polygon at any normal zoom level
- * but cheap enough to keep on the layer at all times. Latitude
- * correction handles the lng→km scaling at the ring's actual
- * latitude.
- */
-function makeCircleGeoJSON(
-  center: [number, number],
-  radiusKm: number,
-  steps = 64,
-): { type: "Polygon"; coordinates: [number, number][][] } {
-  const [lng, lat] = center;
-  const latRad = (lat * Math.PI) / 180;
-  const kmPerDegLat = 111.32;
-  const kmPerDegLng = 111.32 * Math.cos(latRad);
-  const ring: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const theta = (i * 2 * Math.PI) / steps;
-    const dLng = (radiusKm * Math.cos(theta)) / kmPerDegLng;
-    const dLat = (radiusKm * Math.sin(theta)) / kmPerDegLat;
-    ring.push([lng + dLng, lat + dLat]);
-  }
-  return { type: "Polygon", coordinates: [ring] };
-}
-
-/**
  * Smart icon-size curve. milsymbol renders at a fixed pixel size, so
  * without this every symbol stays the same screen size at z=2 (whole
  * Pacific) as at z=14 (single garrison gate) — gigantic and unreadable
@@ -281,9 +233,6 @@ export function OkinawaMapCanvas({
   useEffect(() => {
     hoveredIdRef.current = hoveredId;
   }, [hoveredId]);
-
-  // Threat-rings toggle. Off by default; visible distractor when on.
-  const [showThreatRings, setShowThreatRings] = useState(false);
 
   // Deep-link from PULSE Risk Board: /bastion?unit=CLB-1 selects the
   // marker aliased to that PULSE unit and flies the camera to it. We
@@ -585,61 +534,6 @@ export function OkinawaMapCanvas({
     });
   }, [locked, ready]);
 
-  // PLA threat-ring overlay. We add the GeoJSON source + circle layer
-  // once on map ready; visibility is toggled via setLayoutProperty so
-  // the source doesn't re-fetch every time the operator hides/shows.
-  useEffect(() => {
-    if (!ready) return;
-    const map = mapRef.current;
-    if (!map) return;
-    const sourceId = "spire-threat-rings";
-    const layerId = "spire-threat-rings-fill";
-    const lineLayerId = "spire-threat-rings-line";
-
-    if (!map.getSource(sourceId)) {
-      const features = PLA_THREAT_RINGS.map((r) => ({
-        type: "Feature" as const,
-        properties: {
-          name: r.name,
-          color: r.color,
-          opacity: r.opacity,
-          rangeKm: r.rangeKm,
-        },
-        geometry: makeCircleGeoJSON(r.centerLngLat, r.rangeKm),
-      }));
-      map.addSource(sourceId, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features },
-      });
-      map.addLayer({
-        id: layerId,
-        type: "fill",
-        source: sourceId,
-        paint: {
-          "fill-color": ["get", "color"],
-          "fill-opacity": ["get", "opacity"],
-        },
-        layout: { visibility: "none" },
-      });
-      map.addLayer({
-        id: lineLayerId,
-        type: "line",
-        source: sourceId,
-        paint: {
-          "line-color": ["get", "color"],
-          "line-width": 1.4,
-          "line-opacity": 0.7,
-          "line-dasharray": [2, 3],
-        },
-        layout: { visibility: "none" },
-      });
-    }
-
-    const vis = showThreatRings ? "visible" : "none";
-    if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", vis);
-    if (map.getLayer(lineLayerId)) map.setLayoutProperty(lineLayerId, "visibility", vis);
-  }, [ready, showThreatRings]);
-
   function flyToIsland(island: keyof typeof ISLAND_PRESETS) {
     const map = mapRef.current;
     if (!map) return;
@@ -730,27 +624,6 @@ export function OkinawaMapCanvas({
           <span className="ml-auto font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
             MIL-STD-2525D
           </span>
-          {/* PLA threat-rings toggle — overlays doctrinal ASBM/ASCM
-           * coverage so the contested-logistics narrative is visible
-           * at a glance. Off by default; visual distractor when on. */}
-          <button
-            type="button"
-            onClick={() => setShowThreatRings((v) => !v)}
-            className={
-              "rounded-sm border px-2 py-1 font-mono text-[10px] uppercase tracking-widest transition-colors " +
-              (showThreatRings
-                ? "border-[var(--color-danger)] bg-[color-mix(in_oklab,var(--color-danger-muted)_25%,var(--color-surface))] text-[var(--color-danger)]"
-                : "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text)]")
-            }
-            aria-pressed={showThreatRings}
-            title={
-              showThreatRings
-                ? "Hide PLA ASBM/ASCM coverage rings"
-                : "Show PLA ASBM/ASCM coverage rings (doctrinal range)"
-            }
-          >
-            {showThreatRings ? "⚠ Threats" : "Threats"}
-          </button>
           {/* 3D pitch toggle — equivalent to the 3D affordance on the
            * previous BASTION map. */}
           <button
