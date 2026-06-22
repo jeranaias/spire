@@ -197,8 +197,22 @@ async def channels_health_rollup_endpoint(request: Request):
         "stale": [{channel_id, last_success_at, ...}],  # never succeeded OR > 1h ago
         "failing": [{channel_id, consecutive_failures, last_error}],
       }
+
+    Unlike the action endpoints, this is a status poller the TopBar hits
+    every 30s. When UIS pull-ingest is disabled it returns a clean 200 with
+    ``disabled: true`` (and zero counts) rather than 503 — a 503 here is a
+    config state, not a fault, and would otherwise spam the browser console
+    on every tick. The chip hides itself on ``enabled == 0``.
     """
-    _require_ingest_enabled()
+    if not _ingest_enabled():
+        return {
+            "total": 0,
+            "enabled": 0,
+            "circuit_open": 0,
+            "failing": [],
+            "stale": [],
+            "disabled": True,
+        }
     user = getattr(request.state, "user", None)
     require_user_role(user, INGEST_ROLES, action="uis.channels.rollup")
     from datetime import datetime, timedelta, timezone
