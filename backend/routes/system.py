@@ -242,18 +242,38 @@ async def status():
 # stays responsive, and (2) cache the result on a long TTL — chain integrity
 # changes on the order of minutes, not the 8s status cadence, so re-verifying
 # every poll just burns a core.
-_CHAIN_TTL_S = 60.0
+_CHAIN_TTL_S = 120.0
 _chain_cache: dict = {"ts": 0.0, "value": None}
+_chain_refresh_lock = asyncio.Lock()
+
+
+async def _refresh_chain() -> dict:
+    # Single-flight via the lock: concurrent cold callers (the page fires
+    # /status + /decision-bridge/audit together) collapse to ONE O(n) walk —
+    # the queued callers re-check the cache after acquiring and return it.
+    async with _chain_refresh_lock:
+        cached = _chain_cache["value"]
+        if cached is not None and (_time.monotonic() - _chain_cache["ts"]) < _CHAIN_TTL_S:
+            return cached
+        value = await asyncio.to_thread(verify_chain)
+        _chain_cache["value"] = value
+        _chain_cache["ts"] = _time.monotonic()
+        return value
 
 
 async def _verify_chain_cached() -> dict:
+    # Stale-while-revalidate: once warm, NO caller ever waits on the O(n)
+    # chain walk. Fresh → return cached. Stale → return stale now + refresh
+    # in the background. Cold (first call before the startup warm lands) →
+    # compute once in a worker thread (loop stays responsive for everything
+    # else). Pre-warmed by the lifespan status warm so the first page load
+    # is already served from cache.
     cached = _chain_cache["value"]
-    if cached is not None and (_time.monotonic() - _chain_cache["ts"]) < _CHAIN_TTL_S:
+    if cached is not None:
+        if (_time.monotonic() - _chain_cache["ts"]) >= _CHAIN_TTL_S:
+            asyncio.create_task(_refresh_chain())
         return cached
-    value = await asyncio.to_thread(verify_chain)
-    _chain_cache["value"] = value
-    _chain_cache["ts"] = _time.monotonic()
-    return value
+    return await _refresh_chain()
 
 
 async def _compute_status():
