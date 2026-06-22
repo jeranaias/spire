@@ -949,7 +949,7 @@ function LinkStatusStrip({ lastSuccessAt }: { lastSuccessAt: number | null }) {
 // large title, a one-line "what" subtitle, and a one-line "why this
 // matters" caption pulled from the stage script.
 // ---------------------------------------------------------------------------
-type StageTileKey = "sentry" | "pulse" | "bastion" | "dha-rescue";
+type StageTileKey = "sentry" | "pulse" | "bastion";
 
 interface StageTileSpec {
   key: StageTileKey;
@@ -962,9 +962,9 @@ interface StageTileSpec {
 }
 
 // Order locked by the WP-2 spec: SENTRY (UC 14) → PULSE (UC 13) →
-// BASTION (UC 15) → DHA RESCUE (UC 4). The badge is the hackathon
-// use-case number (NOT a re-numbered "01/02/03/04" sequence) so the
-// audience can match each tile back to the published call.
+// BASTION (UC 15). The badge is the hackathon use-case number (NOT a
+// re-numbered "01/02/03" sequence) so the audience can match each tile
+// back to the published call.
 const STAGE_TILES: StageTileSpec[] = [
   {
     key: "sentry",
@@ -995,16 +995,6 @@ const STAGE_TILES: StageTileSpec[] = [
       "Gates, utilities, emergency, weather, sensors — fused on one COP. Detection to FPCON CHARLIE in seconds, not minutes.",
     accent: "var(--color-danger)",
     to: "/bastion",
-  },
-  {
-    key: "dha-rescue",
-    number: "4",
-    title: "DHA RESCUE",
-    subtitle: "BLOOD/CLASS VIII H+72 — DMO",
-    blurb:
-      "Predictive blood / Class VIII sustainment under INDOPACOM DMO. Hub-spoke supply, cold-chain, market-aware sourcing.",
-    accent: "var(--color-success)",
-    to: "/dha-rescue",
   },
 ];
 

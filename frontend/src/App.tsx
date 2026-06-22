@@ -87,9 +87,6 @@ function useGoToShortcuts() {
           case "p": go("/pulse"); break;
           case "b": go("/bastion"); break;
           case "a": go("/admin"); break;
-          // MDM 2026 stage-pivot — `g d` jumps to the DHA RESCUE
-          // hero surface. Always allowed (the route has no scope guard).
-          case "d": nav("/dha-rescue"); break;
           // 'g f' opens the feedback drawer. Dispatched as a window event
           // so FeedbackDrawer can listen without duplicating the chord
           // window state. Walkthrough audit: prior shortcut was Shift+F

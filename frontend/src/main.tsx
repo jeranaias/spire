@@ -84,10 +84,6 @@ const ChannelsView = lazyWithRecovery(() => import("./views/admin/ChannelsView")
 // + escape hatch for operators who prefer landing directly on their
 // scoped surface.
 const DecisionBridgeView = lazyWithRecovery(() => import("./views/DecisionBridge").then((m) => ({ default: m.DecisionBridgeView })));
-// MDM 2026 stage-pivot — first-class landing for the DHA RESCUE
-// (Class VIII / blood resupply) hero use case. Lazy: the view is only
-// reached from the stage-mode Decision Bridge.
-const DhaRescueView = lazyWithRecovery(() => import("./views/DhaRescueView").then((m) => ({ default: m.DhaRescueView })));
 
 // Expose the active role to the API layer. Every GET/POST now splices it as
 // `?role=...` so the backend's scoping filter applies per-call.
@@ -298,12 +294,6 @@ createRoot(document.getElementById("root")!).render(
              * a blank Outlet. */}
             <Route path="pitch" element={<Navigate to="/" replace />} />
             <Route path="pitch/*" element={<Navigate to="/" replace />} />
-            {/* MDM 2026 stage-pivot — DHA RESCUE first-class surface.
-             * Reachable from the stage-mode Decision Bridge as the
-             * fourth hero use-case tile. No role gate: it's a
-             * presenter-facing summary + drill-into BASTION for the
-             * Class VIII / blood resupply vignette. */}
-            <Route path="dha-rescue" element={<ViewSuspense><DhaRescueView /></ViewSuspense>} />
           </Route>
         </Routes>
       </HashRouter>

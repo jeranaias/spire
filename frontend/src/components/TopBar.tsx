@@ -27,16 +27,15 @@ const OPERATOR_TABS: Tab[] = [
 ];
 
 // MDM 2026 stage-pivot — when `stageMode` is on, the primary nav spine
-// is the four hero use-cases (SENTRY/PULSE/BASTION/DHA RESCUE), no
-// ADMIN. The AUDIT pill on the right of the bar still routes the
-// presenter to /admin/audit for the closing beat, but the privileged
-// ADMIN landing surface is intentionally not exposed as a tab on stage
-// so the audience sees the four-module spine and nothing else.
+// is the hero use-cases (SENTRY/PULSE/BASTION), no ADMIN. The AUDIT
+// pill on the right of the bar still routes the presenter to
+// /admin/audit for the closing beat, but the privileged ADMIN landing
+// surface is intentionally not exposed as a tab on stage so the
+// audience sees the module spine and nothing else.
 const STAGE_TABS: Tab[] = [
   { to: "/sentry",     label: "SENTRY",     restrict: null },
   { to: "/pulse",      label: "PULSE",      restrict: null },
   { to: "/bastion",    label: "BASTION",    restrict: null },
-  { to: "/dha-rescue", label: "DHA RESCUE", restrict: null },
 ];
 
 // Friendly per-tab list of authorized roles for the out-of-scope tooltip.
@@ -115,8 +114,8 @@ export function TopBar() {
               // (it's a privileged surface, not a teaser). Other tabs render
               // even out of scope so operators can see what exists, but they
               // get the disabled treatment + tooltip.
-              // Stage mode swaps ADMIN for DHA RESCUE so the four-module
-              // spine matches the Decision Bridge tile order.
+              // Stage mode drops ADMIN so the tab spine matches the
+              // Decision Bridge use-case tile order.
               .filter((t) => t.restrict == null || t.restrict === role)
               .map((tab) => {
                 const { allowed, allowedRoles } = authorizedRolesFor(tab.to, role);
@@ -272,7 +271,7 @@ export function TopBar() {
 function MoreMenu() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const { role, stageMode } = useSpireStore();
+  const { role } = useSpireStore();
 
   // Close on outside click or Escape.
   useEffect(() => {
@@ -291,13 +290,11 @@ function MoreMenu() {
     };
   }, [open]);
 
-  // Surface list — every page reachable with one click. DHA RESCUE only
-  // appears here in operator mode (it's already a primary tab in stage mode).
-  const items: { to: string; label: string; hide?: boolean; external?: boolean }[] = [
+  // Surface list — every page reachable with one click.
+  const items: { to: string; label: string; external?: boolean }[] = [
     { to: "/", label: "Decision Bridge" },
-    { to: "/dha-rescue", label: "DHA Rescue", hide: stageMode },
     { to: "https://marlog-mdm.fly.dev", label: "MARLOG · Logistics Calculator", external: true },
-  ].filter((i) => !i.hide);
+  ];
 
   // Admin hides for non-security_manager. The primary nav already shows
   // ADMIN for security_manager, but list it here too as a fallback path.
