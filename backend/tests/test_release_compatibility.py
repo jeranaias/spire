@@ -30,6 +30,18 @@ def _login(client: TestClient, dodid: str) -> None:
     assert r.status_code == 200, r.text
 
 
+@pytest.fixture(autouse=True)
+def _elevate_egress_clearance(monkeypatch):
+    """The demo CACs are all CUI ("bump demo user clearances to CUI",
+    4993e60) — the operational posture is UNCLASSIFIED//FOUO. These tests
+    exercise the SECRET-data release-compatibility ENGINE (block/warn/ok),
+    which sits behind require_clearance, so they need a SECRET-cleared egress
+    authority to reach the logic. Elevate the security_manager for this module
+    only; production clearances are untouched."""
+    from backend.auth import MOCK_USERS_BY_DODID
+    monkeypatch.setitem(MOCK_USERS_BY_DODID["3456789012"], "clearance", "SECRET")
+
+
 # ---------------------------------------------------------------------------
 # Helper unit tests against the extracted validator
 # ---------------------------------------------------------------------------
@@ -102,37 +114,57 @@ def test_export_no_batch_id_still_works(client):
 
 
 def test_export_secret_noforn_to_fvey_is_blocked_and_audited(client):
-    """The canonical dataset contains classified-TM (NOFORN-bearing) records.
-    Requesting FVEY release at SECRET must hard-block + write a
-    `release_blocked` audit row, not build a SECRET // REL TO USA, AUS, ...
-    bundle.
-    """
+    """A SECRET batch carrying a classified (NOFORN-bearing) record must
+    hard-block an FVEY release + write a `release_blocked` audit row, not
+    build a SECRET // REL TO USA, AUS, ... bundle. Uses a synthetic batch:
+    the canonical demo dataset is CUI//FOUO, so it can't carry the
+    SECRET//NOFORN content this doctrinal block guards against (clearance is
+    elevated to SECRET by the module autouse fixture so we reach the engine)."""
     _login(client, "3456789012")
-    r = client.post(
-        "/api/sentry/export",
-        json={"release_authority": "FVEY", "format": "xlsx", "include_audit": True, "batch_id": None},
-    )
-    assert r.status_code == 403, r.text
-    detail = r.json()["detail"]
-    assert detail["error"] == "release_blocked"
-    assert detail["release_authority"] == "FVEY"
-    assert detail["classification"] in {"SECRET", "TOP_SECRET", "TS_SCI"}
-    assert "NOFORN" in detail["caveats"]
-    assert detail["issues"], "issues array must explain the doctrinal block"
+    batch_id = "BATCH-T69-BLOCK-001"
+    sentry_route._BATCHES[batch_id] = {
+        "batch_id": batch_id,
+        "source": "synthetic_block_path",
+        "records": [
+            {
+                "sr_number": "SR-T69-B-1",
+                "unit_name": "CLB-6",
+                "equipment_type": "MTVR",
+                "source_classification": "SECRET",
+                "detected_classification_oracle": "SECRET",
+                # `classified` flag → NOFORN aggregated → SECRET//NOFORN→FVEY blocks.
+                "sensitive_flags_oracle": ["classified"],
+                "remark": "Classified TM cross-reference; NOFORN-bearing.",
+            }
+        ],
+    }
+    try:
+        r = client.post(
+            "/api/sentry/export",
+            json={"release_authority": "FVEY", "format": "xlsx", "include_audit": True, "batch_id": batch_id},
+        )
+        assert r.status_code == 403, r.text
+        detail = r.json()["detail"]
+        assert detail["error"] == "release_blocked"
+        assert detail["release_authority"] == "FVEY"
+        assert detail["classification"] in {"SECRET", "TOP_SECRET", "TS_SCI"}
+        assert "NOFORN" in detail["caveats"]
+        assert detail["issues"], "issues array must explain the doctrinal block"
 
-    # Audit row landed in the chain. The /export step uses the source label
-    # ("canonical_dataset") as the subject_id when no batch_id is supplied.
-    rows = entries_for_subject("canonical_dataset", limit=20)
-    blocks = [
-        e for e in rows
-        if e.get("kind") == "release_blocked"
-        and e["payload"].get("release_authority") == "FVEY"
-    ]
-    assert blocks, f"expected a release_blocked audit row; got kinds: {[e.get('kind') for e in rows[:10]]}"
-    last = blocks[0]["payload"]  # ORDER BY id DESC → newest first
-    assert "NOFORN" in last["caveats"]
-    assert last["classification"] in {"SECRET", "TOP_SECRET", "TS_SCI"}
-    assert last["surface"] == "backend"
+        # Audit row landed — subject_id is the batch_id when one is supplied.
+        rows = entries_for_subject(batch_id, limit=20)
+        blocks = [
+            e for e in rows
+            if e.get("kind") == "release_blocked"
+            and e["payload"].get("release_authority") == "FVEY"
+        ]
+        assert blocks, f"expected a release_blocked audit row; got kinds: {[e.get('kind') for e in rows[:10]]}"
+        last = blocks[0]["payload"]  # ORDER BY id DESC → newest first
+        assert "NOFORN" in last["caveats"]
+        assert last["classification"] in {"SECRET", "TOP_SECRET", "TS_SCI"}
+        assert last["surface"] == "backend"
+    finally:
+        sentry_route._BATCHES.pop(batch_id, None)
 
 
 def test_export_warn_path_surfaces_release_warnings(client, monkeypatch):
@@ -144,6 +176,8 @@ def test_export_warn_path_surfaces_release_warnings(client, monkeypatch):
     whose source_classification is SECRET but which carries no `classified`
     sensitive flag (so the aggregated caveat set excludes NOFORN).
     """
+    # Clearance elevated to SECRET by the module-level _elevate_egress_clearance
+    # autouse fixture so this SECRET->FVEY warn-path test reaches the logic.
     _login(client, "3456789012")
     batch_id = "BATCH-T69-WARN-001"
     sentry_route._BATCHES[batch_id] = {
