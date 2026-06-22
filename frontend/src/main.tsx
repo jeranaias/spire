@@ -83,10 +83,6 @@ const IngestMapperView = lazyWithRecovery(() => import("./views/admin/IngestMapp
 // UIS-P5.1 — channels admin (pull-mode SFTP / IMAP / HTTP / DB / Kafka
 // configs, health, on-demand poll, DLQ inspect, circuit reset).
 const ChannelsView = lazyWithRecovery(() => import("./views/admin/ChannelsView").then((m) => ({ default: m.ChannelsView })));
-// Integrations / system-of-record adapter contracts. Wave-1 lane (#27);
-// currently scoped to GCSS-MC. No role-gate — every operator can read the
-// adapter posture as part of the inoculation-via-honesty narrative.
-const IntegrationsView = lazyWithRecovery(() => import("./views/IntegrationsView").then((m) => ({ default: m.IntegrationsView })));
 // Task-24 — "15-second decision" hero dashboard. Lives at `/`. The
 // previous role-default redirect is preserved at `/home` as a fallback
 // + escape hatch for operators who prefer landing directly on their
@@ -309,16 +305,6 @@ createRoot(document.getElementById("root")!).render(
             <Route path="admin/ingest" element={<ViewSuspense><IngestView /></ViewSuspense>} />
             <Route path="admin/ingest/mapper" element={<ViewSuspense><IngestMapperView /></ViewSuspense>} />
             <Route path="admin/channels" element={<ViewSuspense><ChannelsView /></ViewSuspense>} />
-            {/* GCSS-MC integration contract page (Wave-1 lane #27). The
-             * `:system` slug is fixed to `gcss-mc` for now — only one
-             * adapter contract exists — but the path keeps room for
-             * follow-on integrations (palantir, magtf-ii) without a
-             * router change. */}
-            <Route path="integrations/:system" element={<ViewSuspense><IntegrationsView /></ViewSuspense>} />
-            {/* Bare /integrations redirects to the default system —
-             * MORE menu used to point here and rendered an empty
-             * Outlet because no route matched without :system. */}
-            <Route path="integrations" element={<Navigate to="/integrations/gcss-mc" replace />} />
             {/* /pitch retired — redirect to home so any old links / muscle
              * memory routes back into Decision Bridge instead of rendering
              * a blank Outlet. */}

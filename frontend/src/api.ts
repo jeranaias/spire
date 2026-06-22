@@ -445,33 +445,6 @@ export const api = {
     // pill; intentionally mock + deterministic across polls.
     gcssMcLastSync: () =>
       jsonFetch<GcssMcLastSync>("/integrations/gcss-mc/last-sync", undefined, false),
-    // Task #76 — system-of-record sample slice. Goes through jsonFetch so
-    // the DDIL interceptor applies (the integrations page is the one
-    // place that documents failure modes — it must respect the SATCOM
-    // denial drill, not silently bypass it).
-    gcssMcSample: (limit = 3) =>
-      jsonFetch<GcssMcSamplePayload>(
-        `/integrations/gcss-mc/sample?limit=${limit}`,
-        undefined,
-        false,
-      ),
-    // Task #177 — GCSS-MC schema-fidelity work. Backs the Field Dictionary
-    // section that proves SPIRE's coverage against the real 163-column
-    // schema. Pulled once on the Integrations page, no polling needed.
-    gcssMcCoverageSummary: () =>
-      jsonFetch<GcssMcCoverageSummary>(
-        "/integrations/gcss-mc/coverage-summary",
-        undefined,
-        false,
-      ),
-    gcssMcDictionary: (section?: "header" | "parts" | "due_in") =>
-      jsonFetch<GcssMcDictionary>(
-        section
-          ? `/integrations/gcss-mc/dictionary?section=${section}`
-          : "/integrations/gcss-mc/dictionary",
-        undefined,
-        false,
-      ),
     // Task #25 — return SPIRE to a clean t=0 demo state. Gated server-side
     // to the demo operator (g4); the topbar reset button is hidden for
     // every other role so this client method is never reachable from the

@@ -22,7 +22,6 @@
  * old NodeStatus drawer offered.
  */
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   api,
   type GcssMcLastSync,
@@ -95,7 +94,6 @@ export function SystemStatusChip() {
   const role = useSpireStore((s) => s.role);
   const operatingMode = useSpireStore((s) => s.operatingMode);
   const pushToast = useSpireStore((s) => s.pushToast);
-  const nav = useNavigate();
 
   const syncVisible = SYNC_VISIBLE_ROLES.has(role);
 
@@ -424,18 +422,7 @@ export function SystemStatusChip() {
                 ? "Reference implementation — connection is mocked"
                 : null
             }
-            action={
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setOpen(false);
-                  nav("/integrations/gcss-mc");
-                }}
-              >
-                Contract
-              </Button>
-            }
+            action={null}
           />
 
           <StatusRow
