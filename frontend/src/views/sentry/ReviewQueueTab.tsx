@@ -94,6 +94,9 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
   const [resolved, setResolved] = useState<Record<string, Action>>({});
   const [selected, setSelected] = useState<{ col: Column; idx: number } | null>(null);
   const [showAggregation, setShowAggregation] = useState(false);
+  // Filter rail collapsed by default so the three review columns are the
+  // focus; the header stays a single compact row with a Filters toggle.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [bulkRunning, setBulkRunning] = useState(false);
   // Surfacing the load failure was missing — backend would 400 on a stale
   // role param mismatch and the view would sit on "Loading review queue ..."
@@ -573,6 +576,14 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
             ↑↓ nav · A approve · R reject
           </span>
         </div>
+        <div className="flex items-center gap-2">
+        <Button
+          onClick={() => setFiltersOpen((v) => !v)}
+          variant="secondary"
+          size="sm"
+        >
+          Filters{filtersActive ? " ·" : ""} {filtersOpen ? "▴" : "▾"}
+        </Button>
         {queue && queue.aggregation_risks.length > 0 && (
           <Button
             onClick={() => setShowAggregation((v) => !v)}
@@ -590,10 +601,13 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
             {queue.aggregation_risks.length} aggregation risk{queue.aggregation_risks.length === 1 ? "" : "s"}
           </Button>
         )}
+        </div>
       </div>
 
-      {/* Filter chips — client-side narrowing of the loaded queue. Multi
-          select within a category (OR), AND across categories. */}
+      {/* Filter chips — collapsed by default behind the header "Filters"
+          toggle so the three columns lead. Multi-select within a category
+          (OR), AND across categories. */}
+      {filtersOpen && (
       <FilterChipsBar
         clsFilter={clsFilter}
         onClsFilter={setClsFilter}
@@ -609,22 +623,13 @@ export function ReviewQueueTab({ ctx }: { ctx: SentryContext }) {
         showing={totalFiltered}
         total={totalAfterResolved}
       />
+      )}
 
       <div className="flex flex-1 overflow-hidden tracking-wider">
-        {/* Walkthrough #36 — when aggregation_risks fire, the matrix lives
-            in the left rail of the queue (always-on, judge-visible) instead
-            of being hidden behind a button a 12-second Marine will not
-            click. The detail prose panel still toggles below. */}
-        {queue && queue.aggregation_risks.length > 0 && (
-          <AggregationRiskRail
-            risks={queue.aggregation_risks}
-            remarkedPairs={remarkedPairs}
-            remarkRunning={remarkRunning}
-            onCellClick={(unit, equipment, count) =>
-              setRemarkConfirm({ unit, equipment, count })
-            }
-          />
-        )}
+        {/* Aggregation-risk matrix is reached via the "N aggregation risks"
+            header button → the full-width AggregationRiskPanel below. The old
+            always-on cramped left rail was removed so the three review
+            columns get the full width. */}
         <div className={clsx("flex flex-1 overflow-hidden", selectedRecord && "pr-0")}>
           <ReviewColumn
             title="Auto-cleared"
@@ -757,158 +762,6 @@ function ClassificationStripe({
   );
 }
 
-// Walkthrough #36 — left-rail aggregation matrix. Renders the unit ×
-// equipment_type matrix the same way `AggregationRiskPanel` does, but
-// docked into the queue layout so it is visible the moment the page loads
-// rather than gated behind a button.
-function AggregationRiskRail({
-  risks,
-  remarkedPairs,
-  remarkRunning,
-  onCellClick,
-}: {
-  risks: any[];
-  remarkedPairs: Set<string>;
-  remarkRunning: boolean;
-  onCellClick: (unit: string, equipment: string, count: number) => void;
-}) {
-  const units = useMemo(() => Array.from(new Set(risks.map((r) => r.unit))).sort(), [risks]);
-  const equipTypes = useMemo(
-    () => Array.from(new Set(risks.map((r) => r.equipment_type))).sort(),
-    [risks],
-  );
-  const cell = useMemo(() => {
-    const m = new Map<string, any>();
-    for (const r of risks) m.set(`${r.unit}::${r.equipment_type}`, r);
-    return m;
-  }, [risks]);
-  return (
-    <aside
-      className="flex w-56 shrink-0 flex-col overflow-hidden border-r border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning-muted)_14%,var(--color-surface))]"
-      aria-label="Aggregation risk matrix"
-    >
-      <div className="border-b border-[color-mix(in_oklab,var(--color-warning)_40%,var(--color-border))] px-2 py-2">
-        <div className="flex items-center gap-2 font-mono text-xs font-semibold uppercase tracking-widest text-[var(--color-warning)]">
-          <span
-            className="inline-block h-2 w-2 rounded-full bg-[var(--color-danger)]"
-            style={{ boxShadow: "0 0 5px var(--color-danger)" }}
-          />
-          Agg. risk
-          <span className="tabular-nums text-[var(--color-text-muted)]">({risks.length})</span>
-        </div>
-        <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-          unit × equipment
-        </div>
-      </div>
-      <div className="flex-1 overflow-auto p-2">
-        <table className="border-collapse font-mono text-[10px]">
-          <thead>
-            <tr>
-              <th className="sticky left-0 z-10 bg-transparent p-1 text-left text-[var(--color-text-muted)]" />
-              {equipTypes.map((e) => (
-                <th
-                  key={e}
-                  className="p-0 text-left text-[10px] text-[var(--color-text-muted)]"
-                  style={{
-                    transform: "rotate(-45deg)",
-                    transformOrigin: "bottom left",
-                    height: 60,
-                    width: 14,
-                    verticalAlign: "bottom",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={e}
-                >
-                  {e.length > 18 ? `${e.slice(0, 16)}…` : e}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {units.map((u) => (
-              <tr key={u}>
-                <td
-                  className="sticky left-0 z-10 max-w-[7rem] truncate whitespace-nowrap bg-transparent px-1 py-[1px] text-[var(--color-text)]"
-                  title={u}
-                >
-                  {u}
-                </td>
-                {equipTypes.map((e) => {
-                  const r = cell.get(`${u}::${e}`);
-                  if (!r) {
-                    return (
-                      <td
-                        key={e}
-                        className="border border-[var(--color-border)] bg-[var(--color-bg)] p-0"
-                        style={{ height: 14, width: 14 }}
-                      />
-                    );
-                  }
-                  const pairKey = `${u}::${e}`;
-                  const remarked = remarkedPairs.has(pairKey);
-                  const cannibCount = r.cannib_count ?? r.count ?? r.sr_count ?? 0;
-                  const tid = `rq-agg-cell-${u}-${e}`.replace(/\s+/g, "-");
-                  return (
-                    <td
-                      key={e}
-                      title={
-                        remarked
-                          ? `${r.warning} · re-marked CUI`
-                          : `${r.warning} · click to re-mark CUI`
-                      }
-                      data-testid={tid}
-                      role="button"
-                      aria-label={`Re-mark ${u} / ${e} batch as CUI`}
-                      tabIndex={0}
-                      onClick={() => {
-                        if (remarkRunning) return;
-                        onCellClick(u, e, cannibCount);
-                      }}
-                      onKeyDown={(ev) => {
-                        if (remarkRunning) return;
-                        if (ev.key === "Enter" || ev.key === " ") {
-                          ev.preventDefault();
-                          onCellClick(u, e, cannibCount);
-                        }
-                      }}
-                      className={clsx(
-                        "relative border",
-                        remarkRunning ? "cursor-progress" : "cursor-pointer",
-                        remarked
-                          ? "border-[var(--color-success)]"
-                          : "border-[color-mix(in_oklab,var(--color-warning)_40%,var(--color-border))]",
-                      )}
-                      style={{
-                        height: 14,
-                        width: 14,
-                        background: remarked
-                          ? "color-mix(in oklab, var(--color-success) 55%, var(--color-bg))"
-                          : "color-mix(in oklab, var(--color-danger) 50%, var(--color-bg))",
-                        boxShadow: remarked
-                          ? "inset 0 0 4px color-mix(in oklab, var(--color-success) 50%, transparent)"
-                          : "inset 0 0 4px color-mix(in oklab, var(--color-danger) 40%, transparent)",
-                      }}
-                    >
-                      {remarked && (
-                        <span
-                          aria-hidden
-                          className="pointer-events-none absolute inset-0 flex items-center justify-center text-[8px] font-bold text-[var(--color-success)]"
-                          style={{ textShadow: "0 0 2px var(--color-bg)" }}
-                        >
-                          ✓
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </aside>
-  );
-}
 
 // Walkthrough #22 / #34 — confirmation modal so a stray click on the column-
 // header bulk button never silently approves 374 records. The earlier modal's
