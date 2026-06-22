@@ -658,7 +658,12 @@ async def uis_list_profiles(
     request: Request,
     source_id: Optional[str] = Query(None),
 ):
-    _require_ingest_enabled()
+    # The Mapping Editor admin tab auto-loads this on mount. When UIS ingest
+    # is disabled (demo/cloud posture) return a clean empty 200 with a
+    # ``disabled`` marker rather than 503 — a status poll shouldn't log a
+    # console error on every visit. Mutating endpoints keep their 503 gate.
+    if not _ingest_enabled():
+        return {"profiles": [], "disabled": True}
     user = getattr(request.state, "user", None)
     require_user_role(user, INGEST_ROLES, action="uis.profiles.list")
     profiles = list_profiles(source_id=source_id)
