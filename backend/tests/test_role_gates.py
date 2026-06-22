@@ -71,7 +71,6 @@ PROTECTED_ENDPOINTS: list[tuple[str, str, str, str]] = [
     # BASTION — router-level gate, emits view_scope_denied.
     ("/bastion", "GET",  "/api/bastion/cop",                "view_scope_denied"),
     ("/bastion", "GET",  "/api/bastion/alerts",             "view_scope_denied"),
-    ("/bastion", "GET",  "/api/bastion/fused-threats",      "view_scope_denied"),
     ("/bastion", "GET",  "/api/bastion/incidents",          "view_scope_denied"),
     ("/bastion", "GET",  "/api/bastion/tmrs",               "view_scope_denied"),
     # Admin — per-route gates inside system.py, emit role_denied.

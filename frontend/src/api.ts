@@ -827,7 +827,6 @@ export const api = {
     cop: () => jsonFetch<BastionCOP>("/bastion/cop"),
     alerts: (limit = 30) =>
       jsonFetch<BastionAlertsResponse>(`/bastion/alerts?limit=${limit}`),
-    fusedThreats: () => jsonFetch<{ fused_threats: FusedThreat[] }>("/bastion/fused-threats"),
     alertAction: (id: string, action: "ack" | "snooze" | "resolve" | "unack") =>
       jsonFetch<{ ok: boolean; alert_id: string; state: AlertState | null }>(
         `/bastion/alerts/${encodeURIComponent(id)}/${action}`,
@@ -835,13 +834,6 @@ export const api = {
       ),
     incidents: (limit = 50) => jsonFetch<{ incidents: any[] }>(`/bastion/incidents?limit=${limit}`),
     incidentResponse: (id: string) => jsonFetch<IncidentResponse>(`/bastion/incidents/${id}/response`),
-    simulateThermalHawk: (unit = "CLB-6") =>
-      jsonFetch<ThermalHawkSim>(`/bastion/simulate/thermalhawk-detection`, {
-        method: "POST",
-        body: JSON.stringify({ unit }),
-      }),
-    clearSim: (id: string) =>
-      jsonFetch<{ ok: boolean }>(`/bastion/simulate/clear/${id}`, { method: "POST" }),
     nlQuery: (text: string) =>
       jsonFetch<NLQueryResult>(`/bastion/nl-query`, {
         method: "POST",
@@ -2397,21 +2389,6 @@ export interface BastionCOP {
   as_of: string;
 }
 
-export interface FusedThreat {
-  id: string;
-  source: "FUSION";
-  severity: "CRITICAL" | "HIGH" | "MODERATE" | "LOW" | "INFO";
-  timestamp: string;
-  title: string;
-  body: string;
-  unit?: string | null;
-  building?: string | null;
-  fused: true;
-  confidence: number;
-  correlation_chain: { source: string; id: string; title: string; timestamp: string; label?: string }[];
-  response_taskings: string[];
-}
-
 export interface AlertState {
   status: "acknowledged" | "snoozed" | "resolved";
   at: string;
@@ -2428,10 +2405,6 @@ export interface BastionAlert {
   unit?: string;
   location?: string;
   grid?: string;
-  correlated_with?: any[];
-  fpcon_recommended?: string;
-  model_info?: any;
-  response_available?: boolean;
   // Per-alert state baked in by the backend so the front-end never has
   // to infer ack / snooze / resolve from local component state.
   _state?: AlertState;
@@ -2439,7 +2412,6 @@ export interface BastionAlert {
 
 export interface BastionAlertsResponse {
   alerts: BastionAlert[];
-  fused_threats?: FusedThreat[];
   total: number;
   severity_counts: Record<string, number>;
 }
@@ -2461,14 +2433,6 @@ export interface IncidentResponse {
   };
   response_force_assigned: string;
   estimated_response_minutes: number;
-}
-
-export interface ThermalHawkSim {
-  sim_id: string;
-  alert: BastionAlert;
-  checklist: IncidentResponse["checklist"];
-  cordon_zones: { radius_m: number; label: string }[];
-  response_forces_dispatched: string[];
 }
 
 export interface NLQueryResult {
