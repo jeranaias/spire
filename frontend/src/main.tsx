@@ -83,36 +83,17 @@ const IngestMapperView = lazyWithRecovery(() => import("./views/admin/IngestMapp
 // UIS-P5.1 — channels admin (pull-mode SFTP / IMAP / HTTP / DB / Kafka
 // configs, health, on-demand poll, DLQ inspect, circuit reset).
 const ChannelsView = lazyWithRecovery(() => import("./views/admin/ChannelsView").then((m) => ({ default: m.ChannelsView })));
-// E1 hardened-primitives gallery — design/QA surface for verifying every
-// variant of every primitive renders correctly. Not in role-based nav;
-// reachable only by direct deep link (#/__ui-docs).
-const UiDocsView  = lazyWithRecovery(() => import("./views/UiDocsView").then((m) => ({ default: m.UiDocsView })));
-// W1 lane: /about/team — pure-content page (warfighter customer + team).
-// Not role-gated; reachable to any authenticated user from the help menu.
-const AboutTeamView = lazyWithRecovery(() => import("./views/AboutTeamView").then((m) => ({ default: m.AboutTeamView })));
-// W1 transition pathway page — linkable from the Help overlay so a TORCH-class
-// judge can read the SBIR→MTA-RP plan without leaving the app.
-const TransitionView = lazyWithRecovery(() => import("./views/TransitionView").then((m) => ({ default: m.TransitionView })));
 // Integrations / system-of-record adapter contracts. Wave-1 lane (#27);
 // currently scoped to GCSS-MC. No role-gate — every operator can read the
 // adapter posture as part of the inoculation-via-honesty narrative.
 const IntegrationsView = lazyWithRecovery(() => import("./views/IntegrationsView").then((m) => ({ default: m.IntegrationsView })));
-// Joint COP export — sister-service partner viewer (no SPIRE chrome) and
-// the integrations / conformance documentation surface. Both lazy.
+// Joint COP export — sister-service partner viewer (no SPIRE chrome).
 const JointPreviewView      = lazyWithRecovery(() => import("./views/JointPreviewView").then((m) => ({ default: m.JointPreviewView })));
-const JointIntegrationsView = lazyWithRecovery(() => import("./views/JointIntegrationsView").then((m) => ({ default: m.JointIntegrationsView })));
 // Task-24 — "15-second decision" hero dashboard. Lives at `/`. The
 // previous role-default redirect is preserved at `/home` as a fallback
 // + escape hatch for operators who prefer landing directly on their
 // scoped surface.
 const DecisionBridgeView = lazyWithRecovery(() => import("./views/DecisionBridge").then((m) => ({ default: m.DecisionBridgeView })));
-// /pitch deck retired — the live SPIRE walkthrough IS the pitch.
-// PitchView source kept under views/pitch for git history; route
-// removed below.
-// W2 Task #37 — `/demo` scripted scenario cockpit. Lazy because the
-// surface is presenter-only; no operator ever has to download the chunk
-// during normal use.
-const DemoView = lazyWithRecovery(() => import("./views/DemoView").then((m) => ({ default: m.DemoView })));
 // MDM 2026 stage-pivot — first-class landing for the DHA RESCUE
 // (Class VIII / blood resupply) hero use case. Lazy: the view is only
 // reached from the stage-mode Decision Bridge.
@@ -291,11 +272,6 @@ createRoot(document.getElementById("root")!).render(
            * calls /api/joint/oms-uci/export which still re-checks the
            * cookie + clearance gate server-side. */}
           <Route path="/joint/preview" element={<ViewSuspense><JointPreviewView /></ViewSuspense>} />
-          {/* Integrations / conformance docs — same treatment. The doc is
-           * authored from /api/joint/conformance which is auth-gated by
-           * the session middleware; the view shows a friendly "sign in
-           * to SPIRE first" if the cookie is missing. */}
-          <Route path="/integrations/joint" element={<ViewSuspense><JointIntegrationsView /></ViewSuspense>} />
           <Route
             path="/"
             element={
@@ -347,15 +323,6 @@ createRoot(document.getElementById("root")!).render(
             <Route path="admin/ingest" element={<ViewSuspense><IngestView /></ViewSuspense>} />
             <Route path="admin/ingest/mapper" element={<ViewSuspense><IngestMapperView /></ViewSuspense>} />
             <Route path="admin/channels" element={<ViewSuspense><ChannelsView /></ViewSuspense>} />
-            {/* E1 hardened-primitives gallery — design/QA surface only.
-             * Not gated, intentionally hidden from nav. */}
-            <Route path="__ui-docs" element={<ViewSuspense><UiDocsView /></ViewSuspense>} />
-            {/* W1 — about/team. Reachable from the help menu. No role
-             * scope: pure content, available to anyone signed in. */}
-            <Route path="about/team" element={<ViewSuspense><AboutTeamView /></ViewSuspense>} />
-            {/* W1 about / transition pathway — linkable from Help. No
-             * scope guard; this is unclassified company / program info. */}
-            <Route path="about/transition" element={<ViewSuspense><TransitionView /></ViewSuspense>} />
             {/* GCSS-MC integration contract page (Wave-1 lane #27). The
              * `:system` slug is fixed to `gcss-mc` for now — only one
              * adapter contract exists — but the path keeps room for
@@ -371,12 +338,6 @@ createRoot(document.getElementById("root")!).render(
              * a blank Outlet. */}
             <Route path="pitch" element={<Navigate to="/" replace />} />
             <Route path="pitch/*" element={<Navigate to="/" replace />} />
-            {/* W2 Task #37 — `/demo` presenter cockpit. Inside the App
-             * shell so the scripted player can navigate to operator
-             * surfaces without losing chrome. No ScopeGuard: the cockpit
-             * itself is read-only, and the scenarioControl seek calls
-             * are role-checked server-side. */}
-            <Route path="demo" element={<ViewSuspense><DemoView /></ViewSuspense>} />
             {/* MDM 2026 stage-pivot — DHA RESCUE first-class surface.
              * Reachable from the stage-mode Decision Bridge as the
              * fourth hero use-case tile. No role gate: it's a

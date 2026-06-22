@@ -203,17 +203,10 @@ function useFailsafeHotkey() {
 
   useEffect(() => {
     // Failsafe hotkey is armed whenever a presenter context is active:
-    // a scenario is loaded, the operator session is in MDM 2026 stage
-    // mode, or the route is one of the dedicated presenter surfaces
-    // (/demo, /pitch). Any of these means F9 should reach the recorded
-    // backup with one keystroke.
-    const path = window.location.pathname;
-    const presenterRoute =
-      path === "/demo" ||
-      path === "/pitch" ||
-      path.startsWith("/demo/") ||
-      path.startsWith("/pitch/");
-    if (!scenarioLoaded && !stageMode && !presenterRoute) return;
+    // a scenario is loaded or the operator session is in MDM 2026 stage
+    // mode. Either means F9 should reach the recorded backup with one
+    // keystroke.
+    if (!scenarioLoaded && !stageMode) return;
 
     function inField(target: EventTarget | null): boolean {
       return (
