@@ -328,9 +328,14 @@ def _csp_value() -> str:
     extra = f" {tile_origin}" if tile_origin else ""
     return (
         "default-src 'self'; "
-        f"img-src 'self' data: blob: https://*.basemaps.cartocdn.com{extra}; "
-        f"connect-src 'self' https://*.basemaps.cartocdn.com{extra}; "
+        # CartoDB serves the style.json from the APEX (basemaps.cartocdn.com)
+        # while tiles/sprites/glyphs come off subdomains (a/b/c.basemaps...).
+        # CSP wildcards don't cover the apex, so both must be listed or the
+        # BASTION map fails to load its style.
+        f"img-src 'self' data: blob: https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com{extra}; "
+        f"connect-src 'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com{extra}; "
         "script-src 'self'; "
+        "worker-src 'self' blob:; "  # MapLibre GL spawns its render worker from a blob: URL
         "style-src 'self' 'unsafe-inline'; "  # Vite injects style tags; safe
         "font-src 'self' data:; "
         "frame-ancestors 'none'; "
