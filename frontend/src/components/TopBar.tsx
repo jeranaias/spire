@@ -239,11 +239,6 @@ export function TopBar() {
             <CommsControl />
           </span>
           {!stageMode && (
-            <span className="hidden md:inline-flex">
-              <PushToJointButton role={role} />
-            </span>
-          )}
-          {!stageMode && (
             <span className="hidden sm:inline-flex">
               <NotificationsChip />
             </span>
@@ -301,7 +296,6 @@ function MoreMenu() {
   const items: { to: string; label: string; hide?: boolean; external?: boolean }[] = [
     { to: "/", label: "Decision Bridge" },
     { to: "/dha-rescue", label: "DHA Rescue", hide: stageMode },
-    { to: "/joint/preview", label: "Joint COP" },
     { to: "/integrations/gcss-mc", label: "Integrations" },
     { to: "https://marlog-mdm.fly.dev", label: "MARLOG · Logistics Calculator", external: true },
   ].filter((i) => !i.hide);
@@ -939,43 +933,6 @@ function AlertBadge({ count }: { count: number }) {
   );
 }
 
-// PushToJointButton — opens the OMS/UCI sister-service viewer in a new
-// tab. Visible to roles that can release a SECRET//REL bundle. Other
-// roles don't see it so we don't tease an InsufficientClearance gate.
-function PushToJointButton({ role }: { role: Role }) {
-  const allowed = role === "security_manager" || role === "mef_commander" || role === "data_custodian";
-  if (!allowed) return null;
-  function openPartner() {
-    // HashRouter: deep links use the #/ prefix.
-    const url = new URL(window.location.href);
-    url.hash = "#/joint/preview";
-    window.open(url.toString(), "_blank", "noopener,noreferrer");
-  }
-  // Demoted to neutral chrome so the bar reads quiet at idle. The
-  // button used to render in primary blue at full saturation, which
-  // pulled the eye away from active-state chips (System, Notif). The
-  // partner push is a tertiary action: visible when allowed, but it
-  // shouldn't shout. Hover lifts the contrast to the prior treatment
-  // so the affordance is still clearly a CTA on dwell.
-  return (
-    <Button
-      variant="secondary"
-      size="md"
-      onClick={openPartner}
-      aria-label="Push current SPIRE state to the Joint COP partner viewer (opens in a new tab)"
-      title="Push to Joint COP — opens the sister-service OMS/UCI viewer in a new tab"
-      className="hidden xl:inline-flex px-2.5 text-xs tracking-wider border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,var(--color-surface))] hover:text-[var(--color-primary)]"
-      leadingIcon={
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M5 12h14" />
-          <path d="M13 5l7 7-7 7" />
-        </svg>
-      }
-    >
-      JOINT COP
-    </Button>
-  );
-}
 
 
 
