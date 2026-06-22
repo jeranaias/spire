@@ -166,7 +166,7 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
     matched donor → mission saved' story to narrate.
 
     Recipient: a CLB-1 JLTV with TURBOCHARGER ASSY (lead time 21d backordered).
-    Donor:     a MALS-31 JLTV evacuated to MCLB Albany 90+ days.
+    Donor:     a MALS-31 JLTV evacuated to Camp Kinser SMU 90+ days.
     Open recipient SR exactly 7 days before event_date so the proposal lands
     inside the scripted-exercise rehearsal window. Returns None if the fleet
     doesn't contain a CLB-1 JLTV + a MALS-31 JLTV (defensive — current fleet
@@ -240,7 +240,7 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
     )
     recipient_sr.requisitions = [req]
 
-    # Build the donor SR — evacuated to MCLB Albany 90+ days ago.
+    # Build the donor SR — evacuated to Camp Kinser SMU 90+ days ago.
     donor_open = event_date - timedelta(days=95)
     donor_sr = ServiceRequest(
         sr_number=f"{donor_asset.unit_uic}-{donor_open.year % 10}{(donor_open - date(donor_open.year, 1, 1)).days + 1:03d}-9002",
@@ -263,7 +263,7 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
         echelon_numeric=3,
         deadlined_date=donor_open,
         remark_text=(
-            "Demo fixture: vehicle evacuated to MCLB Albany on long-cycle depot "
+            "Demo fixture: vehicle evacuated to Camp Kinser SMU on long-cycle depot "
             "teardown for transmission rebuild. Engine bay still RFI; turbocharger "
             "assy serviceable per receipt inspection. Donor candidate for cross-"
             "level if a receiver SR opens before depot return."
@@ -275,7 +275,7 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
         parts_cost_actual=18500.00,
         labor_hours_actual=80.0,
         job_status="EVACUATED",
-        evacuated_to="MCLB Albany",
+        evacuated_to="Camp Kinser SMU",
     )
 
     srs.append(recipient_sr)
@@ -294,12 +294,12 @@ def _inject_scripted_demo_cannib(srs, assets, seed: int) -> Optional[Cannibaliza
         recipient_unit=recipient_asset.unit_name,
         donor_unit=donor_asset.unit_name,
         readiness_impact_note=(
-            "Donor evacuated to MCLB Albany 95 days; depot ETA 30+ days out. "
+            "Donor evacuated to Camp Kinser SMU 95 days; depot ETA 30+ days out. "
             "Turbocharger harvested at zero readiness cost to donor. Recipient "
             "returned to MC inside scripted-exercise rehearsal window — mission saved."
         ),
         scripted_demo=True,
-        scripted_exercise_label="EX BAYONET FOCUS 26-2 (rehearsal window)",
+        scripted_exercise_label="EX KEEN SWORD 26 (rehearsal window)",
     )
 
     # Apply mutations consistent with the regular cannib path.

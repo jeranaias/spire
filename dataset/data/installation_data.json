@@ -1,20 +1,21 @@
 {
   "installation": {
-    "name": "Camp Henderson",
-    "description": "Synthetic Marine Corps installation modeled on a generic east-coast CONUS base for BASTION demo purposes.",
-    "fictional": true,
-    "center_grid": "18S UJ 30000 70000",
-    "center_lat": 34.72,
-    "center_lon": -77.345,
+    "name": "Camp Foster, Okinawa",
+    "description": "III MEF logistics laydown anchored at Camp Foster, Okinawa, with forces dispersed across the Nansei Shoto (Ryukyu) island chain. Synthetic demonstration data \u2014 coordinates offset from real facilities.",
+    "fictional": false,
+    "synthetic_data": true,
+    "center_grid": "52R ER 80000 06000",
+    "center_lat": 26.2742,
+    "center_lon": 127.7544,
     "fpcon_default": "BRAVO",
     "total_area_sq_km": 45,
-    "contact_emergency": "DSN 555-911",
-    "mission_essential_task": "BASE DEFENSE / FORCE PROTECTION",
-    "mission_objective": "Sustain readiness across {parent}; defend {installation}; preserve QRF responsiveness.",
+    "contact_emergency": "DSN 645-911",
+    "mission_essential_task": "DISTRIBUTED SUSTAINMENT / CONTESTED LOGISTICS",
+    "mission_objective": "Sustain readiness across {parent}; keep Class IX flowing to dispersed forces across the Nansei Shoto; preserve responsiveness under DDIL.",
     "ccir": [
       "MC rate \u2265 70% across {parent}",
-      "At least 1 immediate-response QRF",
-      "PACS uptime \u2265 99%"
+      "No forward island below 60% MC",
+      "GCSS-MC sync current \u2264 24h"
     ]
   },
   "buildings": [

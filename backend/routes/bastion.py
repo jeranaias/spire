@@ -78,28 +78,23 @@ def _load_installation() -> dict:
         return json.load(f)
 
 
-# Pre-computed unit lat/lon for the BASTION COP map. These are the fictional
-# Camp Henderson coordinates from installation_data.json, offset per unit so
-# each unit's pin sits over its own sector of the installation.
-# Base: 34.658 N, -77.398 W (center)
+# Pre-computed unit lat/lon for the BASTION COP map. These mirror the
+# canonical Okinawa scenario positions (frontend/src/data/okinawa-scenario.ts)
+# so a PULSE "show on map" deeplink and the COP marker land on the same point.
+# 8 units on Okinawa Honto across real camps; 2d LAAD forward on Miyako and
+# 2/14 Marines forward on Ishigaki to visualize the dispersed stand-in-forces
+# posture. (lat, lon) — note okinawa-scenario.ts stores [lng, lat].
 UNIT_COORDS = {
-    # Walkthrough caught three units (3/6 Marines, MWSS-271, 2/14 Marines)
-    # collapsing to the default fallback lat/lon (34.658, -77.398) because
-    # the dict still keyed legacy names (MWSS-372, 5/11 Marines, 2d Tank Bn).
-    # Result: the Lejeune dot stack — three pins at identical coords with
-    # overlapping labels. All 10 canonical unit names now have unique
-    # coords spread across the Camp Henderson area so each marker reads on
-    # its own.
-    "CLB-6":        (34.6690, -77.4210),   # CLB-6 motor pool NW
-    "CLB-1":        (34.6510, -77.4050),   # SW sector
-    "3d Maint Bn":  (34.6700, -77.3750),   # NE forward
-    "3/6 Marines":  (34.6480, -77.4170),   # SW infantry quad
-    "2d LAR Bn":    (34.6550, -77.4150),   # West LAR lanes
-    "MALS-31":      (34.6700, -77.3820),   # airfield N
-    "MWSS-271":     (34.6610, -77.3680),   # E airfield support
-    "2d LAAD Bn":   (34.6670, -77.3900),   # LAAD TOC
-    "2/14 Marines": (34.6450, -77.3900),   # S artillery area
-    "7th ESB":      (34.6630, -77.4240),   # W engineer workshop
+    "CLB-6":        (26.2542, 127.6817),   # Camp Kinser
+    "CLB-1":        (26.2742, 127.7544),   # Camp Foster
+    "3d Maint Bn":  (26.2810, 127.7616),   # Camp Foster
+    "MALS-31":      (26.3559, 127.7686),   # Kadena AB
+    "MWSS-271":     (26.2710, 127.7561),   # MCAS Futenma
+    "7th ESB":      (26.4612, 127.8917),   # Camp Hansen
+    "3/6 Marines":  (26.5167, 128.0500),   # Camp Schwab
+    "2d LAR Bn":    (26.5061, 128.0322),   # Camp Schwab
+    "2d LAAD Bn":   (24.7950, 125.3450),   # Miyako (forward)
+    "2/14 Marines": (24.4150, 124.1750),   # Ishigaki (forward)
 }
 
 
@@ -136,7 +131,7 @@ async def cop(role: Optional[str] = None):
         c = by_unit_counter[u.name]
         total = sum(c.values())
         mc_rate = c.get("MC", 0) / total if total else 0.0
-        lat, lon = UNIT_COORDS.get(u.name, (34.658, -77.398))
+        lat, lon = UNIT_COORDS.get(u.name, (26.2742, 127.7544))  # default: Camp Foster, Okinawa
         alerts: list[dict] = []
         if mc_rate < MC_RED_FLOOR:
             alerts.append({"kind": "readiness_collapse", "severity": "HIGH"})

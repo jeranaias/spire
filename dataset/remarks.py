@@ -75,7 +75,7 @@ PARAM_POOLS = {
     "position":         ["front", "rear"],
     "axle":             ["front", "rear", "all"],
     "side":             ["left", "right"],
-    "ima_unit":         ["1st Maint Bn IMA", "2d Maint Bn IMA", "MCLB Albany", "MCLB Barstow"],
+    "ima_unit":         ["3d Maint Bn IMA", "CLR-35 IMA", "Camp Kinser SMU", "Sagami Depot"],
     "subsystem":        ["GPS/INS", "laser rangefinder", "thermal channel", "ballistic computer"],
     "range":            [800, 1000, 1500, 2000],
 }

@@ -226,14 +226,14 @@ export function StatusStrip() {
               aria-expanded={missionOpen}
               aria-controls="status-strip-mission-detail"
               className="!min-h-0 flex min-w-0 items-center gap-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-[3px] font-mono text-xs text-[var(--color-text)] transition-colors hover:border-[var(--color-border-active)] tracking-wide"
-              title={`${datasetInfo?.installation_name ?? "Camp Henderson"} mission summary · click to expand CCIR + status`}
+              title={`${datasetInfo?.installation_name ?? "Camp Foster, Okinawa"} mission summary · click to expand CCIR + status`}
             >
               <span className="truncate">
                 <span className="font-semibold uppercase tracking-widest text-[var(--color-text-secondary)]">
-                  {datasetInfo?.mission_essential_task ?? "BASE DEFENSE / FORCE PROTECTION"}{" "}
+                  {datasetInfo?.mission_essential_task ?? "DISTRIBUTED SUSTAINMENT / CONTESTED LOGISTICS"}{" "}
                 </span>
                 <span className="ml-2 text-[var(--color-text-muted)]">
-                  {datasetInfo?.installation_name ?? "Camp Henderson"} · {datasetInfo?.parent_command ?? "2d MLG"}
+                  {datasetInfo?.installation_name ?? "Camp Foster, Okinawa"} · {datasetInfo?.parent_command ?? "2d MLG"}
                 </span>
               </span>
               <span aria-hidden className="text-[var(--color-text-muted)]">

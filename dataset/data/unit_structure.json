@@ -4,7 +4,7 @@
       "uic": "M21670",
       "name": "CLB-6",
       "parent": "2d MLG",
-      "location": "Camp Lejeune, NC",
+      "location": "Camp Kinser, Okinawa",
       "optempo": "high",
       "deployment_status": "garrison",
       "equipment": {
@@ -45,7 +45,7 @@
       "uic": "M21450",
       "name": "CLB-1",
       "parent": "1st MLG",
-      "location": "Camp Pendleton, CA",
+      "location": "Camp Foster, Okinawa",
       "optempo": "high",
       "deployment_status": "garrison",
       "equipment": {
@@ -86,7 +86,7 @@
       "uic": "M33200",
       "name": "3d Maint Bn",
       "parent": "2d MLG",
-      "location": "Camp Lejeune, NC",
+      "location": "Camp Foster, Okinawa",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
@@ -117,7 +117,7 @@
       "uic": "M40120",
       "name": "3/6 Marines",
       "parent": "2d MarDiv",
-      "location": "Camp Lejeune, NC",
+      "location": "Camp Schwab, Okinawa",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
@@ -143,7 +143,7 @@
       "uic": "M26300",
       "name": "2d LAR Bn",
       "parent": "2d MarDiv",
-      "location": "Camp Lejeune, NC",
+      "location": "Camp Schwab, Okinawa",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
@@ -169,7 +169,7 @@
       "uic": "M55670",
       "name": "MALS-31",
       "parent": "MAG-31",
-      "location": "MCAS Beaufort, SC",
+      "location": "Kadena AB, Okinawa",
       "optempo": "high",
       "deployment_status": "garrison",
       "equipment": {
@@ -205,7 +205,7 @@
       "uic": "M60230",
       "name": "MWSS-271",
       "parent": "MAG-26",
-      "location": "MCAS New River, NC",
+      "location": "MCAS Futenma, Okinawa",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
@@ -241,7 +241,7 @@
       "uic": "M30550",
       "name": "2d LAAD Bn",
       "parent": "2d MAW",
-      "location": "Camp Lejeune, NC",
+      "location": "Miyako, Okinawa",
       "optempo": "low",
       "deployment_status": "garrison",
       "equipment": {
@@ -272,7 +272,7 @@
       "uic": "M15800",
       "name": "2/14 Marines",
       "parent": "14th Marines",
-      "location": "Camp Lejeune, NC",
+      "location": "Ishigaki, Okinawa",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {
@@ -298,7 +298,7 @@
       "uic": "M22100",
       "name": "7th ESB",
       "parent": "2d MLG",
-      "location": "Camp Lejeune, NC",
+      "location": "Camp Hansen, Okinawa",
       "optempo": "medium",
       "deployment_status": "garrison",
       "equipment": {

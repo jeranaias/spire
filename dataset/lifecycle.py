@@ -412,8 +412,11 @@ def _open_corrective_sr(
 
 def _evacuation_target(level: str, asset, rng: random.Random) -> str:
     if level == "Depot":
-        return rng.choice(["MCLB Albany", "MCLB Barstow", "Red River Army Depot"])
-    return rng.choice(["1st Maint Bn IMA", "2d Maint Bn IMA", "3d Maint Bn IMA"])
+        # Theater retrograde nodes — contested logistics keeps depot-level
+        # work forward (Camp Kinser SMU) or in-theater (Sagami, DLA Kadena)
+        # rather than a 7,600 mi airlift back to CONUS.
+        return rng.choice(["Camp Kinser SMU", "Sagami Depot", "DLA Distribution Kadena"])
+    return rng.choice(["3d Maint Bn IMA", "CLR-35 IMA", "CLR-37 IMA"])
 
 
 # ---------------------------------------------------------------------------
@@ -636,16 +639,16 @@ def run_simulation(units, assets, roster, seed: int):
 # parser recognises. Origins are weighted toward the home installations of the
 # units in the synthetic fleet.
 _TMR_INSTALLATIONS = [
-    "Camp Lejeune, NC",
-    "Camp Pendleton, CA",
-    "Camp Geiger, NC",
-    "MCAS Cherry Point, NC",
-    "MCAS Beaufort, SC",
-    "MCAS Yuma, AZ",
-    "MCLB Albany, GA",
-    "MCLB Barstow, CA",
-    "MCAGCC 29 Palms, CA",
-    "Camp Henderson (synthetic)",
+    "Camp Kinser, Okinawa",
+    "Camp Foster, Okinawa",
+    "Kadena AB, Okinawa",
+    "MCAS Futenma, Okinawa",
+    "Camp Hansen, Okinawa",
+    "Camp Schwab, Okinawa",
+    "Naha Port, Okinawa",
+    "White Beach, Okinawa",
+    "Miyako, Okinawa",
+    "Ishigaki, Okinawa",
 ]
 
 _TMR_EQUIP_POOLS = {
@@ -660,20 +663,20 @@ _TMR_PURPOSES = [
     "Pre-exercise equipment positioning",
     "Post-exercise retrograde",
     "Combined Arms Exercise (CAX) lift",
-    "Depot-level evacuation to MCLB",
-    "Inter-MEF cross-deck for combined exercise",
+    "Depot-level evacuation (theater retrograde)",
+    "Inter-island cross-deck for combined exercise",
     "Field-training rotation",
     "Range support package movement",
     "Operational Readiness Inspection lift",
 ]
 
 _TMR_ROUTES = [
-    "I-95 S → US-17 W → installation main gate",
-    "I-40 W → US-70 E → installation ECP-1",
-    "I-10 E → AZ-95 N → installation ECP-2",
-    "I-15 N → CA-247 → MCAGCC main",
-    "I-95 N → US-17 N → MCB main gate",
-    "Convoy serial split — admin lead via I-95, tactical via SR-50",
+    "Route 58 N → Camp Kinser main gate",
+    "Okinawa Expwy → Route 329 → Camp Hansen ECP",
+    "Naha Port ramp → Route 58 N → Camp Foster",
+    "Kadena Gate 2 → Route 58 → Camp Kinser",
+    "White Beach ramp → Route 329 N → Camp Schwab",
+    "Convoy serial split — admin lead via Route 58, tactical via Expwy",
 ]
 
 
@@ -724,12 +727,12 @@ def _generate_tmrs(units, calendars, seed: int) -> List[TMR]:
                     "Range support package movement",
                 ])
                 origin = unit.location if unit.location in _TMR_INSTALLATIONS else _TMR_INSTALLATIONS[0]
-                destination = "Camp Henderson (synthetic)"
+                destination = "Camp Kinser, Okinawa"
             else:
                 offset = rng.randint(2, 6)
                 scheduled = fx_end + timedelta(days=offset)
                 purpose = "Post-exercise retrograde"
-                origin = "Camp Henderson (synthetic)"
+                origin = "Camp Kinser, Okinawa"
                 destination = unit.location if unit.location in _TMR_INSTALLATIONS else _TMR_INSTALLATIONS[0]
             submitted = scheduled - timedelta(days=rng.randint(3, 14))
             tmrs.append(_make_tmr(seq, unit, origin, destination, submitted, scheduled, purpose, rng))
@@ -753,11 +756,11 @@ def _generate_tmrs(units, calendars, seed: int) -> List[TMR]:
         submitted = scheduled - timedelta(days=rng.randint(5, 21))
         # Bias toward depot evacuation routes.
         if rng.random() < 0.5:
-            origin = unit.location if unit.location in _TMR_INSTALLATIONS else "Camp Lejeune, NC"
-            destination = rng.choice(["MCLB Albany, GA", "MCLB Barstow, CA"])
-            purpose = "Depot-level evacuation to MCLB"
+            origin = unit.location if unit.location in _TMR_INSTALLATIONS else "Camp Kinser, Okinawa"
+            destination = rng.choice(["Camp Kinser SMU", "Sagami Depot, Japan"])
+            purpose = "Depot-level evacuation (theater retrograde)"
         else:
-            origin = unit.location if unit.location in _TMR_INSTALLATIONS else "Camp Lejeune, NC"
+            origin = unit.location if unit.location in _TMR_INSTALLATIONS else "Camp Kinser, Okinawa"
             destination = rng.choice([loc for loc in _TMR_INSTALLATIONS if loc != origin])
             purpose = rng.choice([
                 "Inter-MEF cross-deck for combined exercise",

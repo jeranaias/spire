@@ -36,8 +36,8 @@ def make_mgrs(location: str, rng: random.Random) -> str:
     """Generate a plausible-for-the-area MGRS 10-digit grid coordinate."""
     area = MGRS_BY_AREA.get(location)
     if area is None:
-        # Fallback: CONUS East generic
-        area = MGRS_BY_AREA["Camp Lejeune, NC"]
+        # Fallback: Okinawa Honto generic (III MEF hub at Camp Foster)
+        area = MGRS_BY_AREA["Camp Foster, Okinawa"]
     easting = rng.randint(*area["easting_range"])
     northing = rng.randint(*area["northing_range"])
     return f"{area['grid_zone']} {area['square']} {easting:05d} {northing:05d}"
@@ -259,7 +259,7 @@ def derive_classification(flags: List[str], fault_event) -> str:
 if __name__ == "__main__":
     rng = random.Random(42)
     print("Sample MGRS by area:")
-    for area in ["Camp Lejeune, NC", "Camp Pendleton, CA", "Camp Kinser, Okinawa", "MCAS Yuma, AZ"]:
+    for area in ["Camp Kinser, Okinawa", "Camp Foster, Okinawa", "Miyako, Okinawa", "Ishigaki, Okinawa"]:
         print(f"  {area}: {make_mgrs(area, rng)}")
     print(f"\nSample COMSEC: {make_comsec_reference(rng, 1234)}")
     print(f"Sample net ref: {make_net_reference(rng)}")
