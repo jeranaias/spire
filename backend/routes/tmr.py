@@ -20,20 +20,21 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 KNOWN_LOCATIONS = {
-    "lejeune": "Camp Lejeune, NC",
-    "camp lejeune": "Camp Lejeune, NC",
-    "pendleton": "Camp Pendleton, CA",
-    "camp pendleton": "Camp Pendleton, CA",
-    "geiger": "Camp Geiger, NC",
-    "camp geiger": "Camp Geiger, NC",
-    "cherry point": "MCAS Cherry Point, NC",
-    "beaufort": "MCAS Beaufort, SC",
-    "yuma": "MCAS Yuma, AZ",
-    "henderson": "Camp Henderson (synthetic)",
-    "albany": "MCLB Albany, GA",
-    "barstow": "MCLB Barstow, CA",
     "kinser": "Camp Kinser, Okinawa",
-    "twentynine palms": "MCAGCC 29 Palms, CA",
+    "camp kinser": "Camp Kinser, Okinawa",
+    "foster": "Camp Foster, Okinawa",
+    "camp foster": "Camp Foster, Okinawa",
+    "kadena": "Kadena AB, Okinawa",
+    "futenma": "MCAS Futenma, Okinawa",
+    "hansen": "Camp Hansen, Okinawa",
+    "camp hansen": "Camp Hansen, Okinawa",
+    "schwab": "Camp Schwab, Okinawa",
+    "camp schwab": "Camp Schwab, Okinawa",
+    "naha": "Naha Port, Okinawa",
+    "white beach": "White Beach, Okinawa",
+    "miyako": "Miyako, Okinawa",
+    "ishigaki": "Ishigaki, Okinawa",
+    "sagami": "Sagami Depot, Japan",
 }
 
 EQUIPMENT_KEYWORDS = {

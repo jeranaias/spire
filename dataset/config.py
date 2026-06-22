@@ -12,15 +12,15 @@ from datetime import date
 # ---------------------------------------------------------------------------
 # Simulation window
 # ---------------------------------------------------------------------------
-# Walkthrough #JOB-B — slid the canonical simulation window forward so the
-# dataset's last_day matches the operating mission clock at MDM 2026
-# (26 APR 26). PULSE's "as of" text reads from dataset.last_day; SENTRY +
-# BASTION mission clocks read wall-clock UTC. With the dataset ending on
-# 26 APR 26, every "as of" / "TODAY" stamp lines up across views without
-# the operator clocking the prior 5-week mismatch (PULSE was on 31 MAY 26
-# while SENTRY/BASTION were on 26 APR 26 — single source of truth fix).
-SIMULATION_START_DATE = date(2025, 4, 27)
-SIMULATION_END_DATE = date(2026, 4, 26)
+# The canonical simulation window ends on the demo's operating mission clock
+# so the dataset's last_day matches "now". PULSE's "as of" text reads from
+# dataset.last_day; SENTRY + BASTION mission clocks read wall-clock UTC. With
+# the dataset ending on the current date, every "as of" / "TODAY" stamp lines
+# up across views without the operator clocking a stale "56 days ago" banner.
+# Slide BOTH bounds together to keep the 365-day window intact (block-leave
+# in CALENDAR_EVENTS must stay inside the window).
+SIMULATION_START_DATE = date(2025, 6, 23)
+SIMULATION_END_DATE = date(2026, 6, 22)
 SIMULATION_DAYS = (SIMULATION_END_DATE - SIMULATION_START_DATE).days + 1  # 365
 RANDOM_SEED = 42
 
@@ -142,17 +142,25 @@ CLASSIFICATION_LEVELS = ["UNCLASSIFIED", "CUI", "CONFIDENTIAL", "SECRET"]
 # reviewer who geocodes any synthetic grid lands in a non-sensitive place,
 # not on top of a real barracks or motor pool. All values remain synthetic.
 # ---------------------------------------------------------------------------
+# Okinawa / Nansei Shoto lay-down. Okinawa Honto sits in UTM zone 52, lat
+# band R (24-32 N); Miyako and Ishigaki are ~125 E / 124 E in zone 51, band
+# R. Eastings/northings are intentionally offset into East China Sea / open
+# training sectors so a reviewer who geocodes any synthetic grid lands in
+# water or a range polygon, not on a real motor pool. All values synthetic.
+# Keys MUST match the `location` strings in data/unit_structure.json so each
+# unit's SR grids render in its own operating area (sensitive.py falls back
+# to the first Okinawa Honto key for any unmapped location).
 MGRS_BY_AREA = {
-    # CARO NC area -- shifted SW into Onslow Bight training ranges
-    "Camp Lejeune, NC":     {"grid_zone": "18S", "square": "UH", "easting_range": (10000, 28000), "northing_range": (55000, 72000)},
-    # Southern CA area -- shifted into marine training areas south of the base
-    "Camp Pendleton, CA":   {"grid_zone": "11S", "square": "MS", "easting_range": (15000, 35000), "northing_range": (55000, 72000)},
-    # Okinawa -- shifted into East China Sea training sectors
-    "Camp Kinser, Okinawa": {"grid_zone": "52S", "square": "EE", "easting_range": (10000, 30000), "northing_range": (45000, 65000)},
-    # SC low country -- shifted into coastal wetlands training
-    "MCAS Beaufort, SC":    {"grid_zone": "17R", "square": "PP", "easting_range": (20000, 40000), "northing_range": (45000, 65000)},
-    # Sonoran Desert training complex -- well clear of MCAS Yuma proper
-    "MCAS Yuma, AZ":        {"grid_zone": "11S", "square": "QB", "easting_range": (40000, 60000), "northing_range": (40000, 60000)},
+    # ── Okinawa Honto (zone 52R) — offset W/NW into the East China Sea ──
+    "Camp Kinser, Okinawa":   {"grid_zone": "52R", "square": "ER", "easting_range": (10000, 28000), "northing_range": (45000, 62000)},
+    "Camp Foster, Okinawa":   {"grid_zone": "52R", "square": "ER", "easting_range": (15000, 33000), "northing_range": (48000, 65000)},
+    "Kadena AB, Okinawa":     {"grid_zone": "52R", "square": "ER", "easting_range": (18000, 36000), "northing_range": (52000, 68000)},
+    "MCAS Futenma, Okinawa":  {"grid_zone": "52R", "square": "ER", "easting_range": (14000, 32000), "northing_range": (46000, 63000)},
+    "Camp Hansen, Okinawa":   {"grid_zone": "52R", "square": "FR", "easting_range": (20000, 38000), "northing_range": (58000, 74000)},
+    "Camp Schwab, Okinawa":   {"grid_zone": "52R", "square": "FS", "easting_range": (22000, 40000), "northing_range": (10000, 26000)},
+    # ── Forward islands (zone 51R) — offset into open-water training sectors ──
+    "Miyako, Okinawa":        {"grid_zone": "51R", "square": "UP", "easting_range": (30000, 48000), "northing_range": (40000, 56000)},
+    "Ishigaki, Okinawa":      {"grid_zone": "51R", "square": "TP", "easting_range": (60000, 78000), "northing_range": (35000, 51000)},
 }
 
 # ---------------------------------------------------------------------------
