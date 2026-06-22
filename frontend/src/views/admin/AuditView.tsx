@@ -887,7 +887,12 @@ function IdentityCell({ row }: { row: AuditEntry }) {
     return (
       <>
         <div className="text-[var(--color-text)]">
-          {row.identity.rank ? `${row.identity.rank} ${row.identity.name}` : row.identity.name}
+          {/* name sometimes already carries the rank ("MajGen Robert Hayes");
+              only prepend rank when it isn't already there, to avoid
+              "MajGen MajGen Robert Hayes". */}
+          {row.identity.rank && !(row.identity.name || "").startsWith(row.identity.rank)
+            ? `${row.identity.rank} ${row.identity.name}`
+            : row.identity.name}
         </div>
         <div className="text-[10px] tracking-wider text-[var(--color-text-muted)]">
           DODID {maskDodid(row.identity.dodid)} · {row.identity.role || row.actor}
