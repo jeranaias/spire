@@ -128,11 +128,6 @@ function TrainingFlywheelTab() {
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">
-      {/* AdminTabs (W1 #29 audit view) provides formal sub-nav across
-       * all /admin/* surfaces; the in-header "Model supply chain →"
-       * link below is a redundant CTA in the heading row, kept after
-       * the rebase so the Flywheel page still cross-links to the model
-       * registry without forcing the operator into the tab strip. */}
       <AdminTabs active="flywheel" />
       <div className="mb-4 flex items-baseline justify-between gap-4">
         <div>
@@ -149,17 +144,6 @@ function TrainingFlywheelTab() {
             the rolling accuracy trend; below 80% accuracy across ≥ 20 outcomes triggers a retraining recommendation.
           </div>
         </div>
-        {/* W1 #30 — admin-side link to the canonical model supply-chain
-         * page. Lives next to the flywheel so a security manager can pivot
-         * from "are we still calibrated" to "what models are we running"
-         * in one click. */}
-        <a
-          href="#/admin/models"
-          className="shrink-0 rounded-sm border border-[var(--color-border-active)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-[var(--color-primary)] hover:bg-[var(--color-bg)]"
-          title="Per-model provenance, hosting target, FedRAMP, vendor jurisdiction"
-        >
-          Model supply chain →
-        </a>
       </div>
 
       {/* Hero stats row */}
@@ -451,7 +435,7 @@ function fmtAxis(iso?: string): string {
  * via TopBar deep-link; an inline tab strip on every /admin page makes
  * the SOC view discoverable from Flywheel and vice versa.
  */
-export type AdminTabKey = "flywheel" | "audit" | "economics" | "ingest" | "mapper" | "channels";
+export type AdminTabKey = "flywheel" | "audit" | "ingest" | "mapper" | "channels";
 
 export function AdminTabs({ active }: { active: AdminTabKey }) {
   const tab = (to: string, key: AdminTabKey, label: string, hint: string) => (
@@ -476,7 +460,6 @@ export function AdminTabs({ active }: { active: AdminTabKey }) {
     <nav className="mb-3 flex items-center gap-2" aria-label="Admin sub-navigation">
       {tab("/admin",           "flywheel",  "Training Flywheel",   "Per-engine accuracy + decision outcomes")}
       {tab("/admin/audit",     "audit",     "Audit · SOC View",    "Hash-chained audit log with filters + export")}
-      {tab("/admin/economics", "economics", "Inference Economics", "Per-call LLM cost telemetry + 180k-Marine extrapolation")}
       {tab("/admin/ingest",    "ingest",    "Real-Data Ingest",    "Drop a GCSS-MC export to dry-run + apply")}
       {tab("/admin/ingest/mapper", "mapper",  "Mapping Editor",      "Auto + LLM-assisted column-mapping editor; save profiles per unit/source")}
       {tab("/admin/channels",  "channels",  "Ingest Channels",     "Pull-mode SFTP / IMAP / HTTP / DB / Kafka sources, health, DLQ, circuit reset")}

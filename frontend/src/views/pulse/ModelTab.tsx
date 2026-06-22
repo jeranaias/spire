@@ -219,12 +219,9 @@ function Header({ card }: { card: ModelCard }) {
         <div className="mt-1 spire-body-muted">
           In-PULSE summary of the model behind the Risk Board, Predicted Failure panel, and Forecast spaghetti.
           Canonical detail lives at{" "}
-          <a
-            href={card.canonical_model_card_url}
-            className="text-[var(--color-primary)] hover:underline"
-          >
+          <span className="text-[var(--color-text-secondary)]">
             /admin/models/pulse-risk-scorer
-          </a>
+          </span>
           .
         </div>
       </div>
@@ -676,12 +673,9 @@ function LastValidation({ card }: { card: ModelCard }) {
         <div className="mt-0.5 tracking-wide text-[var(--color-text-secondary)]">
           {v.methodology}
         </div>
-        <a
-          href={v.methodology_link}
-          className="mt-1 inline-block text-[var(--color-primary)] hover:underline"
-        >
+        <span className="mt-1 inline-block text-[var(--color-text-secondary)]">
           → full methodology · /admin/models/pulse-risk-scorer
-        </a>
+        </span>
       </div>
     </div>
   );

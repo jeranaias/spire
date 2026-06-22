@@ -70,10 +70,6 @@ const PulseView   = lazyWithRecovery(() => import("./views/PulseView").then((m) 
 const BastionView = lazyWithRecovery(() => import("./views/BastionView").then((m) => ({ default: m.BastionView })));
 const AdminView   = lazyWithRecovery(() => import("./views/AdminView").then((m) => ({ default: m.AdminView })));
 const AuditView   = lazyWithRecovery(() => import("./views/admin/AuditView").then((m) => ({ default: m.AuditView })));
-// W1 #30 — Model registry / supply-chain page. Restricted to security_manager.
-const ModelRegistryView = lazyWithRecovery(() => import("./views/admin/ModelRegistryView").then((m) => ({ default: m.ModelRegistryView })));
-const ModelDetailView   = lazyWithRecovery(() => import("./views/admin/ModelDetailView").then((m) => ({ default: m.ModelDetailView })));
-const InferenceEconomicsView = lazyWithRecovery(() => import("./views/admin/InferenceEconomicsTab").then((m) => ({ default: m.InferenceEconomicsView })));
 // RD9 — operator-side real-data ingest dropzone. Scoped to
 // data_custodian + security_manager via VIEW_SCOPE.
 const IngestView = lazyWithRecovery(() => import("./views/admin/IngestView").then((m) => ({ default: m.IngestView })));
@@ -294,14 +290,6 @@ createRoot(document.getElementById("root")!).render(
              * scope-gated inside the view itself. */}
             <Route path="admin" element={<ViewSuspense><AdminView /></ViewSuspense>} />
             <Route path="admin/audit" element={<ViewSuspense><AuditView /></ViewSuspense>} />
-            {/* W1 #30 — Model registry / supply-chain page. Per-model
-             * cards documenting provenance, hosting target, FedRAMP
-             * status, vendor jurisdiction, validation history. The
-             * inline guards mirror the backend MODEL_REGISTRY_ROLES
-             * gate. Cross-linked from SENTRY Review Queue. */}
-            <Route path="admin/models" element={<ViewSuspense><ModelRegistryView /></ViewSuspense>} />
-            <Route path="admin/models/:modelId" element={<ViewSuspense><ModelDetailView /></ViewSuspense>} />
-            <Route path="admin/economics" element={<ViewSuspense><InferenceEconomicsView /></ViewSuspense>} />
             <Route path="admin/ingest" element={<ViewSuspense><IngestView /></ViewSuspense>} />
             <Route path="admin/ingest/mapper" element={<ViewSuspense><IngestMapperView /></ViewSuspense>} />
             <Route path="admin/channels" element={<ViewSuspense><ChannelsView /></ViewSuspense>} />
