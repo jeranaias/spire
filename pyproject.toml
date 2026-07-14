@@ -1,7 +1,7 @@
 [project]
-name = "repl-nix-workspace"
+name = "spire"
 version = "0.1.0"
-description = "Add your description here"
+description = "SPIRE — offline contested-logistics operating system (SENTRY / PULSE / BASTION)"
 requires-python = ">=3.12"
 dependencies = [
     "cryptography>=43.0.0",
@@ -14,3 +14,14 @@ dependencies = [
     "python-multipart>=0.0.20",
     "uvicorn[standard]>=0.32.0",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0"]
+
+[tool.pytest.ini_options]
+# Put the repo root (and dataset/) on sys.path so `import backend` / `import
+# main` resolve under the bare `pytest` console script, not just `python -m
+# pytest`. Without this, CI collection fails with ModuleNotFoundError.
+pythonpath = [".", "dataset"]
+# async tests (llm map, channel runner, dr scheduler) use pytest-asyncio.
+asyncio_mode = "auto"
