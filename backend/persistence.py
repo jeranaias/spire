@@ -374,14 +374,46 @@ def log(kind: str, *, actor: str = "system", subject_id: Optional[str] = None, p
         }
 
 
-def verify_chain() -> dict:
-    """Walk the entire audit table. Returns {ok, entries, broken_at}."""
+def verify_chain(*, verify_signatures: bool = True) -> dict:
+    """Walk the entire audit table and check tamper-evidence.
+
+    Two layers:
+      1. **Hash chain** — each row's ``self_hash`` must equal
+         ``SHA-256(prev_hash || canonical(entry))`` and link to the prior row.
+      2. **Ed25519 signatures** — when signing is enabled, every row that
+         carries a signature must verify against the audit public key. This
+         is what makes the chain tamper-evident even against an attacker with
+         full DB write access: they can recompute the hash chain (all inputs
+         are in the row), but they cannot re-sign ``self_hash`` without the
+         private key, so any altered signed entry fails here.
+
+    Returns ``{ok, entries, head_hash}`` on success (plus ``signed_entries`` /
+    ``unsigned_signable`` when signature checking ran), or
+    ``{ok: False, entries, broken_at_id, reason}`` on the first violation.
+    """
     with conn() as c:
         rows = list(c.execute(
-            "SELECT id, ts, actor, kind, subject_id, payload, prev_hash, self_hash "
+            "SELECT id, ts, actor, kind, subject_id, payload, prev_hash, self_hash, signature "
             "FROM audit_log ORDER BY id ASC"
         ))
+
+    verify_sig = None
+    should_sign = None
+    if verify_signatures:
+        try:
+            from .uis.audit_integrity import (
+                should_sign as _should_sign,
+                signing_enabled,
+                verify_entry_signature,
+            )
+            if signing_enabled():
+                verify_sig, should_sign = verify_entry_signature, _should_sign
+        except Exception:  # noqa: BLE001 — signature layer is best-effort
+            verify_sig = None
+
     prev = _GENESIS
+    signed_entries = 0
+    unsigned_signable = 0
     for r in rows:
         entry = {
             "ts": r["ts"], "actor": r["actor"], "kind": r["kind"],
@@ -390,9 +422,24 @@ def verify_chain() -> dict:
         }
         expected = hashlib.sha256((prev + _canonical(entry)).encode()).hexdigest()
         if r["prev_hash"] != prev or r["self_hash"] != expected:
-            return {"ok": False, "entries": len(rows), "broken_at_id": r["id"]}
+            return {"ok": False, "entries": len(rows), "broken_at_id": r["id"], "reason": "hash_mismatch"}
+        if verify_sig is not None:
+            sig = r["signature"]
+            if sig:
+                if not verify_sig(r["self_hash"], sig):
+                    return {"ok": False, "entries": len(rows), "broken_at_id": r["id"], "reason": "bad_signature"}
+                signed_entries += 1
+            elif should_sign(r["kind"]):
+                # Signable entry with no signature — reported (not failed) so a
+                # chain that predates signing doesn't false-positive.
+                unsigned_signable += 1
         prev = r["self_hash"]
-    return {"ok": True, "entries": len(rows), "head_hash": prev}
+
+    result = {"ok": True, "entries": len(rows), "head_hash": prev}
+    if verify_sig is not None:
+        result["signed_entries"] = signed_entries
+        result["unsigned_signable"] = unsigned_signable
+    return result
 
 
 def recent_entries(limit: int = 50, *, include_payload: bool = False) -> list[dict]:

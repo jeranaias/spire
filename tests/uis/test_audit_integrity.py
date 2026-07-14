@@ -208,6 +208,83 @@ def test_integrity_status_chain_break_via_direct_db_mutation(isolated_db):
 
 
 # ---------------------------------------------------------------------------
+# Signature layer — the AU-9(5) property: a full rewrite-and-rehash attack
+# (recompute a valid hash chain over forged content) must be caught because
+# the attacker cannot re-sign self_hash without the private key.
+# ---------------------------------------------------------------------------
+
+
+def _forge_chain_row(persistence, row_id: int, new_payload: dict) -> None:
+    """Rewrite one row's payload AND recompute self_hash + every downstream
+    prev_hash/self_hash so the pure hash chain stays internally consistent —
+    exactly what an attacker with DB write access would do."""
+    import hashlib
+    with persistence.conn() as c:
+        rows = list(c.execute(
+            "SELECT id, ts, actor, kind, subject_id, payload, prev_hash, self_hash "
+            "FROM audit_log ORDER BY id ASC"
+        ))
+        prev = persistence._GENESIS
+        for r in rows:
+            payload = json.dumps(new_payload, sort_keys=True, separators=(",", ":")) if r["id"] == row_id else r["payload"]
+            entry = {
+                "ts": r["ts"], "actor": r["actor"], "kind": r["kind"],
+                "subject_id": r["subject_id"], "payload": payload,
+                "prev_hash": prev,
+            }
+            new_self = hashlib.sha256(
+                (prev + json.dumps(entry, sort_keys=True, separators=(",", ":"), default=str)).encode()
+            ).hexdigest()
+            c.execute(
+                "UPDATE audit_log SET payload = ?, prev_hash = ?, self_hash = ? WHERE id = ?",
+                (payload, prev, new_self, r["id"]),
+            )
+            prev = new_self
+
+
+def test_rewrite_and_rehash_passes_hashcheck_but_fails_signature(with_signing_key):
+    """A recomputed hash chain over forged content passes the hash layer but
+    is caught by the signature layer — this is the whole point of AU-9(5)."""
+    from backend import persistence
+    persistence.log(kind="ingest.ecp.apply.commit", actor="u", subject_id="t1", payload={"amount": 1})
+    persistence.log(kind="ingest.ecp.apply.commit", actor="u", subject_id="t2", payload={"amount": 2})
+
+    # Sanity: clean chain verifies both ways.
+    clean = persistence.verify_chain()
+    assert clean["ok"] is True and clean["signed_entries"] == 2
+
+    # Attacker forges row 1 and recomputes the whole hash chain.
+    _forge_chain_row(persistence, 1, {"amount": 999999})
+
+    # Hash-only check is fooled...
+    assert persistence.verify_chain(verify_signatures=False)["ok"] is True
+    # ...but the signature layer catches it.
+    result = persistence.verify_chain()
+    assert result["ok"] is False
+    assert result["reason"] == "bad_signature"
+    assert result["broken_at_id"] == 1
+
+
+def test_verify_chain_reports_unsigned_signable(isolated_db, monkeypatch):
+    """Entries written before signing was enabled are reported, not failed."""
+    from backend import persistence
+    # Write a signable entry with signing OFF (no signature stored).
+    monkeypatch.delenv("SPIRE_AUDIT_SIGNING_KEY_HEX", raising=False)
+    persistence.log(kind="ingest.ecp.apply.commit", actor="u", payload={"x": 1})
+    # Now turn signing ON and verify.
+    monkeypatch.setenv("SPIRE_AUDIT_SIGNING_KEY_HEX", ("\x42" * 32).encode("latin-1").hex())
+    from backend.uis import audit_integrity
+    monkeypatch.setattr(audit_integrity, "_PRIVATE_KEY", None)
+    monkeypatch.setattr(audit_integrity, "_PUBLIC_KEY", None)
+    monkeypatch.setattr(audit_integrity, "_KEY_LOADED", False)
+
+    result = persistence.verify_chain()
+    assert result["ok"] is True
+    assert result["unsigned_signable"] == 1
+    assert result["signed_entries"] == 0
+
+
+# ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
 
