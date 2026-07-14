@@ -72,3 +72,6 @@ datasets/
 
 # Dataset pickle cache (regenerated at boot from dataset/ source mtimes)
 .cache/
+
+# Playwright run artifacts
+test-results/
