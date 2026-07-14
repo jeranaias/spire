@@ -22,10 +22,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
+from ..auth import session_role
 from ..persistence import conn, recent_entries, verify_chain
-from ..scoping import allowed_units, filter_units
+from ..scoping import AUDIT_READ_ROLES, allowed_units, filter_units
 from ..state import get_dataset
 
 router = APIRouter()
@@ -489,10 +490,15 @@ def _events_per_minute(window_minutes: int = 5) -> tuple[float, int]:
 
 
 @router.get("/audit")
-async def audit_health(window_minutes: int = Query(5, ge=1, le=60)):
+async def audit_health(request: Request, window_minutes: int = Query(5, ge=1, le=60)):
     """Audit-chain pulse for the bridge tile: chain integrity, total
     entries, events/min over the last N minutes, latest entry timestamp,
-    and the last detected anomaly (if the chain has ever broken)."""
+    and the last detected anomaly (if the chain has ever broken).
+
+    Operational health is visible to every operator (it's the commander's
+    "is my audit healthy" signal), but the chain **head_hash** — audit
+    internals the canonical /api/system/audit endpoint restricts — is
+    redacted for anyone outside AUDIT_READ_ROLES."""
     # verify_chain() is an O(n) SHA-256 walk of the whole audit table — on
     # the long-lived Fly box the chain is large and this took ~15s, freezing
     # the single event loop and stalling the rest of the home page. Reuse the
@@ -513,10 +519,12 @@ async def audit_health(window_minutes: int = Query(5, ge=1, le=60)):
             "broken_at_id": chain.get("broken_at_id"),
             "as_of": _now_iso(),
         }
+    can_read_audit = session_role(request) in AUDIT_READ_ROLES
     return {
         "chain_ok": bool(chain.get("ok")),
         "total_entries": chain.get("entries", 0),
-        "head_hash": chain.get("head_hash"),
+        # head_hash is audit-internal; only surface it to audit-authorized roles.
+        "head_hash": chain.get("head_hash") if can_read_audit else None,
         "events_per_minute": rate,
         "events_in_window": count_in_window,
         "window_minutes": window_minutes,

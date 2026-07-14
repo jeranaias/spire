@@ -41,6 +41,7 @@ from .routes.ingest import router as ingest_router
 from .routes.uis import router as uis_router
 from .routes.channels import router as uis_channels_router
 from .scoping import (
+    ALL_OPS_ROLES,
     BASTION_VIEW_ROLES,
     PULSE_VIEW_ROLES,
     require_view_scope,
@@ -190,14 +191,33 @@ app.include_router(
     tags=["bastion"],
     dependencies=[Depends(require_view_scope("/bastion", BASTION_VIEW_ROLES))],
 )
-app.include_router(llm_router,    prefix="/api/llm",    tags=["llm"])
-app.include_router(copilot_router, prefix="/api/copilot", tags=["copilot"])
-app.include_router(integrations_router, prefix="/api/integrations", tags=["integrations"])
-app.include_router(gcss_router, prefix="/api/gcss", tags=["gcss"])
+# Cross-cutting operator surfaces — default-deny at the include so an unknown /
+# absent role is refused. Any signed-in operator role legitimately uses these
+# (SPIRO/LLM, GCSS schema, the Decision Bridge home view); sensitive sub-routes
+# (e.g. decision-bridge/audit) carry their own tighter per-route gate.
+app.include_router(
+    llm_router, prefix="/api/llm", tags=["llm"],
+    dependencies=[Depends(require_view_scope("/llm", ALL_OPS_ROLES))],
+)
+app.include_router(
+    copilot_router, prefix="/api/copilot", tags=["copilot"],
+    dependencies=[Depends(require_view_scope("/copilot", ALL_OPS_ROLES))],
+)
+app.include_router(
+    integrations_router, prefix="/api/integrations", tags=["integrations"],
+    dependencies=[Depends(require_view_scope("/integrations", ALL_OPS_ROLES))],
+)
+app.include_router(
+    gcss_router, prefix="/api/gcss", tags=["gcss"],
+    dependencies=[Depends(require_view_scope("/gcss", ALL_OPS_ROLES))],
+)
 app.include_router(gcss_export_router, prefix="/api/gcss/export", tags=["gcss-export"])
 app.include_router(gcss_export_router, prefix="/api/integrations/gcss-mc/export", tags=["gcss-export"])
 app.include_router(joint_router,  prefix="/api/joint",  tags=["joint"])
-app.include_router(decision_bridge_router, prefix="/api/decision-bridge", tags=["decision-bridge"])
+app.include_router(
+    decision_bridge_router, prefix="/api/decision-bridge", tags=["decision-bridge"],
+    dependencies=[Depends(require_view_scope("/decision-bridge", ALL_OPS_ROLES))],
+)
 # RD-track real-data ingest (ECP / SR-header / utilization / …).
 # Router itself ships dormant: every write endpoint returns 503 unless
 # SPIRE_INGEST_ENABLED=1 in the environment. The /status probe is open
