@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from .integrations import (
     _GCSS_DUE_IN_COLUMNS,
@@ -35,17 +35,29 @@ from .integrations import (
     _row_for_header,
     _row_for_parts,
 )
+from ..scoping import SENTRY_EXPORT_ROLES, require_user_role
 from ..state import get_dataset
 
 
 router = APIRouter()
 
 
+def _gate_export(request: Request, action: str) -> None:
+    """Custodian-only gate for the full-fleet GCSS exports — same control as
+    the SENTRY export path. Without it, any authenticated session (including a
+    unit-scoped maintenance_chief) could pull the entire fleet's SR/parts/
+    due-in data via this parallel export route."""
+    user = getattr(request.state, "user", None)
+    require_user_role(user, SENTRY_EXPORT_ROLES, action=action)
+
+
 @router.get("/sr_header.csv")
 async def export_sr_header(
+    request: Request,
     limit: int = Query(500, ge=1, le=10000),
     cm_only: bool = Query(True),
 ):
+    _gate_export(request, "gcss.export.sr_header")
     ds = get_dataset()
     rows: List[Dict[str, Any]] = []
     for sr in ds.srs:
@@ -59,8 +71,10 @@ async def export_sr_header(
 
 @router.get("/sr_parts.csv")
 async def export_sr_parts(
+    request: Request,
     limit: int = Query(500, ge=1, le=10000),
 ):
+    _gate_export(request, "gcss.export.sr_parts")
     ds = get_dataset()
     rows: List[Dict[str, Any]] = []
     for sr in ds.srs:
@@ -75,9 +89,11 @@ async def export_sr_parts(
 
 @router.get("/due_in.csv")
 async def export_due_in(
+    request: Request,
     limit: int = Query(500, ge=1, le=10000),
     open_only: bool = Query(True),
 ):
+    _gate_export(request, "gcss.export.due_in")
     ds = get_dataset()
     rows: List[Dict[str, Any]] = []
     for sr in ds.srs:
