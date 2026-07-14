@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main, master, develop]
 
+# Least privilege: the default token is read-only. Jobs that need more
+# elevate explicitly (none here do).
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend:
     name: Backend · pytest + dataset regen
@@ -24,8 +33,10 @@ jobs:
         run: |
           cd dataset
           python -c "from main import main as regen; regen(seed=42, quick=True)"
-      - name: Run pytest
-        run: pytest dataset/tests/ -v
+      - name: Run test suite
+        # Full backend + integration + dataset suites. Playwright e2e run
+        # separately (they need a browser + a live server).
+        run: pytest tests/ backend/tests/ dataset/tests/ --ignore=tests/playwright -q
 
   frontend:
     name: Frontend · tsc + vite build
@@ -41,12 +52,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install deps
-        run: npm ci --no-audit --no-fund
+        run: npm ci --no-fund
       - name: Type-check + build
         run: npm run build
 
   docker:
-    name: Docker · build images
+    name: Docker · build + image scan
     runs-on: ubuntu-latest
     needs: [backend, frontend]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
@@ -56,6 +67,13 @@ jobs:
         run: docker build -t spire-backend:ci .
       - name: Build frontend image
         run: docker build -t spire-frontend:ci ./frontend
+      - name: Trivy image scan (advisory)
+        # Advisory until base images are hardened/pinned (see PRODUCTION_CHECKLIST).
+        continue-on-error: true
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.58.1
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed spire-backend:ci
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed spire-frontend:ci
       - name: Smoke compose
         run: |
           docker compose up -d --build
@@ -76,7 +94,8 @@ jobs:
       url: https://spire-mdm.fly.dev
     steps:
       - uses: actions/checkout@v4
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # Pinned release (was @master — a moving branch is a supply-chain risk).
+      - uses: superfly/flyctl-actions/setup-flyctl@1.5
       - name: Deploy
         run: flyctl deploy --remote-only --ha=false --app spire-mdm --wait-timeout 300
         env:
