@@ -36,10 +36,12 @@ def client():
 
 @pytest.fixture(scope="module")
 def auth_client(client):
-    """Returns a TestClient with a logged-in g4 session cookie."""
+    """Returns a TestClient logged in as a data-custodian-class role
+    (security_manager). The GCSS-MC full-fleet exports are gated to
+    SENTRY_EXPORT_ROLES, so the roundtrip tests must run under a custodian."""
     resp = client.post(
         "/api/auth/login",
-        json={"dodid": "1234567890", "pin": "123456"},
+        json={"dodid": "3456789012", "pin": "123456"},
     )
     assert resp.status_code == 200, resp.text
     return client
