@@ -1022,7 +1022,7 @@ def secure_wipe(actor: str = "security_manager") -> dict:
     """Overwrite and delete persistent state. Logs the wipe to a fresh chain
     so the action itself is recorded (can't wipe without evidence)."""
     with _LOCK:
-        for path in (DB_PATH, DB_ENCRYPTED_PATH):
+        for path in (DB_PATH, DB_ENCRYPTED_PATH, DB_SALT_PATH):
             if path.exists():
                 size = path.stat().st_size
                 with open(path, "r+b") as f:
@@ -1052,7 +1052,7 @@ def _maybe_log_boot() -> None:
     try:
         with conn() as c:
             row = c.execute(
-                "SELECT kind, ts FROM audit_chain ORDER BY id DESC LIMIT 1"
+                "SELECT kind, ts FROM audit_log ORDER BY id DESC LIMIT 1"
             ).fetchone()
         if row and row["kind"] == "system_boot":
             try:
