@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from ..inference_economics import RATE_CARD, record_call
 
@@ -224,8 +224,13 @@ async def call_llm_chat(
     call_site: str = "unspecified",
     role: Optional[str] = None,
     route: str = "primary",
+    caller_clearance: str = "UNCLASSIFIED",
 ) -> dict:
     """Call the LLM chat completion endpoint via classification-proxy.
+
+    `caller_clearance` is forwarded to the proxy so it can scope output to the
+    operator's clearance. It defaults to UNCLASSIFIED (fail-safe / most
+    restrictive) so a caller that forgets to pass it never over-discloses.
 
     Every call is:
       - temperature 0 by default (demo determinism)
@@ -271,6 +276,7 @@ async def call_llm_chat(
                 call_site=call_site,
                 role=role,
                 route=route,
+                caller_clearance=caller_clearance,
             )
             _clear_primary_failed()
             return result
@@ -310,6 +316,7 @@ async def call_llm_chat(
             call_site=call_site,
             role=role,
             route="fallback-local",
+            caller_clearance=caller_clearance,
         )
         _clear_local_failed()
         return result
@@ -330,6 +337,7 @@ async def _call_ollama_native(
     call_site: str,
     role: Optional[str],
     route: str,
+    caller_clearance: str = "UNCLASSIFIED",
 ) -> dict:
     """Call Ollama's native /api/chat endpoint.
 
@@ -363,8 +371,8 @@ async def _call_ollama_native(
         payload["format"] = "json"
     headers = {
         "Content-Type": "application/json",
-        "X-Caller-Clearance": "UNCLASSIFIED",
-        "X-Classification": "UNCLASSIFIED",
+        "X-Caller-Clearance": caller_clearance,
+        "X-Classification": caller_clearance,
     }
     started = time.perf_counter()
     try:
@@ -452,6 +460,7 @@ async def _call_one_tier(
     call_site: str,
     role: Optional[str],
     route: str,
+    caller_clearance: str = "UNCLASSIFIED",
 ) -> dict:
     """Single-tier LLM call. Owns the HTTP round-trip + cost
     bookkeeping for one upstream. Raises HTTPException on any
@@ -471,8 +480,8 @@ async def _call_one_tier(
             payload["tool_choice"] = tool_choice
     headers = {
         "Content-Type": "application/json",
-        "X-Caller-Clearance": "UNCLASSIFIED",
-        "X-Classification": "UNCLASSIFIED",
+        "X-Caller-Clearance": caller_clearance,
+        "X-Classification": caller_clearance,
     }
     started = time.perf_counter()
     try:
@@ -540,7 +549,7 @@ async def _call_one_tier(
 
 
 @router.post("/chat")
-async def chat(payload: dict):
+async def chat(payload: dict, request: Request):
     messages = payload.get("messages")
     if not messages:
         raise HTTPException(status_code=400, detail="messages required")
@@ -551,6 +560,11 @@ async def chat(payload: dict):
     # smoke tests) don't pollute the prod call-site table.
     tier = payload.get("tier") or "tier2_mid"
     call_site = payload.get("call_site") or "llm_chat_passthrough"
+    # Forward the operator's session clearance to the proxy so it scopes output
+    # to what the caller is cleared for — never the hardcoded UNCLASSIFIED, and
+    # never a client-supplied value. Falls back to UNCLASSIFIED (most restrictive).
+    user = getattr(request.state, "user", None) or {}
+    caller_clearance = user.get("clearance") or "UNCLASSIFIED"
     result = await call_llm_chat(
         messages=messages,
         response_format=response_format,
@@ -558,5 +572,7 @@ async def chat(payload: dict):
         max_tokens=max_tokens,
         tier=tier,
         call_site=call_site,
+        role=user.get("role"),
+        caller_clearance=caller_clearance,
     )
     return result
