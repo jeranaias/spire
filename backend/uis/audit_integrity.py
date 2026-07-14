@@ -265,7 +265,10 @@ class IntegrityStatus:
     entries: int
     head_hash: Optional[str]
     broken_at_id: Optional[int] = None
+    broken_reason: Optional[str] = None
     signing_enabled: bool = False
+    signed_entries: int = 0
+    unsigned_signable: int = 0
     pin_count: int = 0
     pin_consistent: Optional[bool] = None
     pin_error: Optional[str] = None
@@ -276,7 +279,10 @@ class IntegrityStatus:
             "entries": self.entries,
             "head_hash": self.head_hash,
             "broken_at_id": self.broken_at_id,
+            "broken_reason": self.broken_reason,
             "signing_enabled": self.signing_enabled,
+            "signed_entries": self.signed_entries,
+            "unsigned_signable": self.unsigned_signable,
             "pin_count": self.pin_count,
             "pin_consistent": self.pin_consistent,
             "pin_error": self.pin_error,
@@ -330,7 +336,10 @@ def audit_integrity_status() -> IntegrityStatus:
         entries=chain["entries"],
         head_hash=chain.get("head_hash"),
         broken_at_id=chain.get("broken_at_id"),
+        broken_reason=chain.get("reason"),
         signing_enabled=signing_enabled(),
+        signed_entries=chain.get("signed_entries", 0),
+        unsigned_signable=chain.get("unsigned_signable", 0),
         pin_count=len(pin_records),
         pin_consistent=pin_consistent,
         pin_error=pin_error,
