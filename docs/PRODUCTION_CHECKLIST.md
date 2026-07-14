@@ -18,18 +18,22 @@
       current code. _(Repo facts)_
 - [ ] **Resolve `rbac-hardening-orphan`** (238 commits) — merge the wanted work or
       delete the branch. _(Repo facts)_
-- [ ] **Fix the "AES-256 at rest" claim.** Either move at-rest encryption to
-      **AES-256-GCM** (SQLCipher or a validated provider) *or* correct every
-      "AES-256" string to match the AES-128 reality. `persistence.py:19,34`,
-      `system.py:478,1254`, `docker-compose.yml:23`. _(Finding 2 · 3.13.11)_
-- [ ] **Replace the hardcoded KDF salt** (`persistence.py:54`) with a per-install
-      random salt stored beside the DB. _(Finding 2 · 3.13.16)_
-- [ ] **Wire signature verification into `verify_chain()`** and default audit
-      signing ON with a provisioned key, so AU-9(5) is real. `audit_integrity.py:175`,
-      `persistence.py:343`. _(Finding 4 · 3.3.8)_
-- [ ] **Close `gcss_export`** — add the custodian role gate + unit scoping used by
-      the SENTRY export path. `routes/gcss_export.py`, `main.py:197-198`.
-      _(Finding 5 · 3.1.2)_
+- [x] **Fix the "AES-256 at rest" claim.** Moved at-rest encryption to
+      **AES-256-GCM** (was Fernet/AES-128-CBC); DR backups unified onto the same
+      primitive; legacy Fernet files migrate transparently. `persistence.py`,
+      `uis/dr.py`, corrected posture strings in `system.py`. _(Finding 2 · 3.13.11)_
+- [x] **Replace the hardcoded KDF salt** with a per-install random 16-byte salt
+      embedded in the ciphertext header (portable across installs).
+      `persistence.py`. _(Finding 2 · 3.13.16)_
+- [x] **Wire signature verification into `verify_chain()`** — a bad/absent
+      signature on a signed row now fails the chain (`reason=bad_signature`), so a
+      rewrite-and-rehash attack is caught. `persistence.py`, `audit_integrity.py`.
+      _Operational follow-up:_ provision a signing key (env → HSM/PKCS#11) so
+      signing is ON in the deployment; auto-generating a key next to the DB was
+      deliberately avoided (weak assurance / security theater). _(Finding 4 · 3.3.8)_
+- [x] **Close `gcss_export`** — added the custodian `SENTRY_EXPORT_ROLES` gate to
+      all three exports on both mount prefixes; denial is audited.
+      `routes/gcss_export.py`. _(Finding 5 · 3.1.2)_
 - [ ] **Make CAC auth production-real for the target deployment:** drop the DoD PKI
       trust bundle in `cac_trust/`, set `SPIRE_AUTH_MODE=cac`, implement/enable
       **CRL or OCSP** revocation (currently `skip`), and replace the one/two-hop
@@ -85,8 +89,13 @@
 - [ ] **Stand up a FIPS-validated runtime:** rebuild on a FIPS base (UBI9 + FIPS
       provider, or a `-fips` OpenSSL image); verify crypto executes in the validated
       module. _(Finding 1 · FIPS 140-3)_
-- [ ] **Fix `system_boot` logging** — `_maybe_log_boot` queries the wrong table
-      (`audit_chain` → `audit_log`). `persistence.py:1017`. _(Finding 17 · 3.3.1)_
+- [x] **Fix `system_boot` logging** — `_maybe_log_boot` queried a non-existent
+      table (`audit_chain` → `audit_log`); boots are now recorded with cold-start
+      dedup. `persistence.py`. _(Finding 17 · 3.3.1)_
+- [ ] **Do not leave a plaintext `spire.db` on disk at rest.** Even with
+      encryption enabled, the working copy is decrypted to `spire.db` and *not*
+      removed on lock (only the `.enc` is written). `uis/dr.py` reads it directly,
+      so removal needs care. `persistence.py::_lock_db`. _(Residual from Finding 2 · 3.13.16)_
 - [ ] **Strengthen chain-head pinning** to catch equal-length rewrites, and stop
       silently swallowing audit-write failures. `audit_integrity.py:320`.
       _(Finding 18)_
@@ -104,7 +113,12 @@
 
 | Phase | Items | Done |
 |---|---:|---:|
-| P0 — Blockers | 8 | 0 |
+| P0 — Blockers | 8 | 4 |
 | P1 — High | 8 | 0 |
 | P2 — Medium | 6 | 0 |
-| P3 — Hardening | 8 | 0 |
+| P3 — Hardening | 9 | 1 |
+
+**Landed 2026-07-14:** AES-256-GCM at rest + per-install salt, audit signature
+verification (AU-9(5)), `gcss_export` custodian gate, `system_boot` logging fix
+— each with tests. Remaining P0s are operational/owner actions (rotate PAT, push
+`master`, resolve orphan branch, provision CAC PKI + signing key).
