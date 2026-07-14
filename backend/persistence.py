@@ -12,12 +12,12 @@ Two responsibilities:
      maintenance chief marks correct/incorrect persists. In-memory mode
      claims from earlier revisions are removed.
 
-Backing store is SQLite in encrypted mode when SPIRE_DB_PASSPHRASE is set.
-Uses pyca/cryptography's Fernet on top of a standard sqlite3 connection --
-we encrypt the whole DB file at rest via a wrapper, not per-row. Rationale:
-SQLCipher isn't in PyPI with Windows wheels for Python 3.14 yet, and
-file-level encryption satisfies the 'AES-256 at rest' claim for the
-hackathon. Post-hackathon we migrate to SQLCipher proper.
+Backing store is SQLite. When SPIRE_DB_PASSPHRASE is set the whole DB file
+is encrypted at rest with AES-256-GCM: the file is decrypted to DB_PATH on
+unlock and re-encrypted on lock. The key is PBKDF2-HMAC-SHA256 (200k
+iterations) over a per-install random salt persisted beside the DB. Legacy
+Fernet files (pre-GCM installs) are read transparently and migrated to GCM
+on the next write.
 """
 from __future__ import annotations
 
@@ -31,8 +31,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
@@ -44,66 +45,99 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "runtime"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "spire.db"
 DB_ENCRYPTED_PATH = DATA_DIR / "spire.db.enc"
+DB_SALT_PATH = DATA_DIR / "spire.db.salt"
 
 _LOCK = threading.RLock()
 _DB_PASSPHRASE = os.environ.get("SPIRE_DB_PASSPHRASE")  # None == plain mode for local dev
 
-# Fixed salt for deterministic key derivation. Security note: in production
-# the salt should be per-install and stored out-of-band. For a single-tenant
-# laptop demo the fixed salt is acceptable -- the passphrase is the secret.
-_KDF_SALT = b"spire-v0-at-rest-salt-7b3d4f61"
+# At-rest file format: MAGIC || nonce(12) || AES-256-GCM(ciphertext+tag).
+# The key is derived from the passphrase + a per-install random salt held in
+# DB_SALT_PATH (not secret, but unique per install so identical passphrases
+# never collapse to the same key). Anything not starting with MAGIC is a
+# legacy Fernet blob and is decrypted via the migration path below.
+_GCM_MAGIC = b"SPIREg1\x00"
+_KDF_ITERATIONS = 200_000
+
+# Legacy fixed salt — only used to read pre-GCM Fernet files for one-time
+# migration. Never used to write new data.
+_LEGACY_KDF_SALT = b"spire-v0-at-rest-salt-7b3d4f61"
 
 
-# Derived keys are deterministic from (passphrase, salt). Re-running the
-# 200k-iteration PBKDF2 on every call was the dominant cost of conn() —
-# called TWICE per connection (decrypt + re-encrypt), it added ~4-5s per DB
-# touch on the shared-CPU cloud box, so every DB-backed endpoint (audit
-# tile, drafts, sentry) stalled. The KDF result is a secret held only in
-# this process's memory (same trust boundary as the passphrase env var), so
-# memoizing it is safe and cuts conn() from seconds to milliseconds.
-_DERIVED_KEY_CACHE: dict[str, bytes] = {}
+def _install_salt() -> bytes:
+    """Return the per-install KDF salt, creating it on first use."""
+    if DB_SALT_PATH.exists():
+        salt = DB_SALT_PATH.read_bytes()
+        if len(salt) == 16:
+            return salt
+    salt = os.urandom(16)
+    DB_SALT_PATH.write_bytes(salt)
+    return salt
 
 
-def _derive_key(passphrase: str) -> bytes:
-    cached = _DERIVED_KEY_CACHE.get(passphrase)
+# Re-running 200k-iteration PBKDF2 on every conn() (unlock + lock) added
+# seconds per DB touch on the shared-CPU cloud box. The derived key is a
+# secret held only in this process's memory (same trust boundary as the
+# passphrase env var), so memoizing by (passphrase, salt) is safe.
+_DERIVED_KEY_CACHE: dict[tuple[str, bytes], bytes] = {}
+
+
+def _derive_key(passphrase: str, salt: bytes) -> bytes:
+    """Derive a raw 32-byte AES-256 key from passphrase + salt."""
+    cached = _DERIVED_KEY_CACHE.get((passphrase, salt))
     if cached is not None:
         return cached
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=_KDF_SALT,
-        iterations=200_000,
-    )
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=_KDF_ITERATIONS)
     key = kdf.derive(passphrase.encode("utf-8"))
-    # Fernet requires urlsafe b64 32-byte key
+    _DERIVED_KEY_CACHE[(passphrase, salt)] = key
+    return key
+
+
+def _decrypt_blob(blob: bytes, passphrase: str) -> bytes:
+    """Decrypt an at-rest blob. Handles both the AES-256-GCM format (salt in
+    the header, so the blob is self-contained and portable across installs)
+    and legacy Fernet files, which are migrated to GCM on the next write."""
+    if blob[: len(_GCM_MAGIC)] == _GCM_MAGIC:
+        body = blob[len(_GCM_MAGIC):]
+        salt, nonce, ciphertext = body[:16], body[16:28], body[28:]
+        key = _derive_key(passphrase, salt)
+        return AESGCM(key).decrypt(nonce, ciphertext, None)
+    # Legacy Fernet path — read-only, for one-time migration.
     import base64
-    out = base64.urlsafe_b64encode(key)
-    _DERIVED_KEY_CACHE[passphrase] = out
-    return out
+    from cryptography.fernet import Fernet, InvalidToken
+    legacy_key = base64.urlsafe_b64encode(_derive_key(passphrase, _LEGACY_KDF_SALT))
+    try:
+        return Fernet(legacy_key).decrypt(blob)
+    except InvalidToken as e:
+        raise RuntimeError("passphrase does not match existing encrypted data") from e
+
+
+def _encrypt_blob(plaintext: bytes, passphrase: str) -> bytes:
+    """Encrypt with AES-256-GCM under a fresh random nonce. The per-install
+    salt is embedded in the header so the blob decrypts on any install."""
+    salt = _install_salt()
+    key = _derive_key(passphrase, salt)
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext, None)
+    return _GCM_MAGIC + salt + nonce + ciphertext
 
 
 def _unlock_db() -> None:
-    """If encrypted DB exists and passphrase set, decrypt to DB_PATH on
-    startup. Re-encrypts and removes plaintext on lock_db()."""
-    if not _DB_PASSPHRASE:
-        return
-    if not DB_ENCRYPTED_PATH.exists():
+    """If an encrypted DB exists and a passphrase is set, decrypt it to
+    DB_PATH. The working copy is re-encrypted to DB_ENCRYPTED_PATH on lock."""
+    if not _DB_PASSPHRASE or not DB_ENCRYPTED_PATH.exists():
         return
     try:
-        f = Fernet(_derive_key(_DB_PASSPHRASE))
-        plaintext = f.decrypt(DB_ENCRYPTED_PATH.read_bytes())
-        DB_PATH.write_bytes(plaintext)
-    except InvalidToken as e:
+        plaintext = _decrypt_blob(DB_ENCRYPTED_PATH.read_bytes(), _DB_PASSPHRASE)
+    except (InvalidTag, ValueError) as e:
         raise RuntimeError("SPIRE_DB_PASSPHRASE does not match existing encrypted DB") from e
+    DB_PATH.write_bytes(plaintext)
 
 
 def _lock_db() -> None:
-    """Re-encrypt the plaintext DB and remove the unencrypted file."""
+    """Re-encrypt the plaintext working copy to DB_ENCRYPTED_PATH (AES-256-GCM)."""
     if not _DB_PASSPHRASE or not DB_PATH.exists():
         return
-    f = Fernet(_derive_key(_DB_PASSPHRASE))
-    ciphertext = f.encrypt(DB_PATH.read_bytes())
-    DB_ENCRYPTED_PATH.write_bytes(ciphertext)
+    DB_ENCRYPTED_PATH.write_bytes(_encrypt_blob(DB_PATH.read_bytes(), _DB_PASSPHRASE))
 
 
 @contextmanager

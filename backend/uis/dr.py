@@ -276,29 +276,20 @@ def _passphrase_from_env() -> Optional[str]:
     return raw if raw else None
 
 
-def _fernet_for_passphrase(passphrase: str) -> Any:
-    """Build a Fernet using the same key-derivation function the
-    live DB encryption uses. Importing :func:`backend.persistence
-    ._derive_key` keeps a single source of truth — if the live
-    KDF rotates, backups taken before the rotation become
-    unreadable, which is the correct behavior (the operator must
-    re-derive both at the same time)."""
-    from cryptography.fernet import Fernet
-    from ..persistence import _derive_key
-    return Fernet(_derive_key(passphrase))
-
-
 def _encrypt_file(plaintext: Path, ciphertext: Path, passphrase: str) -> None:
-    """Encrypt ``plaintext`` to ``ciphertext`` using the live-DB
-    Fernet recipe. Reads the source whole-file — fine for pilot-
-    scale DBs (low-GB); large-DB streaming is a future task."""
-    f = _fernet_for_passphrase(passphrase)
-    ciphertext.write_bytes(f.encrypt(plaintext.read_bytes()))
+    """Encrypt ``plaintext`` to ``ciphertext`` with the same AES-256-GCM
+    primitive the live DB uses (single source of truth in
+    :mod:`backend.persistence`). Reads the source whole-file — fine for
+    pilot-scale DBs (low-GB); large-DB streaming is a future task."""
+    from ..persistence import _encrypt_blob
+    ciphertext.write_bytes(_encrypt_blob(plaintext.read_bytes(), passphrase))
 
 
 def _decrypt_file(ciphertext: Path, plaintext: Path, passphrase: str) -> None:
-    f = _fernet_for_passphrase(passphrase)
-    plaintext.write_bytes(f.decrypt(ciphertext.read_bytes()))
+    """Decrypt a backup. Transparently reads both the AES-256-GCM format and
+    legacy Fernet backups taken before the migration."""
+    from ..persistence import _decrypt_blob
+    plaintext.write_bytes(_decrypt_blob(ciphertext.read_bytes(), passphrase))
 
 
 # ---------------------------------------------------------------------------
