@@ -75,3 +75,6 @@ datasets/
 
 # Playwright run artifacts
 test-results/
+
+# Session continuity scratch (local only)
+SESSION_HANDOFF.md
