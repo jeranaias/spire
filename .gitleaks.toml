@@ -1,0 +1,18 @@
+title = "SPIRE gitleaks config"
+
+# Start from gitleaks' default rule set, then narrow with an allowlist for
+# known non-secrets that the generic-api-key rule false-positives on.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets (UI storage keys, doc placeholders)"
+# Frontend localStorage/setting key constants, e.g. "spire.pulse.forecast.prefs".
+# These are namespace strings, never credentials.
+regexes = [
+  '''spire\.[a-zA-Z0-9._-]+''',
+]
+# .env.example documents token formats with obvious placeholders.
+paths = [
+  '''\.env\.example$''',
+]
