@@ -150,7 +150,7 @@ frontend/
     HelpOverlay.tsx              ? key keyboard shortcut reference
     classification/              FPCON-aware classification banner strip
     StatusFooter.tsx             Live telemetry ticker (LLM up/down, audit chain head, etc.)
-docs/            ARCHITECTURE, USER_GUIDE, RUNBOOK, BUG_BASH (pilot first-week checklist)
+docs/            See docs/README.md — architecture, security/compliance (PRODUCTION_READINESS + CHECKLIST), capability, ops; archive/ holds MDM-2026 pitch material
 scripts/         Playwright screenshot harness, MGRS lat/lon baker, smoke tests
 .github/         Issue templates, PR template, CI workflow
 Dockerfile       Backend image
