@@ -30,7 +30,7 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r dataset/requirements.txt pytest
+          pip install -r backend/requirements.txt -r dataset/requirements.txt pytest pytest-asyncio
       - name: Dataset deterministic regen (seed 42, quick)
         run: |
           cd dataset
