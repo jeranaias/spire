@@ -475,7 +475,7 @@ async def audit(request: Request, limit: int = 50, role: str | None = None):
         "feedback_summary": feedback_summary(),
         "storage": {
             "encrypted_at_rest": bool(os.environ.get("SPIRE_DB_PASSPHRASE")),
-            "db_path": "runtime/spire.db (plaintext)" if not os.environ.get("SPIRE_DB_PASSPHRASE") else "runtime/spire.db.enc (AES-256 via Fernet/PBKDF2-200k)",
+            "db_path": "runtime/spire.db (plaintext)" if not os.environ.get("SPIRE_DB_PASSPHRASE") else "runtime/spire.db.enc (AES-256-GCM, PBKDF2-HMAC-SHA256 200k)",
         },
     }
 
@@ -1251,7 +1251,7 @@ async def admin_audit(
         "db_path": (
             "runtime/spire.db (plaintext)"
             if not os.environ.get("SPIRE_DB_PASSPHRASE")
-            else "runtime/spire.db.enc (AES-256 via Fernet/PBKDF2-200k)"
+            else "runtime/spire.db.enc (AES-256-GCM, PBKDF2-HMAC-SHA256 200k)"
         ),
     }
 
