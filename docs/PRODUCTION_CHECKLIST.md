@@ -12,15 +12,16 @@
 
 ## P0 — Blockers (do before code leaves the building)
 
-- [ ] **Revoke the live GitHub PAT** in `.env` (not needed for production — it
-      only powers the optional feedback→GitHub-issue egress; local feedback
-      logging works without it). Confirm no credential is in the working tree at
-      handover. The live token was never committed in full — only a fake
-      placeholder (`.env.example`) is in history. _(Repo facts)_
-- [ ] **Push `master` to `origin`** (41 commits ahead) so the review targets
-      current code. _(Repo facts)_
-- [ ] **Resolve `rbac-hardening-orphan`** (238 commits) — merge the wanted work or
-      delete the branch. _(Repo facts)_
+- [~] **Revoke the live GitHub PAT.** Scrubbed from local `.env` (2026-07-14);
+      not needed for production. **Owner action remaining:** delete it server-side
+      at GitHub → Settings → Developer settings → Fine-grained tokens (a PAT can't
+      revoke itself) — it stays valid until then. _(Repo facts)_
+- [x] **Push `master` to `origin`** — done 2026-07-14 (52 commits). _(Repo facts)_
+- [x] **Resolve `rbac-hardening-orphan`** — deleted. It was a true orphan (no shared
+      ancestor), a pre-pivot fork whose RBAC work is superseded in `master` and
+      whose tooling was coupled to a dead backend + an audit-prune approach that
+      contradicts the ATO "never delete the audit chain" retention posture. Nothing
+      salvageable. _(Repo facts)_
 - [x] **Fix the "AES-256 at rest" claim.** Moved at-rest encryption to
       **AES-256-GCM** (was Fernet/AES-128-CBC); DR backups unified onto the same
       primitive; legacy Fernet files migrate transparently. `persistence.py`,
@@ -116,7 +117,7 @@
 
 | Phase | Items | Done |
 |---|---:|---:|
-| P0 — Blockers | 8 | 4 |
+| P0 — Blockers | 8 | 6 |
 | P1 — High | 8 | 0 |
 | P2 — Medium | 6 | 0 |
 | P3 — Hardening | 9 | 1 |
