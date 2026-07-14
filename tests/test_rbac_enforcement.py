@@ -105,3 +105,30 @@ def test_process_rejects_non_custodian(app_client):
     _login(app_client, MAINT_CHIEF_DODID)
     r = app_client.post(f"/api/sentry/process/{batch_id}")
     assert r.status_code == 403, r.text
+
+
+# ---------------------------------------------------------------------------
+# GCSS-MC full-fleet exports are custodian-only (parallel to SENTRY export)
+# ---------------------------------------------------------------------------
+
+_GCSS_EXPORTS = [
+    "/api/gcss/export/sr_header.csv",
+    "/api/gcss/export/sr_parts.csv",
+    "/api/gcss/export/due_in.csv",
+    "/api/integrations/gcss-mc/export/sr_header.csv",
+]
+
+
+@pytest.mark.parametrize("path", _GCSS_EXPORTS)
+def test_gcss_export_rejects_scoped_role(app_client, path):
+    _login(app_client, MAINT_CHIEF_DODID)  # unit-scoped, not a custodian
+    r = app_client.get(path)
+    assert r.status_code == 403, r.text
+
+
+@pytest.mark.parametrize("path", _GCSS_EXPORTS)
+def test_gcss_export_allows_custodian(app_client, path):
+    _login(app_client, SECURITY_MANAGER_DODID)
+    r = app_client.get(path)
+    assert r.status_code == 200, r.text
+    assert "text/csv" in r.headers.get("content-type", "")
