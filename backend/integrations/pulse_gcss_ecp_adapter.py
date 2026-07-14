@@ -231,14 +231,23 @@ def parse_ecp(
         report: IngestReport — aggregate counts the upload UI renders.
     """
     if isinstance(source, (str, Path)):
-        path = Path(source)
-        if path.exists():
-            with path.open("r", encoding="utf-8", newline="") as fh:
-                reader = csv.reader(fh)
-                return _parse_rows(reader, strict_header=strict_header)
+        # Distinguish a filesystem path from a raw CSV body. A CSV body
+        # contains newlines and can exceed the OS path-length limit —
+        # probing it with Path.exists() raises ENAMETOOLONG on Linux (Windows
+        # just returns False, which is why this only bit in CI). Only stat
+        # inputs that could plausibly be a path.
+        as_str = str(source)
+        maybe_path = "\n" not in as_str and len(as_str) < 1024
+        if maybe_path:
+            try:
+                path = Path(source)
+                if path.exists():
+                    with path.open("r", encoding="utf-8", newline="") as fh:
+                        return _parse_rows(csv.reader(fh), strict_header=strict_header)
+            except OSError:
+                pass
         # treat the str as raw CSV body
-        reader = csv.reader(io.StringIO(str(source)))
-        return _parse_rows(reader, strict_header=strict_header)
+        return _parse_rows(csv.reader(io.StringIO(as_str)), strict_header=strict_header)
     if hasattr(source, "read"):
         # file-like
         text = source.read()
