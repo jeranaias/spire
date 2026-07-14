@@ -101,6 +101,12 @@ PULSE_VIEW_ROLES   = frozenset({"maintenance_chief", "g4", "mef_commander"})
 BASTION_VIEW_ROLES = frozenset({"mef_commander", "g4", "security_manager", "maintenance_chief"})
 ADMIN_VIEW_ROLES   = frozenset({"security_manager", "mef_commander"})
 SENTRY_VIEW_ROLES  = frozenset({"data_custodian", "security_manager", "mef_commander"})
+# Every provisioned operator role. Used to gate cross-cutting surfaces that
+# any signed-in operator legitimately uses (SPIRO/LLM, the Decision Bridge home
+# view, GCSS schema lookups) so those routers are default-deny — an unknown or
+# absent role is refused rather than silently allowed. Sensitive sub-routes
+# under these prefixes still carry their own tighter gate (e.g. the audit tile).
+ALL_OPS_ROLES = frozenset({"maintenance_chief", "g4", "data_custodian", "security_manager", "mef_commander"})
 
 VIEW_ROLES: dict[str, frozenset[str]] = {
     "/pulse":   PULSE_VIEW_ROLES,
@@ -404,6 +410,9 @@ def require_view_scope(view: str, allowed: frozenset[str]):
             },
         )
 
+    # Marker so the default-deny governance test (test_default_deny_authz) can
+    # detect an include-level view-scope gate on a route without executing it.
+    _dep._spire_view_scope = view  # type: ignore[attr-defined]
     return _dep
 
 
