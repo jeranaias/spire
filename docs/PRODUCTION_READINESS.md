@@ -36,7 +36,7 @@ infrastructure-level, not a rewrite.
 | Local `master` is **41 commits ahead** of `origin/master` | The GitHub remote a reviewer clones is stale | Push, or the review targets old code |
 | `rbac-hardening-orphan` branch: **238 commits** never merged | Orphaned hardening work — dead or needed? | Merge or delete; don't leave dangling |
 | `marlog/` is a **whole second app** (185 files, ~15.8k LOC) bundled in-repo | Marine Logistics Calculator sibling | Decide scope; carving it out cuts ~16k LOC + one supply chain |
-| **Live GitHub PAT** in on-disk `.env` (`github_pat_11BOVF…`) | Gitignored — *not* committed, but a real live credential in the working tree | **Rotate now**, treat as exposed |
+| **Live GitHub PAT** in on-disk `.env` (`github_pat_…`, redacted) | Gitignored — *not* committed, but a real live credential in the working tree | **Revoke** — it only powers the optional feedback→GitHub-issue egress, which production/air-gap doesn't want |
 
 ---
 

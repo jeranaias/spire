@@ -12,8 +12,11 @@
 
 ## P0 — Blockers (do before code leaves the building)
 
-- [ ] **Rotate the live GitHub PAT** in `.env` and treat it as exposed. Confirm no
-      credential is in the working tree at handover. _(Repo facts)_
+- [ ] **Revoke the live GitHub PAT** in `.env` (not needed for production — it
+      only powers the optional feedback→GitHub-issue egress; local feedback
+      logging works without it). Confirm no credential is in the working tree at
+      handover. The live token was never committed in full — only a fake
+      placeholder (`.env.example`) is in history. _(Repo facts)_
 - [ ] **Push `master` to `origin`** (41 commits ahead) so the review targets
       current code. _(Repo facts)_
 - [ ] **Resolve `rbac-hardening-orphan`** (238 commits) — merge the wanted work or
