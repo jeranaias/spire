@@ -1,0 +1,15 @@
+# Pinned SHA-256 checksums for anything the Orin installer downloads.
+# Format:  <sha256>  <name>
+#
+# setup.sh verifies each download against the matching <name> here before
+# executing it. A listed entry that doesn't match ABORTS the install; a
+# download with no entry runs unverified with a loud warning. Pin every line
+# below (with real values for the versions you deploy) before a production
+# install, e.g.:
+#
+#   curl -fsSL https://ollama.com/install.sh | sha256sum
+#
+# then paste the hash in place of PIN_ME.
+#
+PIN_ME  ollama-install.sh
+PIN_ME  nodesource-setup.sh

@@ -28,8 +28,11 @@ WorkingDirectory=__SPIRE_DIR__
 # .env at the repo root is ALSO auto-loaded by backend/__init__.py, but we
 # point systemd at it too so the values are present in the process env for
 # any code that reads os.environ before the app package imports.
+# Loopback by default; .env can override SPIRE_BIND_HOST=0.0.0.0 for LAN
+# exposure (only behind a TLS reverse proxy).
+Environment=SPIRE_BIND_HOST=127.0.0.1
 EnvironmentFile=__SPIRE_DIR__/.env
-ExecStart=__SPIRE_VENV__/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+ExecStart=__SPIRE_VENV__/bin/uvicorn backend.main:app --host ${SPIRE_BIND_HOST} --port 8000
 Restart=on-failure
 RestartSec=3
 # Give the deterministic dataset boot (RANDOM_SEED=42) room to complete.

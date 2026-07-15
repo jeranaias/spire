@@ -31,6 +31,23 @@ log()  { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '    \033[1;32m✓\033[0m %s\n' "$*"; }
 warn() { printf '    \033[1;33m!\033[0m %s\n' "$*"; }
 
+# Fetch a remote script to disk (auditable) and verify it against a pinned
+# SHA-256 in deploy/orin/SHA256SUMS before executing — never pipe a remote
+# script straight into a shell. If it isn't pinned yet we warn and continue;
+# a pinned checksum that doesn't match aborts. Pin these before a real deploy.
+SUMS_FILE="$(cd "$(dirname "$0")" && pwd)/SHA256SUMS"
+verify_file() {
+  local path="$1" name="$2" expected actual
+  expected="$(awk -v n="$name" '$2==n {print $1}' "$SUMS_FILE" 2>/dev/null)"
+  if [ -z "$expected" ]; then
+    warn "no pinned checksum for $name — running unverified (add it to SHA256SUMS before production)"
+    return 0
+  fi
+  actual="$(sha256sum "$path" | awk '{print $1}')"
+  [ "$actual" = "$expected" ] || { warn "checksum MISMATCH for $name — aborting"; exit 1; }
+  ok "checksum verified: $name"
+}
+
 log "SPIRE Orin Nano setup"
 echo "    repo : ${REPO_DIR}"
 echo "    user : ${RUN_USER}"
@@ -49,7 +66,9 @@ if command -v ollama >/dev/null 2>&1; then
   ok "ollama already installed ($(ollama --version 2>/dev/null | head -n1))"
 else
   # The official installer detects Jetson and wires up GPU acceleration.
-  curl -fsSL https://ollama.com/install.sh | sh
+  curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
+  verify_file /tmp/ollama-install.sh ollama-install.sh
+  sh /tmp/ollama-install.sh
   ok "ollama installed"
 fi
 
@@ -152,7 +171,9 @@ else
   warn "No prebuilt frontend/dist found — building on the box (heavier; ensure 19V power)."
   if ! command -v node >/dev/null 2>&1 || [ "$(node -v | sed 's/v\([0-9]*\).*/\1/')" -lt 20 ]; then
     warn "Node 20+ not found. Installing via NodeSource ..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource-setup.sh
+    verify_file /tmp/nodesource-setup.sh nodesource-setup.sh
+    sudo -E bash /tmp/nodesource-setup.sh
     sudo apt-get install -y nodejs
   fi
   echo "    node -> $(node -v),  npm -> $(npm -v)"
