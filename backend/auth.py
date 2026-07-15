@@ -39,6 +39,37 @@ from pydantic import BaseModel
 SESSION_COOKIE_NAME = "spire_session"
 SESSION_TTL_SECONDS = 12 * 3600  # 12-hour shift
 
+# CSRF double-submit token. The session cookie is HttpOnly (JS can't read it),
+# so cookie auth alone is CSRF-able. We also set a *readable* `spire_csrf`
+# cookie and require the SPA to echo it in `X-CSRF-Token` on state-changing
+# requests. A cross-site attacker can send the ambient session cookie but
+# cannot read this token to echo it, nor set a custom header cross-origin.
+CSRF_COOKIE_NAME = "spire_csrf"
+CSRF_HEADER_NAME = "x-csrf-token"
+_CSRF_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+# Auth endpoints establish/refresh the session and issue the token, so they
+# can't require a pre-existing one.
+_CSRF_EXEMPT_PREFIXES = ("/api/auth/",)
+
+
+def _cookie_secure() -> bool:
+    return os.environ.get("SPIRE_SESSION_SECURE", "0") == "1"
+
+
+def _set_csrf_cookie(response: Response) -> str:
+    """Set (and return) a fresh readable CSRF token cookie."""
+    token = secrets.token_urlsafe(32)
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        token,
+        httponly=False,   # readable by the SPA so it can echo the header
+        samesite="lax",
+        max_age=SESSION_TTL_SECONDS,
+        path="/",
+        secure=_cookie_secure(),
+    )
+    return token
+
 
 _EPHEMERAL_SECRET: Optional[bytes] = None
 
@@ -299,6 +330,7 @@ def login(req: LoginRequest, response: Response) -> dict[str, Any]:
         # TLS-terminating proxy in real deployments, set `SPIRE_SESSION_SECURE=1`.
         secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
     )
+    _set_csrf_cookie(response)
     return {"ok": True, "user": user, "expires_at": payload["exp"]}
 
 
@@ -373,6 +405,7 @@ def cac_login(request: Request, response: Response) -> dict[str, Any]:
         path="/",
         secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
     )
+    _set_csrf_cookie(response)
     return {
         "ok": True,
         "user": result.user,
@@ -475,6 +508,7 @@ def quick_switch(req: QuickSwitchRequest, request: Request, response: Response) 
         path="/",
         secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
     )
+    _set_csrf_cookie(response)
     return {"ok": True, "user": user, "expires_at": payload["exp"]}
 
 
@@ -540,10 +574,20 @@ def _override_query_role(scope: dict, role: str) -> None:
     scope["query_string"] = urlencode(params).encode("ascii")
 
 
+def _needs_csrf(request: Request) -> bool:
+    path = request.url.path
+    return (
+        request.method not in _CSRF_SAFE_METHODS
+        and path.startswith("/api/")
+        and not path.startswith(_CSRF_EXEMPT_PREFIXES)
+    )
+
+
 async def session_middleware(request: Request, call_next):
     """Hydrate `request.state.user`, gate `/api/*` behind a valid session,
-    and force the authenticated role onto the request so downstream
-    handlers can't be tricked by a client-supplied `?role=` override.
+    enforce the CSRF double-submit token on state-changing requests, and force
+    the authenticated role onto the request so downstream handlers can't be
+    tricked by a client-supplied `?role=` override.
     """
     request.state.user = resolve_user_from_request(request)
     if _is_protected_api(request.url.path) and request.state.user is None:
@@ -555,6 +599,25 @@ async def session_middleware(request: Request, call_next):
                 "path": request.url.path,
             },
         )
+    # CSRF: a mutating request from an authenticated session must echo the
+    # readable csrf cookie in the X-CSRF-Token header.
+    if request.state.user is not None and _needs_csrf(request):
+        cookie_tok = request.cookies.get(CSRF_COOKIE_NAME)
+        header_tok = request.headers.get(CSRF_HEADER_NAME)
+        if not cookie_tok or not header_tok or not hmac.compare_digest(cookie_tok, header_tok):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "csrf_failed",
+                    "detail": "Missing or invalid CSRF token.",
+                    "path": request.url.path,
+                },
+            )
     if request.state.user is not None and request.url.path.startswith("/api/"):
         _override_query_role(request.scope, request.state.user["role"])
-    return await call_next(request)
+    response = await call_next(request)
+    # Issue a token to any authenticated session that lacks one (covers
+    # sessions established before this cookie existed).
+    if request.state.user is not None and not request.cookies.get(CSRF_COOKIE_NAME):
+        _set_csrf_cookie(response)
+    return response

@@ -6,6 +6,11 @@
 
 const BASE = "/api";
 
+function readCookie(name: string): string | null {
+  const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 // Role read synchronously from the Zustand store on every call. The store
 // owns the active role; we splice it onto GET requests as `?role=...` so the
 // backend's scoping layer can filter per-role. POST routes also take a role
@@ -167,6 +172,11 @@ async function jsonFetch<T>(path: string, init?: RequestInit, injectRole = true)
   const baseHeaders: Record<string, string> = isFormData
     ? {}
     : { "Content-Type": "application/json" };
+  // CSRF double-submit: echo the readable spire_csrf cookie on mutating calls.
+  if (!isRead) {
+    const csrf = readCookie("spire_csrf");
+    if (csrf) baseHeaders["X-CSRF-Token"] = csrf;
+  }
   const resp = await fetch(`${BASE}${url}`, {
     credentials: "include",
     ...init,
@@ -222,10 +232,13 @@ export async function replayQueuedWrite(write: {
   body?: unknown;
 }): Promise<unknown> {
   const url = withRole(write.path);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const csrf = readCookie("spire_csrf");
+  if (csrf) headers["X-CSRF-Token"] = csrf;  // replayed writes are mutating
   const init: RequestInit = {
     method: write.method,
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers,
   };
   if (write.body !== undefined) init.body = JSON.stringify(write.body);
   const resp = await fetch(`${BASE}${url}`, init);
