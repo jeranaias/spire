@@ -20,6 +20,9 @@ services:
     restart: unless-stopped
     environment:
       SPIRE_MODE: full
+      # This path serves plain HTTP on :8080, so Secure cookies won't send.
+      # Put TLS in front and set this to 1 for a real deployment.
+      SPIRE_SESSION_SECURE: "0"
       # Set SPIRE_DB_PASSPHRASE to enable AES-256 at-rest encryption of the
       # SQLite audit chain. Leave unset for plaintext (dev-only).
       # SPIRE_DB_PASSPHRASE: change-me-in-production
