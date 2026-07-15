@@ -1,9 +1,10 @@
-fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
-pydantic>=2.9.0
-cryptography>=43.0.0
-httpx>=0.27.0
-python-multipart>=0.0.20
+# Exact-pinned for reproducible builds (800-171 3.4.1). Bump via Dependabot.
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.13.3
+cryptography==46.0.7
+httpx==0.28.1
+python-multipart==0.0.26
 # torch + opencv-python-headless are needed ONLY for the live
 # ThermalHawk inference path. They live in requirements-ml.txt so the
 # default Fly deploy stays small (~150MB image) and cold starts fast.
