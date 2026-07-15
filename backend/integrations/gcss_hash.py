@@ -18,10 +18,10 @@ idempotent under re-export.
 """
 from __future__ import annotations
 
-import base64
-import hashlib
 import re
 from typing import Dict
+
+from ..deid import digest_b64url20
 
 
 _PREHASHED_LOWER = re.compile(r"^[a-z_]+_[A-Za-z0-9_\-]{20,}$")
@@ -32,8 +32,9 @@ _CACHE: Dict[str, str] = {}
 
 
 def _digest20(value: str) -> str:
-    raw = hashlib.sha256(value.encode("utf-8")).digest()[:15]
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    # Keyed HMAC (per-install key) — see backend.deid. Bare SHA-256 of a
+    # low-entropy identifier is brute-forceable.
+    return digest_b64url20(value)
 
 
 def hash_field(prefix: str, raw: str) -> str:
