@@ -25,11 +25,13 @@ import { registerMapBridge } from "../state/mapBridge";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, type SupplyClassStatus, type UnitSummary } from "../api";
 
-// CartoDB Dark Matter — free vector tile style, no key, IL5-OK as a
-// public-internet base for the demo. Production swap target is a
-// PMTiles file bundled with the build for the air-gap path.
+// CartoDB Dark Matter — free vector tile style, no key. Used only as the
+// online-demo base. Air-gap / offline deploys set VITE_MAP_STYLE_URL to a
+// bundled PMTiles style so the map never touches the public CDN.
 const CARTO_DARK_STYLE =
   "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const MAP_STYLE_URL =
+  (import.meta.env?.VITE_MAP_STYLE_URL as string | undefined) || CARTO_DARK_STYLE;
 
 // milsymbol options — base size is intentionally small (22px native)
 // so single-island zoom levels render at a readable but unobtrusive
@@ -348,7 +350,7 @@ export function OkinawaMapCanvas({
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: CARTO_DARK_STYLE,
+      style: MAP_STYLE_URL,
       center: start.center,
       zoom: start.zoom,
       minZoom: OKINAWA_VIEW.minZoom,

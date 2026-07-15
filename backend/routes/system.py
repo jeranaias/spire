@@ -1648,11 +1648,14 @@ async def submit_feedback(request: Request, payload: dict = Body(default={})):
         },
     )
 
-    # Optional GitHub issue creation. Token + repo come from env so an
-    # air-gap deploy can leave them unset and feedback still lands locally.
+    # Optional GitHub issue creation — an outbound call to api.github.com, so
+    # it's off by default and requires an EXPLICIT opt-in flag on top of a
+    # token, not just a token. Air-gap/offline deploys leave it off and
+    # feedback still lands locally on the audit chain.
+    gh_enabled = os.environ.get("SPIRE_FEEDBACK_GITHUB", "0").strip().lower() in ("1", "true", "yes")
     gh_token = os.environ.get("SPIRE_GITHUB_TOKEN", "")
     gh_repo = os.environ.get("SPIRE_GITHUB_REPO", "jeranaias/spire")
-    if gh_token and gh_repo and not _AIR_GAPPED:
+    if gh_enabled and gh_token and gh_repo and not _AIR_GAPPED:
         try:
             import urllib.request
             import urllib.error
