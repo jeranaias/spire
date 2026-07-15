@@ -11,7 +11,9 @@ Run:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -138,11 +140,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Vite dev server + static serve in production both live on same origin in
-# prod, but in dev we CORS them separately.
+# Production serves the SPA same-origin (no CORS needed). Dev runs the Vite
+# server on a separate port, so we allow an explicit dev-origin allowlist —
+# never a wildcard. Override with SPIRE_CORS_ORIGINS (comma-separated).
+_CORS_ORIGINS = [
+    o.strip()
+    for o in os.environ.get(
+        "SPIRE_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -250,13 +260,21 @@ if _FRONTEND_DIST.exists():
         return JSONResponse({"error": "no favicon"}, status_code=404)
 
 
+_log = logging.getLogger("spire")
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request, exc: Exception):
+    # Log the full detail server-side; return a generic body + a correlation id
+    # so an operator can find the log line without leaking the exception text,
+    # stack, or internal paths to the client.
+    correlation_id = uuid.uuid4().hex[:12]
+    _log.exception("unhandled exception [%s] on %s", correlation_id, request.url.path)
     return JSONResponse(
         status_code=500,
         content={
-            "error": "unhandled_exception",
-            "detail": str(exc),
-            "path": str(request.url.path),
+            "error": "internal_error",
+            "detail": "An unexpected error occurred.",
+            "correlation_id": correlation_id,
         },
     )
