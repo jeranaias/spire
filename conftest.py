@@ -12,8 +12,14 @@ A test can still exercise the negative path by passing an explicit
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
+
+# Cookies default to Secure (TLS-only). The TestClient speaks http://testserver,
+# which drops Secure cookies, so run the suite with it off.
+os.environ.setdefault("SPIRE_SESSION_SECURE", "0")
 
 _SAFE = {"GET", "HEAD", "OPTIONS", "TRACE"}
 

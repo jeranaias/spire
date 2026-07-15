@@ -53,7 +53,10 @@ _CSRF_EXEMPT_PREFIXES = ("/api/auth/",)
 
 
 def _cookie_secure() -> bool:
-    return os.environ.get("SPIRE_SESSION_SECURE", "0") == "1"
+    # Secure by default — cookies only travel over TLS. Plain-HTTP deploys
+    # (local dev, the docker-compose LAN path, the test client) must set
+    # SPIRE_SESSION_SECURE=0 explicitly, and should really put TLS in front.
+    return os.environ.get("SPIRE_SESSION_SECURE", "1") != "0"
 
 
 def _set_csrf_cookie(response: Response) -> str:
@@ -326,9 +329,8 @@ def login(req: LoginRequest, response: Response) -> dict[str, Any]:
         samesite="lax",
         max_age=SESSION_TTL_SECONDS,
         path="/",
-        # secure=False so the cookie works over plain HTTP in dev. Behind a
-        # TLS-terminating proxy in real deployments, set `SPIRE_SESSION_SECURE=1`.
-        secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
+        # Secure by default; set SPIRE_SESSION_SECURE=0 only for plain-HTTP dev.
+        secure=_cookie_secure(),
     )
     _set_csrf_cookie(response)
     return {"ok": True, "user": user, "expires_at": payload["exp"]}
@@ -403,7 +405,7 @@ def cac_login(request: Request, response: Response) -> dict[str, Any]:
         samesite="lax",
         max_age=SESSION_TTL_SECONDS,
         path="/",
-        secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
+        secure=_cookie_secure(),
     )
     _set_csrf_cookie(response)
     return {
@@ -506,7 +508,7 @@ def quick_switch(req: QuickSwitchRequest, request: Request, response: Response) 
         samesite="lax",
         max_age=SESSION_TTL_SECONDS,
         path="/",
-        secure=os.environ.get("SPIRE_SESSION_SECURE", "0") == "1",
+        secure=_cookie_secure(),
     )
     _set_csrf_cookie(response)
     return {"ok": True, "user": user, "expires_at": payload["exp"]}
