@@ -5,6 +5,7 @@ pydantic==2.13.3
 cryptography==46.0.7
 httpx==0.28.1
 python-multipart==0.0.26
+defusedxml==0.7.1  # hardened XML parsing (XXE / entity-expansion defense)
 # torch + opencv-python-headless are needed ONLY for the live
 # ThermalHawk inference path. They live in requirements-ml.txt so the
 # default Fly deploy stays small (~150MB image) and cold starts fast.
