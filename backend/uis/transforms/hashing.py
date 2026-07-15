@@ -8,9 +8,10 @@ already pre-hashed (file arrived sanitized — preferred) or clear
 """
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import Tuple
+
+from ...deid import digest_hex20
 
 
 _NULL_SENTINELS = frozenset({"", "null", "(null)", "n/a", "na", "none"})
@@ -42,8 +43,7 @@ def classify_hashed_field(prefix: str, raw: str) -> Tuple[str, str]:
         return "", "missing"
     if _PRE_HASHED_RE.match(s):
         return s, "pre_hashed"
-    h = hashlib.sha256(s.encode("utf-8")).hexdigest()[:20]
-    return f"{prefix}_{h}", "self_hashed"
+    return f"{prefix}_{digest_hex20(s)}", "self_hashed"
 
 
 def hash_field(prefix: str, raw: str) -> str:
@@ -54,5 +54,4 @@ def hash_field(prefix: str, raw: str) -> str:
     """
     if raw is None or _is_null(raw or ""):
         return ""
-    h = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
-    return f"{prefix}_{h}"
+    return f"{prefix}_{digest_hex20(raw)}"
