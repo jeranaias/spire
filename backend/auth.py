@@ -331,7 +331,12 @@ def list_users(request: Request) -> dict[str, Any]:
 
 
 @router.post("/login")
-def login(req: LoginRequest, response: Response) -> dict[str, Any]:
+def login(req: LoginRequest, request: Request, response: Response) -> dict[str, Any]:
+    # Throttle brute-force / credential-stuffing: cap attempts per client IP.
+    from .ratelimit import allow
+    client_ip = request.client.host if request.client else "unknown"
+    if not allow(f"login:{client_ip}", max_hits=10, window_s=60):
+        raise HTTPException(status_code=429, detail="too_many_login_attempts")
     # When SPIRE_AUTH_MODE=cac the PIN endpoint hard-closes — every session
     # MUST come through the cert path. The frontend redirects to the CAC
     # screen on a 410 response.
@@ -390,6 +395,10 @@ def cac_login(request: Request, response: Response) -> dict[str, Any]:
     from the audit log alone.
     """
     from . import cac_auth  # local import keeps module load order tidy
+    from .ratelimit import allow
+    client_ip = request.client.host if request.client else "unknown"
+    if not allow(f"cac:{client_ip}", max_hits=10, window_s=60):
+        raise HTTPException(status_code=429, detail="too_many_login_attempts")
 
     mode = cac_auth.auth_mode()
     if mode == cac_auth.AUTH_MODE_MOCK:
