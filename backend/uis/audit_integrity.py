@@ -156,6 +156,38 @@ def public_key_pem() -> Optional[bytes]:
     )
 
 
+# Crypto-agility (P2-9): Ed25519 is the default (FIPS 186-5 approved, and the
+# HEX-seed dev path is Ed25519), but some CAVP-validated OpenSSL FIPS providers
+# still refuse EdDSA. A validated-module deployment can instead provision an
+# ECDSA-P384 or RSA PEM key via SPIRE_AUDIT_SIGNING_KEY_PATH; sign/verify pick
+# the scheme from the key type so no code change is needed.
+
+
+def _sign_with_key(key: Any, data: bytes) -> bytes:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
+    if isinstance(key, ed25519.Ed25519PrivateKey):
+        return key.sign(data)
+    if isinstance(key, ec.EllipticCurvePrivateKey):
+        return key.sign(data, ec.ECDSA(hashes.SHA384()))
+    if isinstance(key, rsa.RSAPrivateKey):
+        return key.sign(data, padding.PKCS1v15(), hashes.SHA256())
+    raise ValueError(f"unsupported signing key type: {type(key).__name__}")
+
+
+def _verify_with_key(key: Any, sig: bytes, data: bytes) -> None:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
+    if isinstance(key, ed25519.Ed25519PublicKey):
+        key.verify(sig, data)
+    elif isinstance(key, ec.EllipticCurvePublicKey):
+        key.verify(sig, data, ec.ECDSA(hashes.SHA384()))
+    elif isinstance(key, rsa.RSAPublicKey):
+        key.verify(sig, data, padding.PKCS1v15(), hashes.SHA256())
+    else:
+        raise ValueError(f"unsupported verify key type: {type(key).__name__}")
+
+
 def sign_entry_hash(self_hash: str) -> Optional[str]:
     """Sign an audit entry's self_hash. Returns hex signature or None
     when signing is disabled. Best-effort — a signing failure logs
@@ -165,8 +197,7 @@ def sign_entry_hash(self_hash: str) -> Optional[str]:
     if _PRIVATE_KEY is None:
         return None
     try:
-        sig = _PRIVATE_KEY.sign(self_hash.encode("utf-8"))
-        return sig.hex()
+        return _sign_with_key(_PRIVATE_KEY, self_hash.encode("utf-8")).hex()
     except Exception as e:
         log.warning("Audit entry signing failed: %s", e)
         return None
@@ -181,7 +212,7 @@ def verify_entry_signature(self_hash: str, signature_hex: str) -> bool:
     try:
         from cryptography.exceptions import InvalidSignature
         sig = bytes.fromhex(signature_hex)
-        _PUBLIC_KEY.verify(sig, self_hash.encode("utf-8"))
+        _verify_with_key(_PUBLIC_KEY, sig, self_hash.encode("utf-8"))
         return True
     except (InvalidSignature, ValueError):
         return False
