@@ -183,7 +183,9 @@ def _audit_signing_enabled() -> bool:
 
 
 def _cookie_posture() -> CookiePosture:
-    secure = (os.environ.get("SPIRE_SESSION_SECURE") or "0").strip() == "1"
+    # Secure by default (matches backend.auth._cookie_secure); only an explicit
+    # SPIRE_SESSION_SECURE=0 turns it off for a plain-HTTP deploy.
+    secure = (os.environ.get("SPIRE_SESSION_SECURE") or "1").strip() != "0"
     # SameSite is lax in dev for cross-port testing; production CAC
     # mode tightens to strict. We surface whatever the operator set.
     samesite = (os.environ.get("SPIRE_SESSION_SAMESITE") or "lax").strip().lower()
@@ -352,7 +354,9 @@ def security_headers_middleware_factory():
         return None
 
     csp = _csp_value()
-    secure = (os.environ.get("SPIRE_SESSION_SECURE") or "0").strip() == "1"
+    # HSTS only makes sense over TLS; it tracks the Secure-cookie setting, which
+    # is on by default and turned off only for a plain-HTTP deploy.
+    secure = (os.environ.get("SPIRE_SESSION_SECURE") or "1").strip() != "0"
 
     async def add_security_headers(request, call_next):
         response = await call_next(request)
