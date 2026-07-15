@@ -87,7 +87,56 @@ def test_full_lock_unlock_cycle(crypto_paths, tmp_path, monkeypatch):
     persistence._lock_db()
     assert enc.exists()
     assert enc.read_bytes()[: len(persistence._GCM_MAGIC)] == persistence._GCM_MAGIC
+    assert not db.exists()  # _lock_db removes the plaintext copy
 
-    db.unlink()
     persistence._unlock_db()
     assert db.read_bytes() == b"sqlite payload"
+
+
+# --- plaintext-at-rest removal (P3) ------------------------------------------
+
+def _enc_paths(monkeypatch, tmp_path):
+    monkeypatch.setattr(persistence, "DB_PATH", tmp_path / "spire.db")
+    monkeypatch.setattr(persistence, "DB_ENCRYPTED_PATH", tmp_path / "spire.db.enc")
+    monkeypatch.setattr(persistence, "DB_SALT_PATH", tmp_path / "spire.db.salt")
+    monkeypatch.setattr(persistence, "_DERIVED_KEY_CACHE", {})
+    monkeypatch.setattr(persistence, "_CONN_DEPTH", 0)
+    return tmp_path
+
+
+def test_no_plaintext_db_lingers_when_encrypted(monkeypatch, tmp_path):
+    d = _enc_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(persistence, "_DB_PASSPHRASE", "pw")
+    persistence.init_db()
+    persistence.log(kind="x", actor="u", payload={"n": 1})
+    # Between operations: only the encrypted artifact exists on disk.
+    assert not (d / "spire.db").exists()
+    assert (d / "spire.db.enc").exists()
+    # Data still roundtrips (next conn decrypts it).
+    with persistence.conn() as c:
+        n = c.execute("SELECT COUNT(*) AS c FROM audit_log").fetchone()["c"]
+    assert n >= 1
+    assert not (d / "spire.db").exists()  # gone again after the read
+
+
+def test_nested_conn_does_not_corrupt(monkeypatch, tmp_path):
+    d = _enc_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(persistence, "_DB_PASSPHRASE", "pw")
+    persistence.init_db()
+    with persistence.conn() as c1:
+        c1.execute("INSERT INTO audit_log(ts,actor,kind,subject_id,payload,prev_hash,self_hash) VALUES ('t','u','a','','{}','0','1')")
+        with persistence.conn() as c2:  # nested — inner must not wipe the DB
+            assert c2.execute("SELECT 1").fetchone() is not None
+    # After the outermost exit, DB is encrypted and readable.
+    assert not (d / "spire.db").exists()
+    with persistence.conn() as c:
+        assert c.execute("SELECT COUNT(*) FROM audit_log").fetchone() is not None
+
+
+def test_plain_mode_keeps_spire_db(monkeypatch, tmp_path):
+    d = _enc_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(persistence, "_DB_PASSPHRASE", None)  # plain mode
+    persistence.init_db()
+    persistence.log(kind="x", actor="u", payload={"n": 1})
+    assert (d / "spire.db").exists()          # plaintext IS the store here
+    assert not (d / "spire.db.enc").exists()

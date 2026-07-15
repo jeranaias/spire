@@ -13,8 +13,9 @@ Two responsibilities:
      claims from earlier revisions are removed.
 
 Backing store is SQLite. When SPIRE_DB_PASSPHRASE is set the whole DB file
-is encrypted at rest with AES-256-GCM: the file is decrypted to DB_PATH on
-unlock and re-encrypted on lock. The key is PBKDF2-HMAC-SHA256 (200k
+is encrypted at rest with AES-256-GCM: the file is decrypted to DB_PATH while
+a connection is open and re-encrypted (and the plaintext removed) on lock, so
+no cleartext DB lingers on disk between operations. The key is PBKDF2-HMAC-SHA256 (200k
 iterations) over a per-install random salt persisted beside the DB. Legacy
 Fernet files (pre-GCM installs) are read transparently and migrated to GCM
 on the next write.
@@ -134,16 +135,35 @@ def _unlock_db() -> None:
 
 
 def _lock_db() -> None:
-    """Re-encrypt the plaintext working copy to DB_ENCRYPTED_PATH (AES-256-GCM)."""
+    """Re-encrypt the plaintext working copy to DB_ENCRYPTED_PATH (AES-256-GCM)
+    and remove the plaintext so no cleartext DB lingers on disk at rest. Only
+    runs in encrypted mode; plain-mode (no passphrase) keeps spire.db as the
+    durable store."""
     if not _DB_PASSPHRASE or not DB_PATH.exists():
         return
     DB_ENCRYPTED_PATH.write_bytes(_encrypt_blob(DB_PATH.read_bytes(), _DB_PASSPHRASE))
+    # Delete the plaintext copy + any transient SQLite sidecars. dr.py already
+    # decrypts the .enc when the plaintext is absent, so backups still work.
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        try:
+            (DB_PATH.parent / (DB_PATH.name + suffix)).unlink()
+        except OSError:
+            pass
+
+
+# conn() nesting depth. Re-entrant per thread via _LOCK (RLock); decrypt on the
+# outermost enter and re-encrypt+wipe on the outermost exit only, so a nested
+# conn() never re-encrypts or unlinks a DB an outer connection still holds.
+_CONN_DEPTH = 0
 
 
 @contextmanager
 def conn():
+    global _CONN_DEPTH
     with _LOCK:
-        _unlock_db()
+        if _CONN_DEPTH == 0:
+            _unlock_db()
+        _CONN_DEPTH += 1
         c = sqlite3.connect(str(DB_PATH))
         c.row_factory = sqlite3.Row
         try:
@@ -151,7 +171,9 @@ def conn():
             c.commit()
         finally:
             c.close()
-            _lock_db()
+            _CONN_DEPTH -= 1
+            if _CONN_DEPTH == 0:
+                _lock_db()
 
 
 # ---------------------------------------------------------------------------
