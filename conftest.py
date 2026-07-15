@@ -25,6 +25,17 @@ _SAFE = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
 
 @pytest.fixture(autouse=True)
+def _reset_server_state():
+    """Clear in-process rate-limit + session-revocation state between tests so
+    the login-heavy suite doesn't trip the throttle and revocations don't leak."""
+    from backend import auth, ratelimit
+    ratelimit.reset()
+    auth._REVOKED_JTI.clear()
+    auth._JTI_LAST_SEEN.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _csrf_aware_testclient(monkeypatch):
     original = TestClient.request
 
