@@ -5,20 +5,31 @@ Tailscale/RigRun hosts are allow-listed; anything else triggers an entry in
 the audit chain and a BASTION alert.
 
 Implementation: wraps socket.getaddrinfo + socket.create_connection.
-Captures host + port; compares against ALLOWED_DESTINATIONS. Does NOT
-terminate the connection -- we log it so it surfaces as visible evidence
-rather than breaking the demo silently. A production deployment would
-swap 'log' for 'deny'.
+Captures host + port; compares against the allowlist. By default it logs
+(so unapproved egress surfaces as visible evidence rather than breaking the
+demo silently). Set SPIRE_EGRESS_ENFORCE=1 to DENY instead: a connection
+outside the allowlist raises EgressBlocked before it opens — the enforcing
+air-gap posture for a production/pilot deploy.
 """
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 import threading
 from datetime import datetime
 from typing import Any
 
 from .persistence import log as audit_log
+
+
+class EgressBlocked(OSError):
+    """Raised when SPIRE_EGRESS_ENFORCE=1 and a connection targets a host
+    outside the allowlist."""
+
+
+def _enforcing() -> bool:
+    return os.environ.get("SPIRE_EGRESS_ENFORCE", "0").strip().lower() in ("1", "true", "yes")
 
 
 ALLOWED_HOSTS = {
@@ -109,6 +120,10 @@ def _patched_create_connection(address, *args: Any, **kwargs: Any):
     host, port = address[0], address[1]
     allowed = _is_allowed(host, port)
     _audit_outbound(host, port, allowed)
+    if not allowed and _enforcing():
+        raise EgressBlocked(
+            f"egress to {host}:{port} blocked by SPIRE_EGRESS_ENFORCE"
+        )
     return _ORIGINAL_CREATE_CONNECTION(address, *args, **kwargs)
 
 
