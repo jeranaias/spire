@@ -69,6 +69,11 @@ jobs:
         run: docker build -t spire-backend:ci .
       - name: Build frontend image
         run: docker build -t spire-frontend:ci ./frontend
+      - name: Build FIPS backend image (advisory)
+        # UBI9-based FIPS-ready variant. Advisory — real FIPS mode needs a
+        # FIPS-enabled host; this just confirms the image builds.
+        continue-on-error: true
+        run: docker build -f Dockerfile.fips -t spire-backend:fips .
       - name: Trivy image scan (advisory)
         # Advisory until base images are hardened/pinned (see PRODUCTION_CHECKLIST).
         continue-on-error: true

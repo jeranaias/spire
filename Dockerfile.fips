@@ -1,0 +1,44 @@
+# SPIRE backend — FIPS-ready image.
+#
+# Built on Red Hat UBI9 (Python 3.12), whose OpenSSL is a CAVS/CAVP-validated
+# FIPS module. IMPORTANT: the base image does NOT by itself put crypto in FIPS
+# mode — the container inherits the FIPS state of the HOST kernel. To actually
+# run validated crypto:
+#   1. the host must be booted in FIPS mode (`fips=1`, `fips-mode-setup --enable`),
+#   2. run the container on that host (it inherits FIPS via crypto-policies),
+#   3. set SPIRE_FIPS_MODE=1 (already set below) so the app refuses any
+#      non-FIPS-safe config at boot (see backend/security_posture.py).
+#
+# Full FIPS 140-3 validation is a deployment + accreditation activity; this
+# image is the container-image half of it. Build:
+#   docker build -f Dockerfile.fips -t spire-backend:fips .
+
+FROM registry.access.redhat.com/ubi9/python-312
+
+# Install as root, then drop to the image's non-root user (1001).
+USER 0
+WORKDIR /opt/spire
+
+COPY backend/requirements.txt ./backend-requirements.txt
+COPY dataset/requirements.txt ./dataset-requirements.txt
+RUN pip install --no-cache-dir -r backend-requirements.txt -r dataset-requirements.txt
+
+COPY backend/ ./backend/
+COPY dataset/ ./dataset/
+RUN mkdir -p /opt/spire/runtime && chown -R 1001:0 /opt/spire
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/opt/spire \
+    SPIRE_MODE=full \
+    SPIRE_FIPS_MODE=1
+
+VOLUME ["/opt/spire/runtime"]
+EXPOSE 8700
+
+# Least privilege — UBI9's default unprivileged user.
+USER 1001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8700/api/system/status || exit 1
+
+CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8700"]
