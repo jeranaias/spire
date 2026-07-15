@@ -265,6 +265,31 @@ def test_rewrite_and_rehash_passes_hashcheck_but_fails_signature(with_signing_ke
     assert result["broken_at_id"] == 1
 
 
+def test_pin_detects_equal_length_prefix_rewrite(isolated_db, monkeypatch, tmp_path):
+    """A rewrite that keeps the entry count (so the shrinkage check passes) and
+    recomputes a valid hash chain is still caught: the pinned head no longer
+    matches the self_hash at that position."""
+    from backend import persistence
+    from backend.uis import audit_integrity
+
+    monkeypatch.setenv("SPIRE_AUDIT_PIN_PATH", str(tmp_path / "pin.jsonl"))
+    persistence.log(kind="ingest.ecp.apply.commit", actor="u", payload={"amount": 1})
+    persistence.log(kind="ingest.ecp.apply.commit", actor="u", payload={"amount": 2})
+
+    chain = persistence.verify_chain(verify_signatures=False)
+    audit_integrity.pin_chain_head(entry_count=chain["entries"], head_hash=chain["head_hash"])
+
+    # Clean state is consistent.
+    assert audit_integrity.audit_integrity_status().pin_consistent is True
+
+    # Attacker rewrites row 1 and recomputes the chain (same length).
+    _forge_chain_row(persistence, 1, {"amount": 999})
+
+    status = audit_integrity.audit_integrity_status()
+    assert status.pin_consistent is False
+    assert "rewritten" in (status.pin_error or "")
+
+
 def test_verify_chain_reports_unsigned_signable(isolated_db, monkeypatch):
     """Entries written before signing was enabled are reported, not failed."""
     from backend import persistence

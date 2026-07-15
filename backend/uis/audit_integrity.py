@@ -320,6 +320,20 @@ class IntegrityStatus:
         }
 
 
+def _self_hash_at(position: int) -> Optional[str]:
+    """Return the self_hash of the 1-based ``position``-th audit row, or None."""
+    from ..persistence import conn
+    try:
+        with conn() as c:
+            row = c.execute(
+                "SELECT self_hash FROM audit_log ORDER BY id ASC LIMIT 1 OFFSET ?",
+                (max(0, position - 1),),
+            ).fetchone()
+        return row["self_hash"] if row else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def audit_integrity_status() -> IntegrityStatus:
     """End-to-end integrity check:
 
@@ -339,28 +353,31 @@ def audit_integrity_status() -> IntegrityStatus:
     pin_consistent: Optional[bool] = None
     pin_error: Optional[str] = None
 
-    if pin_records:
+    if pin_records and chain["ok"]:
         latest = pin_records[-1]
-        latest_hash = latest.get("head_hash")
-        if chain["ok"]:
-            current_hash = chain.get("head_hash")
-            if current_hash and latest_hash:
-                # Pin can lag by a few entries (we don't pin every
-                # entry). Equality means "no entries since last pin"
-                # which is the simplest consistency check; a stricter
-                # check verifies the current head is the result of
-                # adding entries past the pin's recorded count, not
-                # divergence. For now a pin-divergence is the signal
-                # "investigate" — operator reads the chain to confirm.
-                # We treat "current is later" as still consistent.
+        pin_count = int(latest.get("entry_count", 0) or 0)
+        pin_hash = latest.get("head_hash")
+        if pin_count > chain["entries"]:
+            # Chain shrunk relative to the pin → tampering.
+            pin_consistent = False
+            pin_error = (
+                f"Chain has {chain['entries']} entries but pin recorded "
+                f"{pin_count} — chain shrunk."
+            )
+        elif pin_hash and pin_count:
+            # The pinned head was the self_hash at position `pin_count`. In an
+            # append-only chain that row is immutable, so it must still match —
+            # this catches an equal-length or same-count rewrite of the pinned
+            # prefix, not just shrinkage.
+            actual = _self_hash_at(pin_count)
+            if actual is not None and actual != pin_hash:
+                pin_consistent = False
+                pin_error = (
+                    f"Pinned head at entry {pin_count} no longer matches the "
+                    "chain — the pinned prefix was rewritten."
+                )
+            else:
                 pin_consistent = True
-                if latest.get("entry_count", 0) > chain["entries"]:
-                    # Chain shrunk relative to the last pin → tampering
-                    pin_consistent = False
-                    pin_error = (
-                        f"Chain has {chain['entries']} entries but pin "
-                        f"recorded {latest['entry_count']} — chain shrunk."
-                    )
 
     return IntegrityStatus(
         chain_ok=chain["ok"],
