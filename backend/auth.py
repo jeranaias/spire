@@ -145,6 +145,45 @@ def verify_session(token: str) -> Optional[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Server-side session state — revocation list + idle timeout.
+#
+# The signed cookie is stateless, so on its own a stolen cookie is valid for
+# the full 12h TTL and /logout can't kill it server-side. We keep a small
+# in-process registry keyed by the session `jti`: a revoked set (logout) and a
+# last-seen map (idle timeout). Single-process scope — a multi-worker deploy
+# would move this to shared storage (the ephemeral session secret already
+# invalidates every session on restart, so losing this on restart is safe).
+# ---------------------------------------------------------------------------
+
+SESSION_IDLE_SECONDS = int(os.environ.get("SPIRE_SESSION_IDLE_SECONDS", str(30 * 60)))
+
+_REVOKED_JTI: set[str] = set()
+_JTI_LAST_SEEN: dict[str, float] = {}
+
+
+def revoke_jti(jti: Optional[str]) -> None:
+    if jti:
+        _REVOKED_JTI.add(jti)
+        _JTI_LAST_SEEN.pop(jti, None)
+
+
+def is_jti_active(jti: Optional[str]) -> bool:
+    """True if the session is neither revoked nor idled-out. Sessions minted
+    before jti existed (jti=None) are grandfathered in."""
+    if not jti:
+        return True
+    if jti in _REVOKED_JTI:
+        return False
+    now = time()
+    last = _JTI_LAST_SEEN.get(jti)
+    if last is not None and now - last > SESSION_IDLE_SECONDS:
+        revoke_jti(jti)  # idle past the window → dead
+        return False
+    _JTI_LAST_SEEN[jti] = now
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Mock identities — the four cert "smartcards" the operator picks from.
 # Field shape is the load-bearing contract for downstream lanes; additions
 # are safe, renames break the world. Keep this in sync with
@@ -438,8 +477,15 @@ def auth_mode_info() -> dict[str, Any]:
 
 
 @router.post("/logout")
-def logout(response: Response) -> dict[str, Any]:
+def logout(request: Request, response: Response) -> dict[str, Any]:
+    # Revoke the session server-side so re-presenting the cookie is rejected,
+    # then clear it client-side.
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    payload = verify_session(token) if token else None
+    if payload:
+        revoke_jti(payload.get("jti"))
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/")
     return {"ok": True}
 
 
@@ -546,6 +592,8 @@ def resolve_user_from_request(request: Request) -> Optional[dict[str, Any]]:
     payload = verify_session(token)
     if not payload:
         return None
+    if not is_jti_active(payload.get("jti")):
+        return None  # revoked (logout) or idled out
     return MOCK_USERS_BY_DODID.get(str(payload.get("dodid", "")))
 
 
