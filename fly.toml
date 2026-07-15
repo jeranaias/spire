@@ -32,6 +32,9 @@ primary_region = "iad"
 [env]
   SPIRE_MODE = "full"
   PYTHONUNBUFFERED = "1"
+  # The online demo opts into the remote frontier model. Stock builds are
+  # offline-first (SPIRE_LLM_PRIMARY_DISABLE defaults to 1 in code).
+  SPIRE_LLM_PRIMARY_DISABLE = "0"
 
 [http_service]
   internal_port = 8080

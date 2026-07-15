@@ -121,11 +121,12 @@ def _clear_primary_failed() -> None:
     _LOCAL_FAIL_CACHE.pop(_PRIMARY_FAIL_KEY, None)
 
 
-# When the operator explicitly wants air-gap-style behavior (no upstream
-# at all, ever — useful for DDIL drills + the Marine pilot deployment
-# where there's no Tailscale to RigRun), set SPIRE_LLM_PRIMARY_DISABLE=1
-# and Tier-A is skipped entirely. The router goes straight to local.
-LLM_PRIMARY_DISABLED = (os.environ.get("SPIRE_LLM_PRIMARY_DISABLE") or "").strip().lower() in ("1", "true", "yes")
+# Offline-first by DEFAULT: the router goes straight to local Ollama and
+# never reaches the upstream RigRun proxy unless an online deploy explicitly
+# opts in with SPIRE_LLM_PRIMARY_DISABLE=0. This is fail-safe — a stock build
+# (pilot box, air-gap, DDIL) makes no outbound LLM call. The fly.io demo sets
+# it to 0 in fly.toml to use the remote frontier model.
+LLM_PRIMARY_DISABLED = (os.environ.get("SPIRE_LLM_PRIMARY_DISABLE", "1") or "").strip().lower() in ("1", "true", "yes")
 
 
 async def _probe_llm() -> dict:
