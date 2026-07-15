@@ -55,6 +55,7 @@ import sys
 import hashlib
 import logging
 from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
@@ -245,6 +246,29 @@ class FipsConfigViolation(RuntimeError):
     """
 
 
+def fips_runtime_status() -> Dict[str, Any]:
+    """Whether the crypto backend is *actually* running in FIPS mode — not just
+    whether SPIRE_FIPS_MODE was requested.
+
+    This is the check that catches the common trap: a pip-installed
+    `cryptography` wheel bundles its own (non-FIPS) OpenSSL, so an operator can
+    set SPIRE_FIPS_MODE=1 and still be running unvalidated crypto. The kernel
+    flag at /proc/sys/crypto/fips_enabled is authoritative on RHEL/UBI9;
+    OPENSSL_FORCE_FIPS_MODE is Red Hat's testing-only forcing knob.
+    """
+    kernel = False
+    try:
+        kernel = Path("/proc/sys/crypto/fips_enabled").read_text().strip() == "1"
+    except OSError:
+        kernel = False  # not Linux / file absent → not in kernel FIPS mode
+    forced = (os.environ.get("OPENSSL_FORCE_FIPS_MODE") or "").strip().lower() in ("1", "true", "yes")
+    return {
+        "kernel_fips_enabled": kernel,
+        "openssl_forced": forced,
+        "active": kernel or forced,
+    }
+
+
 def assert_fips_safe_config() -> None:
     """When SPIRE_FIPS_MODE=1, verify every configured algorithm is on
     the FIPS allowlist. Idempotent — call once at startup. Raises
@@ -299,6 +323,20 @@ def assert_fips_safe_config() -> None:
         violations.append(
             f"auth_mode={posture.auth_mode} but SPIRE_CAC_REVOCATION_MODE=skip "
             f"(must be ocsp or crl)"
+        )
+
+    # Runtime FIPS engagement: the algorithms above being FIPS-approved is
+    # necessary but NOT sufficient — the crypto backend must actually be running
+    # in FIPS mode (validated OpenSSL provider). Fail closed unless the operator
+    # explicitly opts into config-only testing.
+    rt = fips_runtime_status()
+    allow_unverified = (os.environ.get("SPIRE_FIPS_ALLOW_UNVERIFIED") or "").strip().lower() in ("1", "true", "yes")
+    if not rt["active"] and not allow_unverified:
+        violations.append(
+            "SPIRE_FIPS_MODE=1 but the crypto backend is NOT in FIPS mode "
+            "(/proc/sys/crypto/fips_enabled=0 and OPENSSL_FORCE_FIPS_MODE unset). "
+            "Boot on a FIPS-enabled host (or the Dockerfile.fips image), or set "
+            "SPIRE_FIPS_ALLOW_UNVERIFIED=1 for config-only testing."
         )
 
     if violations:

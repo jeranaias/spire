@@ -1,27 +1,41 @@
 # SPIRE backend — FIPS-ready image.
 #
-# Built on Red Hat UBI9 (Python 3.12), whose OpenSSL is a CAVS/CAVP-validated
-# FIPS module. IMPORTANT: the base image does NOT by itself put crypto in FIPS
-# mode — the container inherits the FIPS state of the HOST kernel. To actually
-# run validated crypto:
-#   1. the host must be booted in FIPS mode (`fips=1`, `fips-mode-setup --enable`),
-#   2. run the container on that host (it inherits FIPS via crypto-policies),
-#   3. set SPIRE_FIPS_MODE=1 (already set below) so the app refuses any
-#      non-FIPS-safe config at boot (see backend/security_posture.py).
+# The subtlety that makes this correct: a pip-installed `cryptography` wheel
+# STATICALLY BUNDLES its own (non-FIPS) OpenSSL, so it can never use the
+# validated FIPS module even on a FIPS host. This image therefore builds
+# cryptography FROM SOURCE (`--no-binary cryptography`) so it links against the
+# SYSTEM OpenSSL — whose FIPS provider on UBI9 is CMVP-validated (cert #4746) —
+# and selects the FIPS crypto-policy at build time.
 #
-# Full FIPS 140-3 validation is a deployment + accreditation activity; this
-# image is the container-image half of it. Build:
+# FIPS engages at runtime when EITHER:
+#   * the host kernel is in FIPS mode (`fips=1`, production), OR
+#   * OPENSSL_FORCE_FIPS_MODE=1 is set (Red Hat: testing/CI only).
+# SPIRE verifies this at boot (backend.security_posture.fips_runtime_status) and
+# refuses to run under SPIRE_FIPS_MODE=1 if the backend isn't actually in FIPS
+# mode — set SPIRE_FIPS_ALLOW_UNVERIFIED=1 only for a config-only smoke test.
+#
+# Full FIPS 140-3 accreditation of the DEPLOYMENT references the module's CMVP
+# certificate; this image is the container half, done to use it correctly.
+#
 #   docker build -f Dockerfile.fips -t spire-backend:fips .
 
 FROM registry.access.redhat.com/ubi9/python-312
 
-# Install as root, then drop to the image's non-root user (1001).
 USER 0
 WORKDIR /opt/spire
 
+# Build toolchain for compiling cryptography against system OpenSSL, and select
+# the FIPS crypto-policy for the image.
+RUN dnf install -y gcc openssl-devel cargo && \
+    update-crypto-policies --set FIPS && \
+    dnf clean all
+
 COPY backend/requirements.txt ./backend-requirements.txt
 COPY dataset/requirements.txt ./dataset-requirements.txt
-RUN pip install --no-cache-dir -r backend-requirements.txt -r dataset-requirements.txt
+# --no-binary cryptography forces a source build linked to the system OpenSSL
+# (validated FIPS provider); the rest install as normal wheels.
+RUN pip install --no-cache-dir --no-binary cryptography \
+        -r backend-requirements.txt -r dataset-requirements.txt
 
 COPY backend/ ./backend/
 COPY dataset/ ./dataset/

@@ -148,6 +148,7 @@ def test_fips_self_check_passes_when_configured(isolated_env, monkeypatch):
     monkeypatch.setenv("SPIRE_SESSION_SECURE", "1")
     monkeypatch.setenv("SPIRE_AUTH_MODE", "cac")
     monkeypatch.setenv("SPIRE_CAC_REVOCATION_MODE", "crl")
+    monkeypatch.setenv("SPIRE_FIPS_ALLOW_UNVERIFIED", "1")  # config-only; no FIPS host in CI
     from backend import security_posture
     security_posture.assert_fips_safe_config()  # no raise
 
@@ -157,9 +158,35 @@ def test_fips_self_check_passes_in_mock_mode_with_secure_cookie(isolated_env, mo
     posture is correct — mock-mode isn't itself a crypto choice."""
     monkeypatch.setenv("SPIRE_FIPS_MODE", "1")
     monkeypatch.setenv("SPIRE_SESSION_SECURE", "1")
+    monkeypatch.setenv("SPIRE_FIPS_ALLOW_UNVERIFIED", "1")  # config-only; no FIPS host in CI
     # auth_mode defaults to mock
     from backend import security_posture
     security_posture.assert_fips_safe_config()  # no raise
+
+
+def test_fips_self_check_refuses_when_crypto_not_in_fips_mode(isolated_env, monkeypatch):
+    """The config can be FIPS-clean, but if the crypto backend isn't actually
+    in FIPS mode (no kernel fips, no force), booting under SPIRE_FIPS_MODE=1
+    would run unvalidated crypto — refuse it."""
+    monkeypatch.setenv("SPIRE_FIPS_MODE", "1")
+    monkeypatch.setenv("SPIRE_SESSION_SECURE", "1")
+    monkeypatch.delenv("OPENSSL_FORCE_FIPS_MODE", raising=False)
+    monkeypatch.delenv("SPIRE_FIPS_ALLOW_UNVERIFIED", raising=False)
+    from backend import security_posture
+    # Force the runtime check to see "not in FIPS mode".
+    monkeypatch.setattr(
+        security_posture, "fips_runtime_status",
+        lambda: {"kernel_fips_enabled": False, "openssl_forced": False, "active": False},
+    )
+    with pytest.raises(security_posture.FipsConfigViolation) as excinfo:
+        security_posture.assert_fips_safe_config()
+    assert "not in FIPS mode" in str(excinfo.value).lower() or "NOT in FIPS mode" in str(excinfo.value)
+
+
+def test_fips_runtime_status_forced(monkeypatch):
+    monkeypatch.setenv("OPENSSL_FORCE_FIPS_MODE", "1")
+    from backend import security_posture
+    assert security_posture.fips_runtime_status()["active"] is True
 
 
 # ---------------------------------------------------------------------------
