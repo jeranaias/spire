@@ -506,6 +506,9 @@ class VerifyResult:
         }
 
 
+MAX_EXTRACT_BYTES = 4 * 1024 ** 3  # 4 GB — reject decompression bombs (CWE-409)
+
+
 def _safe_extract(tar: tarfile.TarFile, dest: Path, allowed: List[str]) -> None:
     """Extract only ``allowed`` member names; reject any path
     that escapes ``dest`` (`..` traversal, absolute paths,
@@ -513,6 +516,7 @@ def _safe_extract(tar: tarfile.TarFile, dest: Path, allowed: List[str]) -> None:
     CWE-22.
     """
     dest = dest.resolve()
+    total = 0
     for member in tar.getmembers():
         if member.name not in allowed:
             raise ValueError(f"unexpected archive member: {member.name!r}")
@@ -521,6 +525,9 @@ def _safe_extract(tar: tarfile.TarFile, dest: Path, allowed: List[str]) -> None:
         target = (dest / member.name).resolve()
         if dest not in target.parents and target != dest:
             raise ValueError(f"archive escapes dest: {member.name!r}")
+        total += max(0, member.size)
+        if total > MAX_EXTRACT_BYTES:
+            raise ValueError(f"archive exceeds {MAX_EXTRACT_BYTES}-byte extract cap")
     tar.extractall(dest)  # noqa: S202 — guarded above
 
 
