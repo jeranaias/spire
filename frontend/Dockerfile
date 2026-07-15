@@ -10,7 +10,9 @@ COPY . .
 RUN npm run build
 
 
-FROM nginx:1.27-alpine
+# Unprivileged nginx: runs as a non-root user and listens on 8080 by default
+# (least privilege, 800-171 3.1 / 3.4.6). Matches the `listen 8080` in nginx.conf.
+FROM nginxinc/nginx-unprivileged:1.27-alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
