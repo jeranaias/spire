@@ -56,3 +56,29 @@ jobs:
           node-version: "22"
       - name: npm audit
         run: npm audit --audit-level=high
+
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python SBOM
+        run: |
+          python -m pip install --upgrade pip cyclonedx-bom
+          cyclonedx-py requirements backend/requirements.txt -o sbom-python-backend.json
+          cyclonedx-py requirements dataset/requirements.txt -o sbom-python-dataset.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: JS SBOM
+        run: |
+          cd frontend && npm ci --no-audit --no-fund
+          npx --yes @cyclonedx/cyclonedx-npm --output-file ../sbom-js.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom-*.json
+          if-no-files-found: warn
