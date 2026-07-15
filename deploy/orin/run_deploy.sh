@@ -40,7 +40,10 @@ OLLAMA_HOST=127.0.0.1:11434 nohup "$HOME/ollama/bin/ollama" pull gemma2:2b > "$H
 log "starting SPIRE backend on :8000..."
 pkill -f "uvicorn backend.main" 2>/dev/null || true
 sleep 1
-nohup .venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 > "$HOME/spire/spire.log" 2>&1 &
+# Bind loopback by default so the box isn't serving cleartext on every
+# interface. Set SPIRE_BIND_HOST=0.0.0.0 to expose it on the LAN (do that only
+# behind a TLS reverse proxy).
+nohup .venv/bin/python -m uvicorn backend.main:app --host "${SPIRE_BIND_HOST:-127.0.0.1}" --port 8000 > "$HOME/spire/spire.log" 2>&1 &
 sleep 12
 code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 8 http://127.0.0.1:8000/ 2>/dev/null || echo "000")
 log "backend http=$code"
