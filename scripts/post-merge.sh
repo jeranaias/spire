@@ -5,9 +5,10 @@ set -e
 # Reinstalls Python + JS dependencies after a task merge so workflows
 # come back up cleanly. Idempotent and non-interactive.
 
-# 1) Python deps (uv-managed via pyproject.toml + uv.lock).
-if command -v uv >/dev/null 2>&1; then
-  uv sync --frozen
+# 1) Python deps — install from the same exact-pinned requirements the build
+# and CI use, so dev doesn't drift from production.
+if command -v pip >/dev/null 2>&1; then
+  pip install -r backend/requirements.txt -r dataset/requirements.txt >/dev/null
 fi
 
 # 2) Frontend deps. Use npm ci when the lockfile is in sync,

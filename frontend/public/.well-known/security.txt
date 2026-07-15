@@ -1,0 +1,4 @@
+# SPIRE vulnerability disclosure — RFC 9116
+Contact: mailto:jesse@thornveil.ai
+Expires: 2027-07-14T00:00:00Z
+Preferred-Languages: en
