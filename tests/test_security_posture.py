@@ -58,7 +58,7 @@ def test_posture_status_default_shape(isolated_env):
     assert p.fips_mode is False
     assert p.audit_signing_enabled is False
     assert p.cookie.httponly is True
-    assert p.cookie.secure is False
+    assert p.cookie.secure is True  # Secure by default now (P2-1)
     assert p.cookie.samesite == "lax"
     assert p.headers.x_frame_options is True  # default on
     assert p.crypto.audit_chain_hash == "sha256"
@@ -125,7 +125,7 @@ def test_fips_self_check_off_is_noop(isolated_env):
 
 def test_fips_self_check_refuses_without_secure_cookie(isolated_env, monkeypatch):
     monkeypatch.setenv("SPIRE_FIPS_MODE", "1")
-    # Cookie not Secure → fail
+    monkeypatch.setenv("SPIRE_SESSION_SECURE", "0")  # explicitly insecure → fail
     from backend import security_posture
     with pytest.raises(security_posture.FipsConfigViolation) as excinfo:
         security_posture.assert_fips_safe_config()
@@ -253,9 +253,10 @@ def test_security_posture_endpoint_requires_security_manager(isolated_env):
     assert res.status_code in (401, 403)
 
 
-def test_security_posture_endpoint_returns_snapshot_for_security_manager(isolated_env):
+def test_security_posture_endpoint_returns_snapshot_for_security_manager(isolated_env, monkeypatch):
     """When signed in as security_manager (CWO Park, dodid 3456789012),
     the endpoint returns the full posture dict."""
+    monkeypatch.setenv("SPIRE_SESSION_SECURE", "0")  # http test client drops Secure cookies
     from fastapi.testclient import TestClient
     from backend.main import app
     client = TestClient(app)
@@ -276,8 +277,9 @@ def test_security_posture_endpoint_returns_snapshot_for_security_manager(isolate
     assert "headers" in body
 
 
-def test_security_posture_endpoint_refuses_g4(isolated_env):
+def test_security_posture_endpoint_refuses_g4(isolated_env, monkeypatch):
     """A G-4 (operator) role cannot read the posture diagnostic."""
+    monkeypatch.setenv("SPIRE_SESSION_SECURE", "0")  # http test client drops Secure cookies
     from fastapi.testclient import TestClient
     from backend.main import app
     client = TestClient(app)
