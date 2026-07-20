@@ -170,6 +170,9 @@ app.middleware("http")(session_middleware)
 # response with HSTS / X-Frame-Options / CSP / etc.
 from . import security_posture  # noqa: E402
 security_posture.assert_fips_safe_config()
+# SPIRE_PROFILE=event: the assessed-event build must not boot unless the
+# enforcing posture is actually configured.
+security_posture.assert_event_profile()
 _security_headers = security_posture.security_headers_middleware_factory()
 if _security_headers is not None:
     app.middleware("http")(_security_headers)

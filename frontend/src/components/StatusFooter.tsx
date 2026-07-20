@@ -108,6 +108,7 @@ export function StatusFooter() {
   // alarms during the first poll cycle.
   const statusLoaded = status != null;
   const egressAttempts = status?.network_egress?.unapproved_attempts ?? 0;
+  const egressMode = status?.network_egress?.mode;
   const encrypted = status?.security?.encrypted_at_rest;
   const sentryLoaded = status?.models?.sentry_loaded ?? false;
   const pulseLoaded = status?.models?.pulse_loaded ?? false;
@@ -116,6 +117,13 @@ export function StatusFooter() {
       label: "NETWORK",
       value: !statusLoaded ? "—" : egressAttempts === 0 ? "0 egress" : `${egressAttempts} unauthorised`,
       tone: !statusLoaded ? "muted" : egressAttempts === 0 ? "ok" : "warn",
+    },
+    {
+      // Whether the watchdog denies or merely records. The event build runs
+      // enforcing; anything else is a demo posture and should read that way.
+      label: "EGRESS",
+      value: !statusLoaded || !egressMode ? "—" : egressMode === "enforce" ? "enforced" : "monitor",
+      tone: !statusLoaded || !egressMode ? "muted" : egressMode === "enforce" ? "ok" : "warn",
     },
     {
       label: "ENCRYPTION",

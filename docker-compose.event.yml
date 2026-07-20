@@ -1,0 +1,47 @@
+# SPIRE event build overlay - T-REX 26-3 / NDIA.
+#
+#   cp deploy/trex/env.event.example deploy/trex/env.event   # then fill it in
+#   docker compose -f docker-compose.yml -f docker-compose.event.yml up -d
+#
+# This overlay does three things the base compose deliberately does not:
+# loads the enforcing env file, hardens both containers at the runtime level,
+# and keeps them running across power cycles in the field.
+#
+# The backend will refuse to boot if the env file is incomplete. That is the
+# point of the profile - see deploy/trex/env.event.example.
+
+services:
+  backend:
+    env_file:
+      - deploy/trex/env.event
+    environment:
+      # Overlay wins over the base file's dev-friendly values.
+      SPIRE_SESSION_SECURE: "1"
+      SPIRE_GITHUB_TOKEN: ""
+    restart: always
+    read_only: true
+    tmpfs:
+      # Read-only root with writable scratch. Runtime state lives on the
+      # named volume, which stays writable.
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - spire-runtime:/opt/spire/runtime
+      # Basemap pack, mounted read-only. Bake per deploy/tiles/README.md.
+      - ./deploy/tiles:/opt/spire/tiles:ro
+
+  frontend:
+    restart: always
+    read_only: true
+    tmpfs:
+      # nginx needs its temp paths; it runs unprivileged so these are the
+      # only writable locations it gets.
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

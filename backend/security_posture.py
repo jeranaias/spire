@@ -78,6 +78,22 @@ def fips_mode() -> bool:
     return (os.environ.get("SPIRE_FIPS_MODE") or "").strip() == "1"
 
 
+def profile() -> str:
+    """Deployment profile. ``event`` is the assessed-event stance: everything
+    enforcing, nothing phoning home, and a refusal to boot if any of that is
+    missing. Anything else is the permissive default used for development
+    and demos."""
+    return (os.environ.get("SPIRE_PROFILE") or "").strip().lower()
+
+
+def event_profile() -> bool:
+    return profile() == "event"
+
+
+def _egress_enforced() -> bool:
+    return (os.environ.get("SPIRE_EGRESS_ENFORCE") or "").strip().lower() in ("1", "true", "yes")
+
+
 def fips_mode_assumed() -> bool:
     """Test override: SPIRE_FIPS_MODE_ASSUME=1 makes the runtime probe
     return True even on a non-FIPS host. Lets the security-posture tests
@@ -153,6 +169,7 @@ class SecurityPosture:
 
     fips_mode: bool
     fips_mode_assumed: bool
+    profile: str
     auth_mode: str
     cac_revocation_mode: str
     audit_signing_enabled: bool
@@ -165,6 +182,7 @@ class SecurityPosture:
         return {
             "fips_mode": self.fips_mode,
             "fips_mode_assumed": self.fips_mode_assumed,
+            "profile": self.profile,
             "auth_mode": self.auth_mode,
             "cac_revocation_mode": self.cac_revocation_mode,
             "audit_signing_enabled": self.audit_signing_enabled,
@@ -224,6 +242,7 @@ def posture_status() -> SecurityPosture:
     return SecurityPosture(
         fips_mode=fips_mode(),
         fips_mode_assumed=fips_mode_assumed(),
+        profile=profile() or "default",
         auth_mode=auth_mode,
         cac_revocation_mode=cac_revocation_mode,
         audit_signing_enabled=_audit_signing_enabled(),
@@ -244,6 +263,65 @@ class FipsConfigViolation(RuntimeError):
     configured non-FIPS algorithm. The process should not boot —
     a misconfigured FIPS deployment is worse than an obviously-mock one.
     """
+
+
+class EventProfileViolation(RuntimeError):
+    """Raised at startup when SPIRE_PROFILE=event but the enforcing posture is
+    not actually configured. An event build that silently downgrades to the
+    demo posture is the failure mode this whole profile exists to prevent."""
+
+
+def _cors_wildcard() -> bool:
+    origins = os.environ.get("SPIRE_CORS_ORIGINS")
+    if origins is None:
+        return False  # the built-in default is an explicit dev allowlist
+    return any(o.strip() in ("*", ".*") for o in origins.split(","))
+
+
+def assert_event_profile() -> None:
+    """Fail-fast validation of the assessed-event posture (WI-3).
+
+    Every check here corresponds to a claim the event build makes about itself.
+    A missing one is a misconfiguration, and a misconfigured enforcing build is
+    worse than an obviously-permissive one: nobody goes looking for the gap.
+    """
+    if not event_profile():
+        return
+
+    violations: List[str] = []
+
+    if not _egress_enforced():
+        violations.append("SPIRE_EGRESS_ENFORCE is not 1 (egress must deny, not monitor)")
+
+    auth_mode = (os.environ.get("SPIRE_AUTH_MODE") or "mock").strip().lower()
+    if auth_mode == "mock":
+        violations.append("SPIRE_AUTH_MODE=mock (set cac or hybrid)")
+
+    if not (os.environ.get("SPIRE_SESSION_SECRET") or "").strip():
+        violations.append("SPIRE_SESSION_SECRET is unset (sessions would use an ephemeral key)")
+
+    if not _audit_signing_enabled():
+        violations.append(
+            "audit signing key unset (set SPIRE_AUDIT_SIGNING_KEY_PATH or "
+            "SPIRE_AUDIT_SIGNING_KEY_HEX)"
+        )
+
+    if (os.environ.get("SPIRE_GITHUB_TOKEN") or "").strip():
+        violations.append("SPIRE_GITHUB_TOKEN is set (feedback phone-home must be off)")
+
+    if (os.environ.get("SPIRE_LLM_PRIMARY_DISABLE") or "1").strip().lower() not in ("1", "true", "yes"):
+        violations.append("SPIRE_LLM_PRIMARY_DISABLE is not 1 (hosted LLM egress must be off)")
+
+    if _cors_wildcard():
+        violations.append("SPIRE_CORS_ORIGINS contains a wildcard (use an explicit allowlist)")
+
+    if violations:
+        raise EventProfileViolation(
+            "SPIRE_PROFILE=event startup self-check failed; refusing to boot.\n"
+            + "\n".join(f"  - {v}" for v in violations)
+        )
+
+    log.info("[security-posture] event profile self-check passed; auth_mode=%s", auth_mode)
 
 
 def fips_runtime_status() -> Dict[str, Any]:
@@ -366,14 +444,19 @@ def assert_fips_safe_config() -> None:
 def _csp_value() -> str:
     tile_origin = (os.environ.get("SPIRE_TILE_ORIGIN") or "").strip()
     extra = f" {tile_origin}" if tile_origin else ""
+    # CartoDB serves the style.json from the APEX (basemaps.cartocdn.com) while
+    # tiles/sprites/glyphs come off subdomains (a/b/c.basemaps...). CSP
+    # wildcards don't cover the apex, so both must be listed or the online
+    # BASTION map fails to load its style. When egress is enforced there is no
+    # online basemap by definition, so the policy drops them entirely — the
+    # header should not advertise a hole the deployment does not use.
+    carto = "" if _egress_enforced() else (
+        " https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com"
+    )
     return (
         "default-src 'self'; "
-        # CartoDB serves the style.json from the APEX (basemaps.cartocdn.com)
-        # while tiles/sprites/glyphs come off subdomains (a/b/c.basemaps...).
-        # CSP wildcards don't cover the apex, so both must be listed or the
-        # BASTION map fails to load its style.
-        f"img-src 'self' data: blob: https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com{extra}; "
-        f"connect-src 'self' https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com{extra}; "
+        f"img-src 'self' data: blob:{carto}{extra}; "
+        f"connect-src 'self'{carto}{extra}; "
         "script-src 'self'; "
         "worker-src 'self' blob:; "  # MapLibre GL spawns its render worker from a blob: URL
         "style-src 'self' 'unsafe-inline'; "  # Vite injects style tags; safe

@@ -356,14 +356,18 @@ def _model_status() -> dict:
 
 def _network_egress_summary() -> dict:
     try:
-        from ..network_monitor import recent, unapproved_count
+        from ..network_monitor import recent, unapproved_count, mode
         return {
             "armed": True,
+            # enforce = unapproved connections are refused; monitor = audited
+            # and allowed. The footer renders this so assessors can read the
+            # posture off the screen instead of asking.
+            "mode": mode(),
             "recent": recent()[-10:],
             "unapproved_attempts": unapproved_count(),
         }
     except Exception as e:  # noqa: BLE001
-        return {"armed": False, "error": str(e)}
+        return {"armed": False, "mode": "unknown", "error": str(e)}
 
 
 @router.get("/dataset-info")

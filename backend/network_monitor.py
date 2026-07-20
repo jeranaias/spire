@@ -32,6 +32,12 @@ def _enforcing() -> bool:
     return os.environ.get("SPIRE_EGRESS_ENFORCE", "0").strip().lower() in ("1", "true", "yes")
 
 
+def mode() -> str:
+    """``enforce`` (unapproved connections refused) or ``monitor`` (audited and
+    allowed). Surfaced in /api/system/status so the posture is visible."""
+    return "enforce" if _enforcing() else "monitor"
+
+
 ALLOWED_HOSTS = {
     "127.0.0.1", "localhost", "::1",
 }

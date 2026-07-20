@@ -967,6 +967,8 @@ export interface SystemStatus {
   };
   network_egress?: {
     armed: boolean;
+    // enforce = unapproved connections refused; monitor = audited and allowed.
+    mode?: "enforce" | "monitor" | "unknown";
     unapproved_attempts: number;
     recent: unknown[];
   };
