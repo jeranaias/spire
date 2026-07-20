@@ -42,3 +42,7 @@ Thumbs.db
 
 # Models — never ship raw weights into the public image
 models/
+
+# Basemap packs — hundreds of MB, and they are bind-mounted at runtime
+# (docker-compose.event.yml), never baked into the image.
+deploy/tiles/*.pmtiles

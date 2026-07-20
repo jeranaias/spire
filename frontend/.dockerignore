@@ -1,0 +1,16 @@
+# The frontend image builds from ./frontend as its context, so the root
+# .dockerignore does not apply here. Without this file node_modules and a
+# stale dist/ get copied into the builder stage and then overwritten by the
+# build - slow, and a way for a local artifact to reach the image.
+node_modules
+dist
+.vite
+coverage
+playwright-report
+test-results
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+Thumbs.db
