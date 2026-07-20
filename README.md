@@ -2,7 +2,12 @@
 
 **Contested Logistics Operating System** — Marine Made.
 Sanitization, Prediction, Intelligence, Readiness Engine.
-Local Intelligence · No Cloud · IL5-Fit
+Local Intelligence · No Cloud · Runs Disconnected
+
+TRL 4 prototype. NIST SP 800-171 Rev. 3 remediation is tracked in
+[docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md); the
+architecture is compatible with IL5 hosting targets but SPIRE holds no
+accreditation and makes no IL5 claim.
 
 > **Marine Made.** SPIRE itself — every surface, every workflow, every
 > role-mapping — is designed and built by a team of active-duty
@@ -186,6 +191,13 @@ LICENSE.md          USMC vs Thornveil IP split
   toggle, clickable aggregation matrix; BASTION map markers
   rewritten 1:1 with PULSE units (deterministic deeplink); 16
   audit-chain entry kinds verified end-to-end live.
+- 2026-07-14 → 07-20 · security hardening pass: AES-256-GCM at rest with a
+  per-install KDF salt, audit-signature verification wired into
+  `verify_chain()`, CSRF double-submit + server-side session revocation,
+  default-deny authorization at every router mount, an egress watchdog with
+  an enforcing mode, offline PMTiles basemap served from the node, and an
+  `SPIRE_PROFILE=event` build that refuses to boot unless the enforcing
+  posture is actually configured. 997 backend tests.
 - Repo: https://github.com/jeranaias/spire (private during pilot)
 - Live: <https://spire-mdm.fly.dev> · Gemma proxy on RigRun
   (RTX PRO 6000) over Tailscale
