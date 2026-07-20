@@ -172,7 +172,7 @@ https://github.com/jeranaias/spire/issues/new/choose.
 
 ---
 
-## Scenario 9 · GC-2 Distributed Consensus
+## Scenario 9 · GC-2 CRDT-style reconciliation
 **Role:** Security Manager (or G-4 / MEF Commander) · **View:** any
 
 **Expected:**

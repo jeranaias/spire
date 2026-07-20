@@ -2266,7 +2266,7 @@ async def admin_inference_extrapolate(payload: dict = Body(default={}), role: st
 
 
 # ---------------------------------------------------------------------------
-# GC-2 Distributed consensus / CRDT sync
+# GC-2 CRDT-style reconciliation - see backend/sync.py and docs/SYNC_DESIGN.md
 # ---------------------------------------------------------------------------
 
 from ..sync import (  # noqa: E402  (imports at module bottom for clarity)

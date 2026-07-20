@@ -1,12 +1,17 @@
 """
-GC-2 Distributed consensus — vector-clock + reconciliation primitives.
+GC-2 — CRDT-style reconciliation primitives with operator conflict resolution.
 
-This is the **defining differentiator** vs Palantir Gotham + Anduril
-Lattice — both depend on continuous mesh comms. SPIRE keeps working with
-intermittent SATCOM via CRDT-style reconciliation: every mutation carries
-a vector clock keyed by node_id + counter, gossip exchanges merge state
-across nodes when they're online, last-writer-wins resolves divergent
-edits with the loser preserved in the audit chain.
+Not consensus. Consensus protocols (Raft, Paxos) need a quorum to agree before
+a write commits, which is exactly what a node behind intermittent SATCOM cannot
+do. The approach here is the opposite: accept every write locally, carry a
+vector clock keyed by node_id + counter, merge on contact, and hand genuinely
+concurrent edits to the operator with the losing side preserved in the audit
+chain. Calling that consensus would be both overstated and the wrong term.
+
+What is real today is the math and the operator surface. The peer is an
+in-process simulation - state does not replicate between two physical nodes
+yet. See docs/SYNC_DESIGN.md for the line between implemented and simulated,
+and the plan for multi-node replication.
 
 The MVP shipped here:
 - VectorClock dataclass + tick / merge / compare helpers.
@@ -42,6 +47,13 @@ def peer_node_id() -> str:
     return os.environ.get("SPIRE_PEER_NODE_ID", "MEU-NODE-0")
 
 
+# The peer lives in this process. Nothing crosses a wire. Surfaced through
+# /sync/state so the UI can label it and an assessor pulling a cable is never
+# misled about what they are looking at. Flips to "network" when multi-node
+# replication lands (docs/SYNC_DESIGN.md, Lane B).
+PEER_TRANSPORT = "in_process_simulation"
+
+
 @dataclass
 class VectorClock:
     """Per-node monotonic counters. {node_id: counter}.
@@ -60,25 +72,31 @@ class VectorClock:
         return VectorClock({k: max(self.counters.get(k, 0), other.counters.get(k, 0)) for k in keys})
 
     def compare(self, other: "VectorClock") -> str:
-        """Return 'before', 'after', 'equal', 'concurrent'."""
+        """This clock's causal relationship to ``other``.
+
+        'before' = every counter is <= the other's and at least one is lower,
+        i.e. this node is behind. 'after' is the mirror. 'concurrent' means
+        each side has seen something the other has not, which is the case that
+        needs an operator.
+        """
         keys = set(self.counters) | set(other.counters)
-        a_le = True
-        b_le = True
+        self_le_other = True   # no counter of ours exceeds theirs
+        other_le_self = True   # no counter of theirs exceeds ours
         equal = True
         for k in keys:
             a = self.counters.get(k, 0)
             b = other.counters.get(k, 0)
             if a > b:
-                b_le = False
+                self_le_other = False
             if a < b:
-                a_le = False
+                other_le_self = False
             if a != b:
                 equal = False
         if equal:
             return "equal"
-        if a_le and not b_le:
+        if self_le_other:
             return "before"
-        if b_le and not a_le:
+        if other_le_self:
             return "after"
         return "concurrent"
 
@@ -130,6 +148,7 @@ def state_summary() -> dict:
     return {
         "node_id": node_id(),
         "peer_node_id": peer_node_id(),
+        "peer_transport": PEER_TRANSPORT,
         "local_clock": _LOCAL_CLOCK.to_dict(),
         "peer_clock": _PEER_CLOCK.to_dict(),
         "events_logged": len(_EVENT_LOG),

@@ -1531,6 +1531,9 @@ export interface Cannibalization {
 export interface SyncStateResponse {
   node_id: string;
   peer_node_id: string;
+  // "in_process_simulation" until multi-node replication lands. The drawer
+  // labels it so nobody mistakes the demo path for live peer sync.
+  peer_transport?: string;
   local_clock: Record<string, number>;
   peer_clock: Record<string, number>;
   events_logged: number;

@@ -466,6 +466,18 @@ export function SystemStatusChip() {
                 <div className="mt-1 spire-body-muted text-sm">
                   Vector-clock-based reconciliation. Loser-preserving last-writer-wins on conflict.
                 </div>
+                {syncState.peer_transport === "in_process_simulation" && (
+                  /* The peer runs in this process; nothing crosses a wire yet.
+                   * Say so on the surface an assessor is looking at rather
+                   * than letting them discover it. */
+                  <div
+                    data-testid="sync-simulated-peer"
+                    className="mt-2 inline-block rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_12%,transparent)] px-2 py-[2px] font-mono text-[10px] font-semibold uppercase tracking-widest text-[var(--color-warning)]"
+                    title="The peer node is an in-process simulation. State does not replicate between physical nodes yet - see docs/SYNC_DESIGN.md"
+                  >
+                    Simulated peer
+                  </div>
+                )}
               </div>
               <IconButton onClick={() => setDrawerOpen(false)} aria-label="Close sync drawer">
                 ✕

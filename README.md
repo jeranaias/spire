@@ -62,7 +62,7 @@ you are and what's happening.
 | # | Feature | Where to see it |
 |---|---|---|
 | GC-1 | Autonomous replenishment planning | PULSE → Forecast → Recommend Actions panel |
-| GC-2 | Distributed consensus (CRDT) | TopBar → Node Status chip → conflict drawer |
+| GC-2 | CRDT-style reconciliation with operator conflict resolution (multi-node replication in integration) | TopBar → Node Status chip → conflict drawer |
 | GC-3 | Predictive failure | PULSE → Risk Board → Predicted Failures panel |
 | GC-4 | C-UAS / base-defense fusion | BASTION → alert sidebar → Fused Threats |
 | GC-5 | Coalition interoperability | SENTRY → Coalition tab → partner picker |
