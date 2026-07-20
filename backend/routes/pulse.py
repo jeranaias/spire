@@ -8,6 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ..timeutil import utcnow
 from ..auth import session_role
 from ..persistence import (
     dismiss_pulse_draft,
@@ -512,7 +513,7 @@ async def predict_failures(
         # telemetry rollups.
         "engine": "pattern engine v1",
         "engine_internal": "rule_based_v1",
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 
@@ -776,7 +777,7 @@ async def recommend_actions(
             "actions": actions[:5],
         })
 
-    return {"assets": out, "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z"}
+    return {"assets": out, "as_of": utcnow().isoformat(timespec="seconds") + "Z"}
 
 
 # ---------------------------------------------------------------------------
@@ -1455,7 +1456,7 @@ async def propose_cannibalization(request: Request, payload: dict):
         )
 
     proposal = {
-        "proposal_id": f"PROP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
+        "proposal_id": f"PROP-{utcnow().strftime('%Y%m%d-%H%M%S')}",
         "recipient_sr": recipient_sr,
         "donor_asset_id": donor_asset_id,
         "donor_sr": donor_sr,
@@ -1464,7 +1465,7 @@ async def propose_cannibalization(request: Request, payload: dict):
         "recipient_unit": recipient.unit_name,
         "donor_unit": donor_unit_name,
         "status": "PROPOSED",
-        "proposed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "proposed_at": utcnow().isoformat(timespec="seconds") + "Z",
     }
     try:
         # persistence.py exports the audit-chain writer as `log`; alias
@@ -1805,7 +1806,7 @@ async def forecast(
         # a STALE chip when the response ages out. `data_window_days` is
         # the rolling history window the slope/sigma fit is anchored to.
         # `coverage_p10_p90` is the calibration metric described above.
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": utcnow().isoformat(timespec="seconds") + "Z",
         "data_window_days": 30,
         "coverage_p10_p90": coverage_p10_p90,
         "coverage_n": coverage_n,

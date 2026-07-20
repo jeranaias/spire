@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -256,7 +256,7 @@ def build_report() -> str:
     parts.append(f"- Real export source: `{real.get('_meta', {}).get('source','—')}`")
     parts.append(f"- Real profile generated: `{real.get('_meta', {}).get('generated_at','—')}`")
     parts.append(f"- Synth profile generated: `{synth.get('_meta', {}).get('generated_at','—')}`")
-    parts.append(f"- Report regenerated: `{datetime.utcnow().isoformat()}Z`")
+    parts.append(f"- Report regenerated: `{datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}Z`")
     parts.append("")
     # Executive summary — every headline metric is computed from the
     # profile JSONs (no hardcoded percentages or timing claims) so the

@@ -37,6 +37,7 @@ from ..state import (
     dataset_status,
     swap_dataset,
 )
+from ..timeutil import utcnow
 
 router = APIRouter()
 
@@ -418,7 +419,7 @@ def _build_dataset_from_report(
         dq_defects={},
         violations=[],
         c_ratings=[],
-        generated_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        generated_at=utcnow().isoformat(timespec="seconds") + "Z",
         seed=seed,
     )
     setattr(ds, "_stage_ingest_skip_counts", skip_counts)

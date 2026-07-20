@@ -17,7 +17,7 @@ import csv
 import json
 import sys
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
@@ -320,7 +320,7 @@ def main() -> int:
     profile = {
         "_meta": {
             "source": "GCSS-MC sanitized export (hashed PII)",
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
             "files": {
                 "header": HEADER_CSV.name,
                 "parts": PARTS_CSV.name,

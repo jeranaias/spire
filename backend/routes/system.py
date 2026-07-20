@@ -39,6 +39,7 @@ from ..scoping import (
     MODEL_REGISTRY_ROLES,
 )
 from .. import scenario as scenario_state
+from ..timeutil import utcnow
 
 # Comms-state primitives — backs GC-7 air-gap toggle.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -47,7 +48,7 @@ if str(_REPO_ROOT) not in _sys.path:
 try:
     from dataset.comms import CommsState, generate_comms_timeline, format_state_for_api  # type: ignore[import-not-found]
     _COMMS_AVAILABLE = True
-    _TIMELINE = generate_comms_timeline(datetime.utcnow(), seed=42)
+    _TIMELINE = generate_comms_timeline(utcnow(), seed=42)
 except Exception:
     _COMMS_AVAILABLE = False
     _TIMELINE = None
@@ -190,7 +191,7 @@ async def build_mode():
     mode = "demo" if raw == "demo" else "operational"
     return {
         "build_mode": mode,
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 
@@ -578,7 +579,7 @@ async def reset_demo(request: Request):
     actor = user.get("role") or session_role(request)
     require_role(actor, RESET_DEMO_ROLES, "system.reset_demo")
 
-    started = datetime.utcnow()
+    started = utcnow()
     failed_steps: list[dict] = []
 
     # 1. Mission clock — pin H+0 to "now". Subsequent regenerators use
@@ -656,7 +657,7 @@ async def reset_demo(request: Request):
     except Exception as e:  # noqa: BLE001
         failed_steps.append({"step": "dataset_rehydrate", "error": str(e)[:160]})
 
-    finished = datetime.utcnow()
+    finished = utcnow()
     duration_ms = int((finished - started).total_seconds() * 1000)
     overall_ok = not failed_steps
 
@@ -862,7 +863,7 @@ async def dr_backup_create(request: Request, payload: dict = Body(default={})):
 
     backup_dir = _dr_backup_dir()
     backup_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    ts = utcnow().strftime("%Y%m%dT%H%M%SZ")
     out_path = backup_dir / f"backup_{ts}_{uuid.uuid4().hex[:8]}.tar.gz"
 
     from ..uis.dr import create_backup
@@ -1271,7 +1272,7 @@ async def comms_state():
     if not _COMMS_AVAILABLE or _TIMELINE is None:
         return {
             "current_state": "DISCONNECTED" if _AIR_GAPPED else "CONNECTED",
-            "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "as_of": utcnow().isoformat(timespec="seconds") + "Z",
             "recent_events": [],
             "queued_ops_count": len([q for q in _QUEUE if not q.get("replayed_at")]),
             "last_sync_at": None,
@@ -1312,12 +1313,12 @@ async def comms_airgap(request: Request, payload: dict = Body(default={})):
         return {
             "ok": True,
             "air_gap_active": True,
-            "engaged_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "engaged_at": utcnow().isoformat(timespec="seconds") + "Z",
         }
 
     # Disable: replay queued ops, mark each replayed_at, return resolution log.
     resolutions: list[dict] = []
-    now = datetime.utcnow()
+    now = utcnow()
     for q in _QUEUE:
         if q.get("replayed_at"):
             continue
@@ -1370,7 +1371,7 @@ async def comms_queue(payload: dict = Body(default={})):
         "payload": payload.get("payload", {}),
         "actor": payload.get("actor", "operator"),
         "actor_edipi": payload.get("actor_edipi"),
-        "queued_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "queued_at": utcnow().isoformat(timespec="seconds") + "Z",
         "replayed_at": None,
         "replay_result": None,
     }
@@ -1534,7 +1535,7 @@ async def scenario_blood_feed(
     return {
         "scenario_id": "blood-h72",
         "events": _vignette.feed(since_offset_min=since_offset_min, kinds=kinds, limit=limit),
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 
@@ -1628,14 +1629,14 @@ async def submit_feedback(request: Request, payload: dict = Body(default={})):
         diagnostics = {}
 
     record = {
-        "id": f"FB-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
+        "id": f"FB-{utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}",
         "title": title,
         "body": body,
         "issue_type": issue_type,
         "severity": severity if issue_type == "bug" else "n/a",
         "role": role,
         "view": view,
-        "submitted_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "submitted_at": utcnow().isoformat(timespec="seconds") + "Z",
         "actor": actor,
         "submitter": submitter or None,
         "diagnostics": diagnostics,
@@ -1774,7 +1775,7 @@ def _seed_outcomes(reference_time: datetime | None = None) -> None:
     has a meaningful trend on first load. Deterministic in structure: the
     same seeded RNG sequence yields the same kind / engine / correctness
     pattern every call, anchored to ``reference_time`` (defaults to
-    `datetime.utcnow()` so the boot-time seed sees "today" and the reset
+    `utcnow()` so the boot-time seed sees "today" and the reset
     flow can pin to its own H+0 anchor for cross-pass identity)."""
     if _DECISION_OUTCOMES:
         return
@@ -1783,7 +1784,7 @@ def _seed_outcomes(reference_time: datetime | None = None) -> None:
     kinds = ["cannibalization_proposal", "expedite_request", "predicted_failure_action", "classification_mark", "fpcon_change"]
     engines = ["rule_based_v1", "j2_v1", "regex_v1", "llm_gate_v1"]
     actors = ["maintenance_chief", "g4", "mef_commander", "data_custodian", "security_manager"]
-    base = (reference_time or datetime.utcnow()) - timedelta(days=14)
+    base = (reference_time or utcnow()) - timedelta(days=14)
     for i in range(48):
         ts = base + timedelta(hours=i * 7 + rng.randint(0, 5), minutes=rng.randint(0, 59))
         kind = rng.choice(kinds)
@@ -1869,10 +1870,10 @@ def record_outcome(*, decision_kind: str, decision_id: str, decided_by: str,
         "decision_id": decision_id,
         "decided_by": decided_by,
         "was_correct": bool(was_correct),
-        "observed_at": observed_at or datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "observed_at": observed_at or utcnow().isoformat(timespec="seconds") + "Z",
         "notes": notes,
         "scoring_engine": scoring_engine,
-        "logged_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "logged_at": utcnow().isoformat(timespec="seconds") + "Z",
     }
     _DECISION_OUTCOMES.append(rec)
     audit_log(
@@ -1929,7 +1930,7 @@ async def admin_telemetry(role: str | None = None):
             "by_decision_kind": {},
             "rolling_accuracy": [],
             "retraining_recommended": False,
-            "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "as_of": utcnow().isoformat(timespec="seconds") + "Z",
         }
 
     # Per-engine + per-kind accuracy
@@ -1990,7 +1991,7 @@ async def admin_telemetry(role: str | None = None):
         "rolling_accuracy": rolling,
         "overall_accuracy": round(overall_acc, 4),
         "retraining_recommended": retrain_needed,
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 

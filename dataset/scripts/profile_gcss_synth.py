@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean, median
 from typing import Any, Dict, Iterable, List, Optional
@@ -228,7 +228,7 @@ def main() -> int:
     profile = {
         "_meta": {
             "source": "SPIRE synthetic dataset (in-memory quick run)",
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
             "sr_count": len(srs),
             "req_count": len(reqs),
         },

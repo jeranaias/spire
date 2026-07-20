@@ -25,6 +25,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from ..inference_economics import RATE_CARD, record_call
+from ..timeutil import utcnow
 
 router = APIRouter()
 
@@ -181,7 +182,7 @@ async def llm_status():
     primary = await _probe_llm()
     local = await _probe_local()
     return {
-        "time": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "time": utcnow().isoformat(timespec="seconds") + "Z",
         **primary,
         "local": local,
         # Active tier hint — what the next call_llm_chat would land on.
@@ -209,7 +210,7 @@ async def llm_tiers():
             else "local" if local.get("reachable") and local.get("target_loaded")
             else "rule"
         ),
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 

@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from .tools import TOOL_REGISTRY, tools_for_planner, run_tool
+from ..timeutil import utcnow
 
 
 SYSTEM_PROMPT = """You are SPIRO — SPIRE's operator-assistant. Marine staff officer voice.
@@ -91,7 +92,7 @@ async def plan(
     from ..routes.llm import call_llm_chat
     from ..routes.bastion import _build_grounding_context
 
-    plan_id = f"PL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+    plan_id = f"PL-{utcnow().strftime('%Y%m%d-%H%M%S')}"
 
     # Action-verb shortcut: bare "go" / "do it" / "execute" with no further
     # context resolves deterministically without a Gemma round-trip. If a
@@ -341,7 +342,7 @@ async def execute(plan_id: str, steps: list, role: str) -> dict:
 
     return {
         "plan_id": plan_id,
-        "executed_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "executed_at": utcnow().isoformat(timespec="seconds") + "Z",
         "step_results": results,
         "ok_count": sum(1 for r in results if not r.get("had_error")),
         "error_count": sum(1 for r in results if r.get("had_error")),

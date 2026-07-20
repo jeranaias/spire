@@ -27,12 +27,13 @@ from __future__ import annotations
 import threading
 from datetime import datetime
 from typing import Optional
+from .timeutil import utcnow
 
 
 _LOCK = threading.RLock()
 # Initialised at module import — equivalent to "H+0 is when the process
 # started". The first reset pins it to a known moment.
-_H0_AT: datetime = datetime.utcnow()
+_H0_AT: datetime = utcnow()
 _LAST_RESET_BY: Optional[str] = None
 
 
@@ -40,7 +41,7 @@ def reset_to_h0(actor: Optional[str] = None) -> dict:
     """Pin H+0 to the current wall-clock moment. Returns the new state."""
     global _H0_AT, _LAST_RESET_BY
     with _LOCK:
-        _H0_AT = datetime.utcnow()
+        _H0_AT = utcnow()
         _LAST_RESET_BY = actor
         return _state_locked()
 
@@ -48,7 +49,7 @@ def reset_to_h0(actor: Optional[str] = None) -> dict:
 def current_offset_seconds() -> int:
     """Seconds elapsed since the last H+0 pin. Always >= 0."""
     with _LOCK:
-        delta = datetime.utcnow() - _H0_AT
+        delta = utcnow() - _H0_AT
         return max(0, int(delta.total_seconds()))
 
 
@@ -60,6 +61,6 @@ def state() -> dict:
 def _state_locked() -> dict:
     return {
         "h0_at": _H0_AT.isoformat(timespec="seconds") + "Z",
-        "offset_seconds": max(0, int((datetime.utcnow() - _H0_AT).total_seconds())),
+        "offset_seconds": max(0, int((utcnow() - _H0_AT).total_seconds())),
         "last_reset_by": _LAST_RESET_BY,
     }

@@ -36,6 +36,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from .timeutil import utcnow
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +356,7 @@ def log(kind: str, *, actor: str = "system", subject_id: Optional[str] = None, p
     SQLite-file rewrite (signature can be verified offline against
     the public key).
     """
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     body = payload or {}
     with conn() as c:
         cur = c.execute("SELECT self_hash FROM audit_log ORDER BY id DESC LIMIT 1")
@@ -752,7 +753,7 @@ def record_sentry_decision(
     answer "who" — not just "which role" — for any held SR. This is the
     backbone the inspector's audit-chain modal surfaces in the UI.
     """
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
             "INSERT OR REPLACE INTO sentry_decisions("
@@ -804,7 +805,7 @@ def record_sentry_bulk_decision(
     names every SR it touched, so a judge or IG can audit the bulk action
     as a single intent.
     """
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     if not sr_numbers:
         return {"count": 0}
     with conn() as c:
@@ -828,7 +829,7 @@ def record_sentry_bulk_decision(
 
 
 def record_pulse_feedback(asset_id: str, correct: bool, note: str = "") -> None:
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
             "INSERT INTO pulse_feedback(asset_id, correct, note, ts) VALUES (?,?,?,?)",
@@ -838,7 +839,7 @@ def record_pulse_feedback(asset_id: str, correct: bool, note: str = "") -> None:
 
 
 def record_incident_response(incident_id: str, item_key: str, checked: bool, *, actor_role: str) -> None:
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
             "INSERT INTO incident_responses(incident_id, item_key, checked, actor_role, ts) VALUES (?,?,?,?,?)",
@@ -876,7 +877,7 @@ def store_sentry_batch(batch_id: str, batch: dict) -> None:
     completion, etc.) so a uvicorn restart recovers the same batch the
     operator was in the middle of.
     """
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     try:
         payload = json.dumps(batch, default=str)
     except Exception:
@@ -947,10 +948,10 @@ def record_pulse_draft(
     shows up in the TopBar drafts badge. Also writes an audit_log row so
     the chain has the artifact (subject_id is the draft_id, payload
     captures the action specifics)."""
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     # draft_id pattern matches PROP-/expedite-style ids elsewhere in PULSE.
     rand_hex = hashlib.sha256(f"{asset_id}{kind}{ts}{actor}".encode()).hexdigest()[:6].upper()
-    draft_id = f"DRAFT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{rand_hex}"
+    draft_id = f"DRAFT-{utcnow().strftime('%Y%m%d-%H%M%S')}-{rand_hex}"
     artifact_json = json.dumps(artifact or {}, sort_keys=True, default=str)
     with conn() as c:
         c.execute(
@@ -1022,7 +1023,7 @@ def list_pulse_drafts(*, status: str = "held", limit: int = 50) -> list[dict]:
 def dismiss_pulse_draft(draft_id: str, *, actor: str) -> Optional[dict]:
     """Mark a draft as dismissed and audit-log the dismissal. Returns the
     updated row or None if the draft wasn't found / already dismissed."""
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         row = c.execute(
             "SELECT draft_id, asset_id, kind, status FROM pulse_drafts WHERE draft_id = ?",
@@ -1046,7 +1047,7 @@ def dismiss_pulse_draft(draft_id: str, *, actor: str) -> Optional[dict]:
 
 
 def store_uploaded_batch(batch_id: str, source: str, record_count: int, schema: dict, raw: bytes) -> None:
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
             "INSERT OR REPLACE INTO uploaded_batches(batch_id, source, created_at, record_count, schema_json, raw_bytes) VALUES (?,?,?,?,?,?)",
@@ -1072,7 +1073,7 @@ def get_user_pref(dodid: str, key: str, default: Optional[str] = None) -> Option
 def set_user_pref(dodid: str, key: str, value: str) -> None:
     """Upsert a per-identity preference. Values are TEXT — JSON-encode at the
     call site if storing structured data."""
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
     with conn() as c:
         c.execute(
             "INSERT INTO user_prefs(dodid, pref_key, pref_value, updated_at) "
@@ -1103,7 +1104,7 @@ def secure_wipe(actor: str = "security_manager") -> dict:
     init_db()
     # First entry in the new chain is the wipe itself
     log("secure_wipe", actor=actor, payload={"note": "operator-initiated secure wipe"})
-    return {"ok": True, "wiped_at": datetime.utcnow().isoformat(timespec="seconds") + "Z"}
+    return {"ok": True, "wiped_at": utcnow().isoformat(timespec="seconds") + "Z"}
 
 
 # ---------------------------------------------------------------------------

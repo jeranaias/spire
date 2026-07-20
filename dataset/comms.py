@@ -18,7 +18,7 @@ Deterministic under a shared RNG so the demo scenario reproduces.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 
@@ -134,7 +134,7 @@ def format_state_for_api(timeline: CommsTimeline) -> dict:
     """Render a timeline into the /comms/state response body."""
     return {
         "current_state": timeline.current_state.value,
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds") + "Z",
         "recent_events": [
             {
                 "at": e.at.isoformat(timespec="seconds") + "Z",

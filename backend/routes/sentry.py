@@ -19,6 +19,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 
+from ..timeutil import utcnow
 from ..auth import session_role
 from ..integrations.sentry_gcss_adapter import (
     EXPECTED_HEADER_COLUMNS as GCSS_HEADER_COLUMNS,
@@ -515,7 +516,7 @@ def _scope_block(
 
 
 def _new_batch(record_source: str, records: list, schema_override: Optional[dict] = None) -> dict:
-    batch_id = f"BATCH-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    batch_id = f"BATCH-{utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     # Detect data-quality defects
     dq_flags = Counter()
     for r in records:
@@ -533,7 +534,7 @@ def _new_batch(record_source: str, records: list, schema_override: Optional[dict
     batch = {
         "batch_id": batch_id,
         "source": record_source,
-        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "created_at": utcnow().isoformat(timespec="seconds") + "Z",
         "record_count": len(records),
         "records": records,
         "status": "ready",
@@ -1312,7 +1313,7 @@ async def start_processing(batch_id: str, request: Request):
     batch = _get_batch(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="batch not found")
-    job_id = f"JOB-{datetime.utcnow().strftime('%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    job_id = f"JOB-{utcnow().strftime('%H%M%S')}-{uuid.uuid4().hex[:6]}"
 
     # Kick off the synchronous classification pass. SENTRY processes on the
     # order of 500 records in <2s -- we don't need async work queues.
@@ -1512,7 +1513,7 @@ async def start_processing(batch_id: str, request: Request):
     job = {
         "job_id": job_id,
         "batch_id": batch_id,
-        "started_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "started_at": utcnow().isoformat(timespec="seconds") + "Z",
         "engine_seconds": engine_seconds,
         "engine_used": engine_used,
         "sentry_model_loaded": sentry_loaded,
@@ -2303,7 +2304,7 @@ async def mark_bulk(payload: dict, request: Request):
     audit_log(
         "sentry_mark_bulk",
         actor=role or "unknown",
-        subject_id=f"bulk_{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}",
+        subject_id=f"bulk_{utcnow().strftime('%Y%m%d-%H%M%S')}",
         payload={
             "actor_dodid": user.get("dodid"),
             "actor_role": role,
@@ -2362,7 +2363,7 @@ async def reveal_sensitive(payload: dict, request: Request):
             "actor_role": role,
             "scope": scope,
             "flags_revealed": flags,
-            "ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "ts": utcnow().isoformat(timespec="seconds") + "Z",
         },
     )
     return {
@@ -2690,7 +2691,7 @@ async def export_sanitized(request: Request, payload: dict):
         "recent_entries": redacted_entries,
         "payload_post_processing": "source_ip fields redacted per OPSEC; "
                                    "re-hash will not match chain self_hash if any payload was redacted.",
-        "captured_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "captured_at": utcnow().isoformat(timespec="seconds") + "Z",
     }
     audit_bytes = json.dumps(audit_snapshot, indent=2, default=str).encode("utf-8")
 
@@ -2722,7 +2723,7 @@ async def export_sanitized(request: Request, payload: dict):
         # not hardcoded "Distribution C".
         "distribution_authority": dist_authority,
         "generalized_unit_markings": generalize,
-        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "created_at": utcnow().isoformat(timespec="seconds") + "Z",
     }
 
     # Walkthrough #1 — release-safety bug: SANITIZED preview must show the
@@ -2795,7 +2796,7 @@ async def export_sanitized(request: Request, payload: dict):
             break
 
     # Bundle as zip
-    export_id = f"EXP-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    export_id = f"EXP-{utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         # Task-70 — write the format the operator actually selected.
@@ -2981,7 +2982,7 @@ async def export_manifest(payload: dict, request: Request):
         "estimated_bytes": estimated_bytes,
         "estimated_files_in_zip": 4 + (1 if payload.get("include_audit", True) else 0),
         "preview_truncated": len(sr_ids_in) > 100,
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 
@@ -3133,7 +3134,7 @@ async def coalition_view(profile_key: str, role: Optional[str] = None):
         "sample_records": sample_srs,
         "partner_units": partner_units_for(profile_key),
         "field_redactions": profile_data.get("field_redactions", []),
-        "as_of": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "as_of": utcnow().isoformat(timespec="seconds") + "Z",
     }
 
 
@@ -3208,7 +3209,7 @@ async def coalition_release(
     manifest_sha256 = manifest["manifest_sha256"]
     record_count = manifest["record_count"]
 
-    release_id = f"REL-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    release_id = f"REL-{utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
 
     # F14 — actually build the release bundle. Earlier this endpoint
     # only logged an audit row and returned a manifest hash, so the FE's
@@ -3311,7 +3312,7 @@ async def coalition_release(
         "record_count": len(scoped_records),
         "blocked_count": len(blocked_records),
         "manifest_sha256": manifest_sha256,
-        "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "created_at": utcnow().isoformat(timespec="seconds") + "Z",
         "actor_role": actor,
         "actor_dodid": (user or {}).get("dodid"),
     }
@@ -3325,7 +3326,7 @@ async def coalition_release(
         "classification_banner": csv_banner,
         "release_id": release_id,
         "profile_key": profile_key,
-        "captured_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "captured_at": utcnow().isoformat(timespec="seconds") + "Z",
         "chain": verify_chain(),
         "recent_entries": [dict(e) for e in recent_entries(limit=200, include_payload=False)],
     }

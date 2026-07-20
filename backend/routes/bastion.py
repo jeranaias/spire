@@ -19,6 +19,7 @@ from ..scoping import (
 )
 from ..state import get_dataset, last_day_snapshots
 from ..persistence import log as audit_log
+from ..timeutil import utcnow
 
 router = APIRouter()
 
@@ -361,7 +362,7 @@ def _is_snoozed(state: dict) -> bool:
     if not until:
         return False
     try:
-        return datetime.fromisoformat(until.replace("Z", "")) > datetime.utcnow()
+        return datetime.fromisoformat(until.replace("Z", "")) > utcnow()
     except Exception:
         return False
 
@@ -478,7 +479,7 @@ async def alert_action(alert_id: str, action: str, request: Request):
                 },
             )
 
-    now = datetime.utcnow()
+    now = utcnow()
     if action == "ack":
         _ALERT_STATE[alert_id] = {
             "status": "acknowledged",

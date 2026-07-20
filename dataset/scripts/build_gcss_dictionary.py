@@ -14,7 +14,7 @@ from __future__ import annotations
 import csv
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -199,7 +199,7 @@ def build() -> Dict[str, Any]:
     return {
         "_meta": {
             "source": "GCSS-MC sanitized data dictionary CSVs",
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
             "real_profile": str(PROFILE_PATH.relative_to(REPO_ROOT)),
         },
         "sections": sections,

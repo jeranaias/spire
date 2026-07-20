@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from pydantic import BaseModel, Field
+from ..timeutil import utcnow
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +156,7 @@ def _extract_equipment(text: str) -> list:
 def _extract_date(text: str) -> Optional[str]:
     lower = text.lower()
     # Today/tomorrow
-    today = datetime.utcnow().date()
+    today = utcnow().date()
     if "tomorrow" in lower:
         return (today + timedelta(days=1)).isoformat()
     if "today" in lower:
@@ -350,7 +351,7 @@ async def parse_tmr_text_llm(text: str) -> dict:
         scheduled = data.get("scheduled_date")
         # Validate the date — let pydantic catch bad strings; null becomes a +5d default.
         if not scheduled:
-            scheduled = (datetime.utcnow() + timedelta(days=5)).date().isoformat()
+            scheduled = (utcnow() + timedelta(days=5)).date().isoformat()
         tmr = TMRRequest(
             origin=data.get("origin") or "Camp Lejeune, NC",
             destination=data.get("destination") or "Camp Geiger, NC",

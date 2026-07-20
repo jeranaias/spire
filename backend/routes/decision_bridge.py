@@ -28,6 +28,7 @@ from ..auth import session_role
 from ..persistence import conn, recent_entries, verify_chain
 from ..scoping import AUDIT_READ_ROLES, allowed_units, filter_units
 from ..state import get_dataset
+from ..timeutil import utcnow
 
 router = APIRouter()
 
@@ -37,7 +38,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return utcnow().isoformat(timespec="seconds") + "Z"
 
 
 def _load_installation_block() -> dict:
@@ -173,7 +174,7 @@ async def alerts_top(role: Optional[str] = None, limit: int = Query(3, ge=1, le=
 # ---------------------------------------------------------------------------
 
 def _hours_until(target: datetime, now: Optional[datetime] = None) -> int:
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     delta = target - now
     return max(0, int(delta.total_seconds() // 3600))
 
@@ -210,7 +211,7 @@ def _class_ix_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict]
     """
     last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else None
     by_nsn: dict[str, dict] = {}
-    today = datetime.utcnow()
+    today = utcnow()
     for sr in ds.srs:
         if allowed is not None and sr.unit_name not in allowed:
             continue
@@ -282,7 +283,7 @@ def _class_viii_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dic
     the unit roster because the canonical dataset does not carry blood
     inventory; values represent a believable medical-supply pressure tied
     to the casualty-evacuation roster."""
-    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else datetime.utcnow().date()
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else utcnow().date()
     units_in_scope = [u.name for u in filter_units(ds, None) if allowed is None or u.name in allowed]
     products = [
         ("Whole Blood (O+)", "BBI"),
@@ -320,7 +321,7 @@ def _class_iii_shortages(ds, allowed: Optional[set[str]], top: int) -> list[dict
     dataset day. Synthesized because the canonical dataset does not
     carry tank-by-tank fuel state; values represent a believable
     consumption-pressure picture tied to vehicle operating tempo."""
-    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else datetime.utcnow().date()
+    last_day = ds.snapshots[-1].snapshot_date if ds.snapshots else utcnow().date()
     units_in_scope = [u.name for u in filter_units(ds, None) if allowed is None or u.name in allowed]
     products = [
         ("JP-8", "Bulk Fuel Tank A"),
@@ -474,7 +475,7 @@ def _events_per_minute(window_minutes: int = 5) -> tuple[float, int]:
     """Compute a rolling events-per-minute rate over the last N minutes
     plus the count in that window. Reads timestamps directly off the
     audit_log table — cheap (indexed on ts)."""
-    cutoff = (datetime.utcnow() - timedelta(minutes=window_minutes)).isoformat(timespec="seconds") + "Z"
+    cutoff = (utcnow() - timedelta(minutes=window_minutes)).isoformat(timespec="seconds") + "Z"
     try:
         with conn() as c:
             row = c.execute(

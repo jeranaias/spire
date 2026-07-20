@@ -35,6 +35,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+from .timeutil import utcnow
 
 
 def node_id() -> str:
@@ -137,7 +138,7 @@ def log_mutation(*, op_kind: str, record_id: str, payload: dict, actor: str) -> 
         payload=payload,
         clock=VectorClock(dict(_LOCAL_CLOCK.counters)),
         actor=actor,
-        at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        at=utcnow().isoformat(timespec="seconds") + "Z",
     )
     _EVENT_LOG.append(ev)
     return ev
@@ -200,7 +201,7 @@ def absorb_peer_state(peer_clock: dict, peer_events: list[dict]) -> dict:
                     "clock": peer_clock_obj.to_dict(),
                     "payload": pe.get("payload", {}),
                 },
-                "detected_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                "detected_at": utcnow().isoformat(timespec="seconds") + "Z",
                 "resolved_at": None,
                 "winner": None,
             })
@@ -230,7 +231,7 @@ def resolve_conflict(conflict_id: str, winner: str, actor: str) -> Optional[dict
     history is preserved — this is the LWW-with-history pattern."""
     for c in _CONFLICTS:
         if c["id"] == conflict_id:
-            c["resolved_at"] = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            c["resolved_at"] = utcnow().isoformat(timespec="seconds") + "Z"
             c["winner"] = winner
             c["resolved_by"] = actor
             return c
@@ -258,7 +259,7 @@ def seed_demo_conflict() -> dict:
     to _CONFLICTS so the demo path is reliable regardless of prior state.
     """
     rid = f"DEMO-CANN-{uuid.uuid4().hex[:6].upper()}"
-    now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    now = utcnow().isoformat(timespec="seconds") + "Z"
     local_clock = {node_id(): 1}
     peer_clock = {peer_node_id(): 1}
     conflict = {

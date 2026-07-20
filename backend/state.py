@@ -41,6 +41,7 @@ from consistency import (  # noqa: E402
     run_all_checks,
 )
 from incidents import generate_incidents  # noqa: E402
+from .timeutil import utcnow
 
 
 @dataclass
@@ -103,7 +104,7 @@ _DATASET_META: dict = {
 
 
 def _utc_iso() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return utcnow().isoformat(timespec="seconds") + "Z"
 
 
 def init_empty_dataset() -> CanonicalDataset:

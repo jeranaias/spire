@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any
 
 from .persistence import log as audit_log
+from .timeutil import utcnow
 
 
 class EgressBlocked(OSError):
@@ -104,7 +105,7 @@ def _audit_outbound(host: str, port: int, allowed: bool) -> None:
         "host": host,
         "port": port,
         "allowed": allowed,
-        "at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "at": utcnow().isoformat(timespec="seconds") + "Z",
     }
     with _LOCK:
         _AUDITED.append(entry)
