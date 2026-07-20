@@ -210,7 +210,7 @@ def require_clearance(
         # module pulling SQLite at scoping import time (CLI tools that touch
         # scoping.py shouldn't trigger DB init).
         try:
-            from .persistence import log as audit_log  # noqa: WPS433
+            from .persistence import AuditWriteFailure, log_or_flag as audit_log  # noqa: WPS433
             audit_log(
                 "spillage_prevented",
                 actor=audit_actor or user.get("role") or "unknown",
@@ -225,6 +225,10 @@ def require_clearance(
                     "surface": "backend",
                 },
             )
+        except AuditWriteFailure:
+            # Event profile: an action nobody can prove happened is not
+            # an action the enforcing build takes.
+            raise
         except Exception:
             # Never let an audit-write failure mask the 403 — we still
             # block the spillage; the chain just temporarily lost a row.
@@ -262,7 +266,7 @@ def require_no_downgrade(
         return new_canonical
     if classification_rank(new_canonical) < classification_rank(prev):
         try:
-            from .persistence import log as audit_log  # noqa: WPS433
+            from .persistence import AuditWriteFailure, log_or_flag as audit_log  # noqa: WPS433
             audit_log(
                 "downgrade_blocked",
                 actor=actor,
@@ -275,6 +279,10 @@ def require_no_downgrade(
                     "reason": "monotonic_write_violation",
                 },
             )
+        except AuditWriteFailure:
+            # Event profile: an action nobody can prove happened is not
+            # an action the enforcing build takes.
+            raise
         except Exception:
             pass
         raise HTTPException(
@@ -311,7 +319,7 @@ def require_role(
     """
     if not role or role not in allowed:
         try:
-            from .persistence import log as audit_log  # noqa: WPS433
+            from .persistence import AuditWriteFailure, log_or_flag as audit_log  # noqa: WPS433
             audit_log(
                 "role_denied",
                 actor=audit_actor or role or "unknown",
@@ -325,6 +333,10 @@ def require_role(
                     "surface": "backend",
                 },
             )
+        except AuditWriteFailure:
+            # Event profile: an action nobody can prove happened is not
+            # an action the enforcing build takes.
+            raise
         except Exception:
             # Never let an audit-write failure mask the 403 — block first,
             # log second; the chain just temporarily lost a row.
@@ -378,7 +390,7 @@ def require_view_scope(view: str, allowed: frozenset[str]):
         if role in allowed:
             return role
         try:
-            from .persistence import log as audit_log  # noqa: WPS433
+            from .persistence import AuditWriteFailure, log_or_flag as audit_log  # noqa: WPS433
             audit_log(
                 "view_scope_denied",
                 actor=role or "unknown",
@@ -394,6 +406,10 @@ def require_view_scope(view: str, allowed: frozenset[str]):
                     "surface": "backend",
                 },
             )
+        except AuditWriteFailure:
+            # Event profile: an action nobody can prove happened is not
+            # an action the enforcing build takes.
+            raise
         except Exception:
             pass
         raise HTTPException(
@@ -452,7 +468,7 @@ def require_user_role(
         # Append-only role-denial record. Lazy-import for the same reason
         # require_clearance does — keep CLI tools from triggering DB init.
         try:
-            from .persistence import log as audit_log  # noqa: WPS433
+            from .persistence import AuditWriteFailure, log_or_flag as audit_log  # noqa: WPS433
             audit_log(
                 "role_denied",
                 actor=role or "unknown",
@@ -467,6 +483,10 @@ def require_user_role(
                     "surface": "backend",
                 },
             )
+        except AuditWriteFailure:
+            # Event profile: an action nobody can prove happened is not
+            # an action the enforcing build takes.
+            raise
         except Exception:
             # Never let an audit-write failure mask the 403.
             pass

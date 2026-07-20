@@ -20,7 +20,7 @@ import threading
 from datetime import datetime
 from typing import Any
 
-from .persistence import log as audit_log
+from .persistence import log_or_flag as audit_log
 from .timeutil import utcnow
 
 
@@ -112,6 +112,10 @@ def _audit_outbound(host: str, port: int, allowed: bool) -> None:
         if len(_AUDITED) > _MAX_AUDITED:
             _AUDITED.pop(0)
     if not allowed:
+        # log_or_flag counts the failure instead of dropping it. Not raising
+        # here even under the event profile: this runs inside a socket call,
+        # and turning an audit outage into a socket exception would take down
+        # paths that have nothing to do with auditing.
         try:
             audit_log(
                 "network_egress_unapproved",

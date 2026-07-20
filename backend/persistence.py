@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -37,6 +38,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from .timeutil import utcnow
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +347,53 @@ _GENESIS = "0" * 64
 def _canonical(row: dict) -> str:
     """Stable JSON for hashing — sorted keys, no whitespace."""
     return json.dumps(row, sort_keys=True, separators=(",", ":"), default=str)
+
+
+class AuditWriteFailure(RuntimeError):
+    """An audit entry could not be written. Raised only under the event
+    profile, where auditability is a hard requirement rather than a
+    best-effort one."""
+
+
+# Counter for audit writes that were attempted and failed. Several call sites
+# guard the write so an audit outage cannot mask the 403 or 503 they are in the
+# middle of returning. That is the right call - but a silent counter of zero is
+# indistinguishable from a broken audit layer, so the count is surfaced in
+# /api/system/status.
+_AUDIT_FAILURES: dict = {"count": 0, "last_kind": None, "last_error": None, "last_at": None}
+
+
+def audit_failures() -> dict:
+    """Snapshot of audit-write failures since process start."""
+    return dict(_AUDIT_FAILURES)
+
+
+def reset_audit_failures() -> None:
+    """Test hook - clears the counter."""
+    _AUDIT_FAILURES.update(count=0, last_kind=None, last_error=None, last_at=None)
+
+
+def log_or_flag(kind: str, **kwargs) -> Optional[dict]:
+    """:func:`log`, but a failure is recorded rather than swallowed.
+
+    Use at call sites that must not let an audit outage mask the response they
+    are already returning (a 403, a blocked downgrade). The failure still gets
+    logged loudly and counted, and under SPIRE_PROFILE=event it raises: an
+    action nobody can prove happened is not an action the enforcing build is
+    willing to take.
+    """
+    try:
+        return log(kind, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - the point is to catch everything
+        _AUDIT_FAILURES["count"] += 1
+        _AUDIT_FAILURES["last_kind"] = kind
+        _AUDIT_FAILURES["last_error"] = f"{type(exc).__name__}: {exc}"
+        _AUDIT_FAILURES["last_at"] = utcnow().isoformat(timespec="seconds") + "Z"
+        _log.error("audit write failed for kind=%s: %s", kind, exc, exc_info=True)
+        from .security_posture import event_profile
+        if event_profile():
+            raise AuditWriteFailure(f"audit write failed for {kind}: {exc}") from exc
+        return None
 
 
 def log(kind: str, *, actor: str = "system", subject_id: Optional[str] = None, payload: Optional[dict] = None) -> dict:

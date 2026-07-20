@@ -18,7 +18,7 @@ from ..scoping import (
     filter_perimeter,
 )
 from ..state import get_dataset, last_day_snapshots
-from ..persistence import log as audit_log
+from ..persistence import AuditWriteFailure, log_or_flag as audit_log
 from ..timeutil import utcnow
 
 router = APIRouter()
@@ -420,6 +420,10 @@ def _audit_blocked_alert_action(
                 "surface": "backend",
             },
         )
+    except AuditWriteFailure:
+        # Event profile: a denial nobody can prove happened is not one the
+        # enforcing build records as handled.
+        raise
     except Exception:
         pass
 

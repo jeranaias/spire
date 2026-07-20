@@ -331,6 +331,11 @@ async def _compute_status():
             "audit_entries": chain["entries"],
             "audit_head_hash": chain.get("head_hash", ""),
             "encrypted_at_rest": bool(os.environ.get("SPIRE_DB_PASSPHRASE")),
+            # Audit writes that were attempted and failed. Several call sites
+            # guard the write so an outage cannot mask the 403 they are
+            # returning; without this counter that guard is indistinguishable
+            # from a healthy audit layer.
+            "audit_write_failures": _audit_failure_summary(),
         },
         "models": _model_status(),
         "network_egress": _network_egress_summary(),
@@ -353,6 +358,14 @@ def _model_status() -> dict:
     except Exception as e:  # noqa: BLE001
         _model_status_cache = {"error": str(e)}
     return _model_status_cache
+
+
+def _audit_failure_summary() -> dict:
+    try:
+        from ..persistence import audit_failures
+        return audit_failures()
+    except Exception as e:  # noqa: BLE001
+        return {"count": -1, "error": str(e)}
 
 
 def _network_egress_summary() -> dict:
