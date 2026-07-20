@@ -27,6 +27,7 @@ from .network_monitor import install as install_netmon
 from .model_hooks import STATE as MODEL_STATE
 
 from .auth import router as auth_router, session_middleware
+from .routes.map_assets import router as map_assets_router
 from .routes.system import router as system_router
 from .routes.pulse import router as pulse_router
 from .routes.sentry import router as sentry_router
@@ -175,6 +176,9 @@ if _security_headers is not None:
 
 app.include_router(auth_router,   prefix="/api/auth",   tags=["auth"])
 app.include_router(system_router, prefix="/api/system", tags=["system"])
+# Basemap assets (WI-1). Not under /api: public basemap geometry, fetched
+# directly by MapLibre, so it is intentionally not session-gated.
+app.include_router(map_assets_router, prefix="/map", tags=["map"])
 # Stage live-ingest mode (Task #183). Mounted under /api/system so the
 # stage-ingest + dataset-status surfaces are siblings of the existing
 # /api/system/admin/reset-demo failsafe used by Shift+F8.

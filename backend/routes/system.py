@@ -2334,3 +2334,17 @@ async def sync_seed_conflict(request: Request, payload: dict = Body(default={}))
         payload={"record_id": conflict.get("record_id")},
     )
     return conflict
+
+
+# ---------------------------------------------------------------------------
+# Basemap configuration (WI-1) — lets a deployed container be repointed at an
+# offline tile pack at RUNTIME, instead of baking VITE_MAP_STYLE_URL at build.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/map-config")
+async def map_config_endpoint(request: Request) -> dict:
+    """Which basemap the COP should load: an offline PMTiles pack we serve, the
+    public style when egress is allowed, or none (refuse to reach out)."""
+    from ..map_tiles import map_config
+    return map_config(str(request.base_url))

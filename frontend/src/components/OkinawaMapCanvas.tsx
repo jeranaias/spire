@@ -24,14 +24,13 @@ import { useSpireStore } from "../state/store";
 import { registerMapBridge } from "../state/mapBridge";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, type SupplyClassStatus, type UnitSummary } from "../api";
+import {
+  BLANK_STYLE,
+  registerPmtilesProtocol,
+  resolveMapConfig,
+  type MapConfig,
+} from "../mapStyle";
 
-// CartoDB Dark Matter — free vector tile style, no key. Used only as the
-// online-demo base. Air-gap / offline deploys set VITE_MAP_STYLE_URL to a
-// bundled PMTiles style so the map never touches the public CDN.
-const CARTO_DARK_STYLE =
-  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
-const MAP_STYLE_URL =
-  (import.meta.env?.VITE_MAP_STYLE_URL as string | undefined) || CARTO_DARK_STYLE;
 
 // milsymbol options — base size is intentionally small (22px native)
 // so single-island zoom levels render at a readable but unobtrusive
@@ -190,6 +189,21 @@ export function OkinawaMapCanvas({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markerRefs = useRef<Map<string, maplibregl.Marker>>(new Map());
   const [ready, setReady] = useState(false);
+  // Which basemap to load. Null until the backend answers — the map is not
+  // built before then, so we never briefly point MapLibre at a CDN a
+  // disconnected node is not allowed to reach.
+  const [mapConfig, setMapConfig] = useState<MapConfig | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    registerPmtilesProtocol();
+    resolveMapConfig().then((cfg) => {
+      if (!cancelled) setMapConfig(cfg);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const markers = useMarkersStore((s) => s.markers);
   const moveMarker = useMarkersStore((s) => s.moveMarker);
@@ -343,14 +357,16 @@ export function OkinawaMapCanvas({
 
   // Initial-mount: build the map once, attach controls.
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current || mapRef.current || !mapConfig) return;
     const start = initialIsland
       ? ISLAND_PRESETS[initialIsland]
       : { center: OKINAWA_VIEW.center, zoom: OKINAWA_VIEW.zoom };
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: MAP_STYLE_URL,
+      // No style URL means no basemap is available; the blank canvas still
+      // carries markers and rings.
+      style: mapConfig.styleUrl ?? BLANK_STYLE,
       center: start.center,
       zoom: start.zoom,
       minZoom: OKINAWA_VIEW.minZoom,
@@ -400,7 +416,7 @@ export function OkinawaMapCanvas({
     // initialIsland intentionally captured at mount; pan-to-island
     // happens via the header chips below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mapConfig]);
 
   // Marker sync — reconcile the DOM markers against the store.
   // We avoid a full teardown each render by reusing maplibre Marker
@@ -707,6 +723,21 @@ export function OkinawaMapCanvas({
          * parent via flex height is the path that survives MapLibre's
          * stylesheet without !important hacks. */}
         <div ref={containerRef} className="h-full w-full" />
+        {mapConfig?.mode === "none" && (
+          <div
+            data-testid="map-no-basemap"
+            className="pointer-events-none absolute left-1/2 top-3 z-10 w-[min(28rem,90%)] -translate-x-1/2 rounded-sm border border-[var(--color-warning)] bg-[color-mix(in_oklab,var(--color-warning)_12%,var(--color-surface))] px-3 py-2 text-center"
+            role="status"
+          >
+            <div className="font-mono text-[10px] uppercase tracking-widest text-[var(--color-warning)]">
+              No offline tile pack installed
+            </div>
+            <div className="mt-1 font-mono text-[10px] text-[var(--color-text-muted)]">
+              Egress is enforced, so no basemap will be fetched. Markers and
+              rings still plot. Install a pack: see deploy/tiles/README.md
+            </div>
+          </div>
+        )}
         {selectedMarker && (
           <MarkerDrawer
             marker={selectedMarker}

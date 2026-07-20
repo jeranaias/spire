@@ -78,3 +78,6 @@ test-results/
 
 # Session continuity scratch (local only)
 SESSION_HANDOFF.md
+
+# Offline basemap archives (large binaries, baked per AO)
+deploy/tiles/*.pmtiles
