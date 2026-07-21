@@ -30,6 +30,7 @@ import {
   haversineKm,
 } from "../state/mapBridge";
 import { OKINAWA_SCENARIO } from "../data/okinawa-scenario";
+import { csrfHeaders } from "../api";
 
 interface PlanStep { tool: string; args: Record<string, any>; id?: string; }
 interface SpiroPlanEconomics {
@@ -214,7 +215,8 @@ export function Spiro() {
         : null;
       const r = await fetch("/api/copilot/plan", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...csrfHeaders() },
+        credentials: "same-origin",
         body: JSON.stringify({
           text: t,
           role,
@@ -386,7 +388,8 @@ export function Spiro() {
       if (backendSteps.length > 0) {
         const r = await fetch("/api/copilot/execute", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...csrfHeaders() },
+          credentials: "same-origin",
           body: JSON.stringify({ plan_id: plan.plan_id, steps: backendSteps, role }),
         });
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);

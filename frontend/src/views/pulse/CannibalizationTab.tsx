@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, type Cannibalization, type StrippableDonor } from "../../api";
+import { api, ApiError, csrfHeaders, type Cannibalization, type StrippableDonor } from "../../api";
 import { formatApiError } from "../../api-retry";
 import { LoadingOverlay } from "./FleetOverviewTab";
 import { useSpireStore } from "../../state/store";
@@ -82,7 +82,7 @@ async function postProposeAndClassify(body: {
     resp = await fetch("/api/pulse/cannibalization/propose", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...csrfHeaders() },
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });

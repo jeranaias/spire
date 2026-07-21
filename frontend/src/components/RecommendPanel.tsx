@@ -12,7 +12,7 @@
  * between "wait for the depot order" and "burn the expedite budget."
  */
 import { useEffect, useState } from "react";
-import { api, type RecommendActionsAsset, type RecommendedAction } from "../api";
+import { api, csrfHeaders, type RecommendActionsAsset, type RecommendedAction } from "../api";
 import { formatApiError } from "../api-retry";
 import { useSpireStore } from "../state/store";
 import { Button, ErrorState, LoadingState, EmptyState } from "./ui";
@@ -65,7 +65,8 @@ export function RecommendPanel({ unit, hideHeader = false }: { unit?: string; hi
         try {
           const r = await fetch("/api/pulse/cannibalization/propose", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...csrfHeaders() },
+            credentials: "same-origin",
             body: JSON.stringify(action.artifact),
             signal: ctrl.signal,
           });

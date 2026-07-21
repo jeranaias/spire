@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useSpireStore, ROLE_LABELS } from "../state/store";
 import { formatApiError } from "../api-retry";
+import { csrfHeaders } from "../api";
 import { Button, IconButton, Pressable } from "./ui";
 
 type IssueType = "bug" | "idea" | "question" | "praise";
@@ -192,7 +193,8 @@ export function FeedbackDrawer() {
       try {
         r = await fetch("/api/system/feedback", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...csrfHeaders() },
+          credentials: "same-origin",
           body: JSON.stringify(payload),
           signal: ctrl.signal,
         });

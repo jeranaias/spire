@@ -11,6 +11,17 @@ function readCookie(name: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+/**
+ * CSRF double-submit header for raw `fetch()` calls that don't go through the
+ * `api` client - SPIRO's /copilot/plan and /copilot/execute are the ones that
+ * matter. Any mutating same-origin request must echo the readable spire_csrf
+ * cookie or the middleware rejects it with 403.
+ */
+export function csrfHeaders(): Record<string, string> {
+  const csrf = readCookie("spire_csrf");
+  return csrf ? { "X-CSRF-Token": csrf } : {};
+}
+
 // Role read synchronously from the Zustand store on every call. The store
 // owns the active role; we splice it onto GET requests as `?role=...` so the
 // backend's scoping layer can filter per-role. POST routes also take a role
