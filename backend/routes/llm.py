@@ -436,6 +436,9 @@ async def _call_ollama_native(
         "economics": {
             "tier": tier,
             "model": rate_card_label,
+            # The actual model that answered, distinct from the tier's canonical
+            # rate-card name - so UI can label honestly on a model-optional node.
+            "served_model": model,
             "call_site": call_site,
             "route": f"{route}/local-native",
             "served_by": "local",

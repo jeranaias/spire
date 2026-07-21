@@ -32,6 +32,36 @@ import {
 import { OKINAWA_SCENARIO } from "../data/okinawa-scenario";
 import { csrfHeaders } from "../api";
 
+/** Clean an ollama/proxy model id into an operator-facing name. */
+function prettyModel(raw: string): string {
+  if (!raw) return "Local LLM";
+  // "hf.co/unsloth/gemma-4-E4B-it-GGUF:Q3_K_M" -> "Gemma 4 E4B"
+  const m = raw.match(/gemma-?(\d)[-_]?(e\d+b)/i);
+  if (m) return `Gemma ${m[1]} ${m[2].toUpperCase()}`;
+  // "qwen2.5:3b" -> "Qwen2.5 3B"
+  const base = raw.split("/").pop() ?? raw;
+  const [name, tag] = base.split(":");
+  const nice = name.replace(/^qwen/i, "Qwen").replace(/^llama/i, "Llama");
+  return tag ? `${nice} ${tag.toUpperCase()}` : nice;
+}
+
+/** Header engine label from the /api/llm/tiers probe. Reflects the tier that
+ *  would actually serve the next call, so the header never claims a model the
+ *  node isn't running. */
+function spiroEngineLabel(tiers: {
+  active_tier?: string;
+  primary?: { model?: string };
+  local?: { target_model?: string };
+}): string {
+  if (tiers.active_tier === "primary" && tiers.primary?.model) {
+    return prettyModel(tiers.primary.model);
+  }
+  if (tiers.active_tier === "local" && tiers.local?.target_model) {
+    return `${prettyModel(tiers.local.target_model)} · Local`;
+  }
+  return "Rule-based";
+}
+
 interface PlanStep { tool: string; args: Record<string, any>; id?: string; }
 interface SpiroPlanEconomics {
   tier: string;
@@ -91,8 +121,24 @@ export function Spiro() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState<"plan" | "execute" | null>(null);
   const [rawOpen, setRawOpen] = useState<Record<string, boolean>>({});
+  // Active engine label, resolved from whatever model the node actually serves
+  // (SPIRE ships model-optional; the header must not claim a model that isn't
+  // loaded). Falls back to a neutral name until the probe returns.
+  const [engineLabel, setEngineLabel] = useState("SPIRE Officer");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/llm/tiers", { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((t) => {
+        if (cancelled || !t) return;
+        setEngineLabel(spiroEngineLabel(t));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Persist open state.
   useEffect(() => {
@@ -592,7 +638,7 @@ export function Spiro() {
       <div className="flex items-baseline justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div>
           <div className="font-mono text-xs uppercase text-[var(--color-primary)] tracking-widest">
-            ◆ SPIRO · SPIRE Officer · Gemma 4
+            ◆ SPIRO · {engineLabel}
           </div>
           <DemoOnly>
             <div className="mt-0.5 font-mono text-[10px] text-[var(--color-text-muted)] tracking-wide">

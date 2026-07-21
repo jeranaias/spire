@@ -63,6 +63,24 @@ DECISIVENESS: always end with a recommended next move. "Recommend: cannib match 
 """
 
 
+def _engine_label(economics: dict | None, *, no_tools: bool = False) -> str:
+    """Where the answer was actually served, for the plan card. SPIRE is
+    model-optional, so this must reflect the real route rather than claim a
+    fixed model. Uses the ``served_by`` marker the LLM layer stamps on every
+    call."""
+    econ = economics or {}
+    served = econ.get("served_by")
+    # Prefer the actual model that answered over the tier's rate-card name.
+    model = econ.get("served_model") or econ.get("model") or "LLM"
+    if served == "local":
+        base = f"{model} (local)"
+    elif served == "primary":
+        base = f"{model} via proxy"
+    else:
+        base = model
+    return f"{base} (no-tools fallback)" if no_tools else base
+
+
 async def plan(
     text: str,
     role: str,
@@ -230,7 +248,7 @@ async def plan(
             "summary": cleaned_content if not steps else _plan_summary(cleaned_content, steps),
             "answer": cleaned_content if not steps else None,
             "steps": steps,
-            "engine": "Gemma4 via RigRun proxy",
+            "engine": _engine_label(economics),
             "tokens_used": usage.get("total_tokens"),
             "economics": economics or None,
         }
@@ -279,7 +297,7 @@ async def plan(
                     "summary": cleaned or rb["summary"],
                     "answer": cleaned or rb["answer"],
                     "steps": rb["steps"],
-                    "engine": "Gemma4 via RigRun proxy (no-tools fallback)",
+                    "engine": _engine_label(economics, no_tools=True),
                     "tokens_used": usage.get("total_tokens"),
                     "economics": economics or None,
                 }
