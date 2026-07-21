@@ -56,6 +56,7 @@ If PRIOR_PROPOSAL is present, execute THAT proposal exactly. Operator is consent
 OUTPUT:
 - Tool calls: return them via the tools list with a one-line `summary_for_operator` (military shorthand).
 - Direct answers: 1-3 sentences. Cite the specific number, asset id, unit. No "consider" or "you might."
+- PLAIN ENGLISH ONLY. NEVER write tool, function, or command names in a direct answer — no `status_summary`, no `recommend_actions(CLB-1)`, no `foo(bar)` syntax. State the action the way a Marine says it: not "recommend_actions(CLB-1, CLB-6)" but "draft a resupply plan for CLB-1 and CLB-6." Not "status_summary → predict_failures" but "pull the readiness picture, then run failure prediction."
 
 MEMORY: conversation history below is state. "and CLB-6?" / "do that one too" / "same for X" → repeat your most recent action against the new target. No re-asking unless genuinely ambiguous.
 
@@ -464,9 +465,71 @@ def _strip_json_dump(text: str) -> str:
     text = re.sub(r"\b(?:call|tool_call|tool)\s*:\s*\w+\s*[(\[{][^)\]}]*[)\]}]", "", text, flags=re.IGNORECASE)
     # Also catch the bare 'call:tool_name' with no parens at all
     text = re.sub(r"\b(?:call|tool_call|tool)\s*:\s*\w+", "", text, flags=re.IGNORECASE)
+    # Small models parrot the tool names from the prompt straight into prose,
+    # e.g. "Recommend: status_summary -> recommend_actions(CLB-1, CLB-6)".
+    # Rewrite those into plain English the operator can act on.
+    text = _humanize_tool_syntax(text)
     text = re.sub(r"\n{2,}", "\n", text)
     text = re.sub(r" {2,}", " ", text)
     return text.strip()
+
+
+# Tool id -> how a Marine would say it. Keeps SPIRO's prose operator-readable
+# even when a small model echoes the planner's tool names.
+_TOOL_HUMAN = {
+    "status_summary": "pull the readiness picture",
+    "recommend_actions": "draft a resupply plan",
+    "predict_failures": "run failure prediction",
+    "forecast_unit": "forecast readiness",
+    "find_asset": "look up the asset",
+    "find_cannibalization_match": "find a cannibalization donor",
+    "search_assets": "search the asset list",
+    "list_alerts": "review the alerts",
+    "walk_unit": "walk the unit status",
+    "get_coalition_view": "pull the coalition view",
+    "mark_text": "classify the text",
+    "map_fly_to": "move the map",
+    "map_select_marker": "select the marker",
+    "map_list_markers": "list the map markers",
+    "map_query_within_radius": "check what is in range",
+}
+
+
+def _humanize_tool_syntax(text: str) -> str:
+    """Rewrite bare tool-call syntax in prose into plain English.
+
+    ``status_summary`` -> ``pull the readiness picture``;
+    ``recommend_actions(CLB-1, CLB-6)`` -> ``draft a resupply plan for CLB-1,
+    CLB-6``; a ``->`` chain between them becomes ``, then``.
+    """
+    if not text:
+        return text
+    import re
+    # Small models markdown-escape underscores ("recommend\_actions") and can
+    # backtick-wrap tool names; normalize both so the match below catches them.
+    text = text.replace("\\_", "_").replace("\\*", "*")
+    text = re.sub(r"`([a-z_]+(?:\([^)]*\))?)`", r"\1", text)
+    names = "|".join(sorted(_TOOL_HUMAN, key=len, reverse=True))
+
+    def _repl(m: "re.Match") -> str:
+        phrase = _TOOL_HUMAN[m.group("name")]
+        args = (m.group("args") or "").strip()
+        if args:
+            # keep the target ids (CLB-1, unit names); drop quotes and kwargs.
+            args = re.sub(r"\b\w+\s*=\s*", "", args)
+            args = args.replace('"', "").replace("'", "").strip(" ,")
+            if args:
+                return f"{phrase} for {args}"
+        return phrase
+
+    text = re.sub(
+        rf"\b(?P<name>{names})\b\s*(?:[(\[{{](?P<args>[^)\]}}]*)[)\]}}])?",
+        _repl,
+        text,
+    )
+    # Tidy the arrow chains the models love ("A -> B", "A → B") into prose.
+    text = re.sub(r"\s*(?:->|→)\s*", ", then ", text)
+    return text
 
 
 def _plan_summary(content: str, steps: list) -> str:
