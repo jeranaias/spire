@@ -172,10 +172,9 @@ the two model chips. It is the posture of the whole system in one strip.
 
 - Do not call GC-2 "consensus". It is CRDT-style reconciliation.
 - Do not claim IL5, an ATO, or FIPS validation. The defensible line is:
-  TRL 4 prototype, 800-171 Rev. 3 remediation tracked in
-  [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md), architecture compatible
-  with IL5 hosting targets, FIPS-safe algorithms with a FIPS-ready image
-  variant.
+  TRL 4 prototype, 800-171 Rev. 3 remediation tracked internally,
+  architecture compatible with IL5 hosting targets, FIPS-safe algorithms
+  with a FIPS-ready image variant.
 - Do not narrate a model as "online" when the footer says rule-based
   fallback.
 - The dataset is synthetic. Say it once, early, and let the banner carry it

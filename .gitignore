@@ -81,3 +81,15 @@ SESSION_HANDOFF.md
 
 # Offline basemap archives (large binaries, baked per AO)
 deploy/tiles/*.pmtiles
+
+# Internal planning + security-gap tracking. Kept local; never published to
+# the shared repo (they enumerate remediation gaps with file:line anchors).
+docs/PRODUCTION_READINESS.md
+docs/PRODUCTION_CHECKLIST.md
+docs/HARDENING_PLAN.md
+docs/CAPABILITY_VISION.md
+docs/INTEGRATION_MAP.md
+docs/FIPS_DEPLOYMENT.md
+
+# Event/MDM pitch + rehearsal material — history, not the running system.
+docs/archive/

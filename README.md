@@ -4,9 +4,8 @@
 Sanitization, Prediction, Intelligence, Readiness Engine.
 Local Intelligence · No Cloud · Runs Disconnected
 
-TRL 4 prototype. NIST SP 800-171 Rev. 3 remediation is tracked in
-[docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md); the
-architecture is compatible with IL5 hosting targets but SPIRE holds no
+TRL 4 prototype. NIST SP 800-171 Rev. 3 remediation is tracked internally;
+the architecture is compatible with IL5 hosting targets but SPIRE holds no
 accreditation and makes no IL5 claim.
 
 > **Marine Made.** SPIRE itself — every surface, every workflow, every
@@ -155,7 +154,7 @@ frontend/
     HelpOverlay.tsx              ? key keyboard shortcut reference
     classification/              FPCON-aware classification banner strip
     StatusFooter.tsx             Live telemetry ticker (LLM up/down, audit chain head, etc.)
-docs/            See docs/README.md — architecture, security/compliance (PRODUCTION_READINESS + CHECKLIST), capability, ops; archive/ holds MDM-2026 pitch material
+docs/            See docs/README.md — architecture, capability, ops, and the recording walkthrough
 scripts/         Playwright screenshot harness, MGRS lat/lon baker, smoke tests
 .github/         Issue templates, PR template, CI workflow
 Dockerfile       Backend image
