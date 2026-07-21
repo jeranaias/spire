@@ -701,7 +701,6 @@ export function Spiro() {
                 <div key={m.id} className="self-start max-w-[92%] rounded-sm border border-[var(--color-border-active)] bg-[var(--color-bg)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--color-text)]">
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <div className="font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] tracking-widest">◆ SPIRO</div>
-                    <CostBadge econ={m.economics} />
                   </div>
                   <div>{m.text}</div>
                   {isLatestAnswer && pending === null && (
@@ -728,7 +727,6 @@ export function Spiro() {
                 <div key={m.id} className="self-start w-full rounded-sm border border-[var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_8%,var(--color-bg))] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--color-text)]">
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <div className="font-mono text-[10px] font-semibold uppercase text-[var(--color-primary)] tracking-widest">◆ SPIRO · proposed plan</div>
-                    <CostBadge econ={p.economics} />
                   </div>
                   <div className="mb-2">{p.summary || `Run ${p.steps.length} tool${p.steps.length === 1 ? "" : "s"}.`}</div>
                   <ol className="mb-2 flex flex-col gap-1">
@@ -913,39 +911,3 @@ function QuickChip({ label, onClick, disabled }: { label: string; onClick: () =>
   );
 }
 
-// D3 — per-call cost surfaced inline next to the SPIRO output. Tier
-// abbreviation makes the badge readable at a glance ("T1 · $0.0002")
-// rather than overwhelming the chat bubble. Hidden if the call ran
-// rule-only (cost == 0 and tier0_rule).
-function CostBadge({ econ }: { econ?: { tier: string; cost_usd: number; latency_ms: number; model: string; call_site: string } | null }) {
-  if (!econ) return null;
-  const tierShort: Record<string, string> = {
-    tier0_rule: "T0",
-    tier1_small: "T1",
-    tier2_mid: "T2",
-    tier3_frontier: "T3",
-  };
-  const tone =
-    econ.tier === "tier3_frontier" ? "var(--color-danger)" :
-    econ.tier === "tier2_mid" ? "var(--color-warning)" :
-    econ.tier === "tier1_small" ? "var(--color-primary)" :
-    "var(--color-success)";
-  const cost = econ.cost_usd === 0
-    ? "$0"
-    : econ.cost_usd >= 0.01
-      ? `$${econ.cost_usd.toFixed(3)}`
-      : `$${econ.cost_usd.toFixed(5).replace(/0+$/, "").replace(/\.$/, ".0")}`;
-  return (
-    <span
-      className="rounded-sm border px-1.5 py-[1px] font-mono text-[10px] tabular-nums tracking-wider"
-      style={{
-        color: tone,
-        borderColor: `color-mix(in oklab, ${tone} 40%, var(--color-border))`,
-        background: `color-mix(in oklab, ${tone} 6%, transparent)`,
-      }}
-      title={`${econ.model} · ${econ.call_site} · ${econ.latency_ms.toFixed(0)} ms`}
-    >
-      {tierShort[econ.tier] || econ.tier} · {cost}
-    </span>
-  );
-}
