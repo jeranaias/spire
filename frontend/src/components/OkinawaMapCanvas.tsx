@@ -25,7 +25,6 @@ import { registerMapBridge } from "../state/mapBridge";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, type SupplyClassStatus, type UnitSummary } from "../api";
 import {
-  BLANK_STYLE,
   registerPmtilesProtocol,
   resolveMapConfig,
   type MapConfig,
@@ -364,9 +363,9 @@ export function OkinawaMapCanvas({
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      // No style URL means no basemap is available; the blank canvas still
-      // carries markers and rings.
-      style: mapConfig.styleUrl ?? BLANK_STYLE,
+      // Same-origin style object (offline), a CDN URL (online), or the blank
+      // fallback (none) - markers and rings still plot on the blank canvas.
+      style: mapConfig.style,
       center: start.center,
       zoom: start.zoom,
       minZoom: OKINAWA_VIEW.minZoom,
