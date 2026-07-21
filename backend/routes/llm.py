@@ -22,6 +22,21 @@ from datetime import datetime
 from typing import Any, Optional
 
 import httpx
+
+# One shared AsyncClient for every outbound call in this module. Creating a
+# fresh httpx.AsyncClient per request costs ~2s on Windows/Python 3.14 (the
+# transport/pool init), which was landing on every LLM probe and every SPIRO
+# turn. A pooled client is also the documented right way to use httpx. Timeouts
+# are passed per-request so the single client serves the fast probes and the
+# long generation calls alike.
+_HTTP_CLIENT: Optional[httpx.AsyncClient] = None
+
+
+def _http() -> httpx.AsyncClient:
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed:
+        _HTTP_CLIENT = httpx.AsyncClient(trust_env=False)
+    return _HTTP_CLIENT
 from fastapi import APIRouter, HTTPException, Request
 
 from ..inference_economics import RATE_CARD, record_call
@@ -133,18 +148,25 @@ LLM_PRIMARY_DISABLED = (os.environ.get("SPIRE_LLM_PRIMARY_DISABLE", "1") or "").
 async def _probe_llm() -> dict:
     """Probe Tier-A (RigRun proxy). Used by /llm/status to surface a
     chip in the operator's StatusFooter."""
+    # When Tier-A is disabled (the offline/enforced default) there is nothing
+    # to reach. Skip the probe entirely: under egress enforcement the connect
+    # attempt blocks on the watchdog's synchronous DNS check until the httpx
+    # timeout, which stalls the single worker and drags every concurrent
+    # request out to multiple seconds. This is what made /api/llm/tiers - and
+    # anything queued behind it - slow.
+    if LLM_PRIMARY_DISABLED:
+        return {"reachable": False, "disabled": True, "proxy": LLM_PROXY_URL}
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{LLM_PROXY_URL}/v1/models")
-            if resp.status_code == 200:
-                data = resp.json()
-                model = (data.get("data") or [{}])[0]
-                return {
-                    "reachable": True,
-                    "model_id": model.get("id"),
-                    "max_context": model.get("max_model_len"),
-                    "proxy": LLM_PROXY_URL,
-                }
+        resp = await _http().get(f"{LLM_PROXY_URL}/v1/models", timeout=3.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            model = (data.get("data") or [{}])[0]
+            return {
+                "reachable": True,
+                "model_id": model.get("id"),
+                "max_context": model.get("max_model_len"),
+                "proxy": LLM_PROXY_URL,
+            }
     except Exception as e:  # noqa: BLE001
         return {"reachable": False, "error": str(e), "proxy": LLM_PROXY_URL}
     return {"reachable": False, "proxy": LLM_PROXY_URL}
@@ -156,19 +178,18 @@ async def _probe_local() -> dict:
     if LLM_LOCAL_DISABLED:
         return {"reachable": False, "disabled": True, "proxy": LLM_LOCAL_URL}
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(f"{LLM_LOCAL_URL}/api/tags")
-            if resp.status_code == 200:
-                data = resp.json()
-                models = [m.get("name") for m in (data.get("models") or [])]
-                has_target = LLM_LOCAL_MODEL in models
-                return {
-                    "reachable": True,
-                    "models": models,
-                    "target_model": LLM_LOCAL_MODEL,
-                    "target_loaded": has_target,
-                    "proxy": LLM_LOCAL_URL,
-                }
+        resp = await _http().get(f"{LLM_LOCAL_URL}/api/tags", timeout=2.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = [m.get("name") for m in (data.get("models") or [])]
+            has_target = LLM_LOCAL_MODEL in models
+            return {
+                "reachable": True,
+                "models": models,
+                "target_model": LLM_LOCAL_MODEL,
+                "target_loaded": has_target,
+                "proxy": LLM_LOCAL_URL,
+            }
     except Exception as e:  # noqa: BLE001
         return {"reachable": False, "error": str(e), "proxy": LLM_LOCAL_URL}
     return {"reachable": False, "proxy": LLM_LOCAL_URL}
@@ -378,12 +399,12 @@ async def _call_ollama_native(
     }
     started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
-            resp = await client.post(
-                f"{base_url}/api/chat",
-                json=payload,
-                headers=headers,
-            )
+        resp = await _http().post(
+            f"{base_url}/api/chat",
+            json=payload,
+            headers=headers,
+            timeout=LLM_TIMEOUT,
+        )
     except httpx.RequestError as exc:
         latency_ms = (time.perf_counter() - started) * 1000
         record_call(
@@ -490,12 +511,12 @@ async def _call_one_tier(
     }
     started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
-            resp = await client.post(
-                f"{base_url}/v1/chat/completions",
-                json=payload,
-                headers=headers,
-            )
+        resp = await _http().post(
+            f"{base_url}/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=LLM_TIMEOUT,
+        )
     except httpx.RequestError as exc:
         latency_ms = (time.perf_counter() - started) * 1000
         record_call(
