@@ -24,6 +24,7 @@
  */
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
+import { noLabels } from "protomaps-themes-base";
 
 export type MapMode = "offline" | "online" | "none";
 
@@ -55,13 +56,44 @@ export const BLANK_STYLE = {
   ],
 } as unknown as maplibregl.StyleSpecification;
 
+// SPIRE deep-navy overrides on top of the Protomaps "dark" theme. The stock
+// flavor is a medium gray that fights the near-black UI chrome and runs
+// land-dark / water-light, which reads backwards on camera. These push the
+// ocean to a deep navy, lift the land so islands stand off the water, and warm
+// the roads/boundaries so the COP has depth without labels.
+const SPIRE_MAP_COLORS: Record<string, string> = {
+  background: "#070b12",
+  water: "#0a1626",
+  earth: "#161d28",
+  landcover: "#18202b",
+  landuse: "#1b2430",
+  buildings: "#232e3d",
+};
+
 /**
- * Geometry-only dark basemap over the Protomaps vector schema, pointing at the
- * same-origin PMTiles archive. Mirrors backend/map_tiles.py::_layers so the
- * self-hosted look matches whatever the backend would have generated. No text
- * layers (no glyph PBFs to vendor); unit symbology is drawn by milsymbol.
+ * Offline basemap: the Protomaps "dark" theme (proper landcover, roads,
+ * buildings, coastlines) recolored to SPIRE's deep-navy palette, pointed at
+ * the same-origin PMTiles archive. Label layers are dropped (noLabels) so no
+ * glyph PBFs need vendoring; unit symbology is drawn client-side by milsymbol.
  */
 function buildOfflineStyle(origin: string): maplibregl.StyleSpecification {
+  const layers = (noLabels("protomaps", "dark") as any[]).map((layer) => {
+    const sl = layer["source-layer"] as string | undefined;
+    const next = { ...layer, paint: { ...(layer.paint ?? {}) } };
+    if (layer.type === "background") {
+      next.paint["background-color"] = "#070b12";
+    } else if (sl && next.paint["fill-color"] && SPIRE_MAP_COLORS[sl]) {
+      next.paint["fill-color"] = SPIRE_MAP_COLORS[sl];
+    } else if (sl === "roads" && next.paint["line-color"]) {
+      // Keep the theme's per-class road widths; just recolor to a cool slate
+      // that reads on the navy without shouting.
+      next.paint["line-color"] = "#38465c";
+    } else if (sl === "boundaries" && next.paint["line-color"]) {
+      next.paint["line-color"] = "#4a5b73";
+    }
+    return next;
+  });
+
   return {
     version: 8,
     name: "SPIRE offline dark",
@@ -72,14 +104,7 @@ function buildOfflineStyle(origin: string): maplibregl.StyleSpecification {
         attribution: "(c) OpenStreetMap contributors",
       },
     },
-    layers: [
-      { id: "background", type: "background", paint: { "background-color": "#0b0f14" } },
-      { id: "earth", type: "fill", source: "protomaps", "source-layer": "earth", paint: { "fill-color": "#11161d" } },
-      { id: "landuse", type: "fill", source: "protomaps", "source-layer": "landuse", paint: { "fill-color": "#141a22" } },
-      { id: "water", type: "fill", source: "protomaps", "source-layer": "water", paint: { "fill-color": "#0a1420" } },
-      { id: "roads", type: "line", source: "protomaps", "source-layer": "roads", paint: { "line-color": "#2a3341", "line-width": 0.8 } },
-      { id: "boundaries", type: "line", source: "protomaps", "source-layer": "boundaries", paint: { "line-color": "#3a4655", "line-width": 0.6, "line-dasharray": [2, 2] } },
-    ],
+    layers,
   } as unknown as maplibregl.StyleSpecification;
 }
 
