@@ -241,32 +241,39 @@ export function MarkTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [release]);
 
-  // Cold-start auto-seed: drop the first sample remark into the textarea
-  // on first mount so a new operator immediately sees a working Tier-1
-  // recommendation (classification + caveats + REL TO + distribution
-  // statement) without clicking anything. Persists "seen" so the auto-
-  // seed never overwrites a returning operator's in-progress draft.
-  // Sample rotation: cycle through SAMPLES across visits so the operator
-  // sees variety on repeat dismissals.
+  // Auto-seed a worked example whenever the draft box is empty on mount, so
+  // an operator always lands on a full Tier-1 recommendation (classification
+  // + caveats + REL TO + distribution statement) without clicking anything.
+  // The only guard is: never clobber a draft already in progress. Samples
+  // rotate across visits so repeat views show variety.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const seenKey = "spire.sentry.mark.autoseed.seen.v1";
     const idxKey = "spire.sentry.mark.autoseed.idx.v1";
-    if (window.localStorage.getItem(seenKey) === "1") return;
-    if ((textareaRef.current?.value ?? "").trim()) return;
-    const idx = Math.max(
-      0,
-      Number(window.localStorage.getItem(idxKey) ?? "0") % SAMPLES.length,
-    );
-    const sample = SAMPLES[idx];
-    if (!sample) return;
-    if (textareaRef.current) {
-      textareaRef.current.value = sample.text;
+    let tries = 0;
+    let raf = 0;
+    // On a cold chunk load the textarea ref may not be attached the instant
+    // this effect fires. Retry across a few frames until it is, then seed -
+    // otherwise the very first visit lands on an empty box.
+    const seed = () => {
+      const ta = textareaRef.current;
+      if (!ta) {
+        if (tries++ < 30) raf = requestAnimationFrame(seed);
+        return;
+      }
+      if (ta.value.trim()) return; // never clobber a draft in progress
+      const idx = Math.max(
+        0,
+        Number(window.localStorage.getItem(idxKey) ?? "0") % SAMPLES.length,
+      );
+      const sample = SAMPLES[idx];
+      if (!sample) return;
+      ta.value = sample.text;
       latestTextRef.current = sample.text;
-    }
-    scheduleMark(true);
-    window.localStorage.setItem(seenKey, "1");
-    window.localStorage.setItem(idxKey, String((idx + 1) % SAMPLES.length));
+      scheduleMark(true);
+      window.localStorage.setItem(idxKey, String((idx + 1) % SAMPLES.length));
+    };
+    seed();
+    return () => { if (raf) cancelAnimationFrame(raf); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
