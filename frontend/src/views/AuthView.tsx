@@ -329,7 +329,7 @@ export function AuthView() {
             the security/about page, not the front door. */}
         <div className="mt-6 grid gap-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)] md:grid-cols-3">
           <div>12-hour shift session · cert lockout after 5 PIN failures</div>
-          <div className="md:text-center">IL5-fit · local-first · no cloud egress</div>
+          <div className="md:text-center">Runs disconnected · local-first · no cloud egress</div>
           <div className="md:text-right">DDIL drills available post-login</div>
         </div>
         </div>
