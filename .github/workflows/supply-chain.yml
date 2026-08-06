@@ -45,7 +45,6 @@ jobs:
   npm-audit:
     name: JS dependency audit (npm audit)
     runs-on: ubuntu-latest
-    continue-on-error: true  # advisory
     defaults:
       run:
         working-directory: frontend
@@ -54,8 +53,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: npm audit
-        run: npm audit --audit-level=high
+      - name: npm audit (fail on high+, one documented exception)
+        # GHSA-qwww-vcr4-c8h2 is React Router's "RSC Mode CSRF" advisory. It is
+        # only reachable through React Router's server runtime / React Server
+        # Components. SPIRE is a client-only SPA (HashRouter, no server routes,
+        # no RSC), so the code path does not exist here; the only "fix" is a
+        # v8 major bump for a vuln we cannot hit. Allowlisted explicitly and
+        # revisited when we move to router v8. Every other high/critical still
+        # fails this job.
+        run: npx --yes audit-ci@^7 --high --allowlist GHSA-qwww-vcr4-c8h2
 
   sbom:
     name: SBOM (CycloneDX)
