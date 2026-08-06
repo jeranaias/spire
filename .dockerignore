@@ -43,6 +43,8 @@ Thumbs.db
 # Models — never ship raw weights into the public image
 models/
 
-# Basemap packs — hundreds of MB, and they are bind-mounted at runtime
-# (docker-compose.event.yml), never baked into the image.
-deploy/tiles/*.pmtiles
+# Basemap packs are allowed into the build context so the public web image
+# (Dockerfile.web) can bake a regional pack and self-host its map. The field
+# image (Dockerfile) doesn't COPY deploy/tiles - it bind-mounts the pack at
+# runtime via docker-compose.event.yml - so nothing is baked there regardless.
+# Keep regional packs (tens of MB); do not drop a full-planet archive here.

@@ -54,6 +54,12 @@ COPY --from=pydeps   /install                 /usr/local
 COPY --from=frontend /app/dist                /usr/share/nginx/html
 COPY backend/                                  ./backend/
 COPY dataset/                                  ./dataset/
+# Offline basemap pack. map_tiles.py auto-discovers deploy/tiles/*.pmtiles, so
+# baking it here makes the public demo self-host its map (no CartoCDN
+# dependency). The archive is gitignored and provided from the local build
+# context; if it's absent the COPY still succeeds (README only) and the map
+# falls back to the online style.
+COPY deploy/tiles/                             ./deploy/tiles/
 COPY deploy/nginx.fly.conf                     /etc/nginx/conf.d/spire.conf
 COPY deploy/supervisord.conf                   /etc/supervisor/conf.d/spire.conf
 COPY deploy/tailscale-up.sh                    /usr/local/bin/tailscale-up.sh
