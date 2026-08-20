@@ -43,6 +43,7 @@ from .routes.stage_ingest import router as stage_ingest_router
 from .routes.ingest import router as ingest_router
 from .routes.uis import router as uis_router
 from .routes.channels import router as uis_channels_router
+from .routes.field_obs import router as field_obs_router
 from .scoping import (
     ALL_OPS_ROLES,
     BASTION_VIEW_ROLES,
@@ -240,6 +241,12 @@ app.include_router(
 # SPIRE_INGEST_ENABLED=1 in the environment. The /status probe is open
 # so the frontend can render the right affordance without 503-ing.
 app.include_router(ingest_router, prefix="/api/ingest", tags=["ingest"])
+# Handheld field-observation lane. Separate from /api/ingest/* on purpose:
+# operator roles may submit here, and what they submit is an advisory
+# overlay that never touches the canonical dataset. See routes/field_obs.py.
+# Dormant unless SPIRE_FIELD_OBS_ENABLED=1; /status stays open so the mobile
+# client can discover policy without tripping a 503.
+app.include_router(field_obs_router, prefix="/api/field", tags=["field-obs"])
 # UIS — generic Universal Ingest Service routes (adapters, upload,
 # map proposal, mapping-profile CRUD). Same feature flag + RBAC as
 # /api/ingest/*. The legacy adapter-specific routes stay live for

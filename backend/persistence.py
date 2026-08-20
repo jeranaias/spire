@@ -31,7 +31,7 @@ import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -307,6 +307,46 @@ CREATE TABLE IF NOT EXISTS uis_mapping_profiles (
 
 CREATE INDEX IF NOT EXISTS idx_uis_profiles_source ON uis_mapping_profiles(source_id);
 CREATE INDEX IF NOT EXISTS idx_uis_profiles_unit ON uis_mapping_profiles(unit);
+
+-- Field observations (handheld ingest lane). Deliberately a SEPARATE table
+-- from the canonical dataset: an unverified report typed into a phone at a
+-- supply point is an *advisory overlay* on the COP, never a write into the
+-- GCSS-derived record of truth. Promotion to authoritative is a distinct,
+-- custodian-class action (see routes/field_obs.py) so the integrity story
+-- for the hash-chained dataset survives opening ingest to operator roles.
+--
+-- Geometry columns are Cursor-on-Target shaped (point lat/lon/hae/ce/le,
+-- event type/time/stale) so an ATAK bridge is a serializer over this row
+-- rather than a schema migration.
+CREATE TABLE IF NOT EXISTS field_observations (
+    obs_id          TEXT PRIMARY KEY,
+    cot_type        TEXT NOT NULL,            -- CoT event type, e.g. a-u-G / b-d
+    category        TEXT NOT NULL,            -- supply_point | route_status | uas_sighting | infra_damage | other
+    summary         TEXT NOT NULL,
+    detail          TEXT NOT NULL DEFAULT '',
+    lat             REAL NOT NULL,
+    lon             REAL NOT NULL,
+    hae             REAL,                     -- height above ellipsoid (m)
+    ce              REAL,                     -- circular error (m)
+    le              REAL,                     -- linear error (m)
+    observed_at     TEXT NOT NULL,            -- CoT time/start
+    stale_at        TEXT NOT NULL,            -- CoT stale
+    classification  TEXT NOT NULL,            -- normalized marking, <= submitter clearance
+    unit_name       TEXT NOT NULL,            -- dataset-namespace scoping key (CLB-6, 7th ESB, ...)
+    submitter_dodid TEXT NOT NULL,
+    submitter_name  TEXT NOT NULL DEFAULT '',
+    submitter_role  TEXT NOT NULL,
+    submitter_unit  TEXT NOT NULL DEFAULT '', -- identity-namespace label (CLB-Det); provenance only
+    source          TEXT NOT NULL DEFAULT 'handheld',
+    status          TEXT NOT NULL DEFAULT 'advisory',   -- advisory | promoted | rejected
+    resolved_by     TEXT,
+    resolved_at     TEXT,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_field_obs_unit    ON field_observations(unit_name);
+CREATE INDEX IF NOT EXISTS idx_field_obs_status  ON field_observations(status);
+CREATE INDEX IF NOT EXISTS idx_field_obs_created ON field_observations(created_at);
 """
 
 
@@ -1188,3 +1228,128 @@ def _maybe_log_boot() -> None:
         pass
 
 _maybe_log_boot()
+
+
+# ---------------------------------------------------------------------------
+# Field observations (handheld ingest lane)
+#
+# Storage-layer only: this module stays free of `scoping` imports so it can be
+# driven from CLI tools without pulling the dataset singleton in. Authorization
+# (who may write, which unit they may write against, which markings they may
+# read) lives in `routes/field_obs.py`; the callers pass already-resolved
+# `units` / `classifications` allowlists down here.
+# ---------------------------------------------------------------------------
+
+_FIELD_OBS_COLUMNS = (
+    "obs_id, cot_type, category, summary, detail, lat, lon, hae, ce, le, "
+    "observed_at, stale_at, classification, unit_name, submitter_dodid, "
+    "submitter_name, submitter_role, submitter_unit, source, status, "
+    "resolved_by, resolved_at, created_at"
+)
+
+
+def insert_field_observation(obs: dict) -> dict:
+    """Persist one advisory observation. Returns the stored row.
+
+    The caller is responsible for having enforced clearance + unit-write
+    authorization; this function trusts the dict it is handed.
+    """
+    with conn() as c:
+        c.execute(
+            "INSERT INTO field_observations("
+            + _FIELD_OBS_COLUMNS
+            + ") VALUES(" + ",".join("?" * 23) + ")",
+            (
+                obs["obs_id"], obs["cot_type"], obs["category"], obs["summary"],
+                obs.get("detail", ""), obs["lat"], obs["lon"], obs.get("hae"),
+                obs.get("ce"), obs.get("le"), obs["observed_at"], obs["stale_at"],
+                obs["classification"], obs["unit_name"], obs["submitter_dodid"],
+                obs.get("submitter_name", ""), obs["submitter_role"],
+                obs.get("submitter_unit", ""), obs.get("source", "handheld"),
+                obs.get("status", "advisory"), obs.get("resolved_by"),
+                obs.get("resolved_at"), obs["created_at"],
+            ),
+        )
+    return dict(obs)
+
+
+def list_field_observations(
+    *,
+    units: Optional[Iterable[str]] = None,
+    classifications: Optional[Iterable[str]] = None,
+    status: Optional[str] = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Return observations newest-first, filtered by the caller's allowlists.
+
+    `units=None` means unrestricted (mef_commander / security_manager).
+    An *empty* iterable means "no units visible" and correctly returns [] —
+    the distinction matters, so don't collapse them to falsy.
+    """
+    where: list[str] = []
+    params: list = []
+
+    if units is not None:
+        units = list(units)
+        if not units:
+            return []
+        where.append("unit_name IN (" + ",".join("?" * len(units)) + ")")
+        params.extend(units)
+
+    if classifications is not None:
+        classifications = list(classifications)
+        if not classifications:
+            return []
+        where.append("classification IN (" + ",".join("?" * len(classifications)) + ")")
+        params.extend(classifications)
+
+    if status is not None:
+        where.append("status = ?")
+        params.append(status)
+
+    sql = "SELECT " + _FIELD_OBS_COLUMNS + " FROM field_observations"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC, obs_id DESC LIMIT ?"
+    params.append(limit)
+
+    with conn() as c:
+        rows = c.execute(sql, tuple(params)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_field_observation(obs_id: str) -> Optional[dict]:
+    with conn() as c:
+        row = c.execute(
+            "SELECT " + _FIELD_OBS_COLUMNS + " FROM field_observations WHERE obs_id = ?",
+            (obs_id,),
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def resolve_field_observation(
+    obs_id: str,
+    *,
+    status: str,
+    actor: str,
+) -> Optional[dict]:
+    """Move an advisory observation to `promoted` or `rejected`.
+
+    Returns None when the id is unknown, and the unchanged row when it has
+    already been resolved — the caller maps those to 404 / 409 respectively.
+    """
+    ts = utcnow().isoformat(timespec="seconds") + "Z"
+    with conn() as c:
+        row = c.execute(
+            "SELECT status FROM field_observations WHERE obs_id = ?", (obs_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if row["status"] != "advisory":
+            return get_field_observation(obs_id)
+        c.execute(
+            "UPDATE field_observations SET status = ?, resolved_by = ?, "
+            "resolved_at = ? WHERE obs_id = ?",
+            (status, actor, ts, obs_id),
+        )
+    return get_field_observation(obs_id)
