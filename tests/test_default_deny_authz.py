@@ -30,6 +30,11 @@ INCLUDE_GATED_PREFIXES = (
 PER_ROUTE_GATED_PREFIXES = (
     "/api/gcss/export", "/api/integrations/gcss-mc/export",  # custodian export gate
     "/api/sentry", "/api/system", "/api/uis", "/api/ingest", "/api/joint",
+    # Field-observation lane: every write endpoint calls require_user_role +
+    # require_clearance in its body, and /api/field/status is an intentionally
+    # open policy probe (same shape as /api/ingest/status) so a handheld can
+    # discover whether the lane is enabled without tripping a 403.
+    "/api/field",
 )
 
 
