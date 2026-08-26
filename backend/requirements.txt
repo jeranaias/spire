@@ -1,5 +1,5 @@
 # Exact-pinned for reproducible builds (800-171 3.4.1). Bump via Dependabot.
-fastapi==0.136.1
+fastapi==0.141.1
 uvicorn[standard]==0.46.0
 pydantic==2.13.4
 cryptography==46.0.7
