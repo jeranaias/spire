@@ -77,7 +77,7 @@ jobs:
         run: |
           cd frontend && npm ci --no-audit --no-fund
           npx --yes @cyclonedx/cyclonedx-npm --output-file ../sbom-js.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom-*.json
