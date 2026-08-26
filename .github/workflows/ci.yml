@@ -104,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Pinned release (was @master — a moving branch is a supply-chain risk).
-      - uses: superfly/flyctl-actions/setup-flyctl@1.5
+      - uses: superfly/flyctl-actions/setup-flyctl@1.6
       - name: Deploy
         run: flyctl deploy --remote-only --ha=false --app spire-mdm --wait-timeout 300
         env:
