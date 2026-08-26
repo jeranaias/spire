@@ -22,7 +22,7 @@ jobs:
     name: Backend · pytest + dataset regen
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -47,7 +47,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -64,7 +64,7 @@ jobs:
     needs: [backend, frontend]
     if: github.event_name != 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build backend image
         run: docker build -t spire-backend:ci .
       - name: Build frontend image
@@ -102,7 +102,7 @@ jobs:
       name: production
       url: https://spire-mdm.fly.dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Pinned release (was @master — a moving branch is a supply-chain risk).
       - uses: superfly/flyctl-actions/setup-flyctl@1.6
       - name: Deploy
