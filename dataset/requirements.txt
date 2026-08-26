@@ -1,5 +1,5 @@
 # Exact-pinned for reproducible builds (800-171 3.4.1). pandas reconciled with
 # pyproject.toml (both 3.0.2). Bump via Dependabot.
 openpyxl==3.1.5
-pandas==3.0.2
+pandas==3.0.5
 numpy==2.4.4
