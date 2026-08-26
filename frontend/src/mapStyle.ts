@@ -22,7 +22,7 @@
  * build-time VITE_MAP_STYLE_URL, then to the public style, so a demo laptop is
  * never left without a map.
  */
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { noLabels } from "protomaps-themes-base";
 
