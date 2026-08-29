@@ -24,7 +24,7 @@
     "react-map-gl": "^8.1.1",
     "react-router-dom": "^7.14.2",
     "recharts": "^3.10.1",
-    "tailwindcss": "^4.2.4",
+    "tailwindcss": "^4.3.3",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
