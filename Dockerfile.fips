@@ -20,7 +20,7 @@
 #   docker build -f Dockerfile.fips -t spire-backend:fips .
 
 # registry.access.redhat.com/ubi9/python-312:latest
-FROM registry.access.redhat.com/ubi9/python-312@sha256:a6e76c7e9def80d1b736d366c22ba88245d6ec86113b5b2655d52e0ba288b5db
+FROM registry.access.redhat.com/ubi9/python-312@sha256:aebe03384391689993c42998836597e6161ac5340cbc84518c1b0528a1c59ea8
 
 USER 0
 WORKDIR /opt/spire
