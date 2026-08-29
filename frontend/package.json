@@ -19,7 +19,7 @@
     "milsymbol": "^3.0.4",
     "pmtiles": "4.4.1",
     "protomaps-themes-base": "^4.5.0",
-    "react": "^19.2.5",
+    "react": "^19.2.8",
     "react-dom": "^19.2.5",
     "react-map-gl": "^8.1.1",
     "react-router-dom": "^7.14.2",
@@ -30,7 +30,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.12.2",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.1.0",
     "eslint": "^10.2.1",
