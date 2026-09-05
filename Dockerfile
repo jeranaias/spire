@@ -6,7 +6,7 @@
 # reviewed today. Dependabot bumps the digest with the tag; update both
 # together or the comment lies.
 # python:3.12-slim
-FROM python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS builder
+FROM python@sha256:8edbf9e42c7fb168b9c523718ed907117e6d2e60f5889c0c499bbda3a787da53 AS builder
 WORKDIR /opt/spire
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements-dataset.tx
 
 
 # python:3.12-slim
-FROM python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+FROM python@sha256:8edbf9e42c7fb168b9c523718ed907117e6d2e60f5889c0c499bbda3a787da53
 WORKDIR /opt/spire
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
